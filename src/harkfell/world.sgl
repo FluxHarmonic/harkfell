@@ -1,61 +1,109 @@
-;;; (harkfell world) - One room, one body, and the soft return.
+;;; (harkfell world) - The rooms, one body, room changes and the soft return.
 ;;;
 ;;; The world steps at the fixed 60 Hz tick: the shells feed it one INTENT
 ;;; per tick ((engine body)), whatever device the intent came from.
 ;;;
-;;; The soft return (ruling D4): touching a hazard dims the screen for half
-;;; a second and puts you back where you entered the room. No lives, no
-;;; death animation. DIM-TICKS going dark (input ignored, the body holds
-;;; still), the body back at the entry at rest, DIM-TICKS coming back.
-;;; RETURNS counts them (the tests and the ?trace line read it). The low
-;;; tone of section 3 is A2's (sound).
+;;; The body lives in global pixels on the world map's one tilemap ((engine
+;;; worldmap)), so it walks, falls and jumps across a seam with no special
+;;; case. The ROOM it is in is the slot its center is in; the tick its
+;;; center crosses into another room, that room becomes the current one and
+;;; the body as it is that tick becomes the room's ENTRY (A0's note: "where
+;;; you entered" is the seam you came through, kept as a body).
 ;;;
-;;; The entry is the room's @ marker: the body stands on the floor of that
-;;; cell, centered in it. A1's room changes make "where you entered" the
-;;; seam you came through; the world keeps it as a body, so that is a
-;;; change of what is stored, not of how the return works.
+;;; The soft return (ruling D4): touching a hazard dims the screen for half
+;;; a second and puts you back at the current room's entry. No lives, no
+;;; death animation. DIM-TICKS going dark (input ignored, the body holds
+;;; still), the body back at the entry, DIM-TICKS coming back. RETURNS
+;;; counts them (the tests and the ?trace line read it). The low tone of
+;;; section 3 is A2's (sound).
+;;;
+;;; A0's single room still works as it did: world-new takes an (engine room)
+;;; and makes a one-room map of it at (0, 0), its entry the @ marker. The
+;;; replay gate's trace is unchanged by the room machinery (it never leaves
+;;; that room).
+;;;
+;;; Live reload (native): world-reload swaps in a new map; the body stays
+;;; where it is unless the new rooms put it inside rock, when it goes back
+;;; to the entry (or, if that is rock too, to the room's start).
 
 (define-library (harkfell world)
   (import (sigil struct)
+          (sigil math)
           (engine tilemap)
+          (engine collide)
           (engine room)
           (engine body)
+          (engine worldmap)
+          (engine reach)
           (engine tween)
           (harkfell feel))
 
-  (export world world? world-new
+  (export world world? world-new world-at
           world-room world-body world-entry world-phase world-timer
-          world-ticks world-returns world-tiles
-          world-tick world-dim DIM-TICKS
-          entry-body)
+          world-ticks world-returns world-tiles world-map world-entered
+          world-tick world-dim DIM-TICKS world-reload world-reset
+          world-origin
+          entry-body cell-body)
 
   (begin
     (define DIM-TICKS 15)
 
-    ;; phase: play, dark (dimming out), light (coming back). timer: ticks
-    ;; left in the phase. ticks: every tick stepped.
+    ;; wm: the world map. room: the placed room the body is in. phase:
+    ;; play, dark (dimming out), light (coming back). timer: ticks left in
+    ;; the phase. ticks: every tick stepped. entered: rooms entered (a room
+    ;; change counts; the first room does not).
     (define-struct world
+      (wm default: #f)
       (room default: #f)
       (body default: #f)
       (entry default: #f)
       (phase default: 'play)
       (timer default: 0)
       (ticks default: 0)
-      (returns default: 0))
+      (returns default: 0)
+      (entered default: 0))
 
-    (define (world-tiles w) (room-tiles (world-room w)))
+    (define (world-map w) (world-wm w))
+    (define (world-tiles w) (worldmap-tiles (world-wm w)))
 
-    ;; The body standing in the entry cell, centered.
+    ;; The current room's top-left in global pixels.
+    (define (world-origin w)
+      (if (world-room w)
+          (worldmap-origin (world-wm w) (world-room w))
+          (cons 0 0)))
+
+    ;; The body standing in cell (c, r) of a tilemap, centered (A0's entry).
+    (define (cell-body tm f c r)
+      (stand-body tm f c r))
+
+    ;; The body standing in the room's @ cell (A0).
     (define (entry-body r f)
-      (let* ((cell (or (room-marker r 'entry) (cons 1 1)))
-             (size (tilemap-size (room-tiles r))))
-        (body (body-at (+ (* size (car cell)) (/ (- size (feel-box-w f)) 2.0))
-                       (- (* size (+ (cdr cell) 1)) (feel-box-h f)))
-              mode: 'ground)))
+      (let ((cell (or (room-marker r 'entry) (cons 1 1))))
+        (cell-body (room-tiles r) f (car cell) (cdr cell))))
 
+    ;; A0: one room, alone.
     (define (world-new r)
-      (let ((b (entry-body r HARKFELL-FEEL)))
-        (world room: r body: b entry: b)))
+      (let* ((p (placed x: 0 y: 0 tiles: (room-tiles r)))
+             (wm (make-worldmap (list p) (tilemap-cols (room-tiles r)) (tilemap-rows (room-tiles r))
+                                (tilemap-size (room-tiles r))))
+             (b (entry-body r HARKFELL-FEEL)))
+        (world wm: wm room: (worldmap-room wm 0 0) body: b entry: b)))
+
+    ;; A world on map wm with the body b (global pixels) as the entry.
+    (define (world-at wm b)
+      (let ((c (body-center b HARKFELL-FEEL)))
+        (world wm: wm room: (worldmap-room-at-px wm (car c) (cdr c)) body: b entry: b)))
+
+    (define (same-room? a b)
+      (and a b (= (placed-x a) (placed-x b)) (= (placed-y a) (placed-y b))))
+
+    ;; After a play tick: a room change makes the body the new room's entry.
+    (define (follow-room w)
+      (let* ((c (body-center (world-body w) HARKFELL-FEEL))
+             (p (worldmap-room-at-px (world-wm w) (car c) (cdr c))))
+        (if (and p (not (same-room? p (world-room w))))
+            (world w room: p entry: (world-body w) entered: (+ (world-entered w) 1))
+            w)))
 
     (define (world-tick w in)
       (let ((w (world w ticks: (+ (world-ticks w) 1))))
@@ -64,7 +112,7 @@
            (let ((b (body-step (world-body w) in (world-tiles w) HARKFELL-FEEL)))
              (if (memq 'hazard (body-events b))
                  (world w body: b phase: 'dark timer: DIM-TICKS)
-                 (world w body: b))))
+                 (follow-room (world w body: b)))))
           ((dark)
            (if (<= (world-timer w) 1)
                (world w
@@ -77,6 +125,23 @@
            (if (<= (world-timer w) 1)
                (world w phase: 'play timer: 0)
                (world w timer: (- (world-timer w) 1)))))))
+
+    ;; Back to the current room's entry at once (the R key).
+    (define (world-reset w)
+      (world w body: (world-entry w) phase: 'play timer: 0))
+
+    (define (inside-rock? tm b)
+      (box-any? tm (body-x b) (body-y b) (feel-box-w HARKFELL-FEEL) (feel-box-h HARKFELL-FEEL) kind-solid?))
+
+    ;; The world on a new map (a room file changed). fallback: a body to use
+    ;; when both the body and the entry are inside rock now.
+    (define (world-reload w wm fallback)
+      (let* ((tm (worldmap-tiles wm))
+             (room (and (world-room w)
+                        (worldmap-room wm (placed-x (world-room w)) (placed-y (world-room w)))))
+             (entry (if (inside-rock? tm (world-entry w)) fallback (world-entry w)))
+             (b (if (inside-rock? tm (world-body w)) entry (world-body w))))
+        (world w wm: wm room: (or room (world-room w)) body: b entry: entry)))
 
     ;; How dark the screen is, 0 (clear) to 1 (black), eased.
     (define (world-dim w)

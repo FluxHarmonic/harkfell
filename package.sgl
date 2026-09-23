@@ -15,7 +15,7 @@
 ;;;   scripts/dev sigil build --config web          browser (manifest has binaryen)
 ;;;   scripts/host-web                              host a snapshot of build/web on wg0
 
-(import (sigil process) (sigil string) (sigil time) (sigil math) (sigil fs))
+(import (sigil process) (sigil string) (sigil time) (sigil math) (sigil fs) (sigil list))
 
 (define sigil-repo "codeberg:sigil/sigil")
 (define app-repo "codeberg:sigil/sigil-desktop")
@@ -32,14 +32,68 @@
         sha
         (string-append sha "-dirty-" (number->string (exact (floor (current-second))))))))
 
-;; After link-web-application: the page's __VERSION__ stamped, and the
-;; Pages edge headers (COOP/COEP) copied beside it.
+;; A string as a JSON string literal, safe inside a <script> element ("<"
+;; is escaped, so no text can close the element).
+(define (json-string s)
+  (let loop ((cs (string->list s)) (acc '()))
+    (if (null? cs)
+        (string-append "\"" (apply string-append (reverse acc)) "\"")
+        (let* ((c (car cs))
+               (i (char->integer c)))
+          (loop (cdr cs)
+                (cons (cond ((char=? c #\") "\\\"")
+                            ((char=? c #\\) "\\\\")
+                            ((char=? c #\newline) "\\n")
+                            ((char=? c #\<) "\\u003c")
+                            ((< i 32) (string-append "\\u00" (if (< i 16) "0" "") (number->string i 16)))
+                            (else (string c)))
+                      acc))))))
+
+(define (sorted-dir d)
+  (list-sort string<? (filter (lambda (n) (not (or (string=? n ".") (string=? n ".."))))
+                              (directory-list d))))
+
+(define (has-suffix? s suf)
+  (let ((n (string-length s)) (m (string-length suf)))
+    (and (>= n m) (string=? (substring s (- n m) n) suf))))
+
+;; The world's files the game reads (the same set (harkfell source) reads
+;; natively), as a JSON array of [path, text] for the page.
+(define (world-json)
+  (let* ((files (append
+                  (if (file-exists? "world/world.sgl") (list "world/world.sgl") '())
+                  (if (directory? "world/regions")
+                      (map (lambda (n) (string-append "world/regions/" n))
+                           (filter (lambda (n) (has-suffix? n ".map")) (sorted-dir "world/regions")))
+                      '())
+                  (if (directory? "world/rooms")
+                      (apply append
+                             (map (lambda (r)
+                                    (let ((d (string-append "world/rooms/" r)))
+                                      (if (directory? d)
+                                          (map (lambda (n) (string-append d "/" n))
+                                               (filter (lambda (n) (has-suffix? n ".room")) (sorted-dir d)))
+                                          '())))
+                                  (sorted-dir "world/rooms")))
+                      '()))))
+    (string-append "["
+                   (string-join (map (lambda (f)
+                                       (string-append "[" (json-string f) "," (json-string (read-file-string f)) "]"))
+                                     files)
+                                ",\n")
+                   "]")))
+
+;; After link-web-application: the page's __VERSION__ stamped, the world
+;; baked in (__WORLD__), and the Pages edge headers (COOP/COEP) copied
+;; beside it.
 (define (stamp-web-version ctx)
   (let* ((out (config-output-dir (context-config ctx)))
          (page-path (path-join out "index.html"))
          (page (read-file-string page-path)))
     (write-file-string (path-join out "_headers") (read-file-string "web/_headers"))
-    (write-file-string page-path (string-replace page "__VERSION__" (web-version)))
+    (write-file-string page-path
+                       (string-replace (string-replace page "__VERSION__" (web-version))
+                                       "__WORLD__" (world-json)))
     (display "  web version ") (display (web-version)) (newline)
     ctx))
 

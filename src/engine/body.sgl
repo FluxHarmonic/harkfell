@@ -156,8 +156,14 @@
     ;; thousandth of a pixel deep, so a body still falling a fraction of a
     ;; pixel above a floor is in the air (a 1 px strip counted it as ground
     ;; a tick early, and its landing then emitted no land event).
+    ;; A ledge counts only when the box's bottom is exactly on its top (where
+    ;; the collision leaves a body that lands on it): a body passing up or
+    ;; down through a ledge's row is not standing on it.
     (define (body-grounded? b tm f)
-      (box-any? tm (body-x b) (+ (body-y b) (feel-box-h f)) (feel-box-w f) 0.001 kind-solid?))
+      (let ((bottom (+ (body-y b) (feel-box-h f))))
+        (or (box-any? tm (body-x b) bottom (feel-box-w f) 0.001 kind-solid?)
+            (and (= bottom (* (tilemap-size tm) (floor (/ bottom (tilemap-size tm)))))
+                 (box-any? tm (body-x b) bottom (feel-box-w f) 0.001 kind-ledge?)))))
 
     (define (body-in-water? b tm f)
       (let ((c (body-center b f)))

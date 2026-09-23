@@ -1,0 +1,194 @@
+;;; (harkfell check) - Gate 3 of section 8, reach, on the written world; and
+;;; the text report an author reads (scripts/room-check).
+;;;
+;;; The search is (engine reach)'s, over the whole world map (so a route may
+;;; leave a room and come back through its neighbour, as a player would),
+;;; from the world's start cell (world/world.sgl's (start ...)), with every
+;;; candidate edge accepted only if its witness replays (witness-lands?).
+;;; Then, for every room:
+;;;
+;;;   unreachable   a standable cell no path from the start reaches. Red,
+;;;                 unless the room declares it (unreached: ((C R) ...)),
+;;;                 and a declared cell that IS reached is red too (the
+;;;                 declaration has gone stale).
+;;;   trap          a cell the start reaches from which no path leads back
+;;;                 to the start: once there, you are stuck. Red.
+;;;
+;;; "Back to the start" is stronger than the design's "an exit or the
+;;; room's entry" and is what the world check means for a region you can
+;;; walk out of; it is the same thing while the world is one region.
+;;;
+;;; The report draws the room's grid with every standable cell marked:
+;;;   *   reached, and the start is reachable from it
+;;;   !   not reached from the start
+;;;   ?   reached, but a trap (no way back)
+;;;   @   the start
+;;;   -   declared unreached (and not reached)
+
+(define-library (harkfell check)
+  (import (sigil struct)
+          (sigil list)
+          (sigil string)
+          (sigil math)
+          (engine tilemap)
+          (engine body)
+          (engine roomfile)
+          (engine worldmap)
+          (engine reach)
+          (harkfell feel)
+          (harkfell content))
+
+  (export start-cell content-reach reach-problems room-report
+          room-cells-global global->local local->global room-standable-cells
+          room-start-cell reach-summary)
+
+  (begin
+    (define (room-tile-origin ct rm)
+      (let ((wm (content-map ct)))
+        (cons (* ROOM-COLS (- (room-x rm) (worldmap-x0 wm)))
+              (* ROOM-ROWS (- (room-y rm) (worldmap-y0 wm))))))
+
+    (define (local->global ct rm c r)
+      (let ((o (room-tile-origin ct rm)))
+        (cons (+ (car o) c) (+ (cdr o) r))))
+
+    (define (global->local ct rm cell)
+      (let ((o (room-tile-origin ct rm)))
+        (cons (- (car cell) (car o)) (- (cdr cell) (cdr o)))))
+
+    ;; The world's start as a global cell, or #f.
+    (define (start-cell ct)
+      (let ((s (content-start ct)))
+        (and s
+             (let ((rm (content-room ct (car (cadr s)) (cadr (cadr s)))))
+               (and rm (local->global ct rm (car (caddr s)) (cadr (caddr s))))))))
+
+    ;; The standable cells of a room, global.
+    (define (room-standable-cells ct rm)
+      (let ((tm (worldmap-tiles (content-map ct)))
+            (o (room-tile-origin ct rm)))
+        (filter (lambda (cell) (standable? tm (car cell) (cdr cell)))
+                (apply append
+                       (map (lambda (r) (map (lambda (c) (cons (+ (car o) c) (+ (cdr o) r))) (iota ROOM-COLS)))
+                            (iota ROOM-ROWS))))))
+
+    (define (room-cells-global ct rm) (room-standable-cells ct rm))
+
+    ;; Where a door (?room=, --room) puts the body in a room, as a global
+    ;; cell: the world's start cell if it is in this room, else the room's
+    ;; start: field, else the standable cell nearest the room's middle
+    ;; (reading order breaks ties); #f if the room has none.
+    (define (room-start-cell ct rm)
+      (let* ((s (content-start ct))
+             (cells (room-standable-cells ct rm)))
+        (cond ((and s (eq? (car s) (room-region rm))
+                    (= (car (cadr s)) (room-x rm)) (= (cadr (cadr s)) (room-y rm)))
+               (local->global ct rm (car (caddr s)) (cadr (caddr s))))
+              ((room-start rm) (local->global ct rm (car (room-start rm)) (cdr (room-start rm))))
+              ((null? cells) #f)
+              (else
+               (let ((mid (local->global ct rm 12 5)))
+                 (let loop ((cs (cdr cells)) (best (car cells)))
+                   (if (null? cs)
+                       best
+                       (loop (cdr cs)
+                             (if (< (dist2 (car cs) mid) (dist2 best mid)) (car cs) best)))))))))
+
+    (define (dist2 a b)
+      (let ((dx (- (car a) (car b))) (dy (- (cdr a) (cdr b))))
+        (+ (* dx dx) (* dy dy))))
+
+    ;; The reach graph from the start (#f with no start).
+    ;; log: optional, (expanded steps kind cell) after each anchor.
+    (define (content-reach ct . log)
+      (let ((s (start-cell ct)))
+        (and s
+             (apply reach-search (worldmap-tiles (content-map ct)) HARKFELL-FEEL (list s) witness-lands? log))))
+
+    (define (cell-str c) (string-append "(" (number->string (car c)) "," (number->string (cdr c)) ")"))
+
+    ;; ((room unreachable traps stale) ...), cells room-local.
+    (define (classify ct g)
+      (let* ((tm (graph-tm g))
+             (s (start-cell ct))
+             (fwd (reach-forward g (list s)))
+             (back (reach-backward g (list s))))
+        (map (lambda (p)
+               (let* ((rm (placed-data p))
+                      (cells (room-standable-cells ct rm))
+                      (idx (lambda (c) (cell-index tm (car c) (cdr c))))
+                      (declared (room-unreached rm))
+                      (local (lambda (c) (global->local ct rm c)))
+                      (unreached (filter (lambda (c) (not (vector-ref fwd (idx c)))) cells))
+                      (traps (filter (lambda (c) (and (vector-ref fwd (idx c)) (not (vector-ref back (idx c))))) cells)))
+                 (list rm
+                       (filter (lambda (c) (not (member c declared))) (map local unreached))
+                       (map local traps)
+                       (filter (lambda (c) (member c declared))
+                               (map local (filter (lambda (c) (vector-ref fwd (idx c))) cells))))))
+             (content-rooms ct))))
+
+    ;; Problems ((engine roomfile) problems, one per room and kind).
+    (define (reach-problems ct g)
+      (if (not g)
+          (list (problem path: "world/world.sgl" line: #f message: "no start: nothing to search from"))
+          (apply append
+                 (map (lambda (e)
+                        (let ((rm (car e)))
+                          (append
+                            (if (null? (cadr e)) '()
+                                (list (problem path: (room-path rm) line: #f
+                                               message: (string-append (room-label rm) ": cells "
+                                                                       (string-join (map cell-str (cadr e)) " ")
+                                                                       " are not reachable from the start"))))
+                            (if (null? (caddr e)) '()
+                                (list (problem path: (room-path rm) line: #f
+                                               message: (string-append (room-label rm) ": cells "
+                                                                       (string-join (map cell-str (caddr e)) " ")
+                                                                       " are traps: no way back to the start from them"))))
+                            (if (null? (cadddr e)) '()
+                                (list (problem path: (room-path rm) line: (field-line (roomfile-text (room-file rm)) "unreached")
+                                               message: (string-append (room-label rm) ": unreached: lists "
+                                                                       (string-join (map cell-str (cadddr e)) " ")
+                                                                       ", which the start does reach")))))))
+                      (classify ct g)))))
+
+    ;; The room's grid with its standable cells marked, then a line each for
+    ;; what is wrong. Lines, for printing.
+    (define (room-report ct g rm)
+      (let* ((e (let find ((es (classify ct g)))
+                  (cond ((null? es) #f)
+                        ((eq? (car (car es)) rm) (car es))
+                        (else (find (cdr es))))))
+             (tm (graph-tm g))
+             (s (start-cell ct))
+             (fwd (reach-forward g (list s)))
+             (cells (map (lambda (c) (global->local ct rm c)) (room-standable-cells ct rm)))
+             (start-local (and s (global->local ct rm s)))
+             (mark (lambda (c r)
+                     (let ((cell (cons c r)))
+                       (cond ((and start-local (equal? cell start-local)) #\@)
+                             ((not (member cell cells)) #f)
+                             ((member cell (caddr e)) #\?)
+                             ((member cell (cadr e)) #\!)
+                             ((member cell (room-unreached rm)) #\-)
+                             (else #\*))))))
+        (append
+          (list (string-append (room-label rm) "  \"" (room-title rm) "\"")
+                (string-append "  intent: " (room-intent rm)))
+          (map (lambda (r)
+                 (string-append "  |"
+                                (list->string (map (lambda (c) (or (mark c r) (room-char rm c r))) (iota ROOM-COLS)))
+                                "|"))
+               (iota ROOM-ROWS))
+          (list (string-append "  standable " (number->string (length cells))
+                               ", unreachable " (number->string (length (cadr e)))
+                               ", traps " (number->string (length (caddr e)))))
+          (if (null? (cadr e)) '() (list (string-append "  UNREACHABLE " (string-join (map cell-str (cadr e)) " "))))
+          (if (null? (caddr e)) '() (list (string-append "  TRAP " (string-join (map cell-str (caddr e)) " "))))
+          (if (null? (cadddr e)) '() (list (string-append "  STALE unreached: " (string-join (map cell-str (cadddr e)) " ")))))))
+
+    (define (reach-summary g)
+      (string-join (map (lambda (p) (string-append (symbol->string (car p)) " " (number->string (cdr p))))
+                        (graph-stats g))
+                   ", "))))

@@ -1,0 +1,747 @@
+;;; (engine reach) - Where a body can get to, found by running the real
+;;; physics, and proved edge by edge by replaying a witness.
+;;;
+;;; The question: in a tilemap, from which standing places can a body get
+;;; to which others? The answer is a REACH GRAPH over standable cells (an
+;;; open cell with something to stand on below it), and every edge of it
+;;; carries a WITNESS: the exact per-tick input script that took a body
+;;; standing at rest in the first cell to rest standing in the second.
+;;;
+;;; How edges are found (the search). The movement code itself
+;;; ((engine body)) runs headless from ANCHOR states with a set of input
+;;; patterns that branch as they go (branches share their prefix, so a
+;;; family of jumps costs little more than its longest member):
+;;;
+;;;   from standing   walks of several lengths (and turning back toward the
+;;;                   face just walked off), jumps from a standing start and
+;;;                   after run-ups of every even tick to 30 (so every take-off
+;;;                   point along a run, the lip included, and coyote presses
+;;;                   past it), each with the jump tapped, held 8 ticks or held,
+;;;                   and in the air holding the direction, letting go of it,
+;;;                   or reversing it; a CHIMNEY policy that kicks off each
+;;;                   wall it is pushed into and turns; up beside rough rock
+;;;                   (the grab from the ground)
+;;;   from a cling    climb up (and over the top, then on for a few lengths),
+;;;                   climb down, kick off (at several heights), let go
+;;;   from a wall     (a smooth wall touched in the air while pushing into it)
+;;;                   kick off, keep sliding, let go
+;;;   from water      swim each of eight ways, leaping whenever the head is out,
+;;;                   or not, for several lengths
+;;;
+;;; A trajectory ends at rest standing (a STAND anchor), holding rough rock
+;;; (CLING), in water (SWIM), after touching a hazard (nothing), or at a
+;;; tick limit (nothing); touching a smooth wall mid-air notes a WALL anchor
+;;; and carries on. Anchors are keyed by cell (and side), and each keeps one
+;;; canonical REPRESENTATIVE state: standing at rest centered in the cell;
+;;; clinging or at a wall flush against it with the body's center at the
+;;; top of the cell, still; swimming at the top of the cell, still. The
+;;; search expands each anchor once, from its representative.
+;;;
+;;; That is where it over-approximates, and knowingly: an arrival anywhere
+;;; in a cell stands for the representative, so momentum is dropped at the
+;;; cell and a wall or a cling is taken from the top of the cell it was
+;;; touched in (up to a cell higher than the body really was). A path from
+;;; one standing cell to another through such anchors is only a CANDIDATE.
+;;;
+;;; The witness replay (what makes an edge real). Every candidate's script
+;;; is the concatenation of its hops' scripts; it is replayed through
+;;; body-step from a standing state built afresh in the first cell, then
+;;; left to settle with no input, and the edge exists only if the body comes
+;;; to rest standing in the second cell, touching no hazard on the way. A
+;;; candidate whose replay goes elsewhere is dropped (and counted). An edge
+;;; without a replaying witness does not exist.
+;;;
+;;; Ceilings are never assumed away: every jump in the search and in the
+;;; replay starts from a real body at its real place, under whatever is
+;;; above it.
+;;;
+;;; What the search covers is the patterns above, so "no edge" means "no
+;;; searched input does it", not "no input could" (the same caveat as the
+;;; movement envelope's). A room that is only traversable by an unsearched
+;;; trick is reported unreachable: the safe direction.
+;;;
+;;; Pure: no platform.
+
+(define-library (engine reach)
+  (import (sigil struct)
+          (sigil list)
+          (sigil math)
+          (sigil string)
+          (engine tilemap)
+          (engine collide)
+          (engine body))
+
+  (export make-intent* NOTHING
+          standable? standable-cells stand-body rest-cell body-cell
+          witness witness? witness-from witness-script witness-hops
+          reach-graph reach-graph? reach-search
+          graph-tm graph-cells graph-edges graph-starts graph-stats
+          graph-edges-from graph-rejected cell-index index-cell
+          replay-witness witness-lands? witness-bodies
+          reach-forward reach-backward)
+
+  (begin
+    ;; --- intents, interned -------------------------------------------------------
+
+    (define (intent-slot h v j p)
+      (+ (* (+ h 1) 12) (* (+ v 1) 4) (if j 2 0) (if p 1 0)))
+
+    ;; defined before INTENTS: the table is built when the module loads
+    (define INTENTS
+      (let ((v (make-vector 36 #f)))
+        (for-each
+          (lambda (h)
+            (for-each
+              (lambda (vv)
+                (for-each
+                  (lambda (j)
+                    (for-each
+                      (lambda (p)
+                        (vector-set! v (intent-slot h vv j p)
+                                     (intent h: h v: vv jump: j press: p)))
+                      (list #f #t)))
+                  (list #f #t)))
+              (list -1 0 1)))
+          (list -1 0 1))
+        v))
+
+    ;; One of the 36 intents (h and v in -1 0 1).
+    (define (make-intent* h v j p) (vector-ref INTENTS (intent-slot h v j p)))
+
+    (define NOTHING (make-intent* 0 0 #f #f))
+
+    ;; --- cells ----------------------------------------------------------------------
+
+    (define (cell-index tm c r) (+ c (* r (tilemap-cols tm))))
+    (define (index-cell tm i) (cons (modulo i (tilemap-cols tm)) (exact (floor (/ i (tilemap-cols tm))))))
+
+    (define (open-kind? k)
+      (not (or (kind-solid? k) (kind-ledge? k) (kind-water? k) (kind-hazard? k))))
+
+    ;; An open cell (not rock, ledge, water or hazard) inside the map with a
+    ;; floor (rock or ledge) under it.
+    (define (standable? tm c r)
+      (and (>= c 0) (< c (tilemap-cols tm))
+           (>= r 0) (< r (- (tilemap-rows tm) 1))
+           (open-kind? (tilemap-ref tm c r))
+           (kind-floor? (tilemap-ref tm c (+ r 1)))))
+
+    ;; Every standable cell, as (c . r), in reading order.
+    (define (standable-cells tm)
+      (let loop ((r 0) (acc '()))
+        (if (>= r (tilemap-rows tm))
+            (reverse acc)
+            (loop (+ r 1)
+                  (let cl ((c 0) (acc acc))
+                    (if (>= c (tilemap-cols tm))
+                        acc
+                        (cl (+ c 1) (if (standable? tm c r) (cons (cons c r) acc) acc))))))))
+
+    ;; A body standing at rest centered in cell (c, r) (A0's entry placement).
+    (define (stand-body tm f c r)
+      (let ((s (tilemap-size tm)))
+        (body (body-at (+ (* s c) (/ (- s (feel-box-w f)) 2.0))
+                       (- (* s (+ r 1)) (feel-box-h f)))
+              mode: 'ground)))
+
+    (define (floor-int x) (exact (floor x)))
+
+    ;; The cell holding the body's center.
+    (define (body-cell tm f b)
+      (let ((s (tilemap-size tm)))
+        (cons (floor-int (/ (+ (body-x b) (/ (feel-box-w f) 2.0)) s))
+              (floor-int (/ (+ (body-y b) (/ (feel-box-h f) 2.0)) s)))))
+
+    ;; The standable cell a grounded body rests in: the row its feet are in,
+    ;; and the column of its center if that is standable, else the column of
+    ;; whichever edge of its box is (a body overhanging a lip stands on the
+    ;; lip's cell). #f if none is.
+    (define (rest-cell tm f b)
+      (let* ((s (tilemap-size tm))
+             (w (feel-box-w f))
+             (r (floor-int (/ (- (+ (body-y b) (feel-box-h f)) 0.5) s)))
+             (cc (floor-int (/ (+ (body-x b) (/ w 2.0)) s)))
+             (cl (floor-int (/ (body-x b) s)))
+             (cr (floor-int (/ (+ (body-x b) w -0.001) s))))
+        (cond ((standable? tm cc r) (cons cc r))
+              ((standable? tm cl r) (cons cl r))
+              ((standable? tm cr r) (cons cr r))
+              (else #f))))
+
+    ;; --- witnesses ---------------------------------------------------------------------
+
+    ;; from: the (c . r) the body starts standing in. script: the intents,
+    ;; one per tick. hops: how many search segments it was built from (1 is
+    ;; a single trajectory from the representative).
+    (define-struct witness
+      (from default: #f)
+      (script default: '())
+      (hops default: 1))
+
+    (define SETTLE-MAX 180)
+
+    ;; Run a witness from a standing state built afresh, then let the body
+    ;; settle (no input) until it is at rest or SETTLE-MAX ticks pass. Returns
+    ;; the final body, or #f if it touched a hazard or left the map.
+    (define (replay-witness tm f w)
+      (let ((from (witness-from w)))
+        (let loop ((b (stand-body tm f (car from) (cdr from)))
+                   (s (witness-script w)))
+          (cond ((not b) #f)
+                ((null? s) (settle-quietly tm f b))
+                (else (loop (safe-step tm f b (car s)) (cdr s)))))))
+
+    ;; Every body along the witness (the replay's trace), start included.
+    (define (witness-bodies tm f w)
+      (let ((from (witness-from w)))
+        (let loop ((b (stand-body tm f (car from) (cdr from)))
+                   (s (witness-script w))
+                   (acc '()))
+          (if (or (not b) (null? s))
+              (reverse (if b (cons b acc) acc))
+              (loop (safe-step tm f b (car s)) (cdr s) (cons b acc))))))
+
+    (define (outside? tm f b)
+      (let ((cx (+ (body-x b) (/ (feel-box-w f) 2.0)))
+            (cy (+ (body-y b) (/ (feel-box-h f) 2.0))))
+        (or (< cx 0) (< cy 0) (>= cx (tilemap-width tm)) (>= cy (tilemap-height tm)))))
+
+    ;; One tick, or #f when it touched a hazard or left the map.
+    (define (safe-step tm f b in)
+      (let ((b2 (body-step b in tm f)))
+        (if (or (memq 'hazard (body-events b2)) (outside? tm f b2)) #f b2)))
+
+    (define (at-rest? b)
+      (and (eq? (body-mode b) 'ground) (= (body-vx b) 0)))
+
+    (define (settle-quietly tm f b)
+      (let loop ((b b) (n 0))
+        (cond ((not b) #f)
+              ((or (at-rest? b) (>= n SETTLE-MAX)) b)
+              (else (loop (safe-step tm f b NOTHING) (+ n 1))))))
+
+    ;; Does the witness bring the body to rest standing in cell `to`?
+    (define (witness-lands? tm f w to)
+      (let ((b (replay-witness tm f w)))
+        (and b
+             (at-rest? b)
+             (let ((c (rest-cell tm f b)))
+               (and c (equal? c to))))))
+
+    ;; --- the graph ------------------------------------------------------------------------
+
+    (define-struct reach-graph
+      (tm default: #f)
+      (cells default: '())          ; the standable cells, (c . r)
+      (starts default: '())         ; the cells the search began from
+      (edges default: #f)           ; vector by cell index: ((to-index . witness) ...)
+      (stats default: '())          ; ((name . count) ...)
+      (rejected default: '()))      ; ((from-cell . to-cell) ...): candidates the replay refused
+
+    (define (graph-tm g) (reach-graph-tm g))
+    (define (graph-cells g) (reach-graph-cells g))
+    (define (graph-starts g) (reach-graph-starts g))
+    (define (graph-edges g) (reach-graph-edges g))
+    (define (graph-stats g) (reach-graph-stats g))
+    (define (graph-rejected g) (reach-graph-rejected g))
+
+    ;; The accepted edges out of cell (c . r): ((to-cell . witness) ...).
+    (define (graph-edges-from g cell)
+      (let ((tm (reach-graph-tm g)))
+        (map (lambda (e) (cons (index-cell tm (car e)) (cdr e)))
+             (vector-ref (reach-graph-edges g) (cell-index tm (car cell) (cdr cell))))))
+
+    ;; Cells reachable from the start cells, as a boolean vector by index.
+    (define (reach-forward g starts)
+      (let* ((tm (reach-graph-tm g))
+             (seen (make-vector (* (tilemap-cols tm) (tilemap-rows tm)) #f))
+             (edges (reach-graph-edges g)))
+        (let loop ((front (map (lambda (c) (cell-index tm (car c) (cdr c))) starts)) (back '()))
+          (cond ((and (null? front) (null? back)) seen)
+                ((null? front) (loop (reverse back) '()))
+                (else
+                 (let ((i (car front)))
+                   (if (vector-ref seen i)
+                       (loop (cdr front) back)
+                       (begin
+                         (vector-set! seen i #t)
+                         (loop (cdr front)
+                               (append (map car (vector-ref edges i)) back))))))))))
+
+    ;; Cells from which some target cell is reachable, as a boolean vector.
+    (define (reach-backward g targets)
+      (let* ((tm (reach-graph-tm g))
+             (n (* (tilemap-cols tm) (tilemap-rows tm)))
+             (into (make-vector n '()))
+             (edges (reach-graph-edges g))
+             (seen (make-vector n #f)))
+        (let fill ((i 0))
+          (when (< i n)
+            (for-each (lambda (e) (vector-set! into (car e) (cons i (vector-ref into (car e)))))
+                      (vector-ref edges i))
+            (fill (+ i 1))))
+        (let loop ((front (map (lambda (c) (cell-index tm (car c) (cdr c))) targets)) (back '()))
+          (cond ((and (null? front) (null? back)) seen)
+                ((null? front) (loop (reverse back) '()))
+                (else
+                 (let ((i (car front)))
+                   (if (vector-ref seen i)
+                       (loop (cdr front) back)
+                       (begin
+                         (vector-set! seen i #t)
+                         (loop (cdr front) (append (vector-ref into i) back))))))))))
+
+    ;; --- the search -------------------------------------------------------------------------
+
+    ;; Anchor kinds, and a key per (kind, cell).
+    (define K-STAND 0)
+    (define K-CLING-L 1)
+    (define K-CLING-R 2)
+    (define K-WALL-L 3)
+    (define K-WALL-R 4)
+    (define K-SWIM 5)
+    (define NKINDS 6)
+
+    (define WALK-CELLS 3)
+    (define WALK-MAX 60)
+    (define PRESS-TICKS (list 0 2 4 8 12 16 20 24 28)) ; run-up ticks to jump at
+    (define RUNUP-MAX 28)
+    (define FLY-MAX 160)
+    (define CLIMB-MAX 240)
+    (define SWIM-MAX 150)
+    (define PATH-HOPS 6)
+    (define KICK-TICKS (list 8 20 40))     ; climb ticks to kick off at
+    (define OVER-STOPS (list 10 18 26 40)) ; ticks after a mantle to stop at
+    (define SWIM-STOPS (list 15 40 90))    ; swim ticks to stop at
+
+    ;; tm: the tilemap. f: the feel. starts: the cells ((c . r) ...) to search
+    ;; from; every anchor reachable from them is expanded. accept?: the
+    ;; witness replay, (tm f witness to-cell) -> bool; the gate passes
+    ;; witness-lands?. Each candidate is first REALIZED (its hops run from
+    ;; real states, a hop that misses repaired by searching again from there)
+    ;; and then replayed whole with accept?. #f skips both and takes every
+    ;; candidate as it stands: a diagnostic (the fixtures' --explore) that
+    ;; shows what the search alone would claim, never a gate.
+    ;; log: optional, (expanded steps kind cell) after each anchor.
+    ;; Returns a reach graph; its stats count anchors, steps, candidates,
+    ;; repaired hops and candidates rejected.
+    (define (reach-search tm f starts accept? . log)
+      (let* ((s (tilemap-size tm))
+             (ncells (* (tilemap-cols tm) (tilemap-rows tm)))
+             (reps (make-vector (* NKINDS ncells) #f))
+             (hops (make-vector (* NKINDS ncells) '()))   ; ((to-key . rev-script) ...)
+             (queue '())
+             (steps 0)
+             (expanded 0)
+             (repaired 0))
+
+        (define (key kind c r) (+ kind (* NKINDS (cell-index tm c r))))
+        (define (key-kind k) (modulo k NKINDS))
+        (define (key-cell k) (index-cell tm (exact (floor (/ k NKINDS)))))
+
+        (define (step b in)
+          (set! steps (+ steps 1))
+          (safe-step tm f b in))
+
+        (define (in-map? c r)
+          (and (>= c 0) (< c (tilemap-cols tm)) (>= r 0) (< r (tilemap-rows tm))))
+
+        (define (box-free? b)
+          (not (box-any? tm (body-x b) (body-y b) (feel-box-w f) (feel-box-h f)
+                         (lambda (k) (or (kind-solid? k) (kind-hazard? k))))))
+
+        ;; The canonical state of an anchor, or #f when the cell cannot hold one
+        ;; (the arrival state stands in then).
+        (define (canonical kind c r side)
+          (cond ((= kind K-STAND)
+                 (and (standable? tm c r) (stand-body tm f c r)))
+                ((or (= kind K-CLING-L) (= kind K-CLING-R) (= kind K-WALL-L) (= kind K-WALL-R))
+                 (let* ((x (if (> side 0) (- (* s (+ c 1)) (feel-box-w f)) (* 1.0 s c)))
+                        (y (- (* 1.0 s r) (- (/ (feel-box-h f) 2.0) 1.0)))
+                        (cling? (or (= kind K-CLING-L) (= kind K-CLING-R)))
+                        (b (body (body-at x y)
+                                 mode: (if cling? 'cling 'air)
+                                 side: side facing: side)))
+                   ;; a cling's canonical state must still hold the rock; a
+                   ;; wall's need only be free: it is the top of the cell the
+                   ;; wall was touched in, touching or not (the discretization
+                   ;; the replay answers for)
+                   (and (box-free? b)
+                        (or (not cling?)
+                            (box-any? tm (if (> side 0) (+ x (feel-box-w f)) (- x 1.0)) y 1.0
+                                      (/ (feel-box-h f) 2.0) kind-climbable?))
+                        b)))
+                ((= kind K-SWIM)
+                 (let ((b (body (body-at (+ (* s c) (/ (- s (feel-box-w f)) 2.0))
+                                         (- (* 1.0 s r) (- (/ (feel-box-h f) 2.0) 1.0)))
+                                mode: 'swim)))
+                   (and (box-free? b) (body-in-water? b tm f) b)))
+                (else #f)))
+
+        (define (arrival-rep kind b)
+          (body b vx: 0.0 vy: 0.0 jumping: #f cut: #f lock: 0 coyote: 0 buffer: 0 events: '()))
+
+        ;; Note that the trajectory from anchor FROM reached (kind, cell, side)
+        ;; with the reversed script REV.
+        ;; While a witness is being repaired, notes go to *sink* (key body
+        ;; rev) instead of the search's tables.
+        (define *sink* #f)
+
+        (define (note! from kind cell side b rev)
+          (let* ((c (car cell))
+                 (r (cdr cell)))
+            (when (in-map? c r)
+              (let ((k (key kind c r)))
+                (if *sink*
+                    (*sink* k b rev)
+                    (note-anchor! from k kind c r side b rev))))))
+
+        (define (note-anchor! from k kind c r side b rev)
+          (unless (vector-ref reps k)
+            (vector-set! reps k (or (canonical kind c r side) (arrival-rep kind b)))
+            (set! queue (cons k queue)))
+          (unless (or (= k from) (assv k (vector-ref hops from)))
+            (vector-set! hops from (cons (cons k rev) (vector-ref hops from)))))
+
+        (define (note-stand! from b rev)
+          (let ((c (rest-cell tm f b)))
+            (when c (note! from K-STAND c 0 b rev))))
+
+        (define (note-cling! from b rev)
+          (note! from (if (< (body-side b) 0) K-CLING-L K-CLING-R) (body-cell tm f b) (body-side b) b rev))
+
+        (define (note-swim! from b rev)
+          (note! from K-SWIM (body-cell tm f b) 0 b rev))
+
+        (define (smooth-wall? b side)
+          (and (touching? tm (body-x b) (body-y b) (feel-box-w f) (feel-box-h f)
+                          (if (> side 0) 'right 'left) kind-solid?)
+               (not (touching? tm (body-x b) (body-y b) (feel-box-w f) (feel-box-h f)
+                               (if (> side 0) 'right 'left) kind-climbable?))))
+
+        ;; Release all input until the body rests somewhere worth noting.
+        (define (settle from b rev)
+          (let loop ((b b) (rev rev) (n 0))
+            (cond ((not b) #f)
+                  ((eq? (body-mode b) 'swim) (note-swim! from b rev))
+                  ((eq? (body-mode b) 'cling) (note-cling! from b rev))
+                  ((at-rest? b) (note-stand! from b rev))
+                  ((>= n SETTLE-MAX) #f)
+                  (else (loop (step b NOTHING) (cons NOTHING rev) (+ n 1))))))
+
+        ;; Airborne after a launch. k: ticks since the press. h: the
+        ;; horizontal input now. held: jump still held. hold-free: the hold
+        ;; branches are still to come. air: 'default (branches to come),
+        ;; 'fixed (none), 'chimney (kick off each wall pushed into and turn).
+        (define (fly from b rev k h held hold-free air)
+          (cond ((not b) #f)
+                ((eq? (body-mode b) 'swim) (note-swim! from b rev))
+                ((eq? (body-mode b) 'cling) (note-cling! from b rev))
+                ((eq? (body-mode b) 'ground) (settle from b rev))
+                ((> k FLY-MAX) #f)
+                (else
+                 ;; the hold branches: let go after a tap or eight ticks
+                 (when (and held hold-free (= k 1) (body-jumping b))
+                   (fly from b rev k h #f #f air))
+                 ;; the air branches
+                 (when (eq? air 'default)
+                   (if (= h 0)
+                       (when (= k 6)
+                         (fly from b rev k 1 held hold-free 'fixed)
+                         (fly from b rev k -1 held hold-free 'fixed))
+                       (begin
+                         (when (= k 8)
+                           (fly from b rev k 0 held hold-free 'fixed))
+                         (when (= k 10)
+                           (fly from b rev k (- h) held hold-free 'fixed)))))
+                 (when (and (not (= h 0)) (smooth-wall? b h))
+                   (note! from (if (< h 0) K-WALL-L K-WALL-R) (body-cell tm f b) h b rev))
+                 (let* ((kick (and (eq? air 'chimney)
+                                   (not (= h 0))
+                                   (= (body-lock b) 0)
+                                   (touching? tm (body-x b) (body-y b) (feel-box-w f) (feel-box-h f)
+                                              (if (> h 0) 'right 'left) kind-solid?)))
+                        (in (if kick
+                                (make-intent* h 0 #t #t)
+                                (make-intent* h 0 held #f)))
+                        (b2 (step b in))
+                        (kicked (and b2 kick (memq 'wall-jump (body-events b2)))))
+                   (fly from b2 (cons in rev) (+ k 1)
+                        (if kicked (- h) h)
+                        (and held (not kicked))
+                        hold-free
+                        air)))))
+
+        ;; Press jump now with direction h; if it launches, fly (and, moving,
+        ;; the chimney policy too).
+        (define (jump-from from b rev h)
+          (let* ((in (make-intent* h 0 #t #t))
+                 (b1 (step b in)))
+            (when (and b1 (or (memq 'jump (body-events b1)) (memq 'wall-jump (body-events b1))))
+              (fly from b1 (cons in rev) 1 h #t #t 'default)
+              (unless (= h 0)
+                (fly from b1 (cons in rev) 1 h #t #f 'chimney)))))
+
+        ;; A kick off the wall on side `side` (clinging, or pushing into it):
+        ;; away, and the branches (stop, come back, the chimney policy).
+        (define (kick-from from b rev side press-h)
+          (let* ((in (make-intent* press-h 0 #t #t))
+                 (b1 (step b in)))
+            (when (and b1 (memq 'wall-jump (body-events b1)))
+              (fly from b1 (cons in rev) 1 (- side) #f #f 'default)
+              (fly from b1 (cons in rev) 1 (- side) #f #f 'chimney))))
+
+        (define (expand-stand from b0)
+          ;; walks: releasing on entering each of the next WALK-CELLS cells
+          ;; (so every neighbour on a floor is an edge), and at the first
+          ;; airborne tick off an edge (dropping straight, or turning back to
+          ;; the face just walked off); then on, holding the direction, to
+          ;; WALK-MAX
+          (let ((c0 (car (body-cell tm f b0))))
+            (for-each
+              (lambda (h)
+                (let walk ((b b0) (rev '()) (t 0) (stops 0) (off #f))
+                  (when b
+                    (let* ((cc (car (body-cell tm f b)))
+                           (moved (* h (- cc c0)))
+                           (stop? (and (> moved stops) (<= moved WALK-CELLS)))
+                           (off? (and (not off) (eq? (body-mode b) 'air))))
+                      (when stop? (settle from b rev))
+                      (when off?
+                        (settle from b rev)
+                        (fly from b rev (+ FLY-MAX -60) (- h) #f #f 'fixed))
+                      (cond ((eq? (body-mode b) 'swim) (note-swim! from b rev))
+                            ((eq? (body-mode b) 'cling) (note-cling! from b rev))
+                            ((< t WALK-MAX)
+                             (let ((in (make-intent* h 0 #f #f)))
+                               (walk (step b in) (cons in rev) (+ t 1)
+                                     (if stop? moved stops)
+                                     (or off off?))))
+                            (else (settle from b rev)))))))
+              (list -1 1)))
+          ;; jumps from standing and from every even tick of a run-up
+          (jump-from from b0 '() 0)
+          (for-each
+            (lambda (h)
+              (let run ((b b0) (rev '()) (t 0))
+                (when (and b (not (memq (body-mode b) (list 'swim 'cling)))
+                           (or (eq? (body-mode b) 'ground) (> (body-coyote b) 0)))
+                  (when (memv t PRESS-TICKS) (jump-from from b rev h))
+                  (when (< t RUNUP-MAX)
+                    (let ((in (make-intent* h 0 #f #f)))
+                      (run (step b in) (cons in rev) (+ t 1)))))))
+            (list -1 1))
+          ;; up beside rough rock: the grab from the ground
+          (for-each
+            (lambda (h)
+              (let grab ((b b0) (rev '()) (t 0))
+                (when (and b (< t 12))
+                  (if (eq? (body-mode b) 'cling)
+                      (note-cling! from b rev)
+                      (let ((in (make-intent* h -1 #f #f)))
+                        (grab (step b in) (cons in rev) (+ t 1)))))))
+            (list -1 1)))
+
+        (define (expand-cling from b0 side)
+          ;; up: climbing, kicking off at some heights, and over the top
+          (let climb ((b b0) (rev '()) (t 0))
+            (when (and b (< t CLIMB-MAX))
+              (when (and (eq? (body-mode b) 'cling) (memv t KICK-TICKS))
+                (kick-from from b rev side 0))
+              (cond ((memq 'mantle (body-events b))
+                     ;; over the top: walk on for a few lengths, then settle
+                     (let on ((b b) (rev rev) (m 0))
+                       (when b
+                         (when (memv m OVER-STOPS)
+                           (settle from b rev))
+                         (when (< m 40)
+                           (let ((in (make-intent* side 0 #f #f)))
+                             (on (step b in) (cons in rev) (+ m 1)))))))
+                    ((eq? (body-mode b) 'cling)
+                     (let ((in (make-intent* 0 -1 #f #f)))
+                       (climb (step b in) (cons in rev) (+ t 1))))
+                    (else (settle from b rev)))))
+          ;; down
+          (let climb ((b b0) (rev '()) (t 0))
+            (when (and b (< t CLIMB-MAX))
+              (when (and (eq? (body-mode b) 'cling) (memv t KICK-TICKS))
+                (kick-from from b rev side 0))
+              (if (eq? (body-mode b) 'cling)
+                  (let ((in (make-intent* 0 1 #f #f)))
+                    (climb (step b in) (cons in rev) (+ t 1)))
+                  (settle from b rev))))
+          ;; kick off here
+          (kick-from from b0 '() side 0)
+          ;; let go
+          (let* ((in (make-intent* (- side) 0 #f #f))
+                 (b1 (step b0 in)))
+            (fly from b1 (list in) (+ FLY-MAX -60) 0 #f #f 'fixed)))
+
+        (define (expand-wall from b0 side)
+          (kick-from from b0 '() side side)
+          (fly from b0 '() (+ FLY-MAX -80) side #f #f 'fixed)
+          (settle from b0 '()))
+
+        (define (expand-swim from b0)
+          (for-each
+            (lambda (hv)
+              (let ((h (car hv)) (v (cdr hv)))
+                (for-each
+                  (lambda (leap)
+                    (let swim ((b b0) (rev '()) (t 0))
+                      (when (and b (< t SWIM-MAX))
+                        (cond ((not (eq? (body-mode b) 'swim))
+                               (fly from b rev (if leap 1 (+ FLY-MAX -60)) h leap leap 'default))
+                              (else
+                               (when (memv t SWIM-STOPS) (settle from b rev))
+                               (let ((in (make-intent* h v leap (and leap (= (modulo t 8) 0)))))
+                                 (swim (step b in) (cons in rev) (+ t 1))))))))
+                  (list #f #t))))
+            (list (cons 1 0) (cons -1 0) (cons 0 -1) (cons 0 1)
+                  (cons 1 -1) (cons -1 -1) (cons 1 1) (cons -1 1))))
+
+        (define (expand-kind from kind b)
+          (cond ((= kind K-STAND) (expand-stand from b))
+                ((= kind K-CLING-L) (expand-cling from b -1))
+                ((= kind K-CLING-R) (expand-cling from b 1))
+                ((= kind K-WALL-L) (expand-wall from b -1))
+                ((= kind K-WALL-R) (expand-wall from b 1))
+                ((= kind K-SWIM) (expand-swim from b))))
+
+        (define (expand! k)
+          (set! expanded (+ expanded 1))
+          (when (pair? log)
+            ((car log) expanded steps (key-kind k) (key-cell k)))
+          (expand-kind k (key-kind k) (vector-ref reps k)))
+
+        ;; --- realizing a candidate: the witness, from real states ---------------
+
+        (define (kind-side kind)
+          (if (or (= kind K-CLING-L) (= kind K-WALL-L)) -1 1))
+
+        ;; Is body b in anchor k (as the search noted it)?
+        (define (in-anchor? k b)
+          (let ((kind (key-kind k))
+                (cell (key-cell k)))
+            (cond ((= kind K-STAND) (and (at-rest? b) (equal? (rest-cell tm f b) cell)))
+                  ((or (= kind K-CLING-L) (= kind K-CLING-R))
+                   (and (eq? (body-mode b) 'cling) (= (body-side b) (kind-side kind))
+                        (equal? (body-cell tm f b) cell)))
+                  ((or (= kind K-WALL-L) (= kind K-WALL-R))
+                   (and (eq? (body-mode b) 'air) (smooth-wall? b (kind-side kind))
+                        (equal? (body-cell tm f b) cell)))
+                  ((= kind K-SWIM) (and (eq? (body-mode b) 'swim) (equal? (body-cell tm f b) cell)))
+                  (else #f))))
+
+        (define (run-script b script)
+          (let loop ((b b) (s script))
+            (if (or (not b) (null? s)) b (loop (step b (car s)) (cdr s)))))
+
+        ;; A candidate path from stand anchor FROM through HOPS ((key . rev) ...,
+        ;; in order) made real: each hop's script is run from where the last
+        ;; one really ended (not from the anchor's canonical state); a hop that
+        ;; does not reach its anchor from there is searched again, with that
+        ;; anchor kind's own patterns, from the real state (the REPAIR). The
+        ;; script so found, or #f when some hop cannot be made.
+        (define (realize from hops)
+          (let loop ((state (vector-ref reps from)) (kind K-STAND) (hs hops) (acc '()) (repairs 0))
+            (if (null? hs)
+                (reverse acc)
+                (let* ((k (caar hs))
+                       (rev (cdar hs))
+                       (b (run-script state (reverse rev))))
+                  (if (and b (in-anchor? k b))
+                      (loop b (key-kind k) (cdr hs) (append rev acc) repairs)
+                      (let ((found #f))
+                        (set! repaired (+ repaired 1))
+                        (set! *sink* (lambda (k2 b2 rev2)
+                                       (when (and (not found) (= k2 k)) (set! found (cons b2 rev2)))))
+                        (expand-kind from kind state)
+                        (set! *sink* #f)
+                        (if found
+                            (loop (car found) (key-kind k) (cdr hs) (append (cdr found) acc) (+ repairs 1))
+                            #f)))))))
+
+        ;; the anchors, from the starts
+        (for-each (lambda (c)
+                    (let ((k (key K-STAND (car c) (cdr c))))
+                      (when (and (standable? tm (car c) (cdr c)) (not (vector-ref reps k)))
+                        (vector-set! reps k (stand-body tm f (car c) (cdr c)))
+                        (set! queue (cons k queue)))))
+                  starts)
+        (let drain ()
+          (unless (null? queue)
+            (let ((k (car queue)))
+              (set! queue (cdr queue))
+              (expand! k)
+              (drain))))
+
+        ;; standing-to-standing candidates: from each stand anchor, a
+        ;; breadth-first walk over non-stand anchors (at most PATH-HOPS
+        ;; hops); the first path to each stand anchor is its candidate, and
+        ;; the replay decides.
+        (let* ((edges (make-vector ncells '()))
+               (candidates 0)
+               (rejected 0)
+               (rejected-edges '())
+               (nkeys (* NKINDS ncells)))
+          (let each ((k 0))
+            (when (< k nkeys)
+              (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
+                (let* ((from-cell (key-cell k))
+                       (seen (list k)))
+                  (let bfs ((front (map (lambda (h) (list (car h) 1 (list h))) (vector-ref hops k)))
+                            (back '()))
+                    (cond ((and (null? front) (null? back)) #f)
+                          ((null? front) (bfs (reverse back) '()))
+                          (else
+                           (let* ((item (car front))
+                                  (to (car item))
+                                  (n (cadr item))
+                                  (path (caddr item)))   ; ((key . rev) ...), last hop first
+                             (if (memv to seen)
+                                 (bfs (cdr front) back)
+                                 (begin
+                                   (set! seen (cons to seen))
+                                   (if (= (key-kind to) K-STAND)
+                                       (let* ((to-cell (key-cell to))
+                                              (hs (reverse path))
+                                              (raw (witness from: from-cell
+                                                            script: (reverse (apply append (map cdr path)))
+                                                            hops: n))
+                                              ;; THE WITNESS REPLAY: the path made real, then
+                                              ;; replayed from a standing state built afresh
+                                              (w (if accept?
+                                                     (let ((script (realize k hs)))
+                                                       (and script
+                                                            (let ((w (witness from: from-cell script: script hops: n)))
+                                                              (and (accept? tm f w to-cell) w))))
+                                                     raw)))
+                                         (set! candidates (+ candidates 1))
+                                         (if w
+                                             (let ((i (cell-index tm (car from-cell) (cdr from-cell))))
+                                               (vector-set! edges i
+                                                            (cons (cons (cell-index tm (car to-cell) (cdr to-cell)) w)
+                                                                  (vector-ref edges i))))
+                                             (begin
+                                               (set! rejected (+ rejected 1))
+                                               (set! rejected-edges (cons (cons from-cell to-cell) rejected-edges))))
+                                         (bfs (cdr front) back))
+                                       (bfs (cdr front)
+                                            (if (>= n PATH-HOPS)
+                                                back
+                                                (append (map (lambda (h)
+                                                               (list (car h) (+ n 1) (cons h path)))
+                                                             (vector-ref hops to))
+                                                        back))))))))))))
+              (each (+ k 1))))
+          (reach-graph tm: tm
+                       cells: (standable-cells tm)
+                       starts: starts
+                       edges: edges
+                       rejected: (reverse rejected-edges)
+                       stats: (list (cons 'anchors expanded)
+                                    (cons 'steps steps)
+                                    (cons 'candidates candidates)
+                                    (cons 'rejected rejected)
+                                    (cons 'repairs repaired))))))))

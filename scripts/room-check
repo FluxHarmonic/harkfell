@@ -1,0 +1,27 @@
+#!/bin/sh
+# The content gates on the written world (harkfell-design section 8, gates
+# 1 to 3): parse and legend, the region maps, seams, then reach over the
+# whole world with every edge's witness replayed. Prints every problem as
+# FILE:LINE: message and each room's reach report (the grid, standable
+# cells marked: * reached, ! unreachable, ? trap, @ the start).
+#
+#   scripts/room-check                       every room
+#   scripts/room-check reedfen:9,3 ...       those rooms' reports (the gates
+#                                            still run on the whole world)
+#   scripts/room-check --world DIR ...       another world (a fixture's)
+#   scripts/room-check --verbose ...         one line per anchor searched
+#
+# Runs the native release binary (the reach search is millions of physics
+# ticks; the bytecode build is about six times slower). Refuses (exit 2,
+# SETUP-FAILED) when the binary is missing or older than any source file:
+# a gate run on a stale binary checks code that is not the tree's.
+# Exit 0 PASS, 1 FAIL, 2 SETUP-FAILED.
+cd "$(dirname "$0")/.." || exit 2
+BIN=build/release/bin/harkfell
+[ -x "$BIN" ] || { echo "SETUP-FAILED: $BIN missing; scripts/dev sigil build --config release"; exit 2; }
+newer=$(find src -name '*.sgl' -newer "$BIN" | head -3)
+if [ -n "$newer" ]; then
+  echo "SETUP-FAILED: $BIN is older than: $newer ... (scripts/dev sigil build --config release)"
+  exit 2
+fi
+exec "$BIN" --room-check "$@"

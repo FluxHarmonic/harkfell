@@ -1,0 +1,642 @@
+;;; (harkfell content) - The world as written: the bible's data, the region
+;;; maps, the room files; read, checked and put on the global grid.
+;;;
+;;; The files (harkfell-design section 8), all text under world/:
+;;;
+;;;   world/world.sgl                 the bible's data: (start ...), the
+;;;                                   (palette ...), each (region ...), each
+;;;                                   (creature ...)
+;;;   world/regions/<region>.map      a region's rooms, laid out, each with
+;;;                                   its title and its one intent; written
+;;;                                   before the rooms
+;;;   world/rooms/<region>/xXyY.room  one room, at global coordinate (X, Y)
+;;;   world/BIBLE.md                  the prose (not read by the game)
+;;;
+;;; A SOURCE is the files as ((path . text) ...): natively read from disk,
+;;; on the web handed over by the page, so both targets check and play the
+;;; same text.
+;;;
+;;; load-content reads everything and returns a CONTENT: the regions, the
+;;; rooms (as (engine worldmap) placed rooms, their data a ROOM record), the
+;;; world map, and every PROBLEM found ((engine roomfile)'s: a path, a line
+;;; where one applies, a message). These are gates 1 and 2 of section 8:
+;;;
+;;;   parse and legend   every file reads; a room has the fields it must, no
+;;;                      field it must not, a grid of 11 rows of 25 legend
+;;;                      characters, its at: matching its file name and inside
+;;;                      its region's bounds, its creatures on its region's
+;;;                      roster, its bed channels the region's, its moment one
+;;;                      of the region's; every ring-stone cell (o) named in
+;;;                      things: as (ring-stone at: (C R) overtone: N) and every
+;;;                      such thing on an o; no two rooms at one coordinate
+;;;   the map            every room in a region map has its file and every file
+;;;                      its map entry, with the same title and intent, and the
+;;;                      map's connections are the seams: two neighbours are
+;;;                      joined in the layout exactly when their shared edge
+;;;                      has an open cell
+;;;   seams              (engine worldmap)'s rule, room by room
+;;;
+;;; Gate 3, reach, is (harkfell check): it runs the physics.
+
+(define-library (harkfell content)
+  (import (sigil struct)
+          (sigil list)
+          (sigil string)
+          (sigil math)
+          (engine tilemap)
+          (engine roomfile)
+          (engine worldmap)
+          (harkfell legend)
+          (harkfell feel))
+
+  (export ROOM-COLS ROOM-ROWS
+          content content? load-content
+          content-regions content-rooms content-map content-problems
+          content-start content-palette content-creatures content-maps
+          region region? region-name region-field
+          room room? room-path room-region room-x room-y room-title room-intent
+          room-grid room-things room-bed room-moment room-decor room-start
+          room-unreached room-file
+          content-room room-key parse-room-key room-label
+          room-char world-char
+          read-room-source room-placed
+          region-map region-map? region-map-region region-map-rooms region-map-origin
+          region-rooms)
+
+  (begin
+    (define ROOM-COLS 25)
+    (define ROOM-ROWS 11)
+
+    (define-struct region
+      (name default: #f)
+      (fields default: '()))
+
+    (define (region-field r name) (let ((p (assq name (region-fields r)))) (and p (cdr p))))
+
+    ;; One room as written.
+    (define-struct room
+      (path default: "")
+      (file default: #f)            ; the (engine roomfile)
+      (region default: #f)
+      (x default: 0)
+      (y default: 0)
+      (title default: "")
+      (intent default: "")
+      (grid default: '())
+      (things default: '())
+      (bed default: '())
+      (moment default: #f)
+      (decor default: 'auto)
+      (start default: #f)           ; (c . r) or #f
+      (unreached default: '()))     ; ((c . r) ...) declared unreachable
+
+    ;; A region map: ((letter x y title intent) ...), and which neighbours are joined.
+    (define-struct region-map
+      (path default: "")
+      (region default: #f)
+      (origin default: #f)
+      (rooms default: '())          ; ((letter x y title intent) ...)
+      (joins default: '()))         ; (((x1 . y1) . (x2 . y2)) ...)
+
+    (define-struct content
+      (source default: '())
+      (start default: #f)           ; (region (x y) (c r)) or #f
+      (palette default: '())        ; ((role "#rrggbb" note) ...)
+      (regions default: '())
+      (creatures default: '())      ; ((name . fields) ...)
+      (maps default: '())
+      (rooms default: '())          ; placed rooms, data = room
+      (wmap default: #f)            ; the worldmap
+      (problems default: '()))
+
+    (define (content-map ct) (content-wmap ct))
+
+    (define (room-key x y) (string-append "x" (number->string x) "y" (number->string y)))
+
+    ;; "reedfen:12,4" -> (reedfen 12 4), or #f.
+    (define (parse-room-key s)
+      (let ((parts (string-split s ":")))
+        (and (= (length parts) 2)
+             (let ((xy (map string->number (string-split (cadr parts) ","))))
+               (and (= (length xy) 2) (integer? (car xy)) (integer? (cadr xy))
+                    (list (string->symbol (car parts)) (car xy) (cadr xy)))))))
+
+    (define (room-label rm)
+      (string-append (symbol->string (room-region rm)) ":"
+                     (number->string (room-x rm)) "," (number->string (room-y rm))))
+
+    (define (content-room ct x y)
+      (let ((p (worldmap-room (content-map ct) x y)))
+        (and p (placed-data p))))
+
+    (define (region-rooms ct name)
+      (filter (lambda (rm) (eq? (room-region rm) name))
+              (map placed-data (content-rooms ct))))
+
+    ;; The character at (c, r) of a room (#\# outside it).
+    (define (room-char rm c r)
+      (if (and (>= r 0) (< r (length (room-grid rm))))
+          (let ((row (list-ref (room-grid rm) r)))
+            (if (and (>= c 0) (< c (string-length row))) (string-ref row c) #\#))
+          #\#))
+
+    ;; The character at global tile (gc, gr) of the world map: the room
+    ;; there, or rock where there is none.
+    (define (world-char ct gc gr)
+      (let* ((wm (content-map ct))
+             (rx (+ (worldmap-x0 wm) (exact (floor (/ gc ROOM-COLS)))))
+             (ry (+ (worldmap-y0 wm) (exact (floor (/ gr ROOM-ROWS)))))
+             (p (worldmap-room wm rx ry)))
+        (if p
+            (room-char (placed-data p) (modulo gc ROOM-COLS) (modulo gr ROOM-ROWS))
+            #\#)))
+
+    ;; --- small readers -------------------------------------------------------------
+
+    (define (pb path line msg) (problem path: path line: line message: msg))
+
+    (define (int-pair? v) (and (list? v) (= (length v) 2) (integer? (car v)) (integer? (cadr v))))
+
+    (define (sym-list? v) (and (list? v) (every symbol? v)))
+
+    (define (every pred l) (or (null? l) (and (pred (car l)) (every pred (cdr l)))))
+
+    (define (ends-with? s suffix)
+      (let ((n (string-length s)) (m (string-length suffix)))
+        (and (>= n m) (string=? (substring s (- n m) n) suffix))))
+
+    (define (starts-with? s prefix)
+      (let ((n (string-length s)) (m (string-length prefix)))
+        (and (>= n m) (string=? (substring s 0 m) prefix))))
+
+    ;; "world/rooms/reedfen/x12y4.room" -> (reedfen 12 4), or #f.
+    (define (room-path-parts path)
+      (let ((parts (string-split path "/")))
+        (and (= (length parts) 4)
+             (string=? (car parts) "world")
+             (string=? (cadr parts) "rooms")
+             (ends-with? (cadddr parts) ".room")
+             (let* ((f (cadddr parts))
+                    (base (substring f 0 (- (string-length f) 5)))
+                    (yi (let loop ((i 0)) (cond ((>= i (string-length base)) #f)
+                                                ((char=? (string-ref base i) #\y) i)
+                                                (else (loop (+ i 1)))))))
+               (and yi (> (string-length base) 1) (char=? (string-ref base 0) #\x)
+                    (let ((x (string->number (substring base 1 yi)))
+                          (y (string->number (substring base (+ yi 1) (string-length base)))))
+                      (and (integer? x) (integer? y)
+                           (list (string->symbol (caddr parts)) x y))))))))
+
+    ;; --- world.sgl ----------------------------------------------------------------------
+
+    ;; -> (list start palette regions creatures problems)
+    (define (read-world path text)
+      (let ((forms (read-all-forms text)))
+        (if (and (pair? forms) (eq? (car forms) 'error))
+            (list #f '() '() '() (list (pb path #f (string-append "does not read: " (cdr forms)))))
+            (let loop ((fs forms) (start #f) (palette '()) (regions '()) (creatures '()) (ps '()))
+              (if (null? fs)
+                  (list start palette (reverse regions) (reverse creatures) (reverse ps))
+                  (let ((f (car fs)))
+                    (cond ((not (and (pair? f) (symbol? (car f))))
+                           (loop (cdr fs) start palette regions creatures
+                                 (cons (pb path #f (string-append "unexpected form " (datum->string f))) ps)))
+                          ((eq? (car f) 'start)
+                           (let* ((r (parse-keyword-fields (cdr f) text path))
+                                  (fl (car r))
+                                  (reg (assq 'region fl)) (rm (assq 'room fl)) (cl (assq 'cell fl)))
+                             (if (and reg rm cl (symbol? (cdr reg)) (int-pair? (cdr rm)) (int-pair? (cdr cl)))
+                                 (loop (cdr fs) (list (cdr reg) (cdr rm) (cdr cl)) palette regions creatures
+                                       (append (reverse (cdr r)) ps))
+                                 (loop (cdr fs) start palette regions creatures
+                                       (cons (pb path (field-line text "start") "(start region: room: (X Y) cell: (C R)) is incomplete") ps)))))
+                          ((eq? (car f) 'palette)
+                           (loop (cdr fs) start (append palette (cdr f)) regions creatures ps))
+                          ((eq? (car f) 'region)
+                           (if (and (pair? (cdr f)) (symbol? (cadr f)))
+                               (let ((r (parse-keyword-fields (cddr f) text path)))
+                                 (loop (cdr fs) start palette
+                                       (cons (region name: (cadr f) fields: (car r)) regions)
+                                       creatures (append (reverse (cdr r)) ps)))
+                               (loop (cdr fs) start palette regions creatures
+                                     (cons (pb path #f "(region NAME ...) needs a name") ps))))
+                          ((eq? (car f) 'creature)
+                           (if (and (pair? (cdr f)) (symbol? (cadr f)))
+                               (let ((r (parse-keyword-fields (cddr f) text path)))
+                                 (loop (cdr fs) start palette regions
+                                       (cons (cons (cadr f) (car r)) creatures)
+                                       (append (reverse (cdr r)) ps)))
+                               (loop (cdr fs) start palette regions creatures
+                                     (cons (pb path #f "(creature NAME ...) needs a name") ps))))
+                          (else
+                           ;; the gating graph, the hush and the rest are read by later phases
+                           (loop (cdr fs) start palette regions creatures ps)))))))))
+
+    (define (check-regions path text palette regions creatures)
+      (let ((roles (map car palette)))
+        (apply append
+               (map (lambda (r)
+                      (let ((name (symbol->string (region-name r)))
+                            (b (region-field r 'bounds))
+                            (pal (region-field r 'palette))
+                            (roster (region-field r 'roster)))
+                        (append
+                          (if (and (list? b) (= (length b) 2) (int-pair? (car b)) (int-pair? (cadr b)))
+                              '()
+                              (list (pb path (field-line text "bounds") (string-append "region " name ": bounds: is not ((X0 Y0) (X1 Y1))"))))
+                          (if (sym-list? pal)
+                              (append
+                                (if (> (length pal) 16)
+                                    (list (pb path (field-line text "palette") (string-append "region " name ": more than 16 palette roles")))
+                                    '())
+                                (map (lambda (role)
+                                       (pb path (field-line text "palette")
+                                           (string-append "region " name ": palette role " (symbol->string role) " is not in the world palette")))
+                                     (filter (lambda (role) (not (memq role roles))) pal)))
+                              (list (pb path (field-line text "palette") (string-append "region " name ": palette: is not a list of roles"))))
+                          (if (sym-list? roster)
+                              (map (lambda (c)
+                                     (pb path (field-line text "roster")
+                                         (string-append "region " name ": roster names " (symbol->string c) ", which is no (creature ...)")))
+                                   (filter (lambda (c) (not (assq c creatures))) roster))
+                              (list (pb path (field-line text "roster") (string-append "region " name ": roster: is not a list of names")))))))
+                    regions))))
+
+    (define (find-region regions name)
+      (let loop ((rs regions))
+        (cond ((null? rs) #f)
+              ((eq? (region-name (car rs)) name) (car rs))
+              (else (loop (cdr rs))))))
+
+    ;; --- rooms ---------------------------------------------------------------------------
+
+    (define ROOM-FIELDS
+      (list 'region 'at 'title 'intent 'bed 'grid 'things 'moment 'decor 'start 'unreached))
+    (define ROOM-REQUIRED (list 'region 'at 'title 'intent 'grid))
+
+    ;; A room file read and checked on its own and against the regions: (room . problems).
+    (define (read-room-source path text regions)
+      (let* ((rf0 (read-roomfile text path 'room))
+             (rf rf0)
+             (line (lambda (name) (field-line text name)))
+             (parts (room-path-parts path))
+             (ps '()))
+        (define (add! msg name) (set! ps (cons (pb path (and name (line name)) msg) ps)))
+        (when (roomfile-ok? rf)
+          (for-each (lambda (f)
+                      (unless (memq (car f) ROOM-FIELDS)
+                        (add! (string-append "unknown field " (symbol->string (car f)) ":") (symbol->string (car f)))))
+                    (roomfile-fields rf))
+          (for-each (lambda (name)
+                      (unless (roomfile-has? rf name)
+                        (add! (string-append "has no " (symbol->string name) ":") #f)))
+                    ROOM-REQUIRED))
+        (let* ((region-sym (roomfile-field rf 'region))
+               (reg (and (symbol? region-sym) (find-region regions region-sym)))
+               (at (roomfile-field rf 'at))
+               (title (roomfile-field rf 'title))
+               (intent (roomfile-field rf 'intent)))
+          (when (roomfile-ok? rf)
+            (cond ((not parts)
+                   (add! "is not at world/rooms/REGION/xXyY.room" #f))
+                  (else
+                   (unless (eq? region-sym (car parts))
+                     (add! (string-append "region: is " (datum->string region-sym) " but the file is under "
+                                          (symbol->string (car parts)) "/")
+                           "region"))
+                   (unless (and (int-pair? at) (= (car at) (cadr parts)) (= (cadr at) (caddr parts)))
+                     (add! (string-append "at: is " (datum->string at) " but the file is named "
+                                          (room-key (cadr parts) (caddr parts)))
+                           "at"))))
+            (when (and (symbol? region-sym) (not reg))
+              (add! (string-append "region " (symbol->string region-sym) " is not in world/world.sgl") "region"))
+            (when (and reg (int-pair? at))
+              (let ((b (region-field reg 'bounds)))
+                (when (and (list? b) (= (length b) 2) (int-pair? (car b)) (int-pair? (cadr b))
+                           (not (and (<= (car (car b)) (car at) (car (cadr b)))
+                                     (<= (cadr (car b)) (cadr at) (cadr (cadr b))))))
+                  (add! (string-append "at: " (datum->string at) " is outside " (symbol->string region-sym)
+                                       "'s bounds " (datum->string b))
+                        "at"))))
+            (unless (and (string? title) (> (string-length title) 0)) (add! "title: is not a string" "title"))
+            (unless (and (string? intent) (> (string-length intent) 0)) (add! "intent: is not a string" "intent"))
+            ;; things: (KIND ...) with KIND on the region's roster, at: inside the grid
+            (let ((things (roomfile-field rf 'things '())))
+              (if (not (list? things))
+                  (add! "things: is not a list" "things")
+                  (for-each
+                    (lambda (t)
+                      (cond ((not (and (pair? t) (symbol? (car t))))
+                             (add! (string-append "things: " (datum->string t) " is not (KIND ...)") "things"))
+                            ((eq? (car t) 'ring-stone) #f)   ; checked against the grid below
+                            ((and reg (not (memq (car t) (or (region-field reg 'roster) '()))))
+                             (add! (string-append "things: " (symbol->string (car t)) " is not on "
+                                                  (symbol->string region-sym) "'s roster")
+                                   "things"))
+                            (else
+                             (let ((a (let find ((l (cdr t)))
+                                        (cond ((or (null? l) (null? (cdr l))) #f)
+                                              ((and (keyword? (car l)) (string=? (keyword->string (car l)) "at")) (cadr l))
+                                              (else (find (cdr l)))))))
+                               (when (and a (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS))))
+                                 (add! (string-append "things: " (symbol->string (car t)) " at: "
+                                                      (datum->string a) " is not a cell of the grid")
+                                       "things"))))))
+                    things)))
+            ;; bed: (CHANNEL LEVEL ...) with the region's channels, levels 0..1
+            (let ((bed (roomfile-field rf 'bed '())))
+              (if (not (and (list? bed) (even? (length bed))))
+                  (add! "bed: is not (CHANNEL LEVEL ...)" "bed")
+                  (let loop ((b bed))
+                    (unless (null? b)
+                      (let ((ch (car b)) (lv (cadr b)))
+                        (unless (and (symbol? ch) (or (not reg) (memq ch (or (region-field reg 'bed-channels) '()))))
+                          (add! (string-append "bed: " (datum->string ch) " is not one of "
+                                               (if reg (symbol->string region-sym) "the region") "'s bed channels")
+                                "bed"))
+                        (unless (and (number? lv) (<= 0 lv 1))
+                          (add! (string-append "bed: level " (datum->string lv) " is not between 0 and 1") "bed")))
+                      (loop (cddr b))))))
+            ;; moment: (tune: NAME when: ...) naming one of the region's moments
+            (let ((m (roomfile-field rf 'moment)))
+              (when m
+                (let ((tune (and (list? m) (let find ((l m))
+                                             (cond ((or (null? l) (null? (cdr l))) #f)
+                                                   ((and (keyword? (car l)) (string=? (keyword->string (car l)) "tune")) (cadr l))
+                                                   (else (find (cdr l))))))))
+                  (unless (and (symbol? tune) (or (not reg) (memq tune (or (region-field reg 'moments) '()))))
+                    (add! (string-append "moment: " (datum->string m) " does not name one of the region's moments")
+                          "moment")))))
+            ;; ring-stones: every o has one, with its overtone, and every one is on an o
+            (let* ((things (let ((t (roomfile-field rf 'things '()))) (if (list? t) t '())))
+                   (grid (roomfile-grid rf))
+                   (stones (filter (lambda (t) (and (pair? t) (eq? (car t) 'ring-stone))) things))
+                   (kw (lambda (t name) (let find ((l (cdr t)))
+                                          (cond ((or (null? l) (null? (cdr l))) #f)
+                                                ((and (keyword? (car l)) (string=? (keyword->string (car l)) name)) (cadr l))
+                                                (else (find (cdr l)))))))
+                   (o-cells (apply append
+                                   (map (lambda (row r)
+                                          (let loop ((c 0) (acc '()))
+                                            (if (>= c (string-length row))
+                                                (reverse acc)
+                                                (loop (+ c 1) (if (char=? (string-ref row c) #\o) (cons (list c r) acc) acc)))))
+                                        grid (iota (length grid))))))
+              (for-each (lambda (t)
+                          (let ((a (kw t "at")) (o (kw t "overtone")))
+                            (unless (and (int-pair? a) (member a o-cells))
+                              (add! (string-append "things: ring-stone at: " (datum->string a) " is not on an o in the grid") "things"))
+                            (unless (and (integer? o) (<= 2 o 7))
+                              (add! (string-append "things: ring-stone at: " (datum->string a) " has no overtone: 2 to 7") "things"))))
+                        stones)
+              (for-each (lambda (cell)
+                          (unless (find (lambda (t) (equal? (kw t "at") cell)) stones)
+                            (add! (string-append "grid: the ring-stone at " (datum->string cell)
+                                                 " is not in things: as (ring-stone at: " (datum->string cell) " overtone: N)")
+                                  "grid")))
+                        o-cells))
+            (let ((d (roomfile-field rf 'decor 'auto)))
+              (unless (memq d (list 'auto 'none))
+                (add! "decor: is neither auto nor none" "decor")))
+            (let ((s (roomfile-field rf 'start)))
+              (when (and s (not (and (int-pair? s) (< -1 (car s) ROOM-COLS) (< -1 (cadr s) ROOM-ROWS))))
+                (add! "start: is not (C R) inside the grid" "start")))
+            (let ((u (roomfile-field rf 'unreached '())))
+              (unless (and (list? u) (every int-pair? u))
+                (add! "unreached: is not ((C R) ...)" "unreached"))))
+          (let* ((grid-ps (check-grid rf ROOM-COLS ROOM-ROWS LEGEND-CHARS))
+                 (all (append (roomfile-problems rf) (reverse ps) (if (roomfile-ok? rf) grid-ps '())))
+                 (u (roomfile-field rf 'unreached '()))
+                 (s (roomfile-field rf 'start)))
+            (cons (room path: path
+                        file: rf
+                        region: region-sym
+                        x: (if (int-pair? at) (car at) 0)
+                        y: (if (int-pair? at) (cadr at) 0)
+                        title: (if (string? title) title "")
+                        intent: (if (string? intent) intent "")
+                        grid: (roomfile-grid rf)
+                        things: (let ((t (roomfile-field rf 'things '()))) (if (list? t) t '()))
+                        bed: (let ((b (roomfile-field rf 'bed '()))) (if (list? b) b '()))
+                        moment: (roomfile-field rf 'moment)
+                        decor: (roomfile-field rf 'decor 'auto)
+                        start: (and (int-pair? s) (cons (car s) (cadr s)))
+                        unreached: (if (and (list? u) (every int-pair? u))
+                                       (map (lambda (p) (cons (car p) (cadr p))) u)
+                                       '()))
+                  all)))))
+
+    ;; A room's tilemap and its placed form (the grid must be whole).
+    (define (room-placed rm)
+      (let* ((tm (make-tilemap ROOM-COLS ROOM-ROWS TILE))
+             (cells (vector-copy (tilemap-cells tm))))
+        (let loop ((r 0))
+          (when (< r ROOM-ROWS)
+            (let cl ((c 0))
+              (when (< c ROOM-COLS)
+                (vector-set! cells (+ c (* r ROOM-COLS)) (char-kind (room-char rm c r)))
+                (cl (+ c 1))))
+            (loop (+ r 1))))
+        (placed x: (room-x rm) y: (room-y rm)
+                tiles: (tilemap tm cells: cells)
+                data: rm)))
+
+    (define (grid-whole? rm)
+      (and (= (length (room-grid rm)) ROOM-ROWS)
+           (every (lambda (row) (= (string-length row) ROOM-COLS)) (room-grid rm))))
+
+    ;; --- region maps -------------------------------------------------------------------------
+
+    ;; -> (region-map . problems)
+    (define (read-map-source path text)
+      (let* ((rf (read-roomfile text path 'map))
+             (line (lambda (n) (field-line text n)))
+             (reg (roomfile-field rf 'region))
+             (origin (roomfile-field rf 'origin))
+             (layout (roomfile-field rf 'layout))
+             (rooms (roomfile-field rf 'rooms))
+             (ps '()))
+        (define (add! msg name) (set! ps (cons (pb path (and name (line name)) msg) ps)))
+        (if (not (roomfile-ok? rf))
+            (cons (region-map path: path) (roomfile-problems rf))
+            (begin
+              (unless (symbol? reg) (add! "region: is not a name" "region"))
+              (unless (int-pair? origin) (add! "origin: is not (X Y)" "origin"))
+              (unless (and (list? layout) (every string? layout)) (add! "layout: is not a list of strings" "layout"))
+              (unless (and (list? rooms)
+                           (every (lambda (e) (and (list? e) (= (length e) 3) (symbol? (car e))
+                                                   (string? (cadr e)) (string? (caddr e))))
+                                  rooms))
+                (add! "rooms: is not ((LETTER \"title\" \"intent\") ...)" "rooms"))
+              (if (not (null? ps))
+                  (cons (region-map path: path region: reg) (reverse ps))
+                  ;; letters at even (col, row) of the layout; joins at the odd places between
+                  (let* ((ox (car origin)) (oy (cadr origin))
+                         (at (lambda (c r)
+                               (if (and (>= r 0) (< r (length layout)) (>= c 0) (< c (string-length (list-ref layout r))))
+                                   (string-ref (list-ref layout r) c)
+                                   #\space)))
+                         (letters '())
+                         (joins '()))
+                    (let rows ((r 0))
+                      (when (< r (length layout))
+                        (let cols ((c 0))
+                          (when (< c (string-length (list-ref layout r)))
+                            (let ((ch (at c r)))
+                              (cond ((char-alphabetic? ch)
+                                     (if (and (even? c) (even? r))
+                                         (set! letters (cons (list ch (+ ox (/ c 2)) (+ oy (/ r 2))) letters))
+                                         (add! (string-append "layout: room " (string ch) " is not on an even row and column") "layout")))
+                                    ((char=? ch #\-)
+                                     (if (and (odd? c) (even? r) (char-alphabetic? (at (- c 1) r)) (char-alphabetic? (at (+ c 1) r)))
+                                         (set! joins (cons (cons (cons (+ ox (/ (- c 1) 2)) (+ oy (/ r 2)))
+                                                                 (cons (+ ox (/ (+ c 1) 2)) (+ oy (/ r 2))))
+                                                           joins))
+                                         (add! "layout: a - that joins no two rooms" "layout")))
+                                    ((char=? ch #\|)
+                                     (if (and (even? c) (odd? r) (char-alphabetic? (at c (- r 1))) (char-alphabetic? (at c (+ r 1))))
+                                         (set! joins (cons (cons (cons (+ ox (/ c 2)) (+ oy (/ (- r 1) 2)))
+                                                                 (cons (+ ox (/ c 2)) (+ oy (/ (+ r 1) 2))))
+                                                           joins))
+                                         (add! "layout: a | that joins no two rooms" "layout")))
+                                    ((char=? ch #\space) #f)
+                                    (else (add! (string-append "layout: '" (string ch) "' is not a room letter, - or |") "layout"))))
+                            (cols (+ c 1))))
+                        (rows (+ r 1))))
+                    (let* ((entries
+                             (let loop ((ls (reverse letters)) (acc '()))
+                               (if (null? ls)
+                                   (reverse acc)
+                                   (let* ((l (car ls))
+                                          (e (assq (string->symbol (string (car l))) rooms)))
+                                     (if e
+                                         (loop (cdr ls) (cons (list (car l) (cadr l) (caddr l) (cadr e) (caddr e)) acc))
+                                         (begin
+                                           (add! (string-append "layout: room " (string (car l)) " has no entry in rooms:") "rooms")
+                                           (loop (cdr ls) acc))))))))
+                      (for-each (lambda (e)
+                                  (unless (let find ((ls letters))
+                                            (and (pair? ls) (or (eq? (string->symbol (string (car (car ls)))) (car e)) (find (cdr ls)))))
+                                    (add! (string-append "rooms: " (symbol->string (car e)) " is not in the layout") "rooms")))
+                                rooms)
+                      (cons (region-map path: path region: reg origin: origin rooms: entries joins: joins)
+                            (reverse ps)))))))))
+
+    (define (joined? m a b)
+      (let loop ((js (region-map-joins m)))
+        (and (pair? js)
+             (or (and (equal? (caar js) a) (equal? (cdar js) b))
+                 (and (equal? (caar js) b) (equal? (cdar js) a))
+                 (loop (cdr js))))))
+
+    ;; Map against rooms: entries have files with the same title and intent,
+    ;; files have entries, and joins are exactly the open shared edges.
+    (define (check-map m rooms wm)
+      (let* ((path (region-map-path m))
+             (reg (region-map-region m))
+             (ps '()))
+        (define (add! msg) (set! ps (cons (pb path #f msg) ps)))
+        (for-each
+          (lambda (e)
+            (let* ((x (cadr e)) (y (caddr e))
+                   (rm (let find ((rs rooms))
+                         (cond ((null? rs) #f)
+                               ((and (eq? (room-region (car rs)) reg) (= (room-x (car rs)) x) (= (room-y (car rs)) y)) (car rs))
+                               (else (find (cdr rs)))))))
+              (cond ((not rm)
+                     (add! (string-append "room " (string (car e)) " at " (room-key x y) " has no file world/rooms/"
+                                          (symbol->string reg) "/" (room-key x y) ".room")))
+                    (else
+                     (unless (string=? (room-title rm) (cadddr e))
+                       (add! (string-append "room " (string (car e)) ": the map's title \"" (cadddr e)
+                                            "\" is not the file's \"" (room-title rm) "\"")))
+                     (unless (string=? (room-intent rm) (list-ref e 4))
+                       (add! (string-append "room " (string (car e)) ": the map's intent \"" (list-ref e 4)
+                                            "\" is not the file's \"" (room-intent rm) "\"")))))))
+          (region-map-rooms m))
+        (for-each
+          (lambda (rm)
+            (when (eq? (room-region rm) reg)
+              (unless (let find ((es (region-map-rooms m)))
+                        (and (pair? es) (or (and (= (cadr (car es)) (room-x rm)) (= (caddr (car es)) (room-y rm)))
+                                            (find (cdr es)))))
+                (add! (string-append (room-path rm) " is not in the region map")))))
+          rooms)
+        ;; joins against open shared edges
+        (for-each
+          (lambda (e)
+            (let ((x (cadr e)) (y (caddr e)))
+              (for-each
+                (lambda (d)
+                  (let* ((nx (+ x (car d))) (ny (+ y (cdr d)))
+                         (a (worldmap-room wm x y))
+                         (b (worldmap-room wm nx ny)))
+                    (when (and a b)
+                      (let ((open (shared-edge-open? a b (car d)))
+                            (j (joined? m (cons x y) (cons nx ny))))
+                        (cond ((and open (not j))
+                               (add! (string-append (room-key x y) " and " (room-key nx ny)
+                                                    " share an open edge, but the map does not join them")))
+                              ((and j (not open))
+                               (add! (string-append "the map joins " (room-key x y) " and " (room-key nx ny)
+                                                    ", but their shared edge is closed"))))))))
+                (list (cons 1 0) (cons 0 1)))))
+          (region-map-rooms m))
+        (reverse ps)))
+
+    ;; Does a's edge toward b (dx 1: b on its right; dx 0: b below) have an open cell?
+    (define (shared-edge-open? a b dx)
+      (let ((tm (placed-tiles a)))
+        (if (= dx 1)
+            (let loop ((r 0)) (and (< r ROOM-ROWS) (or (kind-open? (tilemap-ref tm (- ROOM-COLS 1) r)) (loop (+ r 1)))))
+            (let loop ((c 0)) (and (< c ROOM-COLS) (or (kind-open? (tilemap-ref tm c (- ROOM-ROWS 1))) (loop (+ c 1))))))))
+
+    ;; --- everything ----------------------------------------------------------------------------
+
+    (define (load-content source)
+      (let* ((world-entry (assoc "world/world.sgl" source))
+             (w (if world-entry
+                    (read-world (car world-entry) (cdr world-entry))
+                    (list #f '() '() '() (list (pb "world/world.sgl" #f "is missing")))))
+             (start (car w)) (palette (cadr w)) (regions (caddr w)) (creatures (cadddr w))
+             (ps (append (list-ref w 4)
+                         (if world-entry
+                             (check-regions (car world-entry) (cdr world-entry) palette regions creatures)
+                             '())))
+             (room-reads (map (lambda (e) (read-room-source (car e) (cdr e) regions))
+                              (filter (lambda (e) (starts-with? (car e) "world/rooms/")) source)))
+             (rooms (map car room-reads))
+             (ps (append ps (apply append (map cdr room-reads))))
+             ;; one room per coordinate
+             (ps (append ps
+                         (let loop ((rs rooms) (acc '()))
+                           (if (null? rs)
+                               (reverse acc)
+                               (loop (cdr rs)
+                                     (let ((dup (filter (lambda (o) (and (= (room-x o) (room-x (car rs))) (= (room-y o) (room-y (car rs)))))
+                                                        (cdr rs))))
+                                       (if (null? dup) acc
+                                           (cons (pb (room-path (car rs)) #f
+                                                     (string-append "shares " (room-key (room-x (car rs)) (room-y (car rs)))
+                                                                    " with " (room-path (car dup))))
+                                                 acc))))))))
+             (whole (filter grid-whole? rooms))
+             (placed-rooms (map room-placed whole))
+             (wm (make-worldmap placed-rooms ROOM-COLS ROOM-ROWS TILE))
+             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm))))
+             (map-reads (map (lambda (e) (read-map-source (car e) (cdr e)))
+                             (filter (lambda (e) (and (starts-with? (car e) "world/regions/") (ends-with? (car e) ".map")))
+                                     source)))
+             (maps (map car map-reads))
+             (ps (append ps
+                         (apply append (map cdr map-reads))
+                         (apply append (map (lambda (m) (if (region-map-region m) (check-map m rooms wm) '())) maps))))
+             (ps (append ps
+                         (if (and start (not (find-region regions (car start))))
+                             (list (pb "world/world.sgl" #f "start: names no region"))
+                             '())
+                         (if (and start (not (worldmap-room wm (car (cadr start)) (cadr (cadr start)))))
+                             (list (pb "world/world.sgl" #f (string-append "start: room " (datum->string (cadr start)) " has no room file")))
+                             '()))))
+        (content source: source start: start palette: palette regions: regions creatures: creatures
+                 maps: maps rooms: placed-rooms wmap: wm problems: ps)))))

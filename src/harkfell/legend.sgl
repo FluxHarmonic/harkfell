@@ -1,0 +1,61 @@
+;;; (harkfell legend) - The grid characters every room shares (harkfell-design
+;;; section 8, "The grid"), what each is to the physics, and which material
+;;; it draws as.
+;;;
+;;;   char  meaning                         physics kind  material
+;;;   ' '   air                             air           -
+;;;   '%'   rough rock (climbable)          climbable     rough
+;;;   '#'   smooth rock (not climbable)     solid         rock
+;;;   '='   one-way ledge                   ledge         ledge
+;;;   '~'   water (swimmable)               water         water
+;;;   '|'   reeds, grass, trunks: back      air           reeds
+;;;         layer, not solid
+;;;   'o'   a ring-stone (its overtone in   solid         stone
+;;;         things:)
+;;;   'x'   hazard (the region says which)  hazard        hazard
+;;;   '+'   a false wall: looks like rock,  air           rock
+;;;         is air
+;;;   '^'   an updraft column               air           updraft
+;;;
+;;; The updraft is air to the physics until the glide exists (A4: Reedfen's
+;;; cattail down); the reach checker treats it as air until then, which is
+;;; the conservative reading (it can only lift you).
+;;;
+;;; Edges (the seam rule, (engine worldmap)): a cell is open when its kind
+;;; is air or water, so rock, ledges, ring-stones and hazards close an edge
+;;; and a false wall, reeds and an updraft open it, as the design lists.
+;;;
+;;; A region's legend may add characters of its own (none do yet).
+
+(define-library (harkfell legend)
+  (import (sigil list))
+
+  (export WORLD-LEGEND LEGEND-CHARS
+          char-kind char-material material-of)
+
+  (begin
+    ;; (char kind material)
+    (define WORLD-LEGEND
+      (list (list #\space 'air #f)
+            (list #\% 'climbable 'rough)
+            (list #\# 'solid 'rock)
+            (list #\= 'ledge 'ledge)
+            (list #\~ 'water 'water)
+            (list #\| 'air 'reeds)
+            (list #\o 'solid 'stone)
+            (list #\x 'hazard 'hazard)
+            (list #\+ 'air 'rock)
+            (list #\^ 'air 'updraft)))
+
+    (define LEGEND-CHARS (map car WORLD-LEGEND))
+
+    (define (char-kind c)
+      (let ((e (assv c WORLD-LEGEND)))
+        (if e (cadr e) 'solid)))
+
+    (define (char-material c)
+      (let ((e (assv c WORLD-LEGEND)))
+        (and e (caddr e))))
+
+    ;; A material symbol, or #f for air (for the autotiler's same? test).
+    (define (material-of c) (char-material c))))

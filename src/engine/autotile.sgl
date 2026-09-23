@@ -1,0 +1,62 @@
+;;; (engine autotile) - Which shape a tile takes, from its neighbours.
+;;;
+;;; An author writes one character for a material (rock, say) and never
+;;; picks an edge or a corner: the shape comes from the 4-bit mask of which
+;;; of its four neighbours are the same material,
+;;;
+;;;   up 1, right 2, down 4, left 8
+;;;
+;;; so 0 is a lone block, 15 is the inside of a mass, 14 (right, down,
+;;; left) is a top edge, 6 (right, down) a top-left corner. Sixteen shapes
+;;; per material; the art has one cell per shape (and a few variants of
+;;; each), and the mask picks it.
+;;;
+;;; A VARIANT (0 to n-1) breaks up repeats. It is a hash of the tile's
+;;; global position, so a room looks the same every time it is drawn, and
+;;; the same whichever room it is drawn from.
+;;;
+;;; The neighbour test is the caller's: (same? col row) says whether the
+;;; cell at global (col, row) is this material, which is how a mask crosses
+;;; a seam into the next room and how the caller treats cells outside every
+;;; room (as more of the same, usually, so a room's closed border does not
+;;; draw a rim against nothing).
+;;;
+;;; Pure: no platform.
+
+(define-library (engine autotile)
+  (import (sigil math))
+
+  (export MASK-UP MASK-RIGHT MASK-DOWN MASK-LEFT
+          tile-mask mask-has? tile-variant)
+
+  (begin
+    (define MASK-UP 1)
+    (define MASK-RIGHT 2)
+    (define MASK-DOWN 4)
+    (define MASK-LEFT 8)
+
+    ;; same?: (col row) -> whether that cell is the same material.
+    (define (tile-mask same? col row)
+      (+ (if (same? col (- row 1)) MASK-UP 0)
+         (if (same? (+ col 1) row) MASK-RIGHT 0)
+         (if (same? col (+ row 1)) MASK-DOWN 0)
+         (if (same? (- col 1) row) MASK-LEFT 0)))
+
+    (define (mask-has? mask bit)
+      (odd? (quotient* mask bit)))
+
+    ;; quotient is not bound in this Sigil; a whole division by a power of
+    ;; two from floor and /.
+    (define (quotient* a b) (exact (floor (/ a b))))
+
+    ;; The ZX81 generator: every product stays under 2^23 (no target
+    ;; overflows a fixnum on it, the wasm build included).
+    (define (lcg s) (modulo (+ (* s 75) 74) 65537))
+
+    ;; A variant in 0..n-1 for the tile at global (col, row); negative
+    ;; coordinates are fine.
+    (define (tile-variant col row n)
+      (let* ((a (modulo col 4099))
+             (b (modulo row 4099))
+             (s (lcg (lcg (modulo (+ (* a 13) b 1) 65537)))))
+        (modulo (lcg (modulo (+ s (* b 7)) 65537)) n)))))

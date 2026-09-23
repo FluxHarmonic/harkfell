@@ -10,6 +10,9 @@
 ;;; A move longer than half a tile is taken in steps of at most half a
 ;;; tile, so nothing tunnels through a one-tile wall at any speed.
 ;;;
+;;; A ledge ((engine tilemap)'s one-way kind) stops only a move down onto
+;;; its top; moves up and sideways pass through it.
+;;;
 ;;; Pure: no platform.
 
 (define-library (engine collide)
@@ -112,17 +115,24 @@
       (let ((size (tilemap-size tm))
             (c0 (span-lo tm x))
             (c1 (span-hi tm x w)))
-        (define (row-solid? r)
+        (define (row-with? r pred)
           (let cols ((c c0))
             (and (<= c c1)
-                 (or (kind-solid? (tilemap-ref tm c r))
+                 (or (pred (tilemap-ref tm c r))
                      (cols (+ c 1))))))
+        (define (row-solid? r) (row-with? r kind-solid?))
+        ;; Moving down, every row scanned lies wholly below the box as it was
+        ;; (it starts past the old span), so a ledge in it is one the body is
+        ;; coming down onto from above: it blocks like rock. A ledge the box
+        ;; already overlaps (jumped up into) is never rescanned, and the body
+        ;; falls through it.
+        (define (row-floor? r) (row-with? r kind-floor?))
         (cond ((> d 0)
                (let ((old (span-hi tm y h))
                      (new (span-hi tm (+ y d) h)))
                  (let scan ((r (+ old 1)))
                    (cond ((> r new) (cons (+ y d) 0))
-                         ((row-solid? r) (cons (- (* 1.0 r size) h) 1))
+                         ((row-floor? r) (cons (- (* 1.0 r size) h) 1))
                          (else (scan (+ r 1)))))))
               ((< d 0)
                (let ((old (span-lo tm y))

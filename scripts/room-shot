@@ -1,0 +1,16 @@
+#!/bin/sh
+# One room as a PNG, drawn by the web build (?room=KEY&still): what the room
+# looks like before anyone plays it (section 8, "The review loop").
+#
+#   scripts/room-shot reedfen:9,3 [OUT.png] [--scale N]
+#
+# OUT defaults to build/shots/<region>-x<X>y<Y>.png; the scale (whole view
+# pixels per texel) to 2. Needs build/web (scripts/dev sigil build --config
+# web) and google-chrome. Exit 2 (SETUP-FAILED) on a world with problems.
+cd "$(dirname "$0")/.." || exit 2
+KEY="$1"
+[ -n "$KEY" ] || { echo "usage: scripts/room-shot REGION:X,Y [OUT.png] [--scale N]"; exit 2; }
+shift
+case "$1" in --*|"") OUT="build/shots/$(echo "$KEY" | sed 's/:/-x/; s/,/y/').png" ;; *) OUT="$1"; shift ;; esac
+mkdir -p "$(dirname "$OUT")"
+exec node scripts/shot.mjs build/web "$OUT" --query "room=$KEY&still" "$@"

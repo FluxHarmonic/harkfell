@@ -6,6 +6,9 @@
 ;;;
 ;;;   solid       blocks movement on every side
 ;;;   climbable   blocks like solid, and a body can hold it and climb
+;;;   ledge       one-way: blocks a body coming down onto its top, and
+;;;               nothing else (a body jumps up through it and walks
+;;;               through its sides)
 ;;;   water       a body inside it swims
 ;;;   hazard      touching it is the game's business (a soft return, say)
 ;;;
@@ -24,7 +27,8 @@
           tilemap-cols tilemap-rows tilemap-size tilemap-edge tilemap-cells
           tilemap-ref tilemap-set tilemap-width tilemap-height
           tile-at px->col
-          kind-solid? kind-climbable? kind-water? kind-hazard?)
+          kind-solid? kind-climbable? kind-ledge? kind-floor?
+          kind-water? kind-hazard?)
 
   (begin
     (define-struct tilemap
@@ -68,5 +72,8 @@
 
     (define (kind-solid? k) (or (eq? k 'solid) (eq? k 'climbable)))
     (define (kind-climbable? k) (eq? k 'climbable))
+    (define (kind-ledge? k) (eq? k 'ledge))
+    ;; Something a body can stand on: solid from above.
+    (define (kind-floor? k) (or (kind-solid? k) (eq? k 'ledge)))
     (define (kind-water? k) (eq? k 'water))
     (define (kind-hazard? k) (eq? k 'hazard))))

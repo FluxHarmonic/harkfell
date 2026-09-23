@@ -1,0 +1,65 @@
+;;; (harkfell source) - The world's files read from disk (native only).
+;;;
+;;; A source is ((path . text) ...) with every path written as it would be
+;;; from the repository root ("world/rooms/reedfen/x8y3.room"), whatever
+;;; directory the files were read from, so (harkfell content) names files
+;;; the same way on every target and for every fixture world. The web page
+;;; builds the same list from the files baked into it.
+;;;
+;;; Read: world.sgl, regions/*.map, rooms/*/*.room. Nothing else (BIBLE.md
+;;; is for people).
+
+(define-library (harkfell source)
+  (import (sigil list)
+          (sigil string)
+          (sigil fs))
+
+  (export read-world-source source-mtimes room-file-path)
+
+  (begin
+    (define (ends-with? s suffix)
+      (let ((n (string-length s)) (m (string-length suffix)))
+        (and (>= n m) (string=? (substring s (- n m) n) suffix))))
+
+    (define (sorted-list dir)
+      (list-sort string<?
+                 (filter (lambda (n) (not (or (string=? n ".") (string=? n ".."))))
+                         (directory-list dir))))
+
+    ;; dir: the world directory ("world", or a fixture's). -> ((path . text) ...)
+    (define (read-world-source dir)
+      (map (lambda (p) (cons (car p) (read-file-string (cdr p))))
+           (world-files dir)))
+
+    ;; ((path . disk-path) ...)
+    (define (world-files dir)
+      (append
+        (let ((w (string-append dir "/world.sgl")))
+          (if (file-exists? w) (list (cons "world/world.sgl" w)) '()))
+        (let ((rd (string-append dir "/regions")))
+          (if (directory? rd)
+              (map (lambda (n) (cons (string-append "world/regions/" n) (string-append rd "/" n)))
+                   (filter (lambda (n) (ends-with? n ".map")) (sorted-list rd)))
+              '()))
+        (let ((rd (string-append dir "/rooms")))
+          (if (directory? rd)
+              (apply append
+                     (map (lambda (region)
+                            (let ((d (string-append rd "/" region)))
+                              (if (directory? d)
+                                  (map (lambda (n) (cons (string-append "world/rooms/" region "/" n)
+                                                         (string-append d "/" n)))
+                                       (filter (lambda (n) (ends-with? n ".room")) (sorted-list d)))
+                                  '())))
+                          (sorted-list rd)))
+              '()))))
+
+    ;; The disk path of a source path ("world/rooms/..." under dir).
+    (define (room-file-path dir path)
+      (string-append dir (substring path 5 (string-length path))))
+
+    ;; ((path . mtime-ns) ...) for every file of the world: the live reload
+    ;; compares two of these.
+    (define (source-mtimes dir)
+      (map (lambda (p) (cons (car p) (file-mtime-ns (cdr p))))
+           (world-files dir)))))

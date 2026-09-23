@@ -1,0 +1,262 @@
+;;; (engine roomfile) - A room file read from text: one s-expression, a
+;;; head symbol and keyword fields, one of which is a grid of strings.
+;;;
+;;;   (room
+;;;     region: fen
+;;;     at: (12 4)
+;;;     grid:
+;;;     ("#####"
+;;;      "#   #")
+;;;     ...)
+;;;
+;;; The text goes through the reader Sigil already has, so comments (;),
+;;; strings and lists are the language's own. What this module adds is the
+;;; checking a hand-written file needs, reported as PROBLEMS that name the
+;;; file and the line: a file that does not read, a second form, a field
+;;; that is not a keyword, a field given twice, and (check-grid) a grid with
+;;; the wrong number of rows, a row of the wrong width, or a character
+;;; outside the legend. Reading never raises: a broken file comes back with
+;;; its problems listed, so a gate can name every one of them in one pass.
+;;;
+;;; Line numbers: the reader does not keep positions, so a field's line is
+;;; the first line where "NAME:" appears, and grid row N's line is found by
+;;; walking the text after "grid:" string literal by string literal.
+;;;
+;;; Which fields exist and what they mean is the game's; this module only
+;;; knows there is a head, keywords, and a grid.
+;;;
+;;; Pure: no platform.
+
+(define-library (engine roomfile)
+  (import (sigil struct)
+          (sigil list)
+          (sigil string)
+          (sigil io))
+
+  (export roomfile roomfile? read-roomfile
+          roomfile-path roomfile-text roomfile-head roomfile-fields
+          roomfile-problems roomfile-field roomfile-has? roomfile-grid
+          roomfile-ok?
+          problem problem? problem-path problem-line problem-message
+          problem->string
+          field-line grid-row-line
+          check-grid add-problems
+          read-all-forms parse-keyword-fields datum->string)
+
+  (begin
+    (define-struct problem
+      (path default: "")
+      (line default: #f)            ; 1-based, or #f when no line applies
+      (message default: ""))
+
+    (define (problem->string p)
+      (string-append (problem-path p)
+                     (if (problem-line p)
+                         (string-append ":" (number->string (problem-line p)))
+                         "")
+                     ": " (problem-message p)))
+
+    (define-struct roomfile
+      (path default: "")
+      (text default: "")
+      (head default: #f)            ; the form's first symbol
+      (fields default: '())         ; ((name . value) ...), name a symbol
+      (problems default: '()))      ; in the order found
+
+    (define (roomfile-ok? rf) (null? (roomfile-problems rf)))
+
+    (define (add-problems rf ps)
+      (roomfile rf problems: (append (roomfile-problems rf) ps)))
+
+    (define (roomfile-has? rf name)
+      (and (assq name (roomfile-fields rf)) #t))
+
+    ;; The field's value, or DEFAULT (#f) when it is absent.
+    (define (roomfile-field rf name . default)
+      (let ((p (assq name (roomfile-fields rf))))
+        (cond (p (cdr p))
+              ((pair? default) (car default))
+              (else #f))))
+
+    ;; The grid as a list of strings, or '() when it is absent or not a list
+    ;; of strings (check-grid reports which).
+    (define (roomfile-grid rf)
+      (let ((g (roomfile-field rf 'grid)))
+        (if (and (list? g) (every string? g)) g '())))
+
+    (define (every pred l)
+      (or (null? l) (and (pred (car l)) (every pred (cdr l)))))
+
+    ;; --- reading ------------------------------------------------------------------
+
+    (define (error-text e)
+      (if (error-object? e) (error-object-message e) "unreadable"))
+
+    ;; All the datums in text, or (error . message).
+    (define (read-all-forms text) (read-all text))
+
+    (define (read-all text)
+      (guard (e (#t (cons 'error (error-text e))))
+        (let ((port (open-input-string text)))
+          (let loop ((acc '()))
+            (let ((d (read port)))
+              (if (eof-object? d)
+                  (reverse acc)
+                  (loop (cons d acc))))))))
+
+    ;; text: the file's contents. path: how problems name it. head: the
+    ;; symbol the form must start with.
+    (define (read-roomfile text path head)
+      (let* ((rf (roomfile path: path text: text))
+             (ds (read-all text)))
+        (define (bad msg line) (problem path: path line: line message: msg))
+        (cond ((and (pair? ds) (eq? (car ds) 'error))
+               (add-problems rf (list (bad (string-append "does not read: " (cdr ds)) #f))))
+              ((null? ds)
+               (add-problems rf (list (bad "is empty" #f))))
+              ((not (and (pair? (car ds)) (eq? (caar ds) head)))
+               (add-problems rf (list (bad (string-append "does not start with (" (symbol->string head)) 1))))
+              (else
+               (let* ((r (parse-fields (cdar ds) text path))
+                      (rf (roomfile rf head: head fields: (car r))))
+                 (add-problems rf
+                               (append (cdr r)
+                                       (if (pair? (cdr ds))
+                                           (list (bad "holds more than one form" #f))
+                                           '()))))))))
+
+    ;; (name: value ...) -> ((fields ...) . problems): fields as ((name . value)
+    ;; ...) with name a symbol; problems name PATH and, where they can, the line
+    ;; in TEXT.
+    (define (parse-keyword-fields items text path) (parse-fields items text path))
+
+    (define (parse-fields items text path)
+      (let loop ((items items) (acc '()) (ps '()))
+        (cond ((null? items) (cons (reverse acc) (reverse ps)))
+              ((not (keyword? (car items)))
+               (loop (cdr items) acc
+                     (cons (problem path: path line: #f
+                                    message: (string-append "expected a field name (name:), found "
+                                                            (datum->string (car items))))
+                           ps)))
+              ((null? (cdr items))
+               (let ((name (keyword->string (car items))))
+                 (loop '() acc
+                       (cons (problem path: path line: (field-line text name)
+                                      message: (string-append "field " name ": has no value"))
+                             ps))))
+              (else
+               (let* ((name (keyword->string (car items)))
+                      (sym (string->symbol name)))
+                 (if (assq sym acc)
+                     (loop (cddr items) acc
+                           (cons (problem path: path line: (field-line text name)
+                                          message: (string-append "field " name ": is given twice"))
+                                 ps))
+                     (loop (cddr items) (cons (cons sym (cadr items)) acc) ps)))))))
+
+    (define (datum->string d)
+      (with-output-to-string (lambda () (write d))))
+
+    ;; --- lines --------------------------------------------------------------------
+
+    (define (lines-of text) (string-split text "\n"))
+
+    ;; The first line (1-based) holding "NAME:", or #f.
+    (define (field-line text name)
+      (let ((needle (string-append name ":")))
+        (let loop ((ls (lines-of text)) (n 1))
+          (cond ((null? ls) #f)
+                ((string-contains? (car ls) needle) n)
+                (else (loop (cdr ls) (+ n 1)))))))
+
+    ;; The line of grid row i (0-based): the i-th string literal after the
+    ;; first "grid:". A semicolon outside a string starts a comment to the
+    ;; end of the line, as the reader has it. #f when there is no such row.
+    (define (grid-row-line text i)
+      (let* ((n (string-length text))
+             (start (string-index-of text "grid:")))
+        (and start
+             (let loop ((k start) (line (line-at text start)) (seen 0))
+               (if (>= k n)
+                   #f
+                   (let ((c (string-ref text k)))
+                     (cond ((char=? c #\newline) (loop (+ k 1) (+ line 1) seen))
+                           ((char=? c #\;)
+                            (let skip ((k k))
+                              (if (or (>= k n) (char=? (string-ref text k) #\newline))
+                                  (loop k line seen)
+                                  (skip (+ k 1)))))
+                           ((char=? c #\")
+                            (if (= seen i)
+                                line
+                                (let str ((k (+ k 1)) (line line))
+                                  (cond ((>= k n) #f)
+                                        ((char=? (string-ref text k) #\\) (str (+ k 2) line))
+                                        ((char=? (string-ref text k) #\") (loop (+ k 1) line (+ seen 1)))
+                                        ((char=? (string-ref text k) #\newline) (str (+ k 1) (+ line 1)))
+                                        (else (str (+ k 1) line))))))
+                           (else (loop (+ k 1) line seen)))))))))
+
+    ;; The index of needle in text, or #f.
+    (define (string-index-of text needle)
+      (let ((n (string-length text))
+            (m (string-length needle)))
+        (let loop ((k 0))
+          (cond ((> (+ k m) n) #f)
+                ((string=? (substring text k (+ k m)) needle) k)
+                (else (loop (+ k 1)))))))
+
+    ;; The 1-based line of character index k.
+    (define (line-at text k)
+      (let loop ((i 0) (line 1))
+        (cond ((>= i k) line)
+              ((char=? (string-ref text i) #\newline) (loop (+ i 1) (+ line 1)))
+              (else (loop (+ i 1) line)))))
+
+    ;; --- the grid -------------------------------------------------------------------
+
+    ;; Problems with the grid: absent or not a list of strings, not ROWS rows,
+    ;; a row not COLS wide, a character not in LEGEND (a list of chars). Each
+    ;; names its line; an unknown character also names its row and column
+    ;; (0-based, as the game counts cells).
+    (define (check-grid rf cols rows legend)
+      (let* ((path (roomfile-path rf))
+             (text (roomfile-text rf))
+             (g (roomfile-field rf 'grid)))
+        (define (bad line msg) (problem path: path line: line message: msg))
+        (cond ((not (roomfile-has? rf 'grid))
+               (list (bad #f "has no grid:")))
+              ((not (and (list? g) (every string? g)))
+               (list (bad (field-line text "grid") "grid: is not a list of strings")))
+              (else
+               (append
+                 (if (= (length g) rows)
+                     '()
+                     (list (bad (field-line text "grid")
+                                (string-append "grid has " (number->string (length g))
+                                               " rows, not " (number->string rows)))))
+                 (let loop ((g g) (i 0) (ps '()))
+                   (if (null? g)
+                       (reverse ps)
+                       (let* ((row (car g))
+                              (line (grid-row-line text i))
+                              (ps (if (= (string-length row) cols)
+                                      ps
+                                      (cons (bad line (string-append "grid row " (number->string i)
+                                                                     " is " (number->string (string-length row))
+                                                                     " characters, not " (number->string cols)))
+                                            ps)))
+                              (ps (let chars ((k 0) (ps ps))
+                                    (if (>= k (string-length row))
+                                        ps
+                                        (let ((c (string-ref row k)))
+                                          (chars (+ k 1)
+                                                 (if (memv c legend)
+                                                     ps
+                                                     (cons (bad line (string-append "grid row " (number->string i)
+                                                                                    " column " (number->string k)
+                                                                                    ": '" (string c)
+                                                                                    "' is not in the legend"))
+                                                           ps))))))))
+                         (loop (cdr g) (+ i 1) ps)))))))))))

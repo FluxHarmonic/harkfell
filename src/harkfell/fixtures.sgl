@@ -1,0 +1,215 @@
+;;; (harkfell fixtures) - The reach checker's own gate: rooms whose answer is
+;;; known, which the checker must get right.
+;;;
+;;;   harkfell --reach-fixtures [--fixtures DIR] [--explore]
+;;;
+;;; Two kinds:
+;;;
+;;; 1. FIXTURE FILES (test/fixtures/reach/*.fixture), each one room:
+;;;
+;;;      (fixture
+;;;        name: "a single smooth wall"
+;;;        expect: unreachable        ; or reachable (a positive control)
+;;;        why: "..."                 ; where the answer comes from
+;;;        start: (C R)
+;;;        target: ((C R) ...)
+;;;        grid: ( 11 rows of 25, the world legend ))
+;;;
+;;;    The search runs from start with the witness replay, and every target
+;;;    must be reachable or not, as expect says. An IMPOSSIBLE room (expect
+;;;    unreachable) is one a player could not get through: David's "I can't
+;;;    get up there" rooms go here and stay red for good. Some are chosen
+;;;    because the search alone (its cell-keyed anchors, which take a wall
+;;;    from the top of the cell it was touched in) finds a way the physics
+;;;    does not: with the replay removed they turn reachable, and this gate
+;;;    fails. That is the replay's sabotage.
+;;;
+;;; 2. THE CEILING (A0's test room, from the design's section 8): the tile
+;;;    before the first gap lies under the chimney pillar, whose underside is
+;;;    2 px above a standing body's head. No accepted edge from that tile may
+;;;    take the body more than 2 px above its standing height while the body
+;;;    is still under the pillar. Its positive control: the same room with
+;;;    the pillar's lowest block removed must have an edge that rises more
+;;;    than 2 px there (the check can see a rise).
+;;;
+;;; --explore also prints, per fixture, what the search accepts with the
+;;; replay switched off: a diagnostic for choosing fixtures, never a gate.
+;;;
+;;; Prints PASS/FAIL per fixture and a last line
+;;;   PASS reach-fixtures: N fixtures
+;;;   FAIL reach-fixtures: N of M
+;;;   SETUP-FAILED reach-fixtures: <why>
+;;; and exits 0, 1 or 2.
+
+(define-library (harkfell fixtures)
+  (import (sigil io)
+          (sigil list)
+          (sigil string)
+          (sigil fs)
+          (sigil math)
+          (engine tilemap)
+          (engine room)
+          (engine roomfile)
+          (engine body)
+          (engine reach)
+          (harkfell feel)
+          (harkfell legend)
+          (harkfell rooms)
+          (harkfell content))
+
+  (export reach-fixtures-main fixture-tilemap ceiling-rises
+          PILLAR-CELL A0-ENTRY-CELL)
+
+  (begin
+    (define (say . parts) (display (apply string-append parts)) (newline))
+
+    (define (ends-with? s suffix)
+      (let ((n (string-length s)) (m (string-length suffix)))
+        (and (>= n m) (string=? (substring s (- n m) n) suffix))))
+
+    (define (int-pair? v) (and (list? v) (= (length v) 2) (integer? (car v)) (integer? (cadr v))))
+
+    (define (cell-str c) (string-append "(" (number->string (car c)) "," (number->string (cdr c)) ")"))
+
+    ;; A room's grid (world legend) as a tilemap; the edge outside is rock.
+    (define (fixture-tilemap rows)
+      (let* ((tm (make-tilemap (string-length (car rows)) (length rows) TILE))
+             (cells (vector-copy (tilemap-cells tm))))
+        (let loop ((rs rows) (r 0))
+          (unless (null? rs)
+            (let cl ((c 0))
+              (when (< c (string-length (car rs)))
+                (vector-set! cells (+ c (* r (string-length (car rows)))) (char-kind (string-ref (car rs) c)))
+                (cl (+ c 1))))
+            (loop (cdr rs) (+ r 1))))
+        (tilemap tm cells: cells)))
+
+
+    ;; --- fixture files --------------------------------------------------------------
+
+    ;; -> (fixture-alist . problems)
+    (define (read-fixture path)
+      (let* ((text (read-file-string path))
+             (rf (read-roomfile text path 'fixture))
+             (ps (append (roomfile-problems rf)
+                         (if (roomfile-ok? rf) (check-grid rf ROOM-COLS ROOM-ROWS LEGEND-CHARS) '())))
+             (expect (roomfile-field rf 'expect))
+             (start (roomfile-field rf 'start))
+             (target (roomfile-field rf 'target)))
+        (cond ((not (null? ps)) (cons #f ps))
+              ((not (memq expect (list 'reachable 'unreachable)))
+               (cons #f (list (problem path: path line: (field-line text "expect") message: "expect: is neither reachable nor unreachable"))))
+              ((not (int-pair? start))
+               (cons #f (list (problem path: path line: (field-line text "start") message: "start: is not (C R)"))))
+              ((not (and (list? target) (pair? target) (every int-pair? target)))
+               (cons #f (list (problem path: path line: (field-line text "target") message: "target: is not ((C R) ...)"))))
+              (else
+               (cons (list path
+                           (or (roomfile-field rf 'name) path)
+                           expect
+                           (cons (car start) (cadr start))
+                           (map (lambda (p) (cons (car p) (cadr p))) target)
+                           (roomfile-grid rf))
+                     '())))))
+
+    (define (every pred l) (or (null? l) (and (pred (car l)) (every pred (cdr l)))))
+
+    ;; Which targets the search reaches from start, with accept? deciding edges.
+    (define (targets-reached rows start targets accept?)
+      (let* ((tm (fixture-tilemap rows))
+             (g (reach-search tm HARKFELL-FEEL (list start) accept?))
+             (fwd (reach-forward g (list start))))
+        (cons g (filter (lambda (c) (vector-ref fwd (cell-index tm (car c) (cdr c)))) targets))))
+
+    (define (run-fixture fx explore?)
+      (let* ((path (list-ref fx 0)) (name (list-ref fx 1)) (expect (list-ref fx 2))
+             (start (list-ref fx 3)) (targets (list-ref fx 4)) (rows (list-ref fx 5))
+             (r (targets-reached rows start targets witness-lands?))
+             (g (car r))
+             (reached (cdr r))
+             (stats (graph-stats g))
+             (ok (if (eq? expect 'reachable)
+                     (= (length reached) (length targets))
+                     (null? reached))))
+        (say (if ok "PASS " "FAIL ") "fixture " name " (" path "): expect " (symbol->string expect)
+             ", reached " (string-join (map cell-str reached) " ")
+             (if (null? reached) "none" "")
+             "; candidates " (number->string (cdr (assq 'candidates stats)))
+             ", repaired hops " (number->string (cdr (assq 'repairs stats)))
+             ", rejected by replay " (number->string (cdr (assq 'rejected stats))))
+        (when explore?
+          (let ((r2 (targets-reached rows start targets #f)))
+            (say "  explore: with no replay, reached " (string-join (map cell-str (cdr r2)) " ")
+                 (if (null? (cdr r2)) "none" ""))))
+        ok))
+
+    ;; --- the ceiling (A0's room) ---------------------------------------------------------
+
+    ;; The tile before the first gap, under the pillar, and the room's entry.
+    (define PILLAR-CELL (cons 3 7))
+    (define A0-ENTRY-CELL (cons 1 7))
+
+    ;; For every accepted edge out of PILLAR-CELL: the highest rise above the
+    ;; standing height from the witness's first tick until the body's box
+    ;; first leaves the pillar's column (column 3: x from 48 to 64), i.e.
+    ;; every jump taken from under the pillar before moving out from under
+    ;; it. -> (list edges-examined ticks-under max-rise)
+    (define (ceiling-rises tm)
+      (let* ((g (reach-search tm HARKFELL-FEEL (list A0-ENTRY-CELL) witness-lands?))
+             (edges (graph-edges-from g PILLAR-CELL))
+             (stand-y (- (* TILE (+ (cdr PILLAR-CELL) 1)) (feel-box-h HARKFELL-FEEL)))
+             (lo (* TILE (car PILLAR-CELL)))
+             (hi (* TILE (+ (car PILLAR-CELL) 1))))
+        (let loop ((es edges) (under 0) (rise 0.0))
+          (if (null? es)
+              (list (length edges) under rise)
+              (let scan ((bs (witness-bodies tm HARKFELL-FEEL (cdr (car es)))) (under under) (rise rise))
+                (if (null? bs)
+                    (loop (cdr es) under rise)
+                    (let* ((b (car bs))
+                           (x (body-x b)))
+                      (if (and (> (+ x (feel-box-w HARKFELL-FEEL)) lo) (< x hi))
+                          (scan (cdr bs) (+ under 1) (max rise (- stand-y (body-y b))))
+                          ;; out from under the pillar: the rest of this witness is not a take-off from it
+                          (loop (cdr es) under rise)))))))))
+
+    (define (a0-rows-without-pillar-foot)
+      ;; the pillar is column 3, rows 3 to 6; its lowest block (row 6) goes
+      (map (lambda (row r) (if (= r 6) (string-append (substring row 0 3) "." (substring row 4 (string-length row))) row))
+           TEST-ROOM-ROWS (iota (length TEST-ROOM-ROWS))))
+
+    (define (run-ceiling)
+      (let* ((a (ceiling-rises (room-tiles (load-test-room))))
+             (ok (and (> (car a) 0) (> (cadr a) 0) (<= (caddr a) 2.0001)))
+             (b (ceiling-rises (room-tiles (parse-harkfell-room (a0-rows-without-pillar-foot)))))
+             (ok2 (> (caddr b) 2.0001)))
+        (say (if ok "PASS " "FAIL ") "ceiling: A0's room, edges out of (3,7) " (number->string (car a))
+             ", ticks under the pillar " (number->string (cadr a))
+             ", highest rise there " (number->string (caddr a)) " px (at most 2)")
+        (say (if ok2 "PASS " "FAIL ") "ceiling control: pillar foot removed, edges out of (3,7) " (number->string (car b))
+             ", highest rise under column 3 " (number->string (caddr b)) " px (must be over 2)")
+        (list ok ok2)))
+
+    ;; --- main -------------------------------------------------------------------------------
+
+    (define (reach-fixtures-main args)
+      (let* ((m (member "--fixtures" args))
+             (dir (if (and m (pair? (cdr m))) (cadr m) "test/fixtures/reach"))
+             (explore? (and (member "--explore" args) #t)))
+        (if (not (directory? dir))
+            (begin (say "SETUP-FAILED reach-fixtures: no " dir) 2)
+            (let* ((files (list-sort string<? (filter (lambda (n) (ends-with? n ".fixture")) (directory-list dir))))
+                   (reads (map (lambda (n) (read-fixture (string-append dir "/" n))) files))
+                   (bad (apply append (map cdr reads))))
+              (for-each (lambda (p) (say (problem->string p))) bad)
+              (cond ((not (null? bad)) (say "SETUP-FAILED reach-fixtures: fixtures do not read") 2)
+                    ((null? files) (say "SETUP-FAILED reach-fixtures: no fixtures in " dir) 2)
+                    (else
+                     (let* ((results (append (map (lambda (r) (run-fixture (car r) explore?)) reads)
+                                             (run-ceiling)))
+                            (fails (length (filter not results))))
+                       (if (= fails 0)
+                           (begin (say "PASS reach-fixtures: " (number->string (length results)) " checks") 0)
+                           (begin (say "FAIL reach-fixtures: " (number->string fails) " of "
+                                       (number->string (length results)))
+                                  1)))))))))))

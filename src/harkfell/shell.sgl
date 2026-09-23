@@ -50,7 +50,12 @@
           (harkfell rooms)
           (harkfell input)
           (harkfell draw)
-          (harkfell settings))
+          (harkfell settings)
+          (harkfell feel)
+          (engine worldmap)
+          (engine roomfile)
+          (harkfell content)
+          (harkfell check))
 
   (export shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
@@ -58,6 +63,9 @@
           shell-set-ms! shell-set-stick-form! shell-stick-form
           shell-world shell-clock shell-set-frame-stamp!
           shell-latency-lines now-ms
+          shell-load-content! shell-content shell-goto! shell-goto-start!
+          shell-test-room! shell-set-mode! shell-mode shell-set-still!
+          shell-tap! shell-replace-file! shell-room-label shell-view-size
           VIEW-W VIEW-H)
 
   (begin
@@ -90,6 +98,16 @@
     (define *lat-dropped* 0)       ; measurements replaced or given up, not kept
     (define *launched* #f)         ; a tick of this frame launched a jump or a kick
 
+    ;; A1: the written world
+    (define *content* #f)          ; (harkfell content), once loaded
+    (define *mode* 'play)          ; play, sheet (one region's rooms at 1:1), atlas (all at 1/4)
+    (define *sheet-region* #f)     ; the region the sheet shows
+    (define *still* #f)            ; no ticks: the room holds still for a screenshot
+    (define *view-rt* #f)          ; the sheet's or the atlas's target
+    (define *view-w* 0)
+    (define *view-h* 0)
+    (define *last-fit* #f)         ; the last frame's fit (a tap maps through it)
+
     (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
 
     (define (shell-world) *world*)
@@ -104,11 +122,117 @@
                                 (cons (setting-id st)
                                       (if (and d (setting-value? st d)) d (setting-default st)))))
                             SETTINGS))
-      (shell-reset-world!)
+      (shell-test-room!)
       (set! *clock* (clock-new)))
 
-    (define (shell-reset-world!)
+    ;; A0's test room (the replay's and the envelope's room; ?test-room).
+    (define (shell-test-room!)
       (set! *world* (world-new (load-test-room))))
+
+    ;; R: back to the current room's entry (A0's room: its @).
+    (define (shell-reset-world!)
+      (set! *world* (if *content* (world-reset *world*) (world-new (load-test-room)))))
+
+    ;; --- the written world ---------------------------------------------------------
+
+    (define (shell-content) *content*)
+
+    ;; source: ((path . text) ...). Loads it; returns the problems (a list of
+    ;; strings, empty when the world is clean). The world is not entered
+    ;; here: shell-goto! or shell-goto-start! does that.
+    (define (shell-load-content! source)
+      (let ((ct (load-content source)))
+        (set! *content* ct)
+        (set-draw-content! ct)
+        (map problem->string (content-problems ct))))
+
+    (define (body-in-cell cell)
+      (cell-body (worldmap-tiles (content-map *content*)) HARKFELL-FEEL (car cell) (cdr cell)))
+
+    ;; Into the room at "region:x,y" (at its door cell); #f if there is none.
+    (define (shell-goto! key)
+      (let* ((k (and *content* (parse-room-key key)))
+             (rm (and k (content-room *content* (cadr k) (caddr k))))
+             (cell (and rm (eq? (room-region rm) (car k)) (room-start-cell *content* rm))))
+        (and cell
+             (begin
+               (set! *world* (world-at (content-map *content*) (body-in-cell cell)))
+               (set! *mode* 'play)
+               #t))))
+
+    ;; Into the world's start; #f without one.
+    (define (shell-goto-start!)
+      (let ((cell (and *content* (start-cell *content*))))
+        (and cell
+             (begin
+               (set! *world* (world-at (content-map *content*) (body-in-cell cell)))
+               (set! *mode* 'play)
+               #t))))
+
+    ;; "region:x,y" of the room the body is in, or "test-room".
+    (define (shell-room-label)
+      (let ((p (and *world* (world-room *world*))))
+        (if (and p (placed-data p)) (room-label (placed-data p)) "test-room")))
+
+    ;; mode: 'play, 'atlas, or 'sheet with the region.
+    (define (shell-set-mode! mode . region)
+      (set! *mode* mode)
+      (set! *sheet-region* (and (pair? region) (car region))))
+
+    (define (shell-mode) *mode*)
+    (define (shell-set-still! on) (set! *still* on))
+
+    ;; The rooms the overview shows, its scale and gap.
+    (define (overview-rooms)
+      (if (eq? *mode* 'sheet)
+          (region-rooms *content* *sheet-region*)
+          (map placed-data (content-rooms *content*))))
+    (define (overview-k) (if (eq? *mode* 'sheet) 1 0.25))
+
+    ;; The size of what is drawn now, in view pixels: (w h).
+    (define (shell-view-size)
+      (if (and *content* (not (eq? *mode* 'play)))
+          (let ((sz (overview-size (overview-rooms) (overview-k) (overview-gap))))
+            (list (car sz) (cadr sz)))
+          (list VIEW-W VIEW-H)))
+    (define (overview-gap) (if (eq? *mode* 'sheet) 4 2))
+
+    ;; A tap (or click) at window pixel (x, y). In the atlas or the sheet it
+    ;; enters the room under it; returns its label, or #f.
+    (define (shell-tap! x y)
+      (and *content* *last-fit* (not (eq? *mode* 'play))
+           (let* ((f *last-fit*)
+                  (px (* (- x (fit-x f)) (/ *view-w* (* 1.0 (fit-w f)))))
+                  (py (* (- y (fit-y f)) (/ *view-h* (* 1.0 (fit-h f)))))
+                  (rm (overview-room-at (overview-rooms) (overview-k) (overview-gap) px py)))
+             (and rm
+                  (shell-goto! (room-label rm))
+                  (room-label rm)))))
+
+    ;; A file of the world changed (live reload): the source with that file's
+    ;; new text is loaded again, and if it is clean the world moves onto the
+    ;; new map with the body where it was. Returns the problems (strings);
+    ;; with problems nothing changes.
+    (define (shell-replace-file! path text)
+      (if (not *content*)
+          (list "no world loaded")
+          (let* ((source (cons (cons path text)
+                               (filter (lambda (e) (not (string=? (car e) path)))
+                                       (content-source *content*))))
+                 (ct (load-content source))
+                 (ps (map problem->string (content-problems ct))))
+            (when (null? ps)
+              (set! *content* ct)
+              (set-draw-content! ct)
+              (when (and *world* (world-room *world*) (placed-data (world-room *world*)))
+                (let* ((p (world-room *world*))
+                       (rm (content-room ct (placed-x p) (placed-y p)))
+                       (cell (and rm (room-start-cell ct rm)))
+                       (fallback (if cell
+                                     (cell-body (worldmap-tiles (content-map ct)) HARKFELL-FEEL (car cell) (cdr cell))
+                                     (world-entry *world*))))
+                  (set! *world* (world-reload *world* (content-map ct) fallback)))))
+            ps)))
 
     (define (shell-stick-form) (settings-value *settings* 'stick))
 
@@ -192,7 +316,7 @@
       (set! *clock* (clock-advance *clock* dt))
       (set! *launched* #f)
       (let loop ((i 0))
-        (when (< i (clock-steps *clock*))
+        (when (and (< i (clock-steps *clock*)) (eq? *mode* 'play) (not *still*))
           (let ((in (tick-intent *keys* *sector* *touch-jump* *press*)))
             (set! *press* #f)
             (set! *world* (world-tick *world* in))
@@ -283,13 +407,38 @@
     ;; Draw the frame onto a window of win-w x win-h pixels. ticks: what
     ;; shell-frame! ran (for the latency record).
     (define (shell-present! win-w win-h ticks)
+      (if (and *content* (not (eq? *mode* 'play)))
+          (present-overview! win-w win-h)
+          (present-room! win-w win-h ticks)))
+
+    ;; The sheet or the atlas: one target the size of the overview, fitted
+    ;; to the window (at a whole scale when one fits).
+    (define (present-overview! win-w win-h)
+      (let* ((rooms (overview-rooms))
+             (sz (overview-size rooms (overview-k) (overview-gap))))
+        (unless (and *view-rt* (= *view-w* (car sz)) (= *view-h* (cadr sz)))
+          (when *view-rt* (render-target-free! *view-rt*))
+          (set! *view-w* (car sz))
+          (set! *view-h* (cadr sz))
+          (set! *view-rt* (make-render-target *view-w* *view-h* 'nearest)))
+        (let ((f (view-fit win-w win-h *view-w* *view-h*)))
+          (set! *last-fit* f)
+          (begin-frame)
+          (set-blend-mode 'normal)
+          (with-render-target *view-rt*
+            (draw-overview rooms (overview-k) (overview-gap) #t))
+          (draw-render-target *view-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
+          (end-frame))))
+
+    (define (present-room! win-w win-h ticks)
       (let ((t1 (now-ms))
             (f (view-fit win-w win-h VIEW-W VIEW-H)))
         (ensure-targets! f)
+        (set! *last-fit* f)
         (begin-frame)
         (set-blend-mode 'normal)
         (with-render-target *room-rt*
-          (draw-world *world*))
+          (draw-play *world*))
         (if (eq? (fit-mode f) 'integer)
             (draw-render-target *room-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
             (begin

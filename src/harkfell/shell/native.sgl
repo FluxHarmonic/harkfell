@@ -2,15 +2,35 @@
 ;;;
 ;;; Shaped after Crash The Stack's (crash shell native) at master e737d21
 ;;; (a window at a whole multiple of the view, wait-frame's dt into the
-;;; fixed clock, the keys polled each frame), cut down to what one room
+;;; fixed clock, the keys polled each frame), cut down to what the game
 ;;; needs.
 ;;;
-;;;   harkfell              play (arrows or WASD, Space or Z to jump,
-;;;                         R back to the entry, Escape to quit)
-;;;   harkfell --ms         with the frame readout
-;;;   harkfell --replay     no window: run the replay script and print its
-;;;                         trace (the replay gate, (harkfell replay))
-;;;   harkfell --envelope   no window: print the measured movement envelope
+;;;   harkfell                  play from the world's start (world/ under the
+;;;                             current directory; arrows or WASD, Space or Z
+;;;                             to jump, R back to the room's entry, Escape to
+;;;                             quit)
+;;;   harkfell --room REGION:X,Y   play from that room's door
+;;;   harkfell --world DIR      another world directory (a fixture's)
+;;;   harkfell --test-room      A0's grey test room
+;;;   harkfell --ms             with the frame readout
+;;;   harkfell --room-check [REGION:X,Y ...]   no window: the content gates
+;;;                             ((harkfell cli))
+;;;   harkfell --reach-fixtures no window: the reach checker's own fixtures
+;;;                             ((harkfell fixtures))
+;;;   harkfell --replay         no window: run the replay script and print its
+;;;                             trace (the replay gate, (harkfell replay))
+;;;   harkfell --envelope       no window: print the measured movement envelope
+;;;
+;;; Live reload (section 8, "You edit a room and see it"): twice a second
+;;; the shell compares the modification times of the world's files with
+;;; the last ones it saw; a changed file is read again and, if the world is
+;;; still clean, the room changes under the character. A file with problems
+;;; is not taken: the shell prints them (FILE:LINE: message) and keeps
+;;; playing the last good world, so a half-typed edit never breaks the game.
+;;; Every reload prints one line:
+;;;
+;;;   harkfell: reloaded world/rooms/reedfen/x9y3.room
+;;;   harkfell: NOT reloaded world/rooms/reedfen/x9y3.room (N problems):
 ;;;
 ;;; No gamepad: sigil-desktop 0.10.2 has GLFW's joystick code compiled in
 ;;; but exposes none of it (harkfell-design section 9).
@@ -18,13 +38,17 @@
 (define-library (harkfell shell native)
   (import (sigil io)
           (sigil list)
+          (sigil fs)
           (sigil process)
           (sigil desktop)
           (sigil graphics)
           (harkfell shell)
           (harkfell replay)
           (harkfell envelope)
-          (harkfell feel))
+          (harkfell feel)
+          (harkfell source)
+          (harkfell cli)
+          (harkfell fixtures))
 
   (export native-main)
 
@@ -33,8 +57,12 @@
     (define WINDOW-W (* 3 VIEW-W))
     (define WINDOW-H (* 3 VIEW-H))
 
+    (define RELOAD-EVERY 30)         ; frames between looks at the files
+
     ;; Every key the game listens to, as sigil-desktop names them.
     (define KEYS (list 'left 'right 'up 'down 'a 'd 'w 's 'space 'z))
+
+    (define (say . parts) (display (apply string-append parts)) (newline))
 
     (define (poll-keys!)
       (for-each (lambda (k)
@@ -50,26 +78,72 @@
                   (display (car p)) (display " ") (display (cdr p)) (newline))
                 (envelope-report HARKFELL-FEEL)))
 
+    ;; --- live reload ------------------------------------------------------------
+
+    (define *world-dir* "world")
+    (define *mtimes* '())
+
+    (define (check-reload!)
+      (let ((now (source-mtimes *world-dir*)))
+        (for-each
+          (lambda (e)
+            (let ((old (assoc (car e) *mtimes*)))
+              (when (or (not old) (not (= (cdr old) (cdr e))))
+                (let* ((text (read-file-string (room-file-path *world-dir* (car e))))
+                       (ps (shell-replace-file! (car e) text)))
+                  (if (null? ps)
+                      (say "harkfell: reloaded " (car e))
+                      (begin
+                        (say "harkfell: NOT reloaded " (car e) " (" (number->string (length ps)) " problems):")
+                        (for-each (lambda (p) (say "  " p)) ps)))))))
+          now)
+        (set! *mtimes* now)))
+
     (define (loop)
       (lambda ()
         (gfx-setup)
         (set-viewport #f)
         (set-letterbox-color 0.0 0.0 0.0)
-        (let frame ()
+        (let frame ((n 0))
           (let* ((dt (wait-frame)))
             (poll-keys!)
             (when (key-pressed? 'r) (shell-reset-world!))
             (when (key-pressed? 'escape) (request-quit))
+            (when (and (shell-content) (= (modulo n RELOAD-EVERY) 0))
+              (check-reload!))
             (let ((ticks (shell-frame! dt)))
               (shell-present! (frame-width) (frame-height) ticks))
-            (unless (quit-requested?) (frame))))))
+            (unless (quit-requested?) (frame (+ n 1)))))))
+
+    ;; Loads the world; enters --room's door or the start. #f (after saying
+    ;; why) when there is nothing to play.
+    (define (enter-world! args)
+      (let ((dir (or (arg-value args "--world") "world")))
+        (set! *world-dir* dir)
+        (if (not (file-exists? (string-append dir "/world.sgl")))
+            (begin (say "harkfell: no " dir "/world.sgl; playing A0's test room") #t)
+            (let ((ps (shell-load-content! (read-world-source dir)))
+                  (key (arg-value args "--room")))
+              (for-each (lambda (p) (say "harkfell: " p)) ps)
+              (set! *mtimes* (source-mtimes dir))
+              (cond ((and key (shell-goto! key)) (say "harkfell: room " key) #t)
+                    (key (say "harkfell: no room " key) #f)
+                    ((shell-goto-start!) (say "harkfell: start " (shell-room-label)) #t)
+                    (else (say "harkfell: the world has no start to enter") #f))))))
 
     (define (native-main . _args)
       (let ((args (cdr (command-line))))
         (cond ((member "--replay" args) (print-replay!) 0)
+              ;; the gates exit with their verdict (main's return value is not
+              ;; the process status: measured, a FAIL exited 0 before this)
+              ((member "--room-check" args) (exit (room-check-main args)))
+              ((member "--reach-fixtures" args) (exit (reach-fixtures-main args)))
               ((member "--envelope" args) (print-envelope!) 0)
               (else
                (shell-boot!)
                (shell-set-ms! (and (member "--ms" args) #t))
-               (run-game "Harkfell" WINDOW-W WINDOW-H (loop))
-               0))))))
+               (if (or (member "--test-room" args) (enter-world! args))
+                   (begin
+                     (run-game "Harkfell" WINDOW-W WINDOW-H (loop))
+                     0)
+                   1)))))))

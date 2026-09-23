@@ -55,6 +55,12 @@
   <div id="status"></div>
 
   <script>
+  // The world's files (world/*.sgl, regions/*.map, rooms/*/*.room) as
+  // [path, text] pairs, baked in by the build (package.sgl's stamp step), so
+  // the page and the native game read the same text.
+  window.HARKFELL_WORLD = __WORLD__;
+  </script>
+  <script>
   // Harkfell's page. The generic loader (sigil-web-app.js) boots the wasm,
   // forwards keydown/keyup, and publishes SigilWebApp; the gles3 shell
   // runs one frame per requestAnimationFrame. This page adds the touch
@@ -75,6 +81,13 @@
   //   ?touch               show the touch controls without a touch screen.
   //   ?trace               the harkfell: console lines.
   //   ?replay, ?envelope   print the replay trace / the envelope (the gates).
+  //   ?room=REGION:X,Y     start in that room, at its door (A1).
+  //   ?atlas               every room at quarter scale on the world grid; a
+  //                        tap enters the room under it.
+  //   ?sheet=REGION        the region's rooms at full scale in one picture (the
+  //                        region sheet); a tap enters a room.
+  //   ?still               the world does not step (screenshots).
+  //   ?test-room           A0's grey test room instead of the world.
   //
   // The guard follows Crash The Stack's page guard (master e737d21) in
   // spirit, much reduced: a FATAL line, a trap out of a dispatch or a lost
@@ -128,11 +141,40 @@
       stick.form = send("stick-form", "?") === 1 ? "float" : "fixed";
       if (params.has("trace")) send("trace", "on");
       if (params.has("ms")) send("ms", "on");
+      // the world, then the doors
+      var files = window.HARKFELL_WORLD || [];
+      files.forEach(function (f) { send("world-file", f[0] + "\n" + f[1]); });
+      if (files.length) send("world-done", "");
+      if (params.has("test-room")) send("test-room", "");
+      var room = params.get("room");
+      if (room) send("goto", room);
+      if (params.has("atlas")) setView("atlas");
+      else if (params.get("sheet")) setView("sheet:" + params.get("sheet"));
+      if (params.has("still")) send("still", "on");
       layout();
       if (params.has("replay")) setTimeout(function () { send("replay", ""); }, 50);
       if (params.has("envelope")) setTimeout(function () { send("envelope", ""); }, 50);
     });
     document.getElementById("stage").addEventListener("webglcontextlost", function () { die("webgl context lost"); });
+
+    // The atlas and the sheet: the touch controls are hidden and a tap or a
+    // click on the canvas enters the room under it (the game maps canvas
+    // pixels to rooms).
+    var view = "play";
+    function setView(v) {
+      view = v;
+      send("view", v);
+      if (v === "play") { if (coarse || params.has("touch")) touchLayer.classList.add("on"); }
+      else touchLayer.classList.remove("on");
+    }
+    var stageEl = document.getElementById("stage");
+    stageEl.addEventListener("pointerup", function (e) {
+      if (view === "play") return;
+      var r = stageEl.getBoundingClientRect();
+      var x = (e.clientX - r.left) * stageEl.width / r.width;
+      var y = (e.clientY - r.top) * stageEl.height / r.height;
+      if (send("tap", x.toFixed(1) + "," + y.toFixed(1)) === 1) setView("play");
+    });
 
     // A lost focus (alt-tab with the window still visible) releases the keys
     // and the touch controls too: a keyup that goes to another window would

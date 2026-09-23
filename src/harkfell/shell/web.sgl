@@ -22,6 +22,16 @@
 ;;;   ("reset", "")          back to the entry
 ;;;   ("where", "")          print "harkfell: at X Y MODE" (the arm's probe)
 ;;;   ("latency", "")        print the latency lines of the ?ms readout
+;;;   ("world-file", "PATH\nTEXT")  one file of the world, baked into the page
+;;;                          at build time (A1)
+;;;   ("world-done", "")     every file handed over: load the world and enter
+;;;                          its start (answers 1 if it loaded clean)
+;;;   ("goto", "REGION:X,Y") ?room=: enter that room at its door (1 if it exists)
+;;;   ("view", "atlas"|"sheet:REGION"|"play")  ?atlas, ?sheet=
+;;;   ("still", "on")        ?still: no ticks (a screenshot's room holds still)
+;;;   ("tap", "X,Y")         a click or tap in canvas pixels (the atlas and the
+;;;                          sheet enter the room under it)
+;;;   ("test-room", "")      ?test-room: A0's grey room
 ;;;
 ;;; Trace lines (with ?trace, on the console):
 ;;;   harkfell: boot stick FORM          the stick form in force
@@ -32,6 +42,10 @@
 ;;;   harkfell: returns N                a soft return happened (N so far)
 ;;;   harkfell: stick SECTOR             the stick's direction changed (none e ne n ...)
 ;;;   harkfell: jump down|up             the touch jump button
+;;;   harkfell: world N files, M problems  the world loaded (printed always)
+;;;   harkfell: problem FILE:LINE: ...   one per problem (printed always)
+;;;   harkfell: room REGION:X,Y          the body entered a room (with ?trace,
+;;;                                      and always after a goto or a tap)
 ;;; The replay and envelope lines print whether or not ?trace is on:
 ;;; they are asked for.
 
@@ -54,6 +68,8 @@
     (define *last-ms* #f)
     (define *trace* #f)
     (define *returns* 0)
+    (define *world-files* '())      ; the page's files, until world-done
+    (define *room* #f)              ; the last room label traced
 
     (define (say . parts)
       (println "~a" (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts))))
@@ -87,6 +103,9 @@
           (when (and *trace* (not (= (world-returns (shell-world)) *returns*)))
             (set! *returns* (world-returns (shell-world)))
             (say "returns" (number->string *returns*)))
+          (when (and *trace* (not (equal? (shell-room-label) *room*)))
+            (set! *room* (shell-room-label))
+            (say "room" *room*))
           (gles3-resize-to-display)
           (shell-present! (gles3-canvas-width) (gles3-canvas-height) ticks))))
 
@@ -165,4 +184,40 @@
              (apply say "latency" (shell-latency-lines))
              0)
             ((string=? type "reset") (shell-reset-world!) 0)
+            ((string=? type "world-file")
+             (let ((nl (let find ((i 0))
+                         (cond ((>= i (string-length payload)) #f)
+                               ((char=? (string-ref payload i) #\newline) i)
+                               (else (find (+ i 1)))))))
+               (when nl
+                 (set! *world-files* (cons (cons (substring payload 0 nl)
+                                                 (substring payload (+ nl 1) (string-length payload)))
+                                           *world-files*)))
+               0))
+            ((string=? type "world-done")
+             (let ((ps (shell-load-content! (reverse *world-files*))))
+               (say "world" (number->string (length *world-files*)) "files," (number->string (length ps)) "problems")
+               (for-each (lambda (p) (say "problem" p)) ps)
+               (set! *world-files* '())
+               (shell-goto-start!)
+               (if (null? ps) 1 0)))
+            ((string=? type "goto")
+             (if (shell-goto! payload)
+                 (begin (set! *room* (shell-room-label)) (say "room" *room*) 1)
+                 (begin (say "no-room" payload) 0)))
+            ((string=? type "view")
+             (cond ((string=? payload "atlas") (shell-set-mode! 'atlas))
+                   ((and (> (string-length payload) 6) (string=? (substring payload 0 6) "sheet:"))
+                    (shell-set-mode! 'sheet (string->symbol (substring payload 6 (string-length payload)))))
+                   (else (shell-set-mode! 'play)))
+             (let ((sz (shell-view-size)))
+               (say "view" payload (number->string (car sz)) (number->string (cadr sz))))
+             0)
+            ((string=? type "still") (shell-set-still! (string=? payload "on")) 0)
+            ((string=? type "tap")
+             (let* ((f (fields payload))
+                    (r (and (= (length f) 2) (car f) (cadr f) (shell-tap! (car f) (cadr f)))))
+               (when r (set! *room* r) (say "room" r))
+               (if r 1 0)))
+            ((string=? type "test-room") (shell-test-room!) 0)
             (else 0)))))

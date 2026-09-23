@@ -1,0 +1,99 @@
+;;; (harkfell cli) - The content gates from the command line (native).
+;;;
+;;;   harkfell --room-check [--world DIR] [--parse-only] [--verbose] [REGION:X,Y ...]
+;;;
+;;; --parse-only stops before reach (gates 1 and 2 only): quick, and says so.
+;;;
+;;; Reads the world (world/ by default), runs gates 1 to 3 of section 8
+;;; (parse and legend, the region map, seams; then reach, over the whole
+;;; world from its start), prints every problem as FILE:LINE: message, then
+;;; the reach report of each room named (every room when none is), and a
+;;; last line:
+;;;
+;;;   PASS room-check: N rooms, parse seams map reach green
+;;;   FAIL room-check: N problems
+;;;   SETUP-FAILED room-check: <why>
+;;;
+;;; Exit 0, 1 or 2 to match. Reach is skipped (and the run is a FAIL) when
+;;; the earlier gates are red: a world that does not read has no geometry
+;;; to search.
+
+(define-library (harkfell cli)
+  (import (sigil io)
+          (sigil list)
+          (sigil string)
+          (sigil fs)
+          (sigil time)
+          (sigil math)
+          (engine roomfile)
+          (engine reach)
+          (engine worldmap)
+          (harkfell content)
+          (harkfell check)
+          (harkfell source))
+
+  (export room-check-main arg-value)
+
+  (begin
+    (define (say . parts) (display (apply string-append parts)) (newline))
+
+    ;; The value after a flag in args, or #f.
+    (define (arg-value args flag)
+      (let ((m (member flag args)))
+        (and m (pair? (cdr m)) (cadr m))))
+
+    (define (now-s) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
+
+    (define (room-check-main args)
+      (let* ((dir (or (arg-value args "--world") "world"))
+             (keys (filter (lambda (a) (and (parse-room-key a) (not (equal? a dir)))) args)))
+        (if (not (file-exists? (string-append dir "/world.sgl")))
+            (begin (say "SETUP-FAILED room-check: no " dir "/world.sgl") 2)
+            (let* ((t0 (now-s))
+                   (ct (load-content (read-world-source dir)))
+                   (ps (content-problems ct)))
+              (say "world: " dir ", " (number->string (length (content-rooms ct))) " rooms")
+              (for-each (lambda (p) (say (problem->string p))) ps)
+              (cond
+                ((not (null? ps))
+                  (say "FAIL room-check: " (number->string (length ps)) " problems before reach (reach not run)")
+                  1)
+                ((member "--parse-only" args)
+                  (say "PASS room-check --parse-only: " (number->string (length (content-rooms ct)))
+                       " rooms, parse seams map green (reach NOT run)")
+                  0)
+                (else
+                  (let* ((g (if (member "--verbose" args)
+                                (content-reach ct (lambda (n steps kind cell)
+                                                    (say "  anchor " (number->string n) " kind " (number->string kind)
+                                                         " cell " (number->string (car cell)) "," (number->string (cdr cell))
+                                                         " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
+                                (content-reach ct)))
+                         (t1 (now-s))
+                         (rps (reach-problems ct g))
+                         (rooms (map placed-data (content-rooms ct)))
+                         (shown (if (null? keys)
+                                    rooms
+                                    (filter (lambda (rm) (member (room-label rm) keys)) rooms))))
+                    (when g
+                      (say "reach: " (reach-summary g) ", " (number->string (exact (round (- t1 t0)))) " s")
+                      (when (member "--verbose" args)
+                        (for-each (lambda (e)
+                                    (say "  rejected by the replay: ("
+                                         (number->string (caar e)) "," (number->string (cdar e)) ") -> ("
+                                         (number->string (cadr e)) "," (number->string (cddr e)) ")"))
+                                  (graph-rejected g))))
+                    (for-each (lambda (p) (say (problem->string p))) rps)
+                    (when g
+                      (for-each (lambda (rm)
+                                  (newline)
+                                  (for-each say (room-report ct g rm)))
+                                shown))
+                    (newline)
+                    (if (null? rps)
+                        (begin
+                          (say "PASS room-check: " (number->string (length rooms)) " rooms, parse seams map reach green")
+                          0)
+                        (begin
+                          (say "FAIL room-check: " (number->string (length rps)) " reach problems")
+                          1)))))))))))

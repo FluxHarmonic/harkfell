@@ -1,33 +1,57 @@
-;;; (harkfell draw) - A0's grey boxes.
+;;; (harkfell draw) - Rooms, the body, and the review views, in placeholder
+;;; art.
 ;;;
-;;; The room is drawn into a 400x176 render target with nearest sampling,
-;;; one virtual pixel per texel; the shell then places that target on the
-;;; window at a whole scale ((engine view)). Colors are the placeholders
-;;; below; A4 brings the real palettes (section 7).
+;;; Everything is drawn into the 400x176 room target (or a larger one for
+;;; the region sheet and the atlas) with nearest sampling, one virtual pixel
+;;; per texel; the shell puts the target on the window at a whole scale
+;;; ((engine view)).
 ;;;
-;;; What each kind looks like:
-;;;   rock (solid)       mid grey, a lighter top edge
-;;;   rough (climbable)  darker brown-grey with a speckle, so it reads as
-;;;                      something you could hold
-;;;   water              blue-grey over the body (you are in it)
-;;;   hazard             dull red with a darker ripple
-;;; The body is a pale 10x14 block (its collision box is 8x14, centered)
-;;; with a dark eye on the side it faces and two ears; clinging, the ears
-;;; lie back.
+;;; A1 draws in placeholder art from the region's placeholder palette
+;;; (world/world.sgl's roles): the point is to see the autotiler choose
+;;; shapes and the rooms read, not the look (A4 brings the text-authored
+;;; tiles and the real palettes). Each material, from its 4-bit neighbour
+;;; mask ((engine autotile)) and a variant from its global position:
+;;;
+;;;   rock (# and +)   stone-1, a lit top rim (stone-2) where nothing of it is
+;;;                    above, a shaded rim on bare sides and underneath, and a
+;;;                    crack or two by variant; a false wall draws as rock
+;;;   rough (%)        mud-1 with mud-2 speckles by variant, a mossy top rim
+;;;                    (reed-3) where it is bare
+;;;   stone (o)        a rounded stone-2 block with a groove
+;;;   ledge (=)        a three-pixel plank (mud-2) with a post under a free end
+;;;   water (~)        water-1 over everything, a water-2 surface line
+;;;   hazard (x)       ember, darker ripples, a surface line
+;;;   reeds (|)        two or three stalks (reed-1, reed-2) with a tip (reed-3),
+;;;                    by variant, behind the body
+;;;   updraft (^)      a faint column of fog dots
+;;;
+;;; The body is A0's pale block with ears (fur-1, fur-2).
+;;;
+;;; A0's test room (a world with no content) still draws in A0's grey boxes.
 
 (define-library (harkfell draw)
   (import (sigil math)
+          (sigil list)
+          (sigil string)
           (sigil graphics)
           (engine tilemap)
           (engine body)
           (engine font)
-          (harkfell world))
+          (engine autotile)
+          (engine worldmap)
+          (harkfell world)
+          (harkfell legend)
+          (harkfell content))
 
-  (export VIEW-W VIEW-H draw-world draw-readout)
+  (export VIEW-W VIEW-H draw-world draw-readout
+          set-draw-content! draw-room-at draw-play draw-overview
+          overview-size overview-room-at)
 
   (begin
     (define VIEW-W 400)
     (define VIEW-H 176)
+
+    ;; --- A0's grey boxes (the test room) ------------------------------------------
 
     (define C-SKY '(0.15 0.17 0.21))
     (define C-ROCK '(0.44 0.45 0.47))
@@ -85,12 +109,13 @@
               (cols (+ col 1))))
           (loop (+ row 1)))))
 
-    (define (draw-body b)
-      (let* ((x (- (floor-int (body-x b)) 1))
-             (y (floor-int (body-y b)))
+    ;; The body with its box's top-left at (bx, by) in the current target.
+    (define (draw-body-at b bx by body-c eye-c)
+      (let* ((x (- (floor-int bx) 1))
+             (y (floor-int by))
              (face (body-facing b))
              (clinging (eq? (body-mode b) 'cling)))
-        (color! C-BODY)
+        (color! body-c)
         (draw-filled-rect x (+ y 3) 10 11)
         ;; the ears: up, or lying back while clinging
         (if clinging
@@ -100,10 +125,16 @@
             (begin
               (draw-filled-rect (+ x 2) y 1 3)
               (draw-filled-rect (+ x 7) y 1 3)))
-        (color! C-EYE)
+        (color! eye-c)
         (draw-filled-rect (if (> face 0) (+ x 7) (+ x 2)) (+ y 6) 1 2)))
 
-    ;; The whole room, into the current target (0,0 is the room's corner).
+    (define (draw-dim w)
+      (let ((d (world-dim w)))
+        (when (> d 0.0)
+          (set-color 0.0 0.0 0.0 d)
+          (draw-filled-rect 0 0 VIEW-W VIEW-H))))
+
+    ;; A0: the whole (one-room) map into the current target.
     (define (draw-world w)
       (let* ((tm (world-tiles w))
              (s (tilemap-size tm)))
@@ -116,12 +147,236 @@
                 (draw-tile (tilemap-ref tm col row) (* col s) (* row s) s tm col row)
                 (cols (+ col 1))))
             (loop (+ row 1))))
-        (draw-body (world-body w))
+        (let ((b (world-body w)))
+          (draw-body-at b (body-x b) (body-y b) C-BODY C-EYE))
         (draw-water tm s)
-        (let ((d (world-dim w)))
-          (when (> d 0.0)
-            (set-color 0.0 0.0 0.0 d)
-            (draw-filled-rect 0 0 VIEW-W VIEW-H)))))
+        (draw-dim w)))
+
+    ;; --- the placeholder palette ---------------------------------------------------------
+
+    (define *content* #f)
+    (define *palette* '())          ; ((role . (r g b)) ...)
+
+    (define (hex-digit c)
+      (let ((i (char->integer (char-downcase c))))
+        (if (<= 48 i 57) (- i 48) (+ 10 (- i 97)))))
+
+    (define (hex->rgb s)
+      (if (and (string? s) (= (string-length s) 7))
+          (map (lambda (k) (/ (+ (* 16 (hex-digit (string-ref s k))) (hex-digit (string-ref s (+ k 1)))) 255.0))
+               (list 1 3 5))
+          (list 1.0 0.0 1.0)))
+
+    ;; The content to draw from (its palette, its rooms).
+    (define (set-draw-content! ct)
+      (set! *content* ct)
+      (set! *palette* (if ct
+                          (map (lambda (e) (cons (car e) (hex->rgb (cadr e))))
+                               (filter (lambda (e) (and (pair? e) (pair? (cdr e)))) (content-palette ct)))
+                          '())))
+
+    ;; A role's color; magenta for a role the palette lacks (it shows).
+    (define (role c)
+      (let ((e (assq c *palette*)))
+        (if e (cdr e) (list 1.0 0.0 1.0))))
+
+    (define (shade rgb k) (map (lambda (v) (* v k)) rgb))
+
+    (define (paint! rgb . alpha)
+      (if (pair? alpha)
+          (set-color (car rgb) (cadr rgb) (caddr rgb) (car alpha))
+          (set-color (car rgb) (cadr rgb) (caddr rgb))))
+
+    ;; --- rooms --------------------------------------------------------------------------------
+
+    (define S 16)
+
+    ;; The global tile of a room's (c, r).
+    (define (global-tile rm c r)
+      (let ((wm (content-map *content*)))
+        (cons (+ c (* ROOM-COLS (- (room-x rm) (worldmap-x0 wm))))
+              (+ r (* ROOM-ROWS (- (room-y rm) (worldmap-y0 wm)))))))
+
+    ;; The material at a global tile; outside every room, rock (so a closed
+    ;; border does not draw a rim against nothing).
+    (define (material-at gc gr)
+      (char-material (world-char *content* gc gr)))
+
+    (define (sky!)
+      ;; three bands and a fog band, the placeholder for section 7's dithered sky
+      (paint! (role 'sky-1)) (draw-filled-rect 0 0 VIEW-W 60)
+      (paint! (role 'sky-2)) (draw-filled-rect 0 60 VIEW-W 56)
+      (paint! (role 'sky-3)) (draw-filled-rect 0 116 VIEW-W 40)
+      (paint! (role 'fog)) (draw-filled-rect 0 156 VIEW-W 20))
+
+    ;; One tile of a solid material at (x, y) with mask m and variant v.
+    (define (solid-tile! mat x y m v)
+      (cond ((eq? mat 'rock)
+             (paint! (role 'stone-1)) (draw-filled-rect x y S S)
+             (paint! (shade (role 'stone-1) 0.72))
+             (unless (mask-has? m MASK-LEFT) (draw-filled-rect x y 1 S))
+             (unless (mask-has? m MASK-RIGHT) (draw-filled-rect (+ x 15) y 1 S))
+             (unless (mask-has? m MASK-DOWN) (draw-filled-rect x (+ y 14) S 2))
+             ;; a crack by variant
+             (case v
+               ((0) (draw-filled-rect (+ x 4) (+ y 6) 3 1) (draw-filled-rect (+ x 6) (+ y 7) 1 2))
+               ((1) (draw-filled-rect (+ x 10) (+ y 10) 3 1))
+               ((2) (draw-filled-rect (+ x 3) (+ y 11) 1 2) (draw-filled-rect (+ x 11) (+ y 4) 2 1))
+               (else #f))
+             (unless (mask-has? m MASK-UP)
+               (paint! (role 'stone-2)) (draw-filled-rect x y S 2)))
+            ((eq? mat 'rough)
+             (paint! (role 'mud-1)) (draw-filled-rect x y S S)
+             (paint! (role 'mud-2))
+             (let ((dx (* 2 v)))
+               (draw-filled-rect (+ x 2 dx) (+ y 3) 2 1)
+               (draw-filled-rect (+ x 10) (+ y 6 dx) 2 1)
+               (draw-filled-rect (+ x 5) (+ y 10) 2 1)
+               (draw-filled-rect (+ x 12 (- dx)) (+ y 13) 2 1))
+             (unless (mask-has? m MASK-LEFT) (draw-filled-rect x y 1 S))
+             (unless (mask-has? m MASK-RIGHT) (draw-filled-rect (+ x 15) y 1 S))
+             (unless (mask-has? m MASK-UP)
+               (paint! (role 'reed-3)) (draw-filled-rect x y S 2)
+               (draw-filled-rect (+ x 3 (* 3 v)) (+ y 2) 2 1)))
+            ((eq? mat 'stone)
+             (paint! (role 'stone-2)) (draw-filled-rect (+ x 1) y 14 S) (draw-filled-rect x (+ y 1) S 14)
+             (paint! (shade (role 'stone-2) 0.7)) (draw-filled-rect (+ x 7) (+ y 3) 2 10))
+            ((eq? mat 'ledge)
+             (paint! (role 'mud-2)) (draw-filled-rect x y S 3)
+             (paint! (shade (role 'mud-2) 0.6)) (draw-filled-rect x (+ y 3) S 1)
+             (unless (mask-has? m MASK-LEFT) (draw-filled-rect (+ x 1) (+ y 4) 2 5))
+             (unless (mask-has? m MASK-RIGHT) (draw-filled-rect (+ x 13) (+ y 4) 2 5)))
+            ((eq? mat 'hazard)
+             (paint! (role 'ember)) (draw-filled-rect x y S S)
+             (paint! (shade (role 'ember) 0.7))
+             (draw-filled-rect (+ x 2 v) (+ y 5) 5 1)
+             (draw-filled-rect (+ x 9 (- v)) (+ y 10) 5 1)
+             (unless (mask-has? m MASK-UP)
+               (paint! (shade (role 'ember) 1.3)) (draw-filled-rect x y S 1)))
+            (else #f)))
+
+    ;; The back layer: reeds and updrafts.
+    (define (back-tile! mat x y m v)
+      (cond ((eq? mat 'reeds)
+             (let ((tall (not (mask-has? m MASK-UP))))
+               (for-each (lambda (k)
+                           (let ((sx (+ x 2 (* 5 k) v)))
+                             (paint! (if (even? k) (role 'reed-1) (role 'reed-2)))
+                             (draw-filled-rect sx (+ y (if tall (+ 2 (* 2 k)) 0)) 1 (- S (if tall (+ 2 (* 2 k)) 0)))
+                             (when tall
+                               (paint! (role 'reed-3))
+                               (draw-filled-rect sx (+ y 1 (* 2 k)) 1 2))))
+                         (if (= v 3) (list 0 1) (list 0 1 2)))))
+            ((eq? mat 'updraft)
+             (paint! (role 'fog) 0.5)
+             (draw-filled-rect (+ x 4 v) (+ y 3) 1 1)
+             (draw-filled-rect (+ x 10 (- v)) (+ y 9) 1 1)
+             (draw-filled-rect (+ x 7) (+ y 13) 1 1))
+            (else #f)))
+
+    (define (water-tile! x y m)
+      (paint! (role 'water-1) 0.72) (draw-filled-rect x y S S)
+      (unless (mask-has? m MASK-UP)
+        (paint! (role 'water-2) 0.9) (draw-filled-rect x y S 1)))
+
+    ;; Each tile of the room whose material satisfies pick?, drawn with draw!.
+    (define (each-tile rm pick? draw!)
+      (let loop ((r 0))
+        (when (< r ROOM-ROWS)
+          (let cl ((c 0))
+            (when (< c ROOM-COLS)
+              (let* ((mat (char-material (room-char rm c r))))
+                (when (and mat (pick? mat))
+                  (let* ((g (global-tile rm c r))
+                         (gc (car g)) (gr (cdr g))
+                         (m (tile-mask (lambda (cc rr) (eq? (material-at cc rr) mat)) gc gr)))
+                    (draw! mat (* S c) (* S r) m (tile-variant gc gr 4)))))
+              (cl (+ c 1))))
+          (loop (+ r 1)))))
+
+    (define (solid-mat? m) (memq m (list 'rock 'rough 'stone 'ledge 'hazard)))
+    (define (back-mat? m) (memq m (list 'reeds 'updraft)))
+
+    ;; A room with its top-left at the current origin: sky, back layer,
+    ;; solids; then (after) whatever goes in front via draw-front!.
+    (define (draw-room-back rm)
+      (sky!)
+      (each-tile rm back-mat? back-tile!)
+      (each-tile rm solid-mat? solid-tile!))
+
+    (define (draw-room-front rm)
+      (each-tile rm (lambda (m) (eq? m 'water)) (lambda (mat x y m v) (water-tile! x y m))))
+
+    ;; A whole room (no body) at (ox, oy) at scale k, in the current target.
+    (define (draw-room-at rm ox oy k)
+      (push-transform)
+      (translate ox oy)
+      (scale k k)
+      (draw-room-back rm)
+      (draw-room-front rm)
+      (pop-transform))
+
+    ;; Play: the current room, the body in it, the dim.
+    (define (draw-play w)
+      (let* ((p (world-room w))
+             (rm (and p (placed-data p))))
+        (if (not rm)
+            (draw-world w)
+            (let* ((o (world-origin w))
+                   (b (world-body w)))
+              (draw-room-back rm)
+              (draw-body-at b (- (body-x b) (car o)) (- (body-y b) (cdr o)) (role 'fur-1) (role 'fur-2))
+              (draw-room-front rm)
+              (draw-dim w)))))
+
+    ;; --- the overviews: the region sheet and the atlas ----------------------------------
+
+    ;; rooms: room records. k: the scale (1 for the sheet, 1/4 for the atlas).
+    ;; gap: pixels between rooms. -> (w h x0 y0), x0 y0 the least room coordinate.
+    (define (overview-size rooms k gap)
+      (if (null? rooms)
+          (list VIEW-W VIEW-H 0 0)
+          (let* ((xs (map room-x rooms)) (ys (map room-y rooms))
+                 (x0 (apply min xs)) (y0 (apply min ys))
+                 (nx (+ 1 (- (apply max xs) x0))) (ny (+ 1 (- (apply max ys) y0))))
+            (list (+ gap (* nx (+ gap (floor-int (* k VIEW-W)))))
+                  (+ gap (* ny (+ gap (floor-int (* k VIEW-H)))))
+                  x0 y0))))
+
+    ;; The room drawn at overview pixel (px, py), or #f.
+    (define (overview-room-at rooms k gap px py)
+      (let* ((sz (overview-size rooms k gap))
+             (cw (+ gap (floor-int (* k VIEW-W))))
+             (ch (+ gap (floor-int (* k VIEW-H))))
+             (rx (+ (caddr sz) (floor-int (/ (- px gap) cw))))
+             (ry (+ (cadddr sz) (floor-int (/ (- py gap) ch)))))
+        (let find ((rs rooms))
+          (cond ((null? rs) #f)
+                ((and (= (room-x (car rs)) rx) (= (room-y (car rs)) ry)) (car rs))
+                (else (find (cdr rs)))))))
+
+    ;; Every room at its place, scale k, gap px apart on a dark ground, each
+    ;; labelled with its coordinate and, if labels?, its title's first word
+    ;; (lower case: the mini font's letters).
+    (define (draw-overview rooms k gap labels?)
+      (let* ((sz (overview-size rooms k gap))
+             (x0 (caddr sz)) (y0 (cadddr sz))
+             (cw (+ gap (floor-int (* k VIEW-W))))
+             (ch (+ gap (floor-int (* k VIEW-H)))))
+        (set-color 0.07 0.07 0.08)
+        (draw-filled-rect 0 0 (car sz) (cadr sz))
+        (for-each
+          (lambda (rm)
+            (let ((ox (+ gap (* cw (- (room-x rm) x0))))
+                  (oy (+ gap (* ch (- (room-y rm) y0)))))
+              (draw-room-at rm ox oy k)
+              (when labels?
+                (let ((label (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm)))))
+                  (set-color 0.0 0.0 0.0 0.6)
+                  (draw-filled-rect (+ ox 1) (+ oy 1) (+ 2 (text-width-mini label 1)) 7)
+                  (set-color 0.95 0.95 0.9)
+                  (draw-text-mini label (+ ox 2) (+ oy 2) 1)))))
+          rooms)))
 
     ;; Lines of text at the top right of the rectangle x y w, cells of
     ;; SCALE px, over a dark band (the ?ms readout, in window pixels).

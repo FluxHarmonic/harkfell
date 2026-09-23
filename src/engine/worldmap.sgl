@@ -1,0 +1,188 @@
+;;; (engine worldmap) - Flip-screen rooms on one global grid.
+;;;
+;;; Every room is COLS x ROWS tiles and sits at a whole room coordinate
+;;; (x, y) on a global grid (y grows downward), so a room's neighbours are
+;;; known from its coordinate alone: (x-1, y) is on its left, (x, y+1)
+;;; below it. A world map holds the rooms and one GLOBAL tilemap spanning
+;;; their bounds, with every room's tiles copied in at its place and every
+;;; empty slot solid. A body lives in global pixels on that tilemap, so it
+;;; crosses a seam with the collision code knowing nothing about rooms;
+;;; which room it is "in" is only which slot its center falls in.
+;;;
+;;; The seam rule (exits are open edges on all four sides): a cell on a
+;;; room's edge is OPEN when its kind is passable (by default: not solid,
+;;; not a ledge, not a hazard; water is open). For two rooms side by side,
+;;; every row of the left room's last column must be open exactly where the
+;;; right room's first column is; the same for columns across a room's
+;;; bottom and the top of the room below. An edge with no room beyond it
+;;; must be closed on every cell: a room never opens onto nothing.
+;;;
+;;; Pure: no platform.
+
+(define-library (engine worldmap)
+  (import (sigil struct)
+          (sigil list)
+          (sigil math)
+          (sigil string)
+          (engine tilemap))
+
+  (export placed placed? placed-x placed-y placed-tiles placed-data
+          worldmap worldmap? make-worldmap
+          worldmap-rooms worldmap-cols worldmap-rows worldmap-size
+          worldmap-x0 worldmap-y0 worldmap-tiles
+          worldmap-room worldmap-room-at-px worldmap-origin
+          worldmap-replace
+          seam-problems kind-open?
+          room-name)
+
+  (begin
+    ;; One room: its coordinate, its tilemap (COLS x ROWS), and whatever
+    ;; the game keeps with it (its file, its grid).
+    (define-struct placed
+      (x default: 0)
+      (y default: 0)
+      (tiles default: #f)
+      (data default: #f))
+
+    (define-struct worldmap
+      (rooms default: '())          ; placed rooms
+      (cols default: 25)            ; tiles per room
+      (rows default: 11)
+      (size default: 16)            ; pixels per tile
+      (x0 default: 0)               ; the room coordinate at global tile 0
+      (y0 default: 0)
+      (tiles default: #f))          ; the global tilemap
+
+    (define (room-name p)
+      (string-append "x" (number->string (placed-x p)) "y" (number->string (placed-y p))))
+
+    ;; rooms: placed rooms, all COLS x ROWS. Two rooms at one coordinate is
+    ;; an error (the game refuses it before this point).
+    (define (make-worldmap rooms cols rows size)
+      (if (null? rooms)
+          (worldmap rooms: '() cols: cols rows: rows size: size
+                    tiles: (make-tilemap cols rows size))
+          (let* ((xs (map placed-x rooms))
+                 (ys (map placed-y rooms))
+                 (x0 (apply min xs))
+                 (y0 (apply min ys))
+                 (nx (+ 1 (- (apply max xs) x0)))
+                 (ny (+ 1 (- (apply max ys) y0)))
+                 (gc (* nx cols))
+                 (gr (* ny rows))
+                 (cells (make-vector (* gc gr) 'solid)))
+            (for-each
+              (lambda (p)
+                (let ((ox (* cols (- (placed-x p) x0)))
+                      (oy (* rows (- (placed-y p) y0)))
+                      (tm (placed-tiles p)))
+                  (let loop ((r 0))
+                    (when (< r rows)
+                      (let cl ((c 0))
+                        (when (< c cols)
+                          (vector-set! cells (+ ox c (* gc (+ oy r))) (tilemap-ref tm c r))
+                          (cl (+ c 1))))
+                      (loop (+ r 1))))))
+              rooms)
+            (worldmap rooms: rooms cols: cols rows: rows size: size x0: x0 y0: y0
+                      tiles: (tilemap cols: gc rows: gr size: size cells: cells edge: 'solid)))))
+
+    ;; The map with one room swapped for another at the same coordinate (or
+    ;; added), rebuilt: what a live reload does.
+    (define (worldmap-replace wm p)
+      (make-worldmap (cons p (filter (lambda (q) (not (and (= (placed-x q) (placed-x p))
+                                                           (= (placed-y q) (placed-y p)))))
+                                     (worldmap-rooms wm)))
+                     (worldmap-cols wm) (worldmap-rows wm) (worldmap-size wm)))
+
+    ;; The room at coordinate (x, y), or #f.
+    (define (worldmap-room wm x y)
+      (let loop ((rs (worldmap-rooms wm)))
+        (cond ((null? rs) #f)
+              ((and (= (placed-x (car rs)) x) (= (placed-y (car rs)) y)) (car rs))
+              (else (loop (cdr rs))))))
+
+    ;; The room whose slot holds global pixel (px, py), or #f.
+    (define (worldmap-room-at-px wm px py)
+      (let* ((w (* (worldmap-cols wm) (worldmap-size wm)))
+             (h (* (worldmap-rows wm) (worldmap-size wm))))
+        (worldmap-room wm
+                       (+ (worldmap-x0 wm) (exact (floor (/ px w))))
+                       (+ (worldmap-y0 wm) (exact (floor (/ py h)))))))
+
+    ;; A room's top-left corner in global pixels: (px . py).
+    (define (worldmap-origin wm p)
+      (cons (* (worldmap-cols wm) (worldmap-size wm) (- (placed-x p) (worldmap-x0 wm)))
+            (* (worldmap-rows wm) (worldmap-size wm) (- (placed-y p) (worldmap-y0 wm)))))
+
+    ;; --- seams ------------------------------------------------------------------
+
+    (define (kind-open? k)
+      (not (or (kind-solid? k) (kind-ledge? k) (kind-hazard? k))))
+
+    (define (cells-string tm cells)
+      (list->string (map (lambda (c) (if (kind-open? (tilemap-ref tm (car c) (cdr c))) #\o #\-)) cells)))
+
+    ;; Every seam problem, as strings naming both rooms and the rows or
+    ;; columns that disagree. open?: the passable test (kind-open? by default).
+    (define (seam-problems wm . open?)
+      (let* ((open? (if (pair? open?) (car open?) kind-open?))
+             (cols (worldmap-cols wm))
+             (rows (worldmap-rows wm)))
+        (define (col-cells c) (map (lambda (r) (cons c r)) (iota rows)))
+        (define (row-cells r) (map (lambda (c) (cons c r)) (iota cols)))
+        (define (open-at tm cell) (open? (tilemap-ref tm (car cell) (cdr cell))))
+        ;; the indices where a (list of cells in room p) and b (in room q) disagree
+        (define (mismatches p a q b)
+          (let loop ((a a) (b b) (i 0) (acc '()))
+            (if (null? a)
+                (reverse acc)
+                (loop (cdr a) (cdr b) (+ i 1)
+                      (if (eq? (open-at (placed-tiles p) (car a)) (open-at (placed-tiles q) (car b)))
+                          acc
+                          (cons i acc))))))
+        (define (opens p cells)
+          (let loop ((cells cells) (i 0) (acc '()))
+            (if (null? cells)
+                (reverse acc)
+                (loop (cdr cells) (+ i 1)
+                      (if (open-at (placed-tiles p) (car cells)) (cons i acc) acc)))))
+        (define (nums l) (string-join (map number->string l) " "))
+        (apply append
+               (map (lambda (p)
+                      (let* ((x (placed-x p))
+                             (y (placed-y p))
+                             (left (worldmap-room wm (- x 1) y))
+                             (right (worldmap-room wm (+ x 1) y))
+                             (up (worldmap-room wm x (- y 1)))
+                             (down (worldmap-room wm x (+ y 1)))
+                             (name (room-name p)))
+                        (append
+                          ;; shared edges, each checked once (from its right or lower room)
+                          (if left
+                              (let ((m (mismatches left (col-cells (- cols 1)) p (col-cells 0))))
+                                (if (null? m) '()
+                                    (list (string-append name " left edge and " (room-name left)
+                                                         " right edge disagree on rows " (nums m)))))
+                              (let ((o (opens p (col-cells 0))))
+                                (if (null? o) '()
+                                    (list (string-append name " left edge opens onto no room, rows " (nums o))))))
+                          (if up
+                              (let ((m (mismatches up (row-cells (- rows 1)) p (row-cells 0))))
+                                (if (null? m) '()
+                                    (list (string-append name " top edge and " (room-name up)
+                                                         " bottom edge disagree on columns " (nums m)))))
+                              (let ((o (opens p (row-cells 0))))
+                                (if (null? o) '()
+                                    (list (string-append name " top edge opens onto no room, columns " (nums o))))))
+                          (if right
+                              '()
+                              (let ((o (opens p (col-cells (- cols 1)))))
+                                (if (null? o) '()
+                                    (list (string-append name " right edge opens onto no room, rows " (nums o))))))
+                          (if down
+                              '()
+                              (let ((o (opens p (row-cells (- rows 1)))))
+                                (if (null? o) '()
+                                    (list (string-append name " bottom edge opens onto no room, columns " (nums o)))))))))
+                    (worldmap-rooms wm)))))))

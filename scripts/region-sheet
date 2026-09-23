@@ -1,0 +1,16 @@
+#!/bin/sh
+# Every room of a region at its map position in one PNG (the web build's
+# ?sheet=REGION): the map view and the contact sheet in one (section 8).
+#
+#   scripts/region-sheet reedfen [OUT.png] [--scale N]
+#
+# OUT defaults to build/shots/<region>-sheet.png, the scale to 1. Needs
+# build/web and google-chrome. Exit 2 (SETUP-FAILED) on a world with problems.
+cd "$(dirname "$0")/.." || exit 2
+REGION="$1"
+[ -n "$REGION" ] || { echo "usage: scripts/region-sheet REGION [OUT.png] [--scale N]"; exit 2; }
+shift
+case "$1" in --*|"") OUT="build/shots/$REGION-sheet.png" ;; *) OUT="$1"; shift ;; esac
+mkdir -p "$(dirname "$OUT")"
+case " $* " in *" --scale "*) exec node scripts/shot.mjs build/web "$OUT" --query "sheet=$REGION&still" "$@" ;; esac
+exec node scripts/shot.mjs build/web "$OUT" --query "sheet=$REGION&still" --scale 1 "$@"
