@@ -11,7 +11,8 @@
 ;;;   sketchbook levels FILE                per channel: level, peak, share above 300 Hz
 ;;;   sketchbook catalog                    the catalog, one line a sketch
 ;;;
-;;; Options: -r RATE (44100), --tunes DIR (assets/tunes), --floor F (the
+;;; Options: -r RATE (44100), --tunes DIR (assets/tunes), --voicing fm (the
+;;; drone as the page's FM switch plays it), --floor F (the
 ;;; speaker check's floor, 0.25), --seconds S (per channel, 30).
 ;;;
 ;;; The speaker check (design §3, D10): every channel of every drone and bed
@@ -34,6 +35,7 @@
           (motif render)
           (motif render native)
           (motif synth)
+          (only (sigil dsp core) dsp-init)
           (sketchbook catalog)
           (sketchbook scene)
           (sketchbook analysis))
@@ -75,12 +77,34 @@
     (define (f32! bv i x) (bytevector-ieee-single-set! bv (* i 4) x 'little))
 
     ;; --- probe: is the motif under this tool the one with the bed kinds? -----------
+    ;; Two-sided, and behavioural for the newest change: the bed kinds exist,
+    ;; a made-up kind is refused, and `cents:` (motif ecdada7) moves a note:
+    ;; drone-fm at 220 Hz with cents 1200 must sound at 440. A motif without
+    ;; cents ignores the param (params are not validated) and sounds at 220.
+    (define (tone-amplitude v f sr)
+      (let* ((w (/ (* 2.0 3.141592653589793 f) sr)) (c (* 2.0 (cos w))) (n (vector-length v)))
+        (let loop ((i 0) (s1 0.0) (s2 0.0))
+          (if (>= i n)
+              (/ (* 2.0 (sqrt (max 0.0 (- (+ (* s1 s1) (* s2 s2)) (* c s1 s2))))) n)
+              (loop (+ i 1) (+ (vector-ref v i) (* c s1) (- s2)) s1)))))
+
     (define (probe)
-      (let ((has (memq 'noise-bed (synth-kinds)))
-            (refuses (guard (e (#t #t)) (make-synth-graph 'no-such-kind) #f)))
+      (let* ((has (memq 'noise-bed (synth-kinds)))
+             (refuses (guard (e (#t #t)) (make-synth-graph 'no-such-kind) #f))
+             (sr 44100)
+             (_ (dsp-init sr))
+             (bv (%render-graph (make-synth-graph 'drone-fm '((cents . 1200.0) (breath-lo . 1.0) (index-wander . 0.0) (attack . 0.01)))
+                                sr sr 220.0 1.0 #f))
+             (v (let ((v (make-vector (- sr 4410) 0.0)))
+                  (let loop ((i 0)) (when (< i (vector-length v)) (vector-set! v i (f32 bv (+ i 4410))) (loop (+ i 1))))
+                  v))
+             (a440 (tone-amplitude v 440.0 sr))
+             (a220 (tone-amplitude v 220.0 sr))
+             (cents (> a440 (* 10.0 a220))))
         (say "motif kinds: noise-bed " (if has "present" "ABSENT")
-             ", an unknown kind " (if refuses "refused" "ACCEPTED"))
-        (if (and has refuses) 0 1)))
+             ", an unknown kind " (if refuses "refused" "ACCEPTED")
+             ", cents: 1200 on 220 Hz sounds at " (if cents "440 (present)" "220 (ABSENT: a motif before ecdada7)"))
+        (if (and has refuses cents) 0 1)))
 
     ;; --- renders -------------------------------------------------------------------------
     (define (render-tune file out sr)
@@ -184,8 +208,8 @@
     (define SILENT-DB -70.0)
 
     ;; ((ch level peak share) ...) for every channel of the file
-    (define (channel-report file sr secs)
-      (let ((t (read-tune-file file)))
+    (define (channel-report file sr secs voicing)
+      (let ((t (let ((t0 (read-tune-file file))) (if voicing (swap-drone-kind t0 voicing) t0))))
         (let loop ((ch 1) (acc '()))
           (if (> ch (tune-channels t))
               (reverse acc)
@@ -195,11 +219,11 @@
                       (cons (list ch db (peak v) (if (> db SILENT-DB) (energy-share-above v sr 300.0) #f))
                             acc)))))))
 
-    (define (speaker files floor sr secs)
+    (define (speaker files floor sr secs voicing)
       (let ((fails 0) (checked 0))
         (for-each
           (lambda (file)
-            (let* ((rows (channel-report file sr secs))
+            (let* ((rows (channel-report file sr secs voicing))
                    (sounding (filter (lambda (r) (list-ref r 3)) rows)))
               (when (null? sounding)
                 (set! fails (+ fails 1))
@@ -223,11 +247,11 @@
              (num fails) " failed, floor " (num floor))
         (if (and (= fails 0) (> checked 0)) 0 1)))
 
-    (define (levels file sr secs)
+    (define (levels file sr secs voicing)
       (for-each (lambda (r)
                   (say "ch" (num (car r)) "  " (fixed (cadr r) 1) " dBFS  peak " (fixed (caddr r) 3)
                        "  above 300 Hz " (if (list-ref r 3) (fixed (list-ref r 3) 3) "-")))
-                (channel-report file sr secs))
+                (channel-report file sr secs voicing))
       0)
 
     (define (catalog-lines)
@@ -248,7 +272,9 @@
              (sr (rate args))
              (tdir (tunes-dir args))
              (secs (string->number (option args "--seconds" "30")))
-             (floor-share (string->number (option args "--floor" "0.25"))))
+             (floor-share (string->number (option args "--floor" "0.25")))
+             ;; --voicing fm: the drone measured as the page's FM switch plays it
+             (voicing (and (string=? (option args "--voicing" "saw") "fm") 'drone-fm)))
         (if (null? pos)
             (usage)
             (let ((cmd (car pos)) (rest (cdr pos)))
@@ -256,7 +282,7 @@
                     ((and (string=? cmd "render-tune") (= (length rest) 2)) (render-tune (car rest) (cadr rest) sr))
                     ((and (string=? cmd "render-scene") (= (length rest) 2)) (render-scene (car rest) (cadr rest) tdir sr))
                     ((and (string=? cmd "render-all") (= (length rest) 1)) (render-all (car rest) tdir sr))
-                    ((and (string=? cmd "speaker") (pair? rest)) (speaker rest floor-share sr secs))
-                    ((and (string=? cmd "levels") (= (length rest) 1)) (levels (car rest) sr secs))
+                    ((and (string=? cmd "speaker") (pair? rest)) (speaker rest floor-share sr secs voicing))
+                    ((and (string=? cmd "levels") (= (length rest) 1)) (levels (car rest) sr secs voicing))
                     ((string=? cmd "catalog") (catalog-lines))
                     (else (usage)))))))))

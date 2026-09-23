@@ -125,16 +125,22 @@
 
     (define (start! e)
       (set! *pending* #f)
-      (guard (x (#t (tell "error " (if (error-object? x) (error-object-message x) "while opening"))
-                    (set! *scene* #f)))
-        (let ((t0 (current-milliseconds))
-              (sc (make-scene *sr* loader)))
+      (let ((sc (make-scene *sr* loader)))
+        ;; a failure part way through scene-start! closes the players it had
+        ;; already opened (review, 2026-09-24)
+        (guard (x (#t (tell "error " (if (error-object? x) (error-object-message x) "while opening"))
+                      (guard (y (#t #f)) (scene-close! sc))
+                      (set! *scene* #f)))
+          (start-scene! sc e))))
+
+    (define (start-scene! sc e)
+      (let ((t0 (current-milliseconds)))
           (scene-start! sc e)
           (set! *scene* sc)
           (for-each apply-control! (reverse *controls*))
           (set! *start-ms* #f)
           (set! *dry-base* 0)
-          (tell "playing " (symbol->string (entry-id e)) " (opened in " (num (- (current-milliseconds) t0)) " ms)"))))
+          (tell "playing " (symbol->string (entry-id e)) " (opened in " (num (- (current-milliseconds) t0)) " ms)")))
 
     (define (apply-control! c)
       (when *scene*

@@ -60,6 +60,9 @@ rm -rf "$HOSTED.new"
 mkdir -p "$HOSTED.new/sketchbook"
 # what the page loads, not the build's intermediates (native/ and bin/ are 225 MB)
 cp -r build/web/index.html build/web/_headers build/web/sketchbook.wasm build/web/sigil-wasm-bridges.js build/web/sigil-wasm-bridges.json build/web/assets "$HOSTED.new/sketchbook/"
+# the tunes from source: the page fetches them at run time, and the build's copy
+# is as old as the last web build (the gate checks assets/tunes, so serve those)
+rm -rf "$HOSTED.new/sketchbook/assets/tunes"; cp -r assets/tunes "$HOSTED.new/sketchbook/assets/tunes"
 cat > "$HOSTED.new/index.html" <<'EOF'
 <!doctype html><meta charset="utf-8"><title>Harkfell</title>
 <p><a href="sketchbook/">Harkfell: the sound sketchbook</a></p>
@@ -75,7 +78,7 @@ if [ ! -f build/tls/cert.pem ]; then
 fi
 
 stop
-nohup node ../scripts/serve-web-tls.mjs "$HOSTED" "$HTTPS_PORT" --isolate > "build/host-$HTTPS_PORT.log" 2>&1 &
+nohup node scripts/serve-log.mjs "$HOSTED" "$HTTPS_PORT" --isolate > "build/host-$HTTPS_PORT.log" 2>&1 &
 echo $! > "build/host-$HTTPS_PORT.pid"
 nohup sigil serve --dir "$HOSTED" --host "$ADDR" --port "$HTTP_PORT" > "build/host-$HTTP_PORT.log" 2>&1 &
 echo $! > "build/host-$HTTP_PORT.pid"

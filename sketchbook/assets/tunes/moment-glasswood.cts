@@ -1,10 +1,10 @@
 (tune version: 1 name: "moment-glasswood" tempo: 70 speed: 6 channels: 6
   (bus reverb: zitarev size: 0.85 damp: 0.3 mix: 0.32)
   (instruments
-    (instrument id: 1 name: "icicle" patch: (fm4-bell index: 1.3 amp-decay: 2.6 amp-release: 1.2 vel-depth: 0.4) volume: 30 send: 0.55)
-    (instrument id: 2 name: "ice bell" patch: (fm4-bell index: 0.9 amp-decay: 3.5 amp-release: 1.5 vel-depth: 0.4) volume: 40 send: 0.45)
-    (instrument id: 3 name: "frost pad" patch: (shimmer-pad attack: 1.2 release: 3 sustain: 0.7) volume: 24 send: 0.45)
-    (instrument id: 4 name: "pedal" patch: (drone-fm level: 0.4 index: 2.5 index-wander: 0 breath-lo: 1 attack: 1.5 release: 3) volume: 32 send: 0.3))
+    (instrument id: 1 name: "icicle" patch: (fm4-bell index: 1.3 amp-decay: 2.6 amp-release: 1.2 vel-depth: 0.4) volume: 30 gain: 0.5 send: 0.55)
+    (instrument id: 2 name: "ice bell" patch: (fm4-bell index: 0.9 amp-decay: 3.5 amp-release: 1.5 vel-depth: 0.4) volume: 40 gain: 0.5 send: 0.45)
+    (instrument id: 3 name: "frost pad" patch: (shimmer-pad attack: 1.2 release: 3 sustain: 0.7) volume: 24 gain: 0.5 send: 0.45)
+    (instrument id: 4 name: "pedal" patch: (drone-fm level: 0.4 index: 2.5 index-wander: 0 breath-lo: 1 attack: 1.5 release: 3) volume: 32 gain: 0.5 send: 0.3))
   (patterns
     (pattern id: 0 rows: 112
       (row 0 (1 "D-6" 1 30 "000") (3 "A-5" 2 40 "000") (4 "F#4" 3 24 "000") (5 "A-4" 3 22 "000") (6 "D-2" 4 32 "000"))

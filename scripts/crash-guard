@@ -29,13 +29,21 @@
 # when a build could not be made or the population could not be read (nothing
 # was compared). Exit 0 GREEN, 1 RED, 2 SETUP-FAILED.
 #
-# Classes per tune: identical | DIFFER | FAILED-ONE (rendered on one build
+# Classes per tune: identical | DIFFER | TIMEOUT (either build ran out of
+# time: RED) | FAILED-ONE (rendered on one build
 # only) | failed-both (neither renders; a tune the motif of both builds
 # refuses, reported with the error so a reader can judge it).
 #
 # The base result is cached under ${XDG_CACHE_HOME:-~/.cache}/harkfell/crash-guard/
 # keyed by the base commit, the Crash ref, the rate and the sigil version; the
 # script says when it used the cache. A dir: candidate is never cached.
+#
+# What it compares, and what it does not: the WAV `motif tune render` writes
+# (16-bit PCM from the offline render) at one rate (--rate, 44100). A change
+# smaller than one 16-bit step hashes the same, and the live player path and
+# other rates (Crash renders at 24000..48000 live) are not rendered here. The
+# player and the offline render share the graph executor the guarded changes
+# touch; that they agree is motif's own test (test-tune), not this guard's.
 #
 # While it runs it writes only under a mktemp directory (plus git's worktree
 # bookkeeping in the motif repo's .git, removed again on exit).
@@ -195,6 +203,9 @@ while IFS= read -r key; do
     fi
   elif [ "$bs" = ok ] || [ "$cs" = ok ]; then
     failed_one=$((failed_one + 1)); echo "FAILED-ONE  $key  base: ${b#"$key "}  candidate: ${c#"$key "}"
+  elif [ "$bs" = timeout ] || [ "$cs" = timeout ]; then
+    # a render that ran out of time compared nothing: never allowed in GREEN
+    other=$((other + 1)); echo "TIMEOUT     $key  base: ${b#"$key "}  candidate: ${c#"$key "}"
   elif [ -n "$bs" ] && [ -n "$cs" ]; then
     failed_both=$((failed_both + 1)); echo "failed-both $key  ${c#"$key "}"
   else

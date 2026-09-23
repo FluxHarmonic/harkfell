@@ -1,10 +1,10 @@
 (tune version: 1 name: "moment-cloudstair" tempo: 76 speed: 6 channels: 6
   (bus reverb: zitarev size: 0.75 damp: 0.35 mix: 0.28)
   (instruments
-    (instrument id: 1 name: "high flute" patch: (flute-wind attack: 0.1 release: 0.7 noise-amp: 0.14) volume: 40 send: 0.4)
-    (instrument id: 2 name: "bright air" patch: (shimmer-pad attack: 0.9 release: 2.5 sustain: 0.7 cutoff: 5000) volume: 24 send: 0.4)
-    (instrument id: 3 name: "low line" patch: (drone-fm level: 0.4 index: 2.5 index-wander: 0 breath-lo: 1 attack: 0.6 release: 2) volume: 32 send: 0.25)
-    (instrument id: 4 name: "sparkle" patch: (fm4-bell index: 1.2 amp-decay: 2 amp-release: 1 vel-depth: 0.4) volume: 20 send: 0.55))
+    (instrument id: 1 name: "high flute" patch: (flute-wind attack: 0.1 release: 0.7 noise-amp: 0.14) volume: 40 gain: 0.7 send: 0.4)
+    (instrument id: 2 name: "bright air" patch: (shimmer-pad attack: 0.9 release: 2.5 sustain: 0.7 cutoff: 5000) volume: 24 gain: 0.7 send: 0.4)
+    (instrument id: 3 name: "low line" patch: (drone-fm level: 0.4 index: 2.5 index-wander: 0 breath-lo: 1 attack: 0.6 release: 2) volume: 32 gain: 0.7 send: 0.25)
+    (instrument id: 4 name: "sparkle" patch: (fm4-bell index: 1.2 amp-decay: 2 amp-release: 1 vel-depth: 0.4) volume: 20 gain: 0.7 send: 0.55))
   (patterns
     (pattern id: 0 rows: 128
       (row 0 (1 "F#5" 1 40 "000") (2 "D-4" 2 24 "000") (3 "F#4" 2 22 "000") (4 "A-4" 2 22 "000") (6 "D-2" 3 32 "000"))

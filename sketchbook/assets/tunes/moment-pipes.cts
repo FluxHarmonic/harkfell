@@ -1,10 +1,10 @@
 (tune version: 1 name: "moment-pipes" tempo: 56 speed: 6 channels: 6
   (bus reverb: zitarev size: 0.95 damp: 0.45 mix: 0.35)
   (instruments
-    (instrument id: 1 name: "stone pipe" patch: (fm4-pipe index: 1.2 attack-index: 2.2 op1: (1 1 0.08 0.3 0.85 1.4) op2: (1 0.9 0.06 0.3 0.7 1.4) op3: (2 0.45 0.06 0.3 0.5 1.4)) volume: 32 send: 0.5)
-    (instrument id: 2 name: "low pipe" patch: (fm4-pipe index: 1.0 attack-index: 1.8 op1: (1 1 0.1 0.3 0.85 1.6) op2: (1 0.9 0.08 0.3 0.7 1.6) op3: (2 0.45 0.08 0.3 0.5 1.6)) volume: 34 send: 0.45)
-    (instrument id: 3 name: "drip" patch: (drip level: 0.6 rise: 0.9 sweep: 0.035 decay: 0.07 echo: 0.43 feedback: 0.55 echo-mix: 0.6 hp: 400 seed: 61) volume: 34 send: 0.5)
-    (instrument id: 4 name: "air in the pipe" patch: (pipe-breath level: 0.6 width: 0.07 octave: 0.4 tone: 0.12 swell: 0.5 swell-rate: 0.1 attack: 3 release: 4 seed: 62) volume: 26 send: 0.5))
+    (instrument id: 1 name: "stone pipe" patch: (fm4-pipe index: 1.2 attack-index: 2.2 op1: (1 1 0.08 0.3 0.85 1.4) op2: (1 0.9 0.06 0.3 0.7 1.4) op3: (2 0.45 0.06 0.3 0.5 1.4)) volume: 32 gain: 0.22 send: 0.5)
+    (instrument id: 2 name: "low pipe" patch: (fm4-pipe index: 1.0 attack-index: 1.8 op1: (1 1 0.1 0.3 0.85 1.6) op2: (1 0.9 0.08 0.3 0.7 1.6) op3: (2 0.45 0.08 0.3 0.5 1.6)) volume: 34 gain: 0.22 send: 0.45)
+    (instrument id: 3 name: "drip" patch: (drip level: 0.6 rise: 0.9 sweep: 0.035 decay: 0.07 echo: 0.43 feedback: 0.55 echo-mix: 0.6 hp: 400 seed: 61) volume: 34 gain: 0.22 send: 0.5)
+    (instrument id: 4 name: "air in the pipe" patch: (pipe-breath level: 0.6 width: 0.07 octave: 0.4 tone: 0.12 swell: 0.5 swell-rate: 0.1 attack: 3 release: 4 seed: 62) volume: 26 gain: 0.22 send: 0.5))
   (patterns
     (pattern id: 0 rows: 108
       (row 0 (1 "A-4" 1 34 "000") (2 "F-4" 1 30 "000") (3 "D-4" 1 30 "000") (4 "D-3" 2 34 "000") (6 "D-3" 4 26 "000"))

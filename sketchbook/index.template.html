@@ -2,6 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <script>
+    // The page's files are relative to /sketchbook/, so /sketchbook without the
+    // slash would fetch /assets/... and 404 (David's phone, 2026-09-24): add it.
+    if (!/\/$/.test(location.pathname)) location.replace(location.pathname + "/" + location.search + location.hash);
+    // A file that fails to load (a script, the wasm) does not reach an ordinary
+    // error listener; the capture phase sees it.
+    window.addEventListener("error", function (e) {
+      var t = e.target;
+      if (t && t !== window && (t.src || t.href)) {
+        var s = document.getElementById("status");
+        var msg = "error: could not load " + (t.src || t.href);
+        if (s) s.textContent = msg; else document.addEventListener("DOMContentLoaded", function () { document.getElementById("status").textContent = msg; });
+      }
+    }, true);
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#10141a">
   <title>Harkfell sketchbook</title>
@@ -34,7 +49,7 @@
     .row input[type=range] { width: 110px; }
     .row button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: #1b222b; color: var(--fg); font: inherit; }
     .row button.on { background: var(--warn); color: #0b1014; border-color: var(--warn); }
-    #mount { display: none; }
+    #mount { color: var(--warn); font-size: 0.9rem; margin-top: 6px; }
   </style>
   <script>
     // ?rate=N renders every sketch at N Hz and lets the browser resample to
@@ -81,6 +96,16 @@
   <!--sigil:app-->
 
   <script>
+    // Anything that goes wrong shows in the status line (a phone has no
+    // console): the loader's own failure text appears in #mount too.
+    (function () {
+      function show(msg) { var s = document.getElementById("status"); if (s) s.textContent = "error: " + msg; }
+      window.addEventListener("error", function (e) { show((e.message || "error") + (e.filename ? " (" + e.filename.split("/").pop() + ":" + e.lineno + ")" : "")); });
+      window.addEventListener("unhandledrejection", function (e) { show("promise: " + (e.reason && (e.reason.message || e.reason) || "rejected")); });
+      var err = console.error;
+      console.error = function () { show(Array.prototype.map.call(arguments, String).join(" ").slice(0, 300)); return err.apply(console, arguments); };
+      setTimeout(function () { var s = document.getElementById("status"); if (s && /loading the wasm/.test(s.textContent)) s.textContent += " (still loading after 20 s: " + (self.crossOriginIsolated ? "isolated" : "not isolated") + ", " + (typeof WebAssembly) + ")"; }, 20000);
+    })();
     var HARM = ["none", "H2", "H2–H3", "H2–H4", "H2–H5", "H2–H5 and H7"];
     var GROUPS = { noises: "The noises", hum: "The hum", finding: "The finding tone", beds: "The region beds (the sliders act on these)", moments: "The moments (each over its bed: the duck, then the return)" };
     var items = [], playing = null, fetched = {};
@@ -142,9 +167,9 @@
         var s = arguments[0];
         if (typeof s === "string" && s.indexOf("sketch: ") === 0) {
           var rest = s.slice(8), sp = rest.indexOf(" "), kind = sp < 0 ? rest : rest.slice(0, sp), arg = sp < 0 ? "" : rest.slice(sp + 1);
-          if (kind === "item") { var f = arg.split("\t"); items.push({ id: f[0], group: f[1], title: f[2], note: f[3] }); render(); }
+          if (kind === "item") { var f = arg.split("\t"); items.push({ id: f[0], group: f[1], title: f[2], note: f[3] }); render(); document.getElementById("status").textContent = "ready: " + items.length + " sketches. Tap one to play."; }
           else if (kind === "fetch") fetchTune(arg.trim());
-          else if (kind === "playing") mark(arg.split(" ")[0]);
+          else if (kind === "playing") { mark(arg.split(" ")[0]); isStill = false; still.className = ""; }
           else if (kind === "stopped") mark(null);
           else if (kind === "status") { var p = arg.split(" "); document.getElementById("status").textContent = "t " + p[0] + " s · synthesis " + p[1] + " ms per second of audio · dry frames " + p[2] + " · players " + p[3]; }
           else if (kind === "audio") document.getElementById("status").textContent = "audio " + arg;

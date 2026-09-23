@@ -86,11 +86,12 @@
       (now mutable: #t)
       (end mutable: #t)
       (harmonics mutable: #t)
-      (voicing mutable: #t))
+      (voicing mutable: #t)
+      (bed-tune mutable: #t))       ; the bed as written, for the voicing swap
 
     (define (make-scene sr loader)
       (scene sr: sr loader: loader entry: #f srcs: '() events: '() now: 0.0 end: #f
-             harmonics: DEFAULT-HARMONICS voicing: 'drone-saw))
+             harmonics: DEFAULT-HARMONICS voicing: (quote drone-saw) bed-tune: #f))
 
     (define (scene-sources sc) (reverse (scene-srcs sc)))
 
@@ -148,11 +149,11 @@
            (let ((s (add-source! sc 'main (cadr how) #f #t 1.0)))
              (set-source-on-end! s (lambda (t) (set-scene-end! sc (+ t 0.5))))))
           ((bed)
-           (add-source! sc 'bed (cadr how) #t #t 1.0)
+           (set-scene-bed-tune! sc (player-tune (source-player (add-source! sc 'bed (cadr how) #t #t 1.0))))
            (apply-bed-defaults! sc)
            (set-scene-end! sc BED-SECONDS))
           ((finding)
-           (add-source! sc 'bed (list-ref how 2) #t #t 1.0)
+           (set-scene-bed-tune! sc (player-tune (source-player (add-source! sc 'bed (list-ref how 2) #t #t 1.0))))
            (apply-bed-defaults! sc)
            (add-source! sc 'tone (cadr how) #t #t TONE-GAIN)
            (when (list-ref how 3)
@@ -160,7 +161,7 @@
              (at! sc MOVE-AT-S (lambda () (still-duck! sc #f MOVE-AT-S))))
            (set-scene-end! sc FINDING-SECONDS))
           ((moment)
-           (add-source! sc 'bed (list-ref how 2) #t #t 1.0)
+           (set-scene-bed-tune! sc (player-tune (source-player (add-source! sc 'bed (list-ref how 2) #t #t 1.0))))
            (apply-bed-defaults! sc)
            (let ((m (add-source! sc 'moment (cadr how) #f #f 1.0)))
              (set-source-on-end! m (lambda (t)
@@ -220,19 +221,29 @@
       (unless (eq? (scene-voicing sc) 'drone-saw)
         (scene-voicing! sc (scene-voicing sc))))
 
-    ;; A tune with every drone-saw / drone-fm instrument set to `kind`.
+    ;; A tune with every drone instrument set to `kind`. Going to drone-fm, an
+    ;; instrument's `fm-index:` and `fm-level:` (keys drone-saw ignores) become
+    ;; the FM voice's index and level: the saw's level and the FM default index
+    ;; would leave H2 13 dB hot and the 73 Hz fundamental with nothing a phone
+    ;; can play (review, 2026-09-24). Always applied to the tune as written, so
+    ;; going back to the saw restores it exactly.
     (define (swap-drone-kind t kind)
       (tune t instruments:
             (map (lambda (i)
                    (if (memq (tune-instrument-kind i) '(drone-saw drone-fm))
-                       (tune-instrument i kind: kind)
+                       (let* ((ps (tune-instrument-params i))
+                              (fm (lambda (from to ps)
+                                    (let ((e (assq from ps))) (if e (cons (cons to (cdr e)) ps) ps))))
+                              (ps (if (eq? kind 'drone-fm) (fm 'fm-index 'index (fm 'fm-level 'level ps)) ps)))
+                         (tune-instrument i kind: kind params: ps))
                        i))
                  (tune-instruments t))))
 
     (define (scene-voicing! sc kind)
       (set-scene-voicing! sc kind)
       (let ((p (bed sc)))
-        (when p (player-set-tune! p (swap-drone-kind (player-tune p) kind)))))
+        (when (and p (scene-bed-tune sc))
+          (player-set-tune! p (swap-drone-kind (scene-bed-tune sc) kind)))))
 
     ;; The stillness duck: the bed down 6 dB and the tone forward 4 dB, or back.
     (define (still-duck! sc on? t)

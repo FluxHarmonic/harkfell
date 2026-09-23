@@ -4,11 +4,11 @@
     (instrument id: 1 name: "wind outside" patch: (noise-bed color: pink level: 1.0 centre: 380 width: 1.2 wander: 0.3 rate: 0.06 gust: 0.5 gust-rate: 0.1 hp: 200 lp: 900 attack: 3 release: 4 seed: 18) volume: 26 gain: 2 send: 0.2)
     (instrument id: 2 name: "drip" patch: (drip level: 0.6 rise: 0.9 sweep: 0.035 decay: 0.07 echo: 0.31 feedback: 0.55 echo-mix: 0.55 hp: 400 seed: 15) volume: 36 gain: 2 send: 0.45)
     (instrument id: 3 name: "pipe" patch: (pipe-breath level: 0.6 width: 0.07 octave: 0.4 tone: 0.1 swell: 0.7 swell-rate: 0.09 attack: 4 release: 5 seed: 21) volume: 34 gain: 2 send: 0.45)
-    (instrument id: 4 name: "H2 D3" patch: (drone-saw level: 0.3 bright: 14 excite: 0.5 excite-freq: 500 breath-rate: 0.0213 breath-lo: 0.15 seed: 2) volume: 28 gain: 2 send: 0.35)
-    (instrument id: 5 name: "H3 A3" patch: (drone-saw level: 0.12 bright: 12 excite: 0.4 excite-freq: 600 cents: 1.955 breath-rate: 0.0323 breath-lo: 0.15 seed: 3) volume: 26 gain: 2 send: 0.35)
-    (instrument id: 6 name: "H4 D4" patch: (drone-saw level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 breath-rate: 0.0189 breath-lo: 0.15 seed: 4) volume: 24 gain: 2 send: 0.35)
-    (instrument id: 7 name: "H5 F#4" patch: (drone-saw level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 cents: -13.686 breath-rate: 0.027 breath-lo: 0.15 seed: 5) volume: 22 gain: 2 send: 0.35)
-    (instrument id: 8 name: "H7 C5" patch: (drone-saw level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 cents: -31.174 breath-rate: 0.0244 breath-lo: 0.3 seed: 7) volume: 20 gain: 2 send: 0.4))
+    (instrument id: 4 name: "H2 D3" patch: (drone-saw level: 0.3 fm-index: 2.4 fm-level: 0.1 bright: 14 excite: 0.5 excite-freq: 500 breath-rate: 0.0213 breath-lo: 0.15 seed: 2) volume: 28 gain: 2 send: 0.35)
+    (instrument id: 5 name: "H3 A3" patch: (drone-saw level: 0.12 fm-index: 1.4 fm-level: 0.12 bright: 12 excite: 0.4 excite-freq: 600 cents: 1.955 breath-rate: 0.0323 breath-lo: 0.15 seed: 3) volume: 26 gain: 2 send: 0.35)
+    (instrument id: 6 name: "H4 D4" patch: (drone-saw level: 0.3 fm-index: 1.8 fm-level: 0.45 bright: 8 excite: 0.3 excite-freq: 900 breath-rate: 0.0189 breath-lo: 0.15 seed: 4) volume: 24 gain: 2 send: 0.35)
+    (instrument id: 7 name: "H5 F#4" patch: (drone-saw level: 0.3 fm-index: 1.1 fm-level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 cents: -13.686 breath-rate: 0.027 breath-lo: 0.15 seed: 5) volume: 22 gain: 2 send: 0.35)
+    (instrument id: 8 name: "H7 C5" patch: (drone-saw level: 0.3 fm-index: 1.0 fm-level: 0.2 bright: 8 excite: 0.3 excite-freq: 900 cents: -31.174 breath-rate: 0.0244 breath-lo: 0.3 seed: 7) volume: 20 gain: 2 send: 0.4))
   (patterns
     (pattern id: 0 rows: 16
       (row 0 (1 "D-4" 1 26 "000") (3 "A-3" 3 34 "000") (4 "D-3" 4 28 "000") (5 "A-3" 5 26 "000") (6 "D-4" 6 24 "000") (7 "F#4" 7 22 "000") (8 "C-5" 8 20 "000"))

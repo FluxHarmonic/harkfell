@@ -5,7 +5,8 @@
 ;;; voice must keep a share of its energy above 300 Hz. The share is
 ;;; measured on a Welch power spectrum (Hann-windowed 4096-point FFTs, half
 ;;; overlapped, averaged): the power in bins above 300 Hz over the power in
-;;; every bin but DC. A pure 147 Hz sine keeps almost none; a filtered saw at
+;;; every bin but DC (with a two-bin guard above the cutoff, see GUARD-BINS). A
+;;; pure 147 Hz sine keeps almost none; a filtered saw at
 ;;; the same pitch keeps its partials at 294, 441, 588 Hz and up.
 ;;;
 ;;;   (energy-share-above samples sr hz)   0..1; samples a vector of flonums
@@ -19,6 +20,11 @@
   (begin
     (define FFT-N 4096)
     (define MAX-FRAMES 64)
+    ;; A Hann window spreads a partial over +-2 bins (+-21.5 Hz at 44.1 kHz), so
+    ;; a bin counts as above hz only from two bins past it: a partial just under
+    ;; hz (H2's octave at 293.7 Hz) cannot leak into "above". Conservative: a
+    ;; partial in those two bins counts as below.
+    (define GUARD-BINS 2)
     (define PI 3.141592653589793)
 
     ;; in place on re, im (vectors of length n, a power of two)
@@ -108,7 +114,7 @@
               (if (> total 0.0) (/ above total) #f)
               (let ((x (vector-ref p k)))
                 (loop (+ k 1)
-                      (if (> (* k hz-per-bin) hz) (+ above x) above)
+                      (if (>= (* k hz-per-bin) (+ hz (* GUARD-BINS hz-per-bin))) (+ above x) above)
                       (+ total x)))))))
 
     (define (rms-db v)

@@ -1,10 +1,10 @@
 (tune version: 1 name: "moment-hollow" tempo: 66 speed: 6 channels: 6
   (bus reverb: zitarev size: 0.9 damp: 0.5 mix: 0.3)
   (instruments
-    (instrument id: 1 name: "stone bell" patch: (fm4-bell index: 1.0 amp-decay: 3.5 amp-release: 1.5 vel-depth: 0.5) volume: 44 send: 0.45)
-    (instrument id: 2 name: "stone bell, far" patch: (fm4-bell index: 0.8 amp-decay: 3 amp-release: 1.5 vel-depth: 0.5) volume: 26 send: 0.6)
-    (instrument id: 3 name: "swell" patch: (warm-pad cutoff: 900 attack: 1.6 release: 3 sustain: 0.8) volume: 30 send: 0.4)
-    (instrument id: 4 name: "low line" patch: (drone-fm level: 0.4 index: 2.5 index-wander: 0 breath-lo: 1 attack: 1.2 release: 3) volume: 34 send: 0.3))
+    (instrument id: 1 name: "stone bell" patch: (fm4-bell index: 1.0 amp-decay: 3.5 amp-release: 1.5 vel-depth: 0.5) volume: 44 gain: 0.7 send: 0.45)
+    (instrument id: 2 name: "stone bell, far" patch: (fm4-bell index: 0.8 amp-decay: 3 amp-release: 1.5 vel-depth: 0.5) volume: 26 gain: 0.7 send: 0.6)
+    (instrument id: 3 name: "swell" patch: (warm-pad cutoff: 900 attack: 1.6 release: 3 sustain: 0.8) volume: 30 gain: 0.7 send: 0.4)
+    (instrument id: 4 name: "low line" patch: (drone-fm level: 0.4 index: 2.5 index-wander: 0 breath-lo: 1 attack: 1.2 release: 3) volume: 34 gain: 0.7 send: 0.3))
   (patterns
     (pattern id: 0 rows: 112
       (row 0 (1 "D-5" 1 44 "000") (3 "D-4" 3 30 "000") (4 "F#4" 3 26 "000") (5 "A-4" 3 24 "000") (6 "D-2" 4 34 "000"))
