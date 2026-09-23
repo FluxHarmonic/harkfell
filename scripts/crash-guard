@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# crash-guard: every Crash tune renders byte-identically on two motif builds.
+#
+# Harkfell adds nodes to motif while Crash depends on it (Harkfell design
+# §10, S0's gate: "every Crash tune renders byte-identically before and
+# after the motif release"). This renders every .cts file in a Crash
+# commit with motif's `motif tune render` on a BASE build and on a
+# CANDIDATE build, hashes the WAVs, and compares them tune by tune.
+#
+#   scripts/crash-guard [options]
+#     --motif DIR        motif checkout whose .git holds both refs
+#                        (default ~/Projects/Code/sigil/motif)
+#     --crash DIR        Crash checkout (default ~/Projects/Code/sigil/crash-the-stack)
+#     --crash-ref REF    Crash commit whose .cts files are the population (default e737d21)
+#     --base REF         motif ref for the base build (default origin/master)
+#     --candidate X      REF: built in a throwaway worktree; dir:PATH: an existing
+#                        checkout, built in place (its working tree, dirty or not)
+#     --rate HZ          render rate (default 44100)
+#     -j N               renders in parallel (default 6)
+#     --timeout S        seconds one render may take (default 900)
+#     --no-cache         render the base even if a cached result exists
+#     --keep DIR         leave the per-tune results in DIR
+#     --only REGEX       limit the population to paths matching REGEX (a smoke run:
+#                        the verdict then says LIMITED and is not the guard)
+#
+# Verdict (the last line): CRASH-GUARD GREEN when the population is non-empty,
+# every tune was classified, no tune differs, no tune rendered on one build
+# only, and at least one tune rendered on both; RED otherwise; SETUP-FAILED
+# when a build could not be made or the population could not be read (nothing
+# was compared). Exit 0 GREEN, 1 RED, 2 SETUP-FAILED.
+#
+# Classes per tune: identical | DIFFER | FAILED-ONE (rendered on one build
+# only) | failed-both (neither renders; a tune the motif of both builds
+# refuses, reported with the error so a reader can judge it).
+#
+# The base result is cached under ${XDG_CACHE_HOME:-~/.cache}/harkfell/crash-guard/
+# keyed by the base commit, the Crash ref, the rate and the sigil version; the
+# script says when it used the cache. A dir: candidate is never cached.
+#
+# While it runs it writes only under a mktemp directory (plus git's worktree
+# bookkeeping in the motif repo's .git, removed again on exit).
+
+set -euo pipefail
+
+MOTIF=${HOME}/Projects/Code/sigil/motif
+CRASH=${HOME}/Projects/Code/sigil/crash-the-stack
+CRASH_REF=e737d21
+BASE=origin/master
+CANDIDATE=
+RATE=44100
+JOBS=6
+TIMEOUT=900
+CACHE=1
+KEEP=
+ONLY=
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --motif) MOTIF=$2; shift 2 ;;
+    --crash) CRASH=$2; shift 2 ;;
+    --crash-ref) CRASH_REF=$2; shift 2 ;;
+    --base) BASE=$2; shift 2 ;;
+    --candidate) CANDIDATE=$2; shift 2 ;;
+    --rate) RATE=$2; shift 2 ;;
+    -j) JOBS=$2; shift 2 ;;
+    --timeout) TIMEOUT=$2; shift 2 ;;
+    --no-cache) CACHE=0; shift ;;
+    --keep) KEEP=$2; shift 2 ;;
+    --only) ONLY=$2; shift 2 ;;
+    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    *) echo "crash-guard: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+
+setup_failed() { echo "crash-guard: $*" >&2; echo "CRASH-GUARD SETUP-FAILED ($*)"; exit 2; }
+
+[ -n "$CANDIDATE" ] || setup_failed "--candidate is required"
+command -v sigil >/dev/null || setup_failed "sigil is not on PATH"
+command -v sha256sum >/dev/null || setup_failed "sha256sum is not on PATH"
+git -C "$MOTIF" rev-parse --git-dir >/dev/null 2>&1 || setup_failed "$MOTIF is not a git checkout"
+git -C "$CRASH" rev-parse --verify -q "$CRASH_REF^{commit}" >/dev/null || setup_failed "Crash ref $CRASH_REF not in $CRASH"
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/crash-guard.XXXXXX")
+WORKTREES=()
+cleanup() {
+  for w in "${WORKTREES[@]:-}"; do
+    [ -n "$w" ] && git -C "$MOTIF" worktree remove --force "$w" >/dev/null 2>&1 || true
+  done
+  if [ -n "$KEEP" ]; then mkdir -p "$KEEP" && cp -r "$WORK"/results-* "$WORK"/*.sums "$KEEP"/ 2>/dev/null || true; fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+SIGIL_VERSION=$(sigil --version 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tr -s ' ' | tr ' ' '_')
+CRASH_SHA=$(git -C "$CRASH" rev-parse "$CRASH_REF^{commit}")
+
+# --- the population: every .cts in the Crash commit -------------------------
+mkdir -p "$WORK/tunes"
+git -C "$CRASH" ls-tree -r --name-only "$CRASH_SHA" | grep '\.cts$' > "$WORK/population.txt" || true
+if [ -n "$ONLY" ]; then grep -E "$ONLY" "$WORK/population.txt" > "$WORK/pop.only" || true; mv "$WORK/pop.only" "$WORK/population.txt"; fi
+POP=$(wc -l < "$WORK/population.txt")
+[ "$POP" -gt 0 ] || setup_failed "no .cts files in Crash $CRASH_SHA"
+while IFS= read -r path; do
+  key=$(printf '%s' "$path" | tr '/' '~')
+  git -C "$CRASH" show "$CRASH_SHA:$path" > "$WORK/tunes/$key"
+done < "$WORK/population.txt"
+EXTRACTED=$(find "$WORK/tunes" -type f | wc -l)
+[ "$EXTRACTED" -eq "$POP" ] || setup_failed "extracted $EXTRACTED of $POP tunes"
+echo "crash-guard: population $POP .cts files at Crash $CRASH_SHA; rate $RATE; sigil $SIGIL_VERSION"
+
+# --- build one motif ----------------------------------------------------------
+# build_motif LABEL SPEC -> sets BUILT_DIR; SPEC is a ref or dir:PATH
+build_motif() {
+  local label=$1 spec=$2 dir
+  if [ "${spec#dir:}" != "$spec" ]; then
+    dir=$(cd "${spec#dir:}" && pwd)
+  else
+    git -C "$MOTIF" rev-parse --verify -q "$spec^{commit}" >/dev/null || setup_failed "motif ref $spec not found"
+    dir="$WORK/motif-$label"
+    git -C "$MOTIF" worktree add --detach "$dir" "$spec" >/dev/null 2>&1 || setup_failed "worktree for $spec"
+    WORKTREES+=("$dir")
+  fi
+  (cd "$dir" && sigil deps install > "$WORK/deps-$label.log" 2>&1) || setup_failed "deps install ($label), see log"
+  (cd "$dir" && sigil build > "$WORK/build-$label.log" 2>&1) || { tail -20 "$WORK/build-$label.log" >&2; setup_failed "build ($label)"; }
+  [ -x "$dir/build/dev/bin/motif" ] || setup_failed "no build/dev/bin/motif after the $label build"
+  BUILT_DIR=$dir
+}
+
+describe() {
+  local dir=$1
+  local sha dirty
+  sha=$(git -C "$dir" rev-parse HEAD)
+  dirty=$(git -C "$dir" status --porcelain --untracked-files=no | wc -l)
+  echo "sha $sha, $dirty modified tracked file(s), binary $dir/build/dev/bin/motif ($(stat -c '%y' "$dir/build/dev/bin/motif"))"
+}
+
+# --- render the population with one build -----------------------------------
+# Each result line: KEY ok SHA256 | KEY failed REASON | KEY timeout
+render_all() {
+  local label=$1 dir=$2
+  local out="$WORK/results-$label"
+  mkdir -p "$out"
+  export GUARD_BIN="$dir/build/dev/bin/motif" GUARD_RATE=$RATE GUARD_TIMEOUT=$TIMEOUT GUARD_OUT=$out GUARD_WAV="$WORK/wav-$label" GUARD_TUNES="$WORK/tunes"
+  mkdir -p "$GUARD_WAV"
+  find "$WORK/tunes" -type f -printf '%f\n' | sort | xargs -P "$JOBS" -I{} bash -c '
+    key=$1; wav="$GUARD_WAV/$key.wav"; log="$GUARD_OUT/$key.log"
+    if timeout -s KILL "$GUARD_TIMEOUT" "$GUARD_BIN" tune render "$GUARD_TUNES/$key" -o "$wav" -r "$GUARD_RATE" > "$log" 2>&1; then rc=0; else rc=$?; fi
+    if [ "$rc" -eq 137 ]; then echo "$key timeout" > "$GUARD_OUT/$key.res"
+    elif [ "$rc" -eq 0 ] && grep -q "^Done. Wrote" "$log" && [ -s "$wav" ]; then
+      echo "$key ok $(sha256sum "$wav" | cut -d" " -f1) $(stat -c %s "$wav")" > "$GUARD_OUT/$key.res"
+    else
+      echo "$key failed rc=$rc $(tr "\n" " " < "$log" | cut -c1-200)" > "$GUARD_OUT/$key.res"
+    fi
+    rm -f "$wav"' _ {}
+  cat "$out"/*.res | sort > "$WORK/$label.sums"
+  local n
+  n=$(wc -l < "$WORK/$label.sums")
+  [ "$n" -eq "$POP" ] || setup_failed "$label produced $n results for $POP tunes"
+}
+
+# --- base: cached or rendered -------------------------------------------------
+BASE_SHA=$(git -C "$MOTIF" rev-parse --verify -q "$BASE^{commit}") || setup_failed "base ref $BASE not found"
+CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/harkfell/crash-guard
+CACHE_FILE="$CACHE_DIR/${BASE_SHA}-${CRASH_SHA}-${RATE}-${SIGIL_VERSION}.sums"
+if [ -z "$ONLY" ] && [ "$CACHE" -eq 1 ] && [ -s "$CACHE_FILE" ] && [ "$(wc -l < "$CACHE_FILE")" -eq "$POP" ]; then
+  cp "$CACHE_FILE" "$WORK/base.sums"
+  echo "crash-guard: base motif $BASE_SHA FROM CACHE $CACHE_FILE (--no-cache renders it again)"
+else
+  t0=$(date +%s)
+  build_motif base "$BASE_SHA"; base_dir=$BUILT_DIR
+  echo "crash-guard: base motif $(describe "$base_dir")"
+  render_all base "$base_dir"
+  echo "crash-guard: base rendered in $(( $(date +%s) - t0 )) s"
+  [ -n "$ONLY" ] || { mkdir -p "$CACHE_DIR" && cp "$WORK/base.sums" "$CACHE_FILE"; }
+fi
+
+# --- candidate ----------------------------------------------------------------
+t0=$(date +%s)
+build_motif candidate "$CANDIDATE"; cand_dir=$BUILT_DIR
+echo "crash-guard: candidate motif $(describe "$cand_dir")"
+render_all candidate "$cand_dir"
+echo "crash-guard: candidate rendered in $(( $(date +%s) - t0 )) s"
+
+# --- compare --------------------------------------------------------------------
+identical=0; differ=0; failed_one=0; failed_both=0; other=0
+while IFS= read -r key; do
+  b=$(grep -m1 "^$key " "$WORK/base.sums" || true)
+  c=$(grep -m1 "^$key " "$WORK/candidate.sums" || true)
+  bs=$(echo "$b" | cut -d' ' -f2); cs=$(echo "$c" | cut -d' ' -f2)
+  if [ "$bs" = ok ] && [ "$cs" = ok ]; then
+    if [ "$(echo "$b" | cut -d' ' -f3)" = "$(echo "$c" | cut -d' ' -f3)" ]; then
+      identical=$((identical + 1))
+    else
+      differ=$((differ + 1)); echo "DIFFER      $key"
+    fi
+  elif [ "$bs" = ok ] || [ "$cs" = ok ]; then
+    failed_one=$((failed_one + 1)); echo "FAILED-ONE  $key  base: ${b#"$key "}  candidate: ${c#"$key "}"
+  elif [ -n "$bs" ] && [ -n "$cs" ]; then
+    failed_both=$((failed_both + 1)); echo "failed-both $key  ${c#"$key "}"
+  else
+    other=$((other + 1)); echo "OTHER       $key  base: '$b' candidate: '$c'"
+  fi
+done < <(find "$WORK/tunes" -type f -printf '%f\n' | sort)
+
+classified=$((identical + differ + failed_one + failed_both + other))
+echo "crash-guard: population $POP, classified $classified: identical $identical, DIFFER $differ, FAILED-ONE $failed_one, failed-both $failed_both, other $other"
+if [ "$classified" -eq "$POP" ] && [ "$differ" -eq 0 ] && [ "$failed_one" -eq 0 ] && [ "$other" -eq 0 ] && [ "$identical" -ge 1 ]; then
+  echo "CRASH-GUARD GREEN${ONLY:+ LIMITED to /$ONLY/} ($identical of $POP tunes byte-identical, $failed_both render on neither build)"
+  exit 0
+fi
+echo "CRASH-GUARD RED${ONLY:+ LIMITED to /$ONLY/}"
+exit 1
