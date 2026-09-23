@@ -1,0 +1,22 @@
+;;; (sketchbook main) - The entry: the page's wasm on the web, the tool natively
+;;;
+;;; On the web the wasm runtime resolves main (the boot) and
+;;; sigil-web-dispatch-event (every event from the page); natively main is
+;;; the `sketchbook` tool.
+
+(define-library (sketchbook main)
+  (cond-expand
+    (wasm (import (sketchbook web)))
+    (else (import (sigil core) (sigil process) (sketchbook cli))))
+
+  (export main sigil-web-dispatch-event)
+
+  (begin
+    (cond-expand
+      (wasm
+       (define (main . args) (web-main))
+       (define (sigil-web-dispatch-event type payload) (web-dispatch type payload)))
+      (else
+       ;; the status must leave through exit: the entrypoint ignores main's value
+       (define (main . args) (exit (cli-main)))
+       (define (sigil-web-dispatch-event type payload) 0)))))

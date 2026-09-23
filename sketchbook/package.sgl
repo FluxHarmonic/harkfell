@@ -1,0 +1,110 @@
+;;; Harkfell's sound sketchbook (S0, design §10 and ruling D18): the noises,
+;;; the drone, the finding tone and the first music moments, as .cts tunes
+;;; played live by motif, before any engine exists.
+;;;
+;;; A package of its own beside the game's (the repo root), so the game's
+;;; lock does not carry motif while the motif these sketches need is
+;;; unreleased. One entry, two arms: (sketchbook main) is the page's wasm on
+;;; the web config and the `sketchbook` tool natively.
+;;;
+;;;   sigil deps install && sigil build             the tool: build/dev/bin/sketchbook
+;;;   sigil build --config web                      the page: build/web/
+;;;   scripts/gate                                  the S0 render gates
+;;;   scripts/host                                  build the page, serve on wg0 8795 (https) and 8796
+;;;
+;;; motif: until the leader tags the release with the 0.7.0 nodes, point
+;;; .sigil/deps/motif at the motif checkout that has them and rebuild with
+;;; --force (dev-redirects do not reach a from-git package; see
+;;; procedures/worker-instructions). The tool checks it at startup: a motif
+;;; without the noise-bed kind is refused.
+
+(import (sigil process) (sigil string) (sigil time) (sigil math) (sigil fs))
+
+(define sigil-repo "codeberg:sigil/sigil")
+
+;; The page's version: the git commit, plus the second when the tree is dirty.
+(define (web-version)
+  (let* ((sha (string-trim (process-output->string "git" "rev-parse" "--short=12" "HEAD")))
+         (dirty (string-trim (process-output->string "git" "status" "--porcelain" "--untracked-files=no")))
+         (sha (if (string=? sha "") "unversioned" sha)))
+    (if (string=? dirty "")
+        sha
+        (string-append sha "-dirty-" (number->string (exact (floor (current-second))))))))
+
+;; After the link: the page's __VERSION__ stamped, the COOP/COEP headers
+;; beside it (the repo's web/_headers, the same file the game ships).
+(define (stamp-page ctx)
+  (let* ((out (config-output-dir (context-config ctx)))
+         (page-path (path-join out "index.html"))
+         (page (read-file-string page-path)))
+    (write-file-string (path-join out "_headers") (read-file-string "../web/_headers"))
+    (write-file-string page-path (string-replace page "__VERSION__" (web-version)))
+    (display "  sketchbook version ") (display (web-version)) (newline)
+    ctx))
+
+(package
+  name: "harkfell-sketchbook"
+  version: "0.0.1"
+  sigil: "0.22.5"
+  description: "Harkfell's sound sketchbook: beds, the drone and moments, live on motif"
+  license: "GPL-3.0-or-later"
+  authors: (list "David Wilson <david@daviwil.com>")
+
+  entry: '(sketchbook main)
+  bundle-name: "sketchbook"
+
+  configs: (list
+    (config
+      name: 'dev
+      output-dir: "build/dev"
+      debug?: #t
+      optimize: 0
+      bundle?: #t)
+    ;; the tool at native speed: its FFTs and the scene mix are Sigil loops
+    (config
+      name: 'release
+      output-dir: "build/release"
+      debug?: #f
+      optimize: 2
+      backend: 'native
+      bundle?: #t)
+    (config
+      name: 'web
+      output-dir: "build/web"
+      toolchain: 'zig
+      target: "wasm32-wasi"
+      backend: 'native
+      debug?: #f
+      optimize: 2
+      bundle?: #t
+      features: '(web wasm)))
+
+  dependencies: (list
+    ;; The tune model, the player and the render, both targets. ^0.6.6 until
+    ;; the release with the 0.7.0 nodes is tagged (see the header).
+    (from-git url: "codeberg:sigil/motif" version: "^0.6.6")
+    ;; The sink: sokol natively (unused by the tool), the WebAudio bridge on the web.
+    (from-git url: "codeberg:sigil/sigil-audio" version: "^0.12.2")
+    (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.5" configs: '(web))
+    (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.5" configs: '(web)))
+
+  tasks: (list
+    (task
+      name: 'build
+      description: "Compile the sketchbook (and, on the web config, link the page)"
+      steps: (list
+        (lambda (ctx)
+          (if (memq (target-os ctx) '(wasm wasi))
+              ((compile-c-sources sources: (list "src/c/wasm-audio-stub.c")
+                                  flags: (with-sigil-c-flags '("-std=c99"))) ctx)
+              ctx))
+        (lambda (ctx)
+          (if (memq (target-os ctx) '(wasm wasi))
+              ((create-static-library name: "harkfell-sketchbook") ctx)
+              ctx))
+        (compile-sigil-modules sources: "src/**/*.sgl")
+        (link-assets)
+        (lambda (ctx)
+          (if (memq (target-os ctx) '(wasm wasi))
+              (stamp-page ((link-web-application name: "sketchbook" html-mount-id: "mount") ctx))
+              ctx))))))

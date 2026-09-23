@@ -1,0 +1,243 @@
+;;; (sketchbook web) - The page's wasm: scenes played live through the sink
+;;;
+;;; The page (index.template.html) owns the controls and the fetches; this
+;;; owns the players. Every source of the playing scene has a sink stream
+;;; of its own, pumped each frame toward DEPTH frames ahead of the output,
+;;; and the source's gain is the stream's volume (applied at output time,
+;;; so a duck is heard at once rather than a sink's depth later).
+;;;
+;;; Dispatches (type payload):
+;;;   frame MS              the page's animation frame (and its timer)
+;;;   gesture NAME          a user gesture: resume the audio context
+;;;   catalog -             print the catalog for the page's buttons
+;;;   tune-chunk TEXT       part of a tune file's text, then
+;;;   tune-done NAME        the text is complete
+;;;   play ID | stop -      start a sketch (asks for missing tunes first) | stop
+;;;   level GROUP,V         wind|water|texture|drone, 0..1, on the bed
+;;;   harmonics K           0..5 of H2 H3 H4 H5 H7 sound in the bed
+;;;   voicing saw|fm        the bed's drone voice
+;;;   still on|off          the stillness duck, by hand (a finding sketch)
+;;; Lines (console.log, the page reads the "sketch:" ones):
+;;;   sketch: item ID<tab>GROUP<tab>TITLE<tab>NOTE      the catalog
+;;;   sketch: fetch NAME                                 fetch assets/tunes/NAME.cts
+;;;   sketch: playing ID | sketch: stopped | sketch: error MSG
+;;;   sketch: audio RATE running|suspended|none
+;;;   sketch: status T PULL-MS DRY SOURCES                 twice a second
+
+(define-library (sketchbook web)
+  (import (sigil core)
+          (sigil math)
+          (sigil string)
+          (sigil time)
+          (sigil audio sink)
+          (motif tune)
+          (sketchbook catalog)
+          (sketchbook scene))
+  (export web-main web-dispatch)
+  (begin
+    (define DEPTH 16384)          ; kept ahead: 341 ms at 48 kHz (Crash's SOURCE-DEPTH)
+    (define BUFFER 32768)         ; the ring
+    (define PUSH-MAX 4096)
+    (define PUSH-RAMP 2048)       ; a fresh or dry stream fills in smaller pumps
+    (define RAMP-BELOW 4096)
+
+    (define *ctx* #f)
+    (define *sr* 48000)
+    (define *texts* '())          ; ((name . text) ...)
+    (define *chunks* '())
+    (define *scene* #f)
+    (define *streams* '())        ; ((id . stream) ...)
+    (define *start-ms* #f)
+    (define *pending* #f)         ; an entry waiting for its tunes
+    (define *buf* (make-bytevector (* 8 PUSH-MAX) 0))
+    (define *pull-ms* 0.0)        ; this second's pull cost
+    (define *pull-frames* 0)
+    (define *status-at* 0)
+    (define *dry-base* 0)
+    (define *dry-closed* 0)        ; starved frames of streams already closed
+    (define *controls* '())       ; the page's live settings, applied again on each start
+
+    (define (tell . parts)
+      (println "~a" (apply string-append "sketch: " parts)))
+
+    (define (num x) (number->string x))
+
+    ;; --- audio ------------------------------------------------------------------------
+    (define (audio-open!)
+      (unless *ctx*
+        (set! *ctx* (guard (e (#t #f)) (audio-context-open)))
+        (when *ctx* (set! *sr* (audio-context-sample-rate *ctx*)))
+        (tell "audio " (num *sr*) " "
+              (if *ctx* (symbol->string (guard (e (#t 'unknown)) (audio-context-state *ctx*))) "none"))))
+
+    (define (gesture!)
+      (audio-open!)
+      (when (and *ctx* (not (eq? (guard (e (#t #f)) (audio-context-state *ctx*)) 'running)))
+        (guard (e (#t #f)) (audio-context-resume *ctx*)))
+      0)
+
+    (define (stream-for id)
+      (let ((e (assq id *streams*)))
+        (if e
+            (cdr e)
+            (let ((s (guard (e (#t #f)) (open-audio-stream channels: 2 buffer-frames: BUFFER))))
+              (when s (set! *streams* (cons (cons id s) *streams*)))
+              s))))
+
+    (define (close-streams!)
+      (for-each (lambda (e) (guard (x (#t #f)) (close-audio-stream! (cdr e)))) *streams*)
+      (set! *streams* '()))
+
+    (define (dry-frames)
+      (let loop ((es *streams*) (n 0))
+        (if (null? es) (+ n *dry-closed*) (loop (cdr es) (+ n (guard (e (#t 0)) (audio-stream-underruns (cdr (car es)))))))))
+
+    ;; --- tunes ----------------------------------------------------------------------------
+    (define (text-of name) (let ((e (assoc name *texts*))) (and e (cdr e))))
+
+    (define (loader name)
+      (let ((text (text-of name)))
+        (and text (read-tune-string text))))
+
+    (define (entry-files e) (filter string? (cdr (entry-how e))))
+
+    (define (missing e) (filter (lambda (f) (not (text-of f))) (entry-files e)))
+
+    ;; --- scenes -----------------------------------------------------------------------------
+    (define (stop!)
+      (when *scene* (scene-close! *scene*))
+      (close-streams!)
+      (set! *scene* #f)
+      (set! *dry-closed* 0)
+      (set! *pending* #f)
+      (tell "stopped"))
+
+    (define (play! id)
+      (stop!)
+      (gesture!)
+      (let ((e (catalog-entry (string->symbol id))))
+        (cond ((not e) (tell "error no sketch " id))
+              ((pair? (missing e))
+               (set! *pending* e)
+               (for-each (lambda (f) (tell "fetch " f)) (missing e)))
+              (else (start! e))))
+      0)
+
+    (define (start! e)
+      (set! *pending* #f)
+      (guard (x (#t (tell "error " (if (error-object? x) (error-object-message x) "while opening"))
+                    (set! *scene* #f)))
+        (let ((t0 (current-milliseconds))
+              (sc (make-scene *sr* loader)))
+          (scene-start! sc e)
+          (set! *scene* sc)
+          (for-each apply-control! (reverse *controls*))
+          (set! *start-ms* #f)
+          (set! *dry-base* 0)
+          (tell "playing " (symbol->string (entry-id e)) " (opened in " (num (- (current-milliseconds) t0)) " ms)"))))
+
+    (define (apply-control! c)
+      (when *scene*
+        (case (car c)
+          ((level) (scene-bed-level! *scene* (cadr c) (caddr c)))
+          ((harmonics) (scene-harmonics! *scene* (cadr c)))
+          ((voicing) (scene-voicing! *scene* (cadr c))))))
+
+    (define (control! c)
+      (set! *controls* (cons c (filter (lambda (x) (not (and (eq? (car x) (car c))
+                                                              (or (not (eq? (car c) 'level)) (eq? (cadr x) (cadr c))))))
+                                       *controls*)))
+      (apply-control! c)
+      0)
+
+    ;; --- the frame ------------------------------------------------------------------------------
+    ;; A source gets its stream when it goes live (an open stream with nothing
+    ;; pushed counts starved frames: the moment waiting for its trigger read
+    ;; as 200k dry frames, 2026-09-23) and gives it up once it has ended and
+    ;; the stream has played out.
+    (define (pump-source! s now)
+      (cond
+        ((source-live? s)
+         (let ((st (stream-for (source-id s))))
+           (when st
+             (set-audio-stream-volume! st (max 0.0 (min 1.0 (source-gain s now))))
+             (let* ((depth (audio-stream-depth st))
+                    (n (min (if (< depth RAMP-BELOW) PUSH-RAMP PUSH-MAX)
+                            (audio-stream-room st)
+                            (- DEPTH depth))))
+               (when (> n 0)
+                 (let ((t0 (current-milliseconds)))
+                   (when (source-pull! *scene* s *buf* n (/ depth (* 1.0 *sr*)))
+                     (push-audio-samples st *buf* n))
+                   (set! *pull-ms* (+ *pull-ms* (- (current-milliseconds) t0)))
+                   (set! *pull-frames* (+ *pull-frames* n))))))))
+        ((source-ended? s)
+         (let ((e (assq (source-id s) *streams*)))
+           (when e
+             (if (> (audio-stream-depth (cdr e)) 0)
+                 (set-audio-stream-volume! (cdr e) (max 0.0 (min 1.0 (source-gain s now))))
+                 (begin
+                   (set! *dry-closed* (+ *dry-closed* (audio-stream-underruns (cdr e))))
+                   (guard (x (#t #f)) (close-audio-stream! (cdr e)))
+                   (set! *streams* (filter (lambda (x) (not (eq? (car x) (source-id s)))) *streams*)))))))
+        (else #f)))
+
+    (define (frame! payload)
+      (let ((ms (or (string->number payload) (current-milliseconds))))
+        (when *scene*
+          (unless *start-ms* (set! *start-ms* ms))
+          (let ((now (/ (- ms *start-ms*) 1000.0)))
+            (scene-tick! *scene* now)
+            (for-each (lambda (s) (pump-source! s now)) (scene-sources *scene*))
+            (when (>= ms *status-at*)
+              (set! *status-at* (+ ms 500))
+              ;; the pull cost as ms per second of audio: under 1000 keeps up
+              (tell "status " (num (/ (round (* now 10.0)) 10.0)) " "
+                    (num (if (> *pull-frames* 0) (round (/ *pull-ms* (/ *pull-frames* (* 1.0 *sr*)))) 0)) " "
+                    (num (dry-frames)) " "
+                    (num (length (filter source-live? (scene-sources *scene*)))))
+              (set! *pull-ms* 0.0)
+              (set! *pull-frames* 0)))))
+      0)
+
+    ;; --- dispatch ---------------------------------------------------------------------------------
+    (define (tune-done! name)
+      (let ((text (apply string-append (reverse *chunks*))))
+        (set! *chunks* '())
+        (set! *texts* (cons (cons name text) *texts*))
+        (when (and *pending* (null? (missing *pending*)))
+          (start! *pending*))
+        0))
+
+    (define (split-comma s)
+      (let ((i (string-index s #\,)))
+        (if i (cons (substring s 0 i) (substring s (+ i 1) (string-length s))) (cons s ""))))
+
+    (define (web-dispatch type payload)
+      (cond ((string=? type "frame") (frame! payload))
+            ((string=? type "gesture") (gesture!))
+            ((string=? type "catalog")
+             (for-each (lambda (e)
+                         (tell "item " (symbol->string (entry-id e)) "\t" (symbol->string (entry-group e)) "\t"
+                               (entry-title e) "\t" (entry-note e)))
+                       CATALOG)
+             0)
+            ((string=? type "tune-chunk") (set! *chunks* (cons payload *chunks*)) 0)
+            ((string=? type "tune-done") (tune-done! payload))
+            ((string=? type "play") (play! payload))
+            ((string=? type "stop") (stop!) 0)
+            ((string=? type "level")
+             (let* ((p (split-comma payload)) (v (string->number (cdr p))))
+               (if v (control! (list 'level (string->symbol (car p)) v)) 0)))
+            ((string=? type "harmonics")
+             (let ((k (string->number payload))) (if k (control! (list 'harmonics k)) 0)))
+            ((string=? type "voicing")
+             (control! (list 'voicing (if (string=? payload "fm") 'drone-fm 'drone-saw))))
+            ((string=? type "still")
+             (when *scene* (scene-still! *scene* (string=? payload "on")))
+             0)
+            (else 0)))
+
+    (define (web-main)
+      (tell "ready")
+      0)))

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10141a">
+  <title>Harkfell sketchbook</title>
+  <!-- version: "__VERSION__" -->
+  <!-- Harkfell's sound sketchbook (S0). The wasm (sketchbook.wasm) plays
+       every sketch live through motif; this page owns the buttons, the
+       sliders and the fetches of assets/tunes/NAME.cts. The build puts the
+       loader's mount and script tag at the marker and stamps __VERSION__. -->
+  <style>
+    :root { --bg: #10141a; --fg: #d8dee6; --dim: #8a96a4; --line: #2a323c; --accent: #9fd3c7; --warn: #e6b87a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 16px 16px 180px; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    h2 { font-size: 1.05rem; margin: 24px 0 8px; color: var(--accent); }
+    p.lead, p.small { color: var(--dim); margin: 4px 0; }
+    p.small { font-size: 0.85rem; }
+    .item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+    .item button { flex: 0 0 auto; min-width: 64px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line);
+                   background: #1b222b; color: var(--fg); font: inherit; cursor: pointer; }
+    .item button.on { background: var(--accent); color: #0b1014; border-color: var(--accent); }
+    .item .t { font-weight: 600; }
+    .item .n { color: var(--dim); font-size: 0.9rem; }
+    #dock { position: fixed; left: 0; right: 0; bottom: 0; background: #151b22; border-top: 1px solid var(--line); }
+    #dock .in { max-width: 760px; margin: 0 auto; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+    #now { font-weight: 600; }
+    #status { color: var(--dim); font: 12px ui-monospace, monospace; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 6px; }
+    .row label { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--dim); }
+    .row input[type=range] { width: 110px; }
+    .row button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: #1b222b; color: var(--fg); font: inherit; }
+    .row button.on { background: var(--warn); color: #0b1014; border-color: var(--warn); }
+    #mount { display: none; }
+  </style>
+  <script>
+    // ?rate=N renders every sketch at N Hz and lets the browser resample to
+    // the device: the WebAudio bridge opens `new AudioContext()` with no
+    // options, so the page supplies the rate by wrapping the constructor
+    // before the loader runs. Nothing is set without the parameter.
+    (function () {
+      var want = Number(new URLSearchParams(location.search).get("rate"));
+      var Base = window.AudioContext || window.webkitAudioContext;
+      if (want > 0 && Base) {
+        var Wrapped = function (opts) { return new Base(Object.assign({ sampleRate: want }, opts || {})); };
+        Wrapped.prototype = Base.prototype;
+        window.AudioContext = Wrapped;
+        if (window.webkitAudioContext) window.webkitAudioContext = Wrapped;
+      }
+    })();
+  </script>
+</head>
+<body>
+  <main>
+    <h1>Harkfell: the sound sketchbook</h1>
+    <p class="lead">Every sound here is synthesised live by motif as you listen; nothing is recorded.</p>
+    <p class="small">Try each on your phone's speaker, on laptop speakers and on headphones. <span id="iso"></span> Render rate: <a href="?">device</a> · <a href="?rate=32000">32000</a> · <a href="?rate=24000">24000</a>.</p>
+    <div id="list"></div>
+  </main>
+
+  <div id="dock"><div class="in">
+    <div><span id="now">Tap a sketch to play it.</span> <button id="stop" style="float:right">Stop</button></div>
+    <div class="row" id="bedrow">
+      <label>wind <input type="range" min="0" max="100" value="100" data-level="wind"></label>
+      <label>water <input type="range" min="0" max="100" value="100" data-level="water"></label>
+      <label>texture <input type="range" min="0" max="100" value="100" data-level="texture"></label>
+      <label>drone <input type="range" min="0" max="100" value="100" data-level="drone"></label>
+    </div>
+    <div class="row">
+      <label>harmonics carried <input type="range" id="harm" min="0" max="5" value="4"> <span id="harmv">H2–H5</span></label>
+      <button id="voicing">drone: saw</button>
+      <button id="still">stand still</button>
+    </div>
+    <div id="status">loading the wasm…</div>
+  </div></div>
+
+
+  <!--sigil:app-->
+
+  <script>
+    var HARM = ["none", "H2", "H2–H3", "H2–H4", "H2–H5", "H2–H5 and H7"];
+    var GROUPS = { noises: "The noises", hum: "The hum", finding: "The finding tone", beds: "The region beds (the sliders act on these)", moments: "The moments (each over its bed: the duck, then the return)" };
+    var items = [], playing = null, fetched = {};
+    document.getElementById("iso").textContent = self.crossOriginIsolated ? "(isolated: the worklet path the game takes)" : "(NOT isolated: a slower audio path)";
+
+    function withApp(fn) {
+      if (globalThis.SigilWebApp) { fn(globalThis.SigilWebApp); return; }
+      document.addEventListener("sigil-web-app-ready", function (e) { fn(e.detail); }, { once: true });
+    }
+    function send(type, payload) { withApp(function (app) { app.dispatch(type, String(payload)); }); }
+
+    // a tune's text to the wasm, 8 KB a dispatch, then ("tune-done", name)
+    function fetchTune(name) {
+      if (!/^[a-z0-9-]+$/.test(name) || fetched[name]) return;
+      fetched[name] = true;
+      fetch("assets/tunes/" + name + ".cts").then(function (r) {
+        if (!r.ok) throw new Error("tune " + r.status);
+        return r.text();
+      }).then(function (text) {
+        withApp(function (app) {
+          for (var i = 0; i < text.length; i += 8192) app.dispatch("tune-chunk", text.slice(i, i + 8192));
+          app.dispatch("tune-done", name);
+        });
+      }, function (err) { fetched[name] = false; document.getElementById("now").textContent = "could not fetch " + name + ": " + err.message; });
+    }
+
+    function render() {
+      var list = document.getElementById("list"), group = null;
+      list.innerHTML = "";
+      items.forEach(function (it) {
+        if (it.group !== group) {
+          group = it.group;
+          var h = document.createElement("h2"); h.textContent = GROUPS[group] || group; list.appendChild(h);
+        }
+        var row = document.createElement("div"); row.className = "item";
+        var b = document.createElement("button"); b.textContent = "play"; b.dataset.id = it.id;
+        b.addEventListener("click", function () { send("play", it.id); });
+        var text = document.createElement("div");
+        text.innerHTML = '<div class="t"></div><div class="n"></div>';
+        text.querySelector(".t").textContent = it.title;
+        text.querySelector(".n").textContent = it.note;
+        row.appendChild(b); row.appendChild(text); list.appendChild(row);
+      });
+    }
+
+    function mark(id) {
+      playing = id;
+      document.querySelectorAll(".item button").forEach(function (b) {
+        var on = b.dataset.id === id; b.className = on ? "on" : ""; b.textContent = on ? "playing" : "play";
+      });
+      var it = items.find(function (x) { return x.id === id; });
+      document.getElementById("now").textContent = it ? it.title : "Tap a sketch to play it.";
+    }
+
+    // the wasm's lines
+    (function () {
+      var log = console.log;
+      console.log = function () {
+        var s = arguments[0];
+        if (typeof s === "string" && s.indexOf("sketch: ") === 0) {
+          var rest = s.slice(8), sp = rest.indexOf(" "), kind = sp < 0 ? rest : rest.slice(0, sp), arg = sp < 0 ? "" : rest.slice(sp + 1);
+          if (kind === "item") { var f = arg.split("\t"); items.push({ id: f[0], group: f[1], title: f[2], note: f[3] }); render(); }
+          else if (kind === "fetch") fetchTune(arg.trim());
+          else if (kind === "playing") mark(arg.split(" ")[0]);
+          else if (kind === "stopped") mark(null);
+          else if (kind === "status") { var p = arg.split(" "); document.getElementById("status").textContent = "t " + p[0] + " s · synthesis " + p[1] + " ms per second of audio · dry frames " + p[2] + " · players " + p[3]; }
+          else if (kind === "audio") document.getElementById("status").textContent = "audio " + arg;
+          else if (kind === "error") document.getElementById("now").textContent = "error: " + arg;
+        }
+        return log.apply(console, arguments);
+      };
+    })();
+
+    // every gesture may resume the audio context (the autoplay policy)
+    ["pointerup", "touchend", "click", "keydown"].forEach(function (n) {
+      document.addEventListener(n, function () { send("gesture", n); }, true);
+    });
+    document.getElementById("stop").addEventListener("click", function () { send("stop", ""); });
+    document.querySelectorAll("[data-level]").forEach(function (el) {
+      el.addEventListener("input", function () { send("level", el.dataset.level + "," + (el.value / 100)); });
+    });
+    var harm = document.getElementById("harm");
+    harm.addEventListener("input", function () { document.getElementById("harmv").textContent = HARM[harm.value]; send("harmonics", harm.value); });
+    var voicing = document.getElementById("voicing"), fm = false;
+    voicing.addEventListener("click", function () { fm = !fm; voicing.textContent = "drone: " + (fm ? "FM" : "saw"); send("voicing", fm ? "fm" : "saw"); });
+    var still = document.getElementById("still"), isStill = false;
+    still.addEventListener("click", function () { isStill = !isStill; still.className = isStill ? "on" : ""; send("still", isStill ? "on" : "off"); });
+
+    // frames: the animation frame, and a timer for when frames are throttled
+    withApp(function (app) {
+      app.dispatch("catalog", "");
+      function frame(t) { app.dispatch("frame", String(Math.round(performance.now()))); requestAnimationFrame(frame); }
+      requestAnimationFrame(frame);
+      setInterval(function () { app.dispatch("frame", String(Math.round(performance.now()))); }, 40);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,262 @@
+;;; (sketchbook cli) - The sketchbook's native tool
+;;;
+;;;   sketchbook probe                      the motif this was built against has the
+;;;                                         0.7.0 kinds (and still refuses a made-up one)
+;;;   sketchbook render-tune FILE OUT.wav   one .cts, rendered as motif renders it
+;;;   sketchbook render-scene ID OUT.wav    a catalog sketch as the page plays it
+;;;                                         (its players mixed, with the duck)
+;;;   sketchbook render-all DIR             every tune to DIR/tunes/NAME.wav, every
+;;;                                         sketch to DIR/ID.wav
+;;;   sketchbook speaker FILE...            the speaker check, every channel of each
+;;;   sketchbook levels FILE                per channel: level, peak, share above 300 Hz
+;;;   sketchbook catalog                    the catalog, one line a sketch
+;;;
+;;; Options: -r RATE (44100), --tunes DIR (assets/tunes), --floor F (the
+;;; speaker check's floor, 0.25), --seconds S (per channel, 30).
+;;;
+;;; The speaker check (design §3, D10): every channel of every drone and bed
+;;; tune (the beds, the hum, the noises and the finding tones: every file
+;;; the catalog names but the moments) is rendered alone, and its share of
+;;; energy above 300 Hz must reach the floor. A channel that never sounds is
+;;; reported and passes (nothing to hear), unless every channel of a file is
+;;; silent (the file failed to sound: FAIL). Exit 0 all pass, 1 any fail.
+
+(define-library (sketchbook cli)
+  (import (sigil core)
+          (sigil math)
+          (sigil string)
+          (sigil io)
+          (sigil process)
+          (motif tune)
+          (motif tune compile)
+          (motif tune player)
+          (motif track)
+          (motif render)
+          (motif render native)
+          (motif synth)
+          (sketchbook catalog)
+          (sketchbook scene)
+          (sketchbook analysis))
+  (export cli-main)
+  (begin
+    (define BLOCK 4096)
+
+    (define (say . parts) (display (apply string-append parts)) (newline))
+    (define (num x) (number->string x))
+    (define (fixed x places)
+      (let* ((m (expt 10 places))
+             (r (/ (round (* x m)) m)))
+        (number->string (inexact r))))
+
+    ;; --- options ------------------------------------------------------------------
+    (define (option args name default)
+      (let loop ((xs args))
+        (cond ((or (null? xs) (null? (cdr xs))) default)
+              ((string=? (car xs) name) (cadr xs))
+              (else (loop (cdr xs))))))
+
+    (define (positional args)
+      (let loop ((xs args) (acc '()))
+        (cond ((null? xs) (reverse acc))
+              ((and (> (string-length (car xs)) 0) (char=? (string-ref (car xs) 0) #\-) (pair? (cdr xs)))
+               (loop (cddr xs) acc))
+              (else (loop (cdr xs) (cons (car xs) acc))))))
+
+    (define (tunes-dir args) (option args "--tunes" "assets/tunes"))
+    (define (rate args) (string->number (option args "-r" "44100")))
+
+    (define (tune-path dir name) (string-append dir "/" name ".cts"))
+
+    (define (loader dir)
+      (lambda (name) (read-tune-file (tune-path dir name))))
+
+    ;; --- pcm --------------------------------------------------------------------------
+    (define (f32 bv i) (bytevector-ieee-single-ref bv (* i 4) 'little))
+    (define (f32! bv i x) (bytevector-ieee-single-set! bv (* i 4) x 'little))
+
+    ;; --- probe: is the motif under this tool the one with the bed kinds? -----------
+    (define (probe)
+      (let ((has (memq 'noise-bed (synth-kinds)))
+            (refuses (guard (e (#t #t)) (make-synth-graph 'no-such-kind) #f)))
+        (say "motif kinds: noise-bed " (if has "present" "ABSENT")
+             ", an unknown kind " (if refuses "refused" "ACCEPTED"))
+        (if (and has refuses) 0 1)))
+
+    ;; --- renders -------------------------------------------------------------------------
+    (define (render-tune file out sr)
+      (let* ((t (read-tune-file file))
+             (trk (tune->track t sr: sr)))
+        (render-track-to-wav trk out)
+        (say "tune " file " -> " out)
+        0))
+
+    ;; A scene, mixed: every live source pulled a block at a time and added
+    ;; at its gain, the gain moving linearly across the block. The scene's
+    ;; clock is the frames rendered. Stops at the scene's end (a loop's
+    ;; fixed length, a moment's end plus its tail) or at `cap` seconds.
+    (define (render-scene-pcm e dir sr cap)
+      (let* ((sc (make-scene sr (loader dir)))
+             (_ (scene-start! sc e))
+             (buf (make-bytevector (* 8 BLOCK) 0))
+             (chunks '()))
+        (let loop ((frames 0))
+          (let* ((now (/ frames (* 1.0 sr)))
+                 (_ (scene-tick! sc now))
+                 (end (scene-end sc)))
+            (if (or (>= now cap) (and end (>= now end)))
+                (begin
+                  (scene-close! sc)
+                  (apply bytevector-append (reverse chunks)))
+                (let ((mix (make-bytevector (* 8 BLOCK) 0))
+                      (t1 (/ (+ frames BLOCK) (* 1.0 sr))))
+                  (for-each
+                    (lambda (s)
+                      (when (source-live? s)
+                        (let ((g0 (source-gain s now)) (g1 (source-gain s t1)))
+                          (when (source-pull! sc s buf BLOCK 0.0)
+                            (let add ((i 0))
+                              (when (< i (* 2 BLOCK))
+                                (let ((g (+ g0 (* (- g1 g0) (/ (quotient i 2) (* 1.0 BLOCK))))))
+                                  (f32! mix i (+ (f32 mix i) (* g (f32 buf i)))))
+                                (add (+ i 1))))))))
+                    (scene-sources sc))
+                  (set! chunks (cons mix chunks))
+                  (loop (+ frames BLOCK))))))))
+
+    (define (render-scene id out dir sr)
+      (let ((e (catalog-entry (string->symbol id))))
+        (if (not e)
+            (begin (say "no sketch " id) 1)
+            (let ((pcm (render-scene-pcm e dir sr 240.0)))
+              (write-float32-pcm-to-wav! out pcm sr 2)
+              (say "sketch " id " -> " out " (" (fixed (/ (bytevector-length pcm) 8.0 sr) 1) " s, peak "
+                   (fixed (pcm-peak pcm) 3) ")")
+              (say "  level each second, dBFS: " (envelope pcm sr))
+              0))))
+
+    ;; the RMS of each whole second of a stereo f32 buffer (both channels), in dB
+    (define (envelope pcm sr)
+      (let ((secs (quotient (quotient (bytevector-length pcm) 8) sr)))
+        (let loop ((s 0) (acc '()))
+          (if (>= s secs)
+              (apply string-append (reverse acc))
+              (let sum ((i (* s sr 2)) (e 0.0))
+                (if (< i (* (+ s 1) sr 2))
+                    (sum (+ i 1) (+ e (* (f32 pcm i) (f32 pcm i))))
+                    (let ((r (sqrt (/ e (* 2.0 sr)))))
+                      (loop (+ s 1)
+                            (cons (string-append (if (> r 0.0) (fixed (* 20.0 (/ (log r) (log 10.0))) 0) "-inf") " ")
+                                  acc)))))))))
+
+    (define (pcm-peak pcm)
+      (let loop ((i 0) (m 0.0))
+        (if (>= i (quotient (bytevector-length pcm) 4)) m (loop (+ i 1) (max m (abs (f32 pcm i)))))))
+
+    (define (render-all dir-out tdir sr)
+      (process-run "mkdir" "-p" (string-append dir-out "/tunes"))
+      (for-each (lambda (name)
+                  (render-tune (tune-path tdir name) (string-append dir-out "/tunes/" name ".wav") sr))
+                (catalog-tunes))
+      (for-each (lambda (e)
+                  (render-scene (symbol->string (entry-id e)) (string-append dir-out "/" (symbol->string (entry-id e)) ".wav") tdir sr))
+                CATALOG)
+      0)
+
+    ;; --- the speaker check -----------------------------------------------------------------
+    ;; One channel alone: the player soloed on it, `secs` seconds pulled
+    ;; (less if the tune ends), mono (L+R)/2.
+    (define (channel-samples t ch sr secs)
+      (let* ((p (open-tune-player t sr loop: #t))
+             (n (exact (floor (* secs sr))))
+             (v (make-vector n 0.0))
+             (buf (make-bytevector (* 8 BLOCK) 0)))
+        (player-solo! p ch)
+        (let loop ((i 0))
+          (if (or (>= i n) (not (player-pull! p buf 0 BLOCK)))
+              (begin (player-close! p) (if (< i n) (vector-copy v 0 i) v))
+              (begin
+                (let fill ((k 0))
+                  (when (and (< k BLOCK) (< (+ i k) n))
+                    (vector-set! v (+ i k) (* 0.5 (+ (f32 buf (* 2 k)) (f32 buf (+ 1 (* 2 k))))))
+                    (fill (+ k 1))))
+                (loop (+ i BLOCK)))))))
+
+    (define SILENT-DB -70.0)
+
+    ;; ((ch level peak share) ...) for every channel of the file
+    (define (channel-report file sr secs)
+      (let ((t (read-tune-file file)))
+        (let loop ((ch 1) (acc '()))
+          (if (> ch (tune-channels t))
+              (reverse acc)
+              (let* ((v (channel-samples t ch sr secs))
+                     (db (rms-db v)))
+                (loop (+ ch 1)
+                      (cons (list ch db (peak v) (if (> db SILENT-DB) (energy-share-above v sr 300.0) #f))
+                            acc)))))))
+
+    (define (speaker files floor sr secs)
+      (let ((fails 0) (checked 0))
+        (for-each
+          (lambda (file)
+            (let* ((rows (channel-report file sr secs))
+                   (sounding (filter (lambda (r) (list-ref r 3)) rows)))
+              (when (null? sounding)
+                (set! fails (+ fails 1))
+                (say "FAIL  " file ": no channel sounds (level under " (num SILENT-DB) " dBFS on all)"))
+              (for-each
+                (lambda (r)
+                  (let ((share (list-ref r 3)))
+                    (cond ((not share)
+                           (say "  --  " file " ch" (num (car r)) ": silent (" (fixed (cadr r) 1) " dBFS)"))
+                          ((< share floor)
+                           (set! fails (+ fails 1)) (set! checked (+ checked 1))
+                           (say "FAIL  " file " ch" (num (car r)) ": " (fixed share 3) " of its energy above 300 Hz, floor "
+                                (num floor) " (" (fixed (cadr r) 1) " dBFS)"))
+                          (else
+                           (set! checked (+ checked 1))
+                           (say "pass  " file " ch" (num (car r)) ": " (fixed share 3) " above 300 Hz ("
+                                (fixed (cadr r) 1) " dBFS)")))))
+                rows)))
+          files)
+        (say "speaker check: " (num checked) " voices checked in " (num (length files)) " files, "
+             (num fails) " failed, floor " (num floor))
+        (if (and (= fails 0) (> checked 0)) 0 1)))
+
+    (define (levels file sr secs)
+      (for-each (lambda (r)
+                  (say "ch" (num (car r)) "  " (fixed (cadr r) 1) " dBFS  peak " (fixed (caddr r) 3)
+                       "  above 300 Hz " (if (list-ref r 3) (fixed (list-ref r 3) 3) "-")))
+                (channel-report file sr secs))
+      0)
+
+    (define (catalog-lines)
+      (for-each (lambda (e)
+                  (say (symbol->string (entry-id e)) "\t" (symbol->string (entry-group e)) "\t"
+                       (entry-title e) "\t" (entry-note e)))
+                CATALOG)
+      0)
+
+    (define (usage)
+      (say "usage: sketchbook probe | render-tune FILE OUT | render-scene ID OUT | render-all DIR")
+      (say "                  | speaker FILE... | levels FILE | catalog   [-r RATE] [--tunes DIR] [--floor F] [--seconds S]")
+      2)
+
+    (define (cli-main)
+      (let* ((args (cdr (command-line)))
+             (pos (positional args))
+             (sr (rate args))
+             (tdir (tunes-dir args))
+             (secs (string->number (option args "--seconds" "30")))
+             (floor-share (string->number (option args "--floor" "0.25"))))
+        (if (null? pos)
+            (usage)
+            (let ((cmd (car pos)) (rest (cdr pos)))
+              (cond ((string=? cmd "probe") (probe))
+                    ((and (string=? cmd "render-tune") (= (length rest) 2)) (render-tune (car rest) (cadr rest) sr))
+                    ((and (string=? cmd "render-scene") (= (length rest) 2)) (render-scene (car rest) (cadr rest) tdir sr))
+                    ((and (string=? cmd "render-all") (= (length rest) 1)) (render-all (car rest) tdir sr))
+                    ((and (string=? cmd "speaker") (pair? rest)) (speaker rest floor-share sr secs))
+                    ((and (string=? cmd "levels") (= (length rest) 1)) (levels (car rest) sr secs))
+                    ((string=? cmd "catalog") (catalog-lines))
+                    (else (usage)))))))))

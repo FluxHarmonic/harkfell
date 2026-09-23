@@ -1,0 +1,242 @@
+;;; (sketchbook scene) - What one sketch button plays: players, gains, a clock
+;;;
+;;; A scene is one or more motif players (sources), each with a gain that
+;;; ramps linearly, and events on a clock in seconds. The page and the tool
+;;; share it: the page gives each source its own sink stream and sets the
+;;; stream's volume from the gain every frame (a gain applied at output
+;;; time, Crash's source-gain model); the tool mixes the sources itself,
+;;; sample by sample, into a WAV. Both call scene-tick! with their clock.
+;;;
+;;; The moment follows the design (§5, Layer 3): the bed ducks about 6 dB
+;;; over 2 s on its SOURCE gain (never on its channel volumes, which belong
+;;; to the room mix and the sliders), the moment player is opened when the
+;;; scene starts and only started at the trigger, it plays to its end and
+;;; motif's 2 s release tail, and the bed comes back over 4 s.
+;;;
+;;;   (make-scene sr loader)          loader: (name) -> tune, or #f
+;;;   (scene-start! sc entry)         build the entry's sources and events at time 0
+;;;   (scene-tick! sc now)            run the events due by `now` (seconds)
+;;;   (scene-sources sc)              the sources, in start order
+;;;   (source-live? src)              started and not ended
+;;;   (source-gain src now)           0..1
+;;;   (source-pull! sc src out n lag) n stereo f32 frames of its player into
+;;;                                   out, #t; #f once it has ended, and then
+;;;                                   its on-end event runs `lag` s later (the
+;;;                                   page's sink still holds that much)
+;;;   (scene-end sc)                  seconds when the scene is complete, or #f
+;;;   (scene-close! sc)
+;;;   live: (scene-bed-level! sc group v)  group: wind water texture drone
+;;;         (scene-harmonics! sc k)        k of H2 H3 H4 H5 H7 sound (0..5)
+;;;         (scene-voicing! sc kind)       drone-saw | drone-fm on the bed's drone
+;;;         (scene-still! sc on?)          the stillness duck, by hand
+
+(define-library (sketchbook scene)
+  (import (sigil core)
+          (sigil math)
+          (sigil struct)
+          (motif tune)
+          (motif tune player)
+          (sketchbook catalog))
+  (export make-scene scene-start! scene-tick! scene-sources scene-end scene-close!
+          scene-now scene-entry scene-find
+          source-id source-player source-live? source-ended? source-gain source-pull!
+          scene-bed-level! scene-harmonics! scene-voicing! scene-still!
+          scene-harmonics scene-voicing swap-drone-kind
+          DUCK-GAIN DUCK-IN-S DUCK-OUT-S MOMENT-AT-S TONE-GAIN TONE-FORWARD
+          BED-CHANNELS DRONE-CHANNELS DEFAULT-HARMONICS)
+  (begin
+    (define DUCK-GAIN 0.5)          ; -6 dB
+    (define DUCK-IN-S 2.0)          ; the moment's duck
+    (define DUCK-OUT-S 4.0)         ; the bed's return
+    (define MOMENT-AT-S 5.0)
+    (define TONE-GAIN 0.63)         ; the finding tone at rest; forward is +4 dB
+    (define TONE-FORWARD 1.0)
+    (define STILL-AT-S 8.0)
+    (define MOVE-AT-S 20.0)
+    (define STILL-IN-S 1.0)
+    (define STILL-OUT-S 1.5)
+    ;; how long the tool renders a scene that has no end of its own
+    (define LOOP-SECONDS 60.0)
+    (define BED-SECONDS 90.0)
+    (define FINDING-SECONDS 30.0)
+    (define AFTER-MOMENT-S 6.0)
+    ;; a region bed's channels: 1 wind, 2 water, 3 texture, 4..8 the drone
+    ;; H2 H3 H4 H5 H7 (design §5, Layer 1)
+    (define BED-CHANNELS '((wind 1) (water 2) (texture 3) (drone 4 5 6 7 8)))
+    (define DRONE-CHANNELS '(4 5 6 7 8))
+    (define DEFAULT-HARMONICS 4)    ; H2..H5: the chord the four required harmonics make
+
+    (define-struct source
+      (id)
+      (player)
+      (started mutable: #t)
+      (ended mutable: #t)
+      (from mutable: #t)            ; gain ramp: from -> to over dur s starting at t0
+      (to mutable: #t)
+      (t0 mutable: #t)
+      (dur mutable: #t)
+      (on-end mutable: #t))         ; (lambda (t) ...) or #f
+
+    (define-struct scene
+      (sr)
+      (loader)
+      (entry mutable: #t)
+      (srcs mutable: #t)            ; newest first
+      (events mutable: #t)          ; ((t . thunk) ...) sorted by t
+      (now mutable: #t)
+      (end mutable: #t)
+      (harmonics mutable: #t)
+      (voicing mutable: #t))
+
+    (define (make-scene sr loader)
+      (scene sr: sr loader: loader entry: #f srcs: '() events: '() now: 0.0 end: #f
+             harmonics: DEFAULT-HARMONICS voicing: 'drone-saw))
+
+    (define (scene-sources sc) (reverse (scene-srcs sc)))
+
+    (define (scene-find sc id)
+      (let loop ((ss (scene-srcs sc)))
+        (cond ((null? ss) #f)
+              ((eq? (source-id (car ss)) id) (car ss))
+              (else (loop (cdr ss))))))
+
+    (define (source-live? s) (and (source-started s) (not (source-ended s))))
+    (define (source-ended? s) (source-ended s))
+
+    (define (source-gain s now)
+      (let ((t0 (source-t0 s)) (dur (source-dur s)))
+        (cond ((<= now t0) (source-from s))
+              ((or (<= dur 0.0) (>= now (+ t0 dur))) (source-to s))
+              (else (+ (source-from s) (* (- (source-to s) (source-from s)) (/ (- now t0) dur)))))))
+
+    ;; --- building ---------------------------------------------------------------
+
+    (define (load sc name)
+      (or ((scene-loader sc) name)
+          (error (string-append "sketchbook: no tune " name))))
+
+    (define (add-source! sc id name loop? started? gain)
+      (let ((s (source id: id player: (open-tune-player (load sc name) (scene-sr sc) loop: loop?)
+                       started: started? ended: #f from: gain to: gain t0: 0.0 dur: 0.0 on-end: #f)))
+        (set-scene-srcs! sc (cons s (scene-srcs sc)))
+        s))
+
+    (define (at! sc t thunk)
+      (let insert ((es (scene-events sc)) (before '()))
+        (if (or (null? es) (> (car (car es)) t))
+            (set-scene-events! sc (append (reverse before) (list (cons t thunk)) es))
+            (insert (cdr es) (cons (car es) before)))))
+
+    ;; ramp a source's gain from where it is at `t` to `to` over `secs`
+    (define (ramp! sc id to secs t)
+      (let ((s (scene-find sc id)))
+        (when s
+          (let ((g (source-gain s t)))
+            (set-source-from! s g)
+            (set-source-to! s to)
+            (set-source-t0! s t)
+            (set-source-dur! s secs)))))
+
+    (define (scene-start! sc e)
+      (set-scene-entry! sc e)
+      (let ((how (entry-how e)))
+        (case (car how)
+          ((loop)
+           (add-source! sc 'main (cadr how) #t #t 1.0)
+           (set-scene-end! sc LOOP-SECONDS))
+          ((once)
+           (let ((s (add-source! sc 'main (cadr how) #f #t 1.0)))
+             (set-source-on-end! s (lambda (t) (set-scene-end! sc (+ t 0.5))))))
+          ((bed)
+           (add-source! sc 'bed (cadr how) #t #t 1.0)
+           (apply-bed-defaults! sc)
+           (set-scene-end! sc BED-SECONDS))
+          ((finding)
+           (add-source! sc 'bed (list-ref how 2) #t #t 1.0)
+           (apply-bed-defaults! sc)
+           (add-source! sc 'tone (cadr how) #t #t TONE-GAIN)
+           (when (list-ref how 3)
+             (at! sc STILL-AT-S (lambda () (still-duck! sc #t STILL-AT-S)))
+             (at! sc MOVE-AT-S (lambda () (still-duck! sc #f MOVE-AT-S))))
+           (set-scene-end! sc FINDING-SECONDS))
+          ((moment)
+           (add-source! sc 'bed (list-ref how 2) #t #t 1.0)
+           (apply-bed-defaults! sc)
+           (let ((m (add-source! sc 'moment (cadr how) #f #f 1.0)))
+             (set-source-on-end! m (lambda (t)
+                                     (ramp! sc 'bed 1.0 DUCK-OUT-S t)
+                                     (set-scene-end! sc (+ t AFTER-MOMENT-S))))
+             (at! sc MOMENT-AT-S
+                  (lambda ()
+                    (ramp! sc 'bed DUCK-GAIN DUCK-IN-S MOMENT-AT-S)
+                    (set-source-started! m #t)))))
+          (else (error "sketchbook: unknown sketch kind" how)))))
+
+    ;; --- the clock -----------------------------------------------------------------
+
+    (define (scene-tick! sc now)
+      (set-scene-now! sc now)
+      (let loop ()
+        (let ((es (scene-events sc)))
+          (when (and (pair? es) (<= (car (car es)) now))
+            (set-scene-events! sc (cdr es))
+            ((cdr (car es)))
+            (loop)))))
+
+    (define (source-pull! sc s out n lag)
+      (cond ((not (source-live? s)) #f)
+            ((player-pull! (source-player s) out 0 n) #t)
+            (else
+             (set-source-ended! s #t)
+             (let ((f (source-on-end s)) (t (+ (scene-now sc) lag)))
+               (when f (at! sc t (lambda () (f t)))))
+             #f)))
+
+    (define (scene-close! sc)
+      (for-each (lambda (s) (player-close! (source-player s))) (scene-srcs sc))
+      (set-scene-srcs! sc '()))
+
+    ;; --- the live controls -----------------------------------------------------------
+
+    (define (bed sc) (let ((s (scene-find sc 'bed))) (and s (source-player s))))
+
+    (define (scene-bed-level! sc group v)
+      (let ((p (bed sc)) (chans (assq group BED-CHANNELS)))
+        (when (and p chans)
+          (for-each (lambda (ch) (player-set-channel-volume! p ch (max 0.0 (min 1.0 v))))
+                    (cdr chans)))))
+
+    (define (scene-harmonics! sc k)
+      (set-scene-harmonics! sc (max 0 (min 5 k)))
+      (let ((p (bed sc)))
+        (when p
+          (let loop ((chs DRONE-CHANNELS) (i 0))
+            (when (pair? chs)
+              (player-mute! p (car chs) (>= i (scene-harmonics sc)))
+              (loop (cdr chs) (+ i 1)))))))
+
+    (define (apply-bed-defaults! sc)
+      (scene-harmonics! sc (scene-harmonics sc))
+      (unless (eq? (scene-voicing sc) 'drone-saw)
+        (scene-voicing! sc (scene-voicing sc))))
+
+    ;; A tune with every drone-saw / drone-fm instrument set to `kind`.
+    (define (swap-drone-kind t kind)
+      (tune t instruments:
+            (map (lambda (i)
+                   (if (memq (tune-instrument-kind i) '(drone-saw drone-fm))
+                       (tune-instrument i kind: kind)
+                       i))
+                 (tune-instruments t))))
+
+    (define (scene-voicing! sc kind)
+      (set-scene-voicing! sc kind)
+      (let ((p (bed sc)))
+        (when p (player-set-tune! p (swap-drone-kind (player-tune p) kind)))))
+
+    ;; The stillness duck: the bed down 6 dB and the tone forward 4 dB, or back.
+    (define (still-duck! sc on? t)
+      (ramp! sc 'bed (if on? DUCK-GAIN 1.0) (if on? STILL-IN-S STILL-OUT-S) t)
+      (ramp! sc 'tone (if on? TONE-FORWARD TONE-GAIN) (if on? STILL-IN-S STILL-OUT-S) t))
+
+    (define (scene-still! sc on?) (still-duck! sc on? (scene-now sc)))))

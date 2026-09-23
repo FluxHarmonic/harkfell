@@ -1,0 +1,31 @@
+(tune version: 1 name: "icicles" tempo: 60 speed: 15 channels: 3
+  (bus reverb: zitarev size: 0.8 damp: 0.3 mix: 0.3)
+  (instruments
+    (instrument id: 1 name: "cold air" patch: (noise-bed color: pink level: 1.0 centre: 2200 width: 1.4 wander: 0.35 rate: 0.06 gust: 0.5 gust-rate: 0.09 hp: 800 lp: 7000 attack: 3 release: 4 seed: 17) volume: 22 gain: 2 send: 0.2)
+    (instrument id: 2 name: "icicle" patch: (fm4-bell index: 1.3 amp-decay: 2.6 amp-release: 1.2 vel-depth: 0.4) volume: 30 gain: 2 send: 0.55))
+  (patterns
+    (pattern id: 0 rows: 16
+      (row 0 (1 "D-4" 1 22 "000"))
+      (row 6 (2 "A-6" 2 28 "000"))
+      (row 7 (3 "E-6" 2 18 "000"))
+      (row 13 (2 "C#7" 0 22 "000")))
+    (pattern id: 1 rows: 80
+      (row 4 (2 "F#6" 0 26 "000"))
+      (row 5 (3 "B-6" 0 16 "000"))
+      (row 11 (2 "G#6" 0 30 "000"))
+      (row 19 (2 "D-7" 0 22 "000"))
+      (row 20 (3 "A-6" 0 20 "000"))
+      (row 21 (2 "E-7" 0 14 "000"))
+      (row 30 (2 "B-6" 0 26 "000"))
+      (row 38 (3 "F#6" 0 22 "000"))
+      (row 39 (2 "C#7" 0 18 "000"))
+      (row 47 (2 "A-6" 0 30 "000"))
+      (row 54 (3 "G#6" 0 16 "000"))
+      (row 55 (2 "E-6" 0 24 "000"))
+      (row 56 (3 "B-6" 0 14 "000"))
+      (row 64 (2 "D-7" 0 26 "000"))
+      (row 71 (2 "F#6" 0 20 "000"))
+      (row 72 (3 "C#7" 0 16 "000"))
+      (row 79 (1 "..." 0 0 "B01"))))
+  (order 0 1)
+  (history ("claude" "2026-09-23" "S0 sketch: icicle chimes, D Lydian, over a thin wind")))

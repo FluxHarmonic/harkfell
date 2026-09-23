@@ -1,0 +1,114 @@
+;;; (sketchbook catalog) - Every sketch, once: the page's buttons, the WAVs
+;;;
+;;; An entry is (id group title how note):
+;;;   how  (loop FILE)             a tune played on a loop (a noise, a bed)
+;;;        (once FILE)             a tune played to its end (the hum)
+;;;        (bed FILE)              a region bed on a loop, under the sliders
+;;;        (finding TONE BED still?)  the finding tone over a bed; still?:
+;;;                                at 8 s you stop (the bed dips 6 dB, the
+;;;                                tone comes forward 4 dB), at 20 s you move
+;;;        (moment FILE BED)       the bed, then at 5 s the moment: the bed
+;;;                                ducks 6 dB over 2 s, the moment plays to
+;;;                                its end, the bed comes back over 4 s
+;;; FILE names a tune in assets/tunes/ without the .cts.
+;;;
+;;; The groups are the design's §10 S0 list, in its order.
+
+(define-library (sketchbook catalog)
+  (import (sigil core))
+  (export CATALOG catalog-entry entry-id entry-group entry-title entry-how entry-note
+          catalog-tunes GROUPS)
+  (begin
+    (define GROUPS
+      '((noises . "The noises")
+        (hum . "The hum")
+        (finding . "The finding tone")
+        (beds . "The region beds")
+        (moments . "The moments")))
+
+    (define CATALOG
+      '((wind-fell noises "Wind on the open fell" (loop "wind-fell")
+                   "pink noise in a wide band whose centre wanders, slow gusts")
+        (wind-hollow noises "Wind in a sheltered hollow" (loop "wind-hollow")
+                     "the same wind lower and softer, the top end gone")
+        (wind-cliff noises "Wind gusting on a cliff" (loop "wind-cliff")
+                    "a brighter band that moves faster, with deep gusts")
+        (water-tarn noises "A still tarn" (loop "water-tarn")
+                    "brown noise held low and quiet, lapping on a slow swell")
+        (water-stream noises "A stream" (loop "water-stream")
+                      "brighter noise, a faster wander, and small plinks")
+        (water-drips noises "Drips in a cave" (loop "water-drips")
+                     "single drops on irregular rows, each echoed through the delay")
+        (reeds noises "Reeds" (loop "reeds")
+                "a high noise band with a flutter, rising and falling")
+        (icicles noises "Icicle chimes" (loop "icicles")
+                 "FM bells high in the Lydian set, far apart, over a thin wind")
+        (pipes noises "Pipe tones" (loop "pipes")
+               "wind resonating in limestone pipes at A, D and E, swelling on its own")
+        (hum-fundamental hum "The fundamental, under the first room" (once "hum-fundamental")
+                         "a low D (73.4 Hz) as faint as it is at the start; on a phone you hear its upper partials")
+        (hum-build-saw hum "The drone builds, saw voices" (once "hum-build-saw")
+                       "H2, then H3, H4 and H5 enter every 20 s, each breathing on its own 25-60 s cycle")
+        (hum-build-fm hum "The drone builds, FM voices" (once "hum-build-fm")
+                      "the same build in the gentle two-operator voice")
+        (hum-h7-saw hum "The whole drone and H7, saw" (once "hum-h7-saw")
+                    "H2 to H5, then the secret H7 enters at 30 s: the chord turns into a dominant seventh")
+        (hum-h7-fm hum "The whole drone and H7, FM" (once "hum-h7-fm")
+                   "the same in the FM voice")
+        (finding-far finding "H2 three rooms away" (finding "tone-far" "bed-reedfen" #f)
+                     "faint and dark over the Reedfen bed; you keep walking")
+        (finding-far-still finding "H2 three rooms away, standing still" (finding "tone-far" "bed-reedfen" #t)
+                           "at 8 s you stop: the bed dips 6 dB and the tone comes forward; at 20 s you move on")
+        (finding-near finding "H2 next door" (finding "tone-near" "bed-reedfen" #f)
+                      "louder and brighter")
+        (finding-near-still finding "H2 next door, standing still" (finding "tone-near" "bed-reedfen" #t)
+                            "the same with the stillness duck at 8 s")
+        (finding-here finding "H2 in this room" (finding "tone-here" "bed-reedfen" #f)
+                      "full and clear")
+        (finding-here-still finding "H2 in this room, standing still" (finding "tone-here" "bed-reedfen" #t)
+                            "the same with the stillness duck at 8 s")
+        (bed-hollow beds "The Hollow" (bed "bed-hollow")
+                    "wind in the stone ring and the fundamental under the floor")
+        (bed-reedfen beds "Reedfen" (bed "bed-reedfen")
+                     "open wind, the tarn, the reeds")
+        (bed-glasswood beds "Glasswood" (bed "bed-glasswood")
+                       "cold wind, a trickle under ice, icicle chimes")
+        (bed-pipes beds "The Pipes" (bed "bed-pipes")
+                   "wind outside, drips inside, the pipes breathing")
+        (bed-cloudstair beds "Cloudstair" (bed "bed-cloudstair")
+                        "high gusting wind, almost no water, air in the rock")
+        (moment-hollow moments "The Hollow: the stones remember" (moment "moment-hollow" "bed-hollow")
+                       "D major, stone bells and a low swell, 22 s")
+        (moment-reedfen moments "Reedfen: first open water" (moment "moment-reedfen" "bed-reedfen")
+                        "D Dorian, a reedy flute over plucked frog-bells, 24 s")
+        (moment-glasswood moments "Glasswood: the ice rings" (moment "moment-glasswood" "bed-glasswood")
+                          "D Lydian, the icicle bells themselves begin to play, 20 s")
+        (moment-pipes moments "The Pipes: the old air" (moment "moment-pipes" "bed-pipes")
+                      "D Aeolian, pipe tones in a slow chorale with echoing drips, 26 s")
+        (moment-cloudstair moments "Cloudstair: above the cloud" (moment "moment-cloudstair" "bed-cloudstair")
+                           "D Mixolydian, a bright pad and a flute rising, 22 s")))
+
+    (define (entry-id e) (list-ref e 0))
+    (define (entry-group e) (list-ref e 1))
+    (define (entry-title e) (list-ref e 2))
+    (define (entry-how e) (list-ref e 3))
+    (define (entry-note e) (list-ref e 4))
+
+    (define (catalog-entry id)
+      (let loop ((es CATALOG))
+        (cond ((null? es) #f)
+              ((eq? (entry-id (car es)) id) (car es))
+              (else (loop (cdr es))))))
+
+    ;; every tune file the catalog names, once each, in catalog order
+    (define (catalog-tunes)
+      (let loop ((es CATALOG) (acc '()))
+        (if (null? es)
+            (reverse acc)
+            (let* ((how (entry-how (car es)))
+                   (files (filter string? (cdr how)))
+                   (acc (let add ((fs files) (acc acc))
+                          (cond ((null? fs) acc)
+                                ((member (car fs) acc) (add (cdr fs) acc))
+                                (else (add (cdr fs) (cons (car fs) acc)))))))
+              (loop (cdr es) acc)))))))

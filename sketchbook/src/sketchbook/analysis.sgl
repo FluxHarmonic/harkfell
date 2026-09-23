@@ -1,0 +1,123 @@
+;;; (sketchbook analysis) - What a small speaker keeps of a sound
+;;;
+;;; The speaker check (Harkfell design §3, "Speakers first", ruling D10): a
+;;; phone speaker plays almost nothing below 300 Hz, so every drone and bed
+;;; voice must keep a share of its energy above 300 Hz. The share is
+;;; measured on a Welch power spectrum (Hann-windowed 4096-point FFTs, half
+;;; overlapped, averaged): the power in bins above 300 Hz over the power in
+;;; every bin but DC. A pure 147 Hz sine keeps almost none; a filtered saw at
+;;; the same pitch keeps its partials at 294, 441, 588 Hz and up.
+;;;
+;;;   (energy-share-above samples sr hz)   0..1; samples a vector of flonums
+;;;   (rms-db samples)                     level in dBFS (-inf as -200)
+;;;   (peak samples)
+
+(define-library (sketchbook analysis)
+  (import (sigil core)
+          (sigil math))
+  (export energy-share-above rms-db peak welch-power FFT-N)
+  (begin
+    (define FFT-N 4096)
+    (define MAX-FRAMES 64)
+    (define PI 3.141592653589793)
+
+    ;; in place on re, im (vectors of length n, a power of two)
+    (define (fft! re im)
+      (let ((n (vector-length re)))
+        (let loop ((i 1) (j 0))
+          (when (< i n)
+            (let bit ((b (quotient n 2)) (j j))
+              (if (>= j b)
+                  (bit (quotient b 2) (- j b))
+                  (let ((j (+ j b)))
+                    (when (< i j)
+                      (let ((tr (vector-ref re i)) (ti (vector-ref im i)))
+                        (vector-set! re i (vector-ref re j))
+                        (vector-set! im i (vector-ref im j))
+                        (vector-set! re j tr)
+                        (vector-set! im j ti)))
+                    (loop (+ i 1) j))))))
+        (let stage ((len 2))
+          (when (<= len n)
+            (let* ((ang (/ (* -2.0 PI) len))
+                   (wr (cos ang))
+                   (wi (sin ang))
+                   (half (quotient len 2)))
+              (let block ((s 0))
+                (when (< s n)
+                  (let pair ((k 0) (cr 1.0) (ci 0.0))
+                    (when (< k half)
+                      (let* ((a (+ s k))
+                             (b (+ a half))
+                             (xr (- (* cr (vector-ref re b)) (* ci (vector-ref im b))))
+                             (xi (+ (* cr (vector-ref im b)) (* ci (vector-ref re b)))))
+                        (vector-set! re b (- (vector-ref re a) xr))
+                        (vector-set! im b (- (vector-ref im a) xi))
+                        (vector-set! re a (+ (vector-ref re a) xr))
+                        (vector-set! im a (+ (vector-ref im a) xi))
+                        (pair (+ k 1) (- (* cr wr) (* ci wi)) (+ (* cr wi) (* ci wr))))))
+                  (block (+ s len))))
+              (stage (* len 2)))))))
+
+    (define HANN
+      (let ((w (make-vector FFT-N 0.0)))
+        (let loop ((i 0))
+          (when (< i FFT-N)
+            (vector-set! w i (- 0.5 (* 0.5 (cos (/ (* 2.0 PI i) (- FFT-N 1))))))
+            (loop (+ i 1))))
+        w))
+
+    ;; Mean power per bin (0..N/2) over Hann frames: half-overlapped, or
+    ;; MAX-FRAMES of them spread evenly when the signal is longer than that.
+    (define (welch-power v)
+      (let* ((n (vector-length v))
+             (half (quotient FFT-N 2))
+             (step (max half (quotient (- n FFT-N) MAX-FRAMES)))
+             (acc (make-vector (+ half 1) 0.0)))
+        (let frame ((start 0) (frames 0))
+          (if (> (+ start FFT-N) n)
+              (begin
+                (let loop ((k 0))
+                  (when (<= k half)
+                    (vector-set! acc k (/ (vector-ref acc k) (max 1 frames)))
+                    (loop (+ k 1))))
+                acc)
+              (let ((re (make-vector FFT-N 0.0))
+                    (im (make-vector FFT-N 0.0)))
+                (let fill ((i 0))
+                  (when (< i FFT-N)
+                    (vector-set! re i (* (vector-ref v (+ start i)) (vector-ref HANN i)))
+                    (fill (+ i 1))))
+                (fft! re im)
+                (let loop ((k 0))
+                  (when (<= k half)
+                    (vector-set! acc k
+                                 (+ (vector-ref acc k)
+                                    (* (vector-ref re k) (vector-ref re k))
+                                    (* (vector-ref im k) (vector-ref im k))))
+                    (loop (+ k 1))))
+                (frame (+ start step) (+ frames 1)))))))
+
+    ;; The share of the power above hz, DC left out; #f when there is no
+    ;; power at all (a silent voice cannot pass or fail a speaker).
+    (define (energy-share-above v sr hz)
+      (let* ((p (welch-power v))
+             (hz-per-bin (/ sr FFT-N 1.0)))
+        (let loop ((k 1) (above 0.0) (total 0.0))
+          (if (>= k (vector-length p))
+              (if (> total 0.0) (/ above total) #f)
+              (let ((x (vector-ref p k)))
+                (loop (+ k 1)
+                      (if (> (* k hz-per-bin) hz) (+ above x) above)
+                      (+ total x)))))))
+
+    (define (rms-db v)
+      (let loop ((i 0) (acc 0.0))
+        (if (>= i (vector-length v))
+            (let ((r (sqrt (/ acc (max 1 (vector-length v))))))
+              (if (> r 0.0) (* 20.0 (/ (log r) (log 10.0))) -200.0))
+            (loop (+ i 1) (+ acc (* (vector-ref v i) (vector-ref v i)))))))
+
+    (define (peak v)
+      (let loop ((i 0) (m 0.0))
+        (if (>= i (vector-length v)) m (loop (+ i 1) (max m (abs (vector-ref v i)))))))))

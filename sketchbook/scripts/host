@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Host the sketchbook on wg0: https 8795 (cross-origin isolated, the path the
+# published game takes) and http 8796, both serving a snapshot at
+# build/hosted/ with the page at /sketchbook/ (live synthesis only: no WAVs,
+# David 2026-09-23).
+#
+#   scripts/host            build the page, snapshot, serve
+#   scripts/host --serve    snapshot the existing build/web and serve (no build)
+#   scripts/host --stop     stop the two servers this script started, by their PIDs
+#
+# Binds to the wg0 address only (serve-web-tls.mjs reads it from the
+# interface; `sigil serve` is given it explicitly). The certificate is
+# self-signed for that address (build/tls/, made here with openssl from guix
+# if missing); a phone taps through the warning once.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+HTTPS_PORT=8795
+HTTP_PORT=8796
+HOSTED=build/hosted
+ADDR=$(ip -4 -o addr show dev wg0 | awk '{print $4}' | cut -d/ -f1)
+[ -n "$ADDR" ] || { echo "host: no wg0 address; refusing to bind elsewhere"; exit 1; }
+
+# a PID from a pidfile, if it is still that server: its exe is the expected
+# binary and its cwd is this directory. Prints the PID or nothing.
+live_pid() {
+  local file=$1 want=$2 pid exe cwd
+  [ -f "$file" ] || return 0
+  pid=$(cat "$file")
+  exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+  cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+  [ "$(basename "${exe% (deleted)}")" = "$want" ] || return 0
+  [ "$cwd" = "$(pwd)" ] || return 0
+  echo "$pid"
+}
+
+stop() {
+  for spec in "build/host-$HTTPS_PORT.pid:node" "build/host-$HTTP_PORT.pid:sigil"; do
+    file=${spec%%:*}; want=${spec#*:}
+    pid=$(live_pid "$file" "$want")
+    if [ -n "$pid" ]; then
+      echo "host: stopping $want pid $pid ($(tr '\0' ' ' < /proc/$pid/cmdline))"
+      kill "$pid"
+    fi
+    rm -f "$file"
+  done
+}
+
+if [ "${1:-}" = "--stop" ]; then stop; exit 0; fi
+
+if [ "${1:-}" != "--serve" ]; then
+  # inside the repo's manifest: binaryen's wasm-opt (without it the link skips asyncify and
+  # still exits 0)
+  guix shell -m ../manifest.scm -- sigil build --config web > build/host-web.log 2>&1 || { tail -20 build/host-web.log; exit 1; }
+  grep -q ASYNCIFY build/host-web.log || { echo "host: the link skipped asyncify (no wasm-opt?)"; exit 1; }
+fi
+
+# the snapshot of build/web (the page must be built, with asyncify)
+[ -f build/web/index.html ] && [ -f build/web/sketchbook.wasm ] || { echo "host: the page did not build"; exit 1; }
+rm -rf "$HOSTED.new"
+mkdir -p "$HOSTED.new/sketchbook"
+# what the page loads, not the build's intermediates (native/ and bin/ are 225 MB)
+cp -r build/web/index.html build/web/_headers build/web/sketchbook.wasm build/web/sigil-wasm-bridges.js build/web/sigil-wasm-bridges.json build/web/assets "$HOSTED.new/sketchbook/"
+cat > "$HOSTED.new/index.html" <<'EOF'
+<!doctype html><meta charset="utf-8"><title>Harkfell</title>
+<p><a href="sketchbook/">Harkfell: the sound sketchbook</a></p>
+EOF
+rm -rf "$HOSTED"; mv "$HOSTED.new" "$HOSTED"
+echo "host: snapshot $(du -sh "$HOSTED" | cut -f1)"
+
+if [ ! -f build/tls/cert.pem ]; then
+  mkdir -p build/tls
+  guix shell openssl -- openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout build/tls/key.pem -out build/tls/cert.pem \
+    -subj "/CN=$ADDR" -addext "subjectAltName=IP:$ADDR" 2>/dev/null
+fi
+
+stop
+nohup node ../scripts/serve-web-tls.mjs "$HOSTED" "$HTTPS_PORT" --isolate > "build/host-$HTTPS_PORT.log" 2>&1 &
+echo $! > "build/host-$HTTPS_PORT.pid"
+nohup sigil serve --dir "$HOSTED" --host "$ADDR" --port "$HTTP_PORT" > "build/host-$HTTP_PORT.log" 2>&1 &
+echo $! > "build/host-$HTTP_PORT.pid"
+sleep 1
+ss -ltn | grep -E "$ADDR:($HTTPS_PORT|$HTTP_PORT) " || { echo "host: not listening"; cat build/host-*.log; exit 1; }
+echo "host: https://$ADDR:$HTTPS_PORT/sketchbook/ (isolated) and http://$ADDR:$HTTP_PORT/sketchbook/"
