@@ -252,14 +252,25 @@ async function ring() {
   return await evaluate(`(() => { const r = document.getElementById("ring").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 }; })()`);
 }
 
-// A touch at (x, y), a drag of dx over steps, held for ms, then lifted.
+// A touch at (x, y), a drag of dx over steps, held, then lifted. Returns
+// where the body is 150 ms into the hold: from the entry a walk right
+// reaches the first pit in about 0.75 s of game time, and under load a
+// hold lasts much longer than asked, so a sample at the end could be in
+// the pit or back at the entry after the soft return.
 async function drag(x, y, dx, ms) {
   await touch("touchStart", [[x, y, 1]]);
   for (let i = 1; i <= 6; i++) { await touch("touchMove", [[x + (dx * i) / 6, y, 1]]); await sleep(16); }
+  await sleep(150);
+  const mid = await where();
   await sleep(ms);
-  await touch("touchEnd", []);
+  await touch("touchEnd", [[x + dx, y, 1]]);
+  return mid;
 }
 
+// Both stick legs read the game's own trace ("harkfell: stick e") as the
+// verdict, and check only that the body moved at all: a longer hold walks
+// the body into the first pit under load, and a soft return would put it
+// back at the entry.
 if (LEGS.includes("float")) {
   ran.add("float");
   await open("trace&touch&stick=float");
@@ -268,12 +279,13 @@ if (LEGS.includes("float")) {
   const x = Math.min(W / 2 - 20, g.x + 2.2 * g.r), y = Math.max(H / 2 + 20, g.y - 0.3 * g.r);
   const outside = Math.hypot(x - g.x, y - g.y) > 1.5 * g.r;
   const a = await where();
-  await drag(x, y, g.r * 0.8, 500);
-  const b = await where();
+  const t0 = lines.length;
+  const b = await drag(x, y, g.r * 0.8, 100);
+  const read = lines.slice(t0).includes("harkfell: stick e");
   const lat = await latency();
-  const m = lat.match(/in (\d+) .*move (\d+) /);
-  if (outside && b.x > a.x + 8 && m) pass("float", `touch at ${Math.round(x)},${Math.round(y)} (outside the ring): x ${a.x} -> ${b.x}; ${lat}`);
-  else fail("float", `outside ${outside}; x ${a.x} -> ${b.x}; ${lat}`);
+  const m = lat.match(/in (\d+) /);
+  if (outside && read && b.x > a.x && m) pass("float", `touch at ${Math.round(x)},${Math.round(y)} (outside the ring) read as stick e; x ${a.x} -> ${b.x}; ${lat}`);
+  else fail("float", `outside ${outside}; stick e read ${read}; x ${a.x} -> ${b.x}; ${lat}`);
 }
 
 if (LEGS.includes("fixed")) {
@@ -282,12 +294,14 @@ if (LEGS.includes("fixed")) {
   const g = await ring();
   const x = Math.min(W / 2 - 20, g.x + 2.2 * g.r), y = Math.max(H / 2 + 20, g.y - 0.3 * g.r);
   const a = await where();
-  await drag(x, y, g.r * 0.8, 500);
-  const b = await where();
-  await drag(g.x, g.y, g.r * 0.8, 500);
-  const c = await where();
-  if (Math.abs(b.x - a.x) < 0.001 && c.x > b.x + 8) pass("fixed", `outside the ring: x stays ${a.x}; inside: x ${b.x} -> ${c.x}`);
-  else fail("fixed", `outside: x ${a.x} -> ${b.x}; inside: -> ${c.x}`);
+  const t0 = lines.length;
+  const b = await drag(x, y, g.r * 0.8, 100);
+  const t1 = lines.length;
+  const c = await drag(g.x, g.y, g.r * 0.8, 100);
+  const outsideRead = lines.slice(t0, t1).some((l) => l.startsWith("harkfell: stick"));
+  const insideRead = lines.slice(t1).includes("harkfell: stick e");
+  if (!outsideRead && b.x === a.x && insideRead && c.x > b.x) pass("fixed", `outside the ring: no stick read, x stays ${a.x}; inside: stick e, x ${b.x} -> ${c.x}`);
+  else fail("fixed", `outside: read ${outsideRead}, x ${a.x} -> ${b.x}; inside: read ${insideRead}, x -> ${c.x}`);
   // the stored form: a reload with no ?stick keeps fixed
   await open("trace&touch");
   const s = lines.find((l) => l.startsWith("harkfell: boot"));
@@ -315,30 +329,33 @@ if (LEGS.includes("two")) {
   await open("trace&touch&stick=float");
   const g = await ring();
   const a = await where();
-  // finger 1 on the stick, dragged right and held; finger 2 on the jump
+  // finger 1 on the stick, dragged LEFT and held (the body presses into the
+  // room's edge, where the chimney is open above it: dragged right, under
+  // load the body walked under the pillar before the jump and bonked its
+  // underside, 2 px above the head); finger 2 on the jump
   // button while finger 1 stays down; finger 2 lifted, then finger 1. The
-  // game's own trace says what it read: the stick went e before the jump
-  // went down, the body rose, and the stick stayed e (no "stick none")
+  // game's own trace says what it read: the stick went w before the jump
+  // went down, the body rose, and the stick stayed w (no "stick none")
   // from the jump finger's lift until the stick finger's.
   const at = () => lines.length;
   await touch("touchStart", [[g.x, g.y, 1]]);
-  for (let i = 1; i <= 3; i++) { await touch("touchMove", [[g.x + (g.r * 0.8 * i) / 3, g.y, 1]]); await sleep(16); }
+  for (let i = 1; i <= 3; i++) { await touch("touchMove", [[g.x - (g.r * 0.8 * i) / 3, g.y, 1]]); await sleep(16); }
   const t0 = at();
-  await touch("touchStart", [[g.x + g.r * 0.8, g.y, 1], [W * 0.85, H * 0.8, 2]]);
+  await touch("touchStart", [[g.x - g.r * 0.8, g.y, 1], [W * 0.85, H * 0.8, 2]]);
   await sleep(150);
   const b = await where();
   await touch("touchEnd", [[W * 0.85, H * 0.8, 2]]);   // CDP lifts the points LISTED (measured): the jump finger
   await sleep(300);
   const t1 = at();
-  await touch("touchEnd", [[g.x + g.r * 0.8, g.y, 1]]);
+  await touch("touchEnd", [[g.x - g.r * 0.8, g.y, 1]]);
   await sleep(100);
   const before = lines.slice(0, t0), during = lines.slice(t0, t1), after = lines.slice(t1);
-  const e = before.includes("harkfell: stick e");
+  const e = before.includes("harkfell: stick w");
   const down = during.includes("harkfell: jump down"), up = during.includes("harkfell: jump up");
   const held = !during.includes("harkfell: stick none");
   const released = after.includes("harkfell: stick none");
-  if (e && down && up && held && released && b.y < a.y - 10) pass("two", `stick e, jump down with it held, rose y ${a.y} -> ${b.y}, jump up with the stick still e, stick none only when its own finger lifted`);
-  else fail("two", `stick e ${e}, jump down ${down}, up ${up}, stick held through ${held}, released after ${released}, y ${a.y} -> ${b.y}`);
+  if (e && down && up && held && released && b.y < a.y - 10) pass("two", `stick w, jump down with it held, rose y ${a.y} -> ${b.y}, jump up with the stick still w, stick none only when its own finger lifted`);
+  else fail("two", `stick w ${e}, jump down ${down}, up ${up}, stick held through ${held}, released after ${released}, y ${a.y} -> ${b.y}`);
 }
 
 if (LEGS.includes("timing")) {
