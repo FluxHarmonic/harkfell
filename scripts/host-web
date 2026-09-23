@@ -1,0 +1,103 @@
+#!/bin/sh
+# Host a SNAPSHOT of build/web on the WireGuard address for David's phone.
+#
+#   scripts/host-web           copy build/web -> build/hosted, (re)start both servers
+#   scripts/host-web --stop    stop both servers started from this checkout
+#
+# After Crash The Stack's scripts/host-web and scripts/serve-web (master
+# e737d21), merged into one script:
+#   https  PORT_TLS (8797), cross-origin isolated (COOP/COEP), through
+#          scripts/serve-web-tls.mjs, with a self-signed certificate for the
+#          wg0 address in build/tls/ (made here with openssl through guix
+#          when missing; the phone taps through the warning once)
+#   http   PORT_HTTP (8798), through `sigil serve`, not isolated
+# Both bind to the wg0 address only, read at run time; an empty or
+# wildcard address is a refusal.
+#
+# The snapshot rule (Crash's): the tree must be clean and build/web must be
+# HEAD's build (the page's version stamp), so what David plays is a commit.
+# The PIDs go to build/host-PORT.pid; a stop kills only a PID whose exe is
+# the expected binary and whose cwd is this checkout.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+PORT_TLS="${PORT_TLS:-8797}"
+PORT_HTTP="${PORT_HTTP:-8798}"
+SRC=build/web
+DST=build/hosted
+HERE="$(pwd)"
+
+# The PID in build/host-PORT.pid if it is still ours: exe named $2, cwd here.
+live_pid() {
+  f="build/host-$1.pid"
+  [ -f "$f" ] || return 0
+  pid="$(cat "$f")"
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  [ "$(basename "${exe% (deleted)}")" = "$2" ] || return 0
+  [ "$cwd" = "$HERE" ] || return 0
+  echo "$pid"
+}
+
+stop_port() {
+  pid="$(live_pid "$1" "$2")"
+  if [ -n "$pid" ]; then
+    kill "$pid" && echo "host-web: stopped $2 pid $pid (port $1)"
+  elif [ -f "build/host-$1.pid" ]; then
+    echo "host-web: build/host-$1.pid names no $2 process in $HERE; not killing anything"
+  fi
+  rm -f "build/host-$1.pid"
+}
+
+if [ "${1:-}" = "--stop" ]; then
+  stop_port "$PORT_TLS" node
+  stop_port "$PORT_HTTP" sigil
+  exit 0
+fi
+
+HOST="$(ip -4 -o addr show wg0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+case "$HOST" in
+  ""|0.0.0.0|"*") echo "host-web: refusing to bind to '${HOST:-<empty>}' (wg0 has no IPv4 address?)"; exit 1 ;;
+esac
+
+[ -f "$SRC/index.html" ] || { echo "host-web: $SRC/index.html missing; build --config web first"; exit 1; }
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "host-web: the tree is dirty; the snapshot would not match a commit. Commit first."
+  exit 1
+fi
+head="$(git rev-parse --short=12 HEAD)"
+stamp="$(grep -o 'version: "[^"]*"' "$SRC/index.html" | head -1 | cut -d'"' -f2)"
+if [ "$stamp" != "$head" ]; then
+  echo "host-web: $SRC was built at '$stamp', HEAD is $head. Build --config web at HEAD first."
+  exit 1
+fi
+
+if [ ! -s build/tls/cert.pem ] || [ ! -s build/tls/key.pem ]; then
+  mkdir -p build/tls
+  guix shell openssl -- openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+    -keyout build/tls/key.pem -out build/tls/cert.pem \
+    -subj "/CN=$HOST" -addext "subjectAltName=IP:$HOST" 2>/dev/null
+  [ -s build/tls/cert.pem ] || { echo "host-web: the certificate was not made"; exit 1; }
+  echo "host-web: made a self-signed certificate for $HOST in build/tls/"
+fi
+
+stop_port "$PORT_TLS" node
+stop_port "$PORT_HTTP" sigil
+rm -rf "$DST"
+cp -r "$SRC" "$DST"
+
+setsid node scripts/serve-web-tls.mjs "$DST" "$PORT_TLS" --isolate > "build/host-$PORT_TLS.log" 2>&1 &
+echo $! > "build/host-$PORT_TLS.pid"
+setsid sigil serve --dir "$DST" --host "$HOST" --port "$PORT_HTTP" > "build/host-$PORT_HTTP.log" 2>&1 &
+echo $! > "build/host-$PORT_HTTP.pid"
+sleep 1
+for p in "$PORT_TLS:node" "$PORT_HTTP:sigil"; do
+  port="${p%%:*}"; name="${p##*:}"
+  if [ -z "$(live_pid "$port" "$name")" ]; then
+    echo "host-web: the $name server on $port exited at once; its log:"
+    cat "build/host-$port.log"
+    exit 1
+  fi
+done
+echo "host-web: serving $DST (version $stamp)"
+echo "  https://$HOST:$PORT_TLS/  (isolated; pid $(cat "build/host-$PORT_TLS.pid"))"
+echo "  http://$HOST:$PORT_HTTP/  (pid $(cat "build/host-$PORT_HTTP.pid"))"
