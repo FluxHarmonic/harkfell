@@ -2,9 +2,9 @@
 ;;; the drone, the finding tone and the first music moments, as .cts tunes
 ;;; played live by motif, before any engine exists.
 ;;;
-;;; A package of its own beside the game's (the repo root), so the game's
-;;; lock does not carry motif while the motif these sketches need is
-;;; unreleased. One entry, two arms: (sketchbook main) is the page's wasm on
+;;; A package of its own beside the game's (the repo root): it was built
+;;; against a motif not yet released, and it keeps its own lock, tools and
+;;; web link apart from the game's. One entry, two arms: (sketchbook main) is the page's wasm on
 ;;; the web config and the `sketchbook` tool natively.
 ;;;
 ;;;   sigil deps install && sigil build             the tool: build/dev/bin/sketchbook
@@ -12,11 +12,9 @@
 ;;;   scripts/gate                                  the S0 render gates
 ;;;   scripts/host                                  build the page, serve on wg0 8795 (https) and 8796
 ;;;
-;;; motif: until the leader tags the release with the 0.7.0 nodes, point
-;;; .sigil/deps/motif at the motif checkout that has them and rebuild with
-;;; --force (dev-redirects do not reach a from-git package; see
-;;; procedures/worker-instructions). The tool checks it at startup: a motif
-;;; without the noise-bed kind is refused.
+;;; motif ^0.7.0 is the floor: the bed nodes and kinds (PINK, BROWN, RANDI,
+;;; DELAY, noise-bed, the drone kinds, cents:) arrived in 0.7.0. The tool
+;;; checks it at startup: `sketchbook probe` requires cents: to move a note.
 
 (import (sigil process) (sigil string) (sigil time) (sigil math) (sigil fs))
 
@@ -80,9 +78,9 @@
       features: '(web wasm)))
 
   dependencies: (list
-    ;; The tune model, the player and the render, both targets. ^0.6.6 until
-    ;; the release with the 0.7.0 nodes is tagged (see the header).
-    (from-git url: "codeberg:sigil/motif" version: "^0.6.6")
+    ;; The tune model, the player and the render, both targets. 0.7.0 is the
+    ;; release with the bed nodes and kinds these sketches use.
+    (from-git url: "codeberg:sigil/motif" version: "^0.7.0")
     ;; The sink: sokol natively (unused by the tool), the WebAudio bridge on the web.
     (from-git url: "codeberg:sigil/sigil-audio" version: "^0.12.2")
     (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.5" configs: '(web))
