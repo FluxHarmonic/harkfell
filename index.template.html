@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Harkfell</title>
+  <!-- version: "__VERSION__" -->
+  <style>
+    /* The page is the room: the canvas fills the viewport and the game
+       places the 400x176 view on it at a whole number of DEVICE pixels
+       per view pixel ((engine view)), so the canvas must not be scaled by
+       CSS beyond its own devicePixelRatio sizing. */
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
+                 overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+    #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
+             display: block; touch-action: none; user-select: none;
+             -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+    #status { position: fixed; left: 8px; bottom: 8px; color: #aab; font: 13px ui-monospace, monospace; }
+    #status:empty, #status [data-sigil-booting] { display: none; }
+
+    /* The touch controls (D17, D25): a stick under the left thumb, a jump
+       button under the right. Drawn by the page over the canvas; the page
+       tracks the fingers and sends the game a direction, the game decides
+       what it means ((engine stick)). */
+    #touch { position: fixed; inset: 0; touch-action: none; display: none; z-index: 2;
+             -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+    #touch.on { display: block; }
+    #ring, #knob, #jumpbtn { position: absolute; border-radius: 50%; pointer-events: none;
+                             box-sizing: border-box; }
+    #ring { border: 2px solid rgba(235, 230, 215, 0.35); background: rgba(235, 230, 215, 0.06); }
+    #ring.live { border-color: rgba(235, 230, 215, 0.6); }
+    #knob { background: rgba(235, 230, 215, 0.45); }
+    #jumpbtn { border: 2px solid rgba(235, 230, 215, 0.35); background: rgba(235, 230, 215, 0.08); }
+    #jumpbtn.down { background: rgba(235, 230, 215, 0.35); }
+
+    /* The page guard's card: the game died (a trap, a FATAL, a lost WebGL
+       context). A tap reloads. No words (D8): a circle arrow. */
+    #dead { position: fixed; inset: 0; z-index: 3; display: flex; align-items: center;
+            justify-content: center; background: rgba(0, 0, 0, 0.8); color: #ddd; font: 48px sans-serif; }
+    #dead[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="stage" width="800" height="352"></canvas>
+  <div id="touch">
+    <div id="ring"></div>
+    <div id="knob"></div>
+    <div id="jumpbtn"></div>
+  </div>
+  <div id="dead" hidden>&#x21bb;</div>
+  <div id="status"></div>
+
+  <script>
+  // Harkfell's page. The generic loader (sigil-web-app.js) boots the wasm,
+  // forwards keydown/keyup, and publishes SigilWebApp; the gles3 shell
+  // runs one frame per requestAnimationFrame. This page adds the touch
+  // controls, the parameters, the visibility word and a small guard.
+  //
+  // Parameters:
+  //   ?stick=float|fixed   the joystick form (D25); stored by the game, so
+  //                        the phone keeps it until asked otherwise.
+  //                        float: the ring rests at its home spot and a
+  //                        thumb landing anywhere in the lower-left quarter
+  //                        re-centres it; it goes home on lift-off.
+  //                        fixed: the ring stays where it is drawn; press
+  //                        inside it (half a radius of slack).
+  //   ?ms                  the readout: frame, step and draw ms, the scale,
+  //                        the stick form, and touch latency (in, move,
+  //                        jump: last, average, max of the last 16, ms).
+  //   ?touch               show the touch controls without a touch screen.
+  //   ?trace               the harkfell: console lines.
+  //   ?replay, ?envelope   print the replay trace / the envelope (the gates).
+  //
+  // The guard follows Crash The Stack's page guard (master e737d21) in
+  // spirit, much reduced: a FATAL line, a trap out of a dispatch or a lost
+  // WebGL context marks the instance dead; after that nothing reaches it
+  // and a card offers a reload.
+  (function () {
+    "use strict";
+    var params = new URLSearchParams(location.search);
+    var guard = { dead: false };
+    var deadCard = document.getElementById("dead");
+    function die(why) {
+      if (guard.dead) return;
+      guard.dead = true;
+      console.error("harkfell: page dead " + why);
+      deadCard.hidden = false;
+    }
+    deadCard.addEventListener("click", function () { location.reload(); });
+    var warn = console.warn;
+    console.warn = function () {
+      var s = String(arguments[0] || "");
+      if (s.indexOf("FATAL:") >= 0) die("fatal");
+      return warn.apply(console, arguments);
+    };
+    window.addEventListener("error", function (e) {
+      if (e.error && e.error instanceof WebAssembly.RuntimeError) die("trap");
+    });
+
+    function withApp(fn) {
+      if (globalThis.SigilWebApp && globalThis.SigilWebApp.started) { fn(globalThis.SigilWebApp); return; }
+      document.addEventListener("sigil-web-app-ready", function (e) { fn(e.detail); }, { once: true });
+    }
+
+    var app = null;
+    function send(type, payload) {
+      if (!app || guard.dead) return 0;
+      return app.dispatch(type, payload);
+    }
+
+    withApp(function (a) {
+      app = a;
+      var deliver = app.deliver;
+      app.deliver = function (type, payload) {
+        if (guard.dead) return -1;
+        try { return deliver.call(app, type, payload); }
+        catch (err) { die("trap in " + type); throw err; }
+      };
+      if (params.has("trace")) send("trace", "on");
+      if (params.has("ms")) send("ms", "on");
+      var form = params.get("stick");
+      if (form === "float" || form === "fixed") send("stick-form", form);
+      stick.form = send("stick-form", "?") === 1 ? "float" : "fixed";
+      layout();
+      if (params.has("replay")) setTimeout(function () { send("replay", ""); }, 50);
+      if (params.has("envelope")) setTimeout(function () { send("envelope", ""); }, 50);
+    });
+    document.getElementById("stage").addEventListener("webglcontextlost", function () { die("webgl context lost"); });
+
+    document.addEventListener("visibilitychange", function () {
+      send("visibility", document.visibilityState);
+      if (document.visibilityState === "hidden") releaseAll();
+    });
+
+    // ---- the touch controls ----------------------------------------------
+    var touchLayer = document.getElementById("touch");
+    var ringEl = document.getElementById("ring");
+    var knobEl = document.getElementById("knob");
+    var jumpEl = document.getElementById("jumpbtn");
+    var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    if (coarse || params.has("touch")) touchLayer.classList.add("on");
+
+    // Sizes in CSS px, from the short side of the screen.
+    var stick = { form: "float", r: 60, homeX: 0, homeY: 0, cx: 0, cy: 0, id: null };
+    var jump = { r: 46, x: 0, y: 0, id: null };
+
+    function place(el, x, y, r) {
+      el.style.width = el.style.height = (2 * r) + "px";
+      el.style.left = (x - r) + "px";
+      el.style.top = (y - r) + "px";
+    }
+
+    function layout() {
+      var w = window.innerWidth, h = window.innerHeight;
+      var s = Math.min(w, h);
+      stick.r = Math.max(44, Math.round(s * 0.17));
+      jump.r = Math.max(36, Math.round(s * 0.13));
+      stick.homeX = stick.r + Math.round(s * 0.08);
+      stick.homeY = h - stick.r - Math.round(s * 0.08);
+      jump.x = w - jump.r - Math.round(s * 0.1);
+      jump.y = h - jump.r - Math.round(s * 0.1);
+      if (stick.id === null) { stick.cx = stick.homeX; stick.cy = stick.homeY; }
+      place(ringEl, stick.cx, stick.cy, stick.r);
+      place(knobEl, stick.cx, stick.cy, Math.round(stick.r * 0.42));
+      place(jumpEl, jump.x, jump.y, jump.r);
+    }
+    window.addEventListener("resize", layout);
+    layout();
+
+    function stickVector(x, y, t) {
+      var dx = (x - stick.cx) / stick.r, dy = (y - stick.cy) / stick.r;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      if (len > 1) { dx /= len; dy /= len; }
+      place(knobEl, stick.cx + dx * stick.r, stick.cy + dy * stick.r, Math.round(stick.r * 0.42));
+      send("stick", dx.toFixed(4) + "," + dy.toFixed(4) + "," + t.toFixed(3));
+    }
+
+    // Does a touch at (x, y) take the stick?
+    function takesStick(x, y) {
+      var w = window.innerWidth, h = window.innerHeight;
+      var dx = x - stick.homeX, dy = y - stick.homeY;
+      var inRing = Math.sqrt(dx * dx + dy * dy) <= stick.r * 1.5;
+      if (stick.form === "fixed") return inRing;
+      return inRing || (x < w / 2 && y > h / 2);
+    }
+
+    function releaseStick(t) {
+      stick.id = null;
+      stick.cx = stick.homeX; stick.cy = stick.homeY;
+      ringEl.classList.remove("live");
+      place(ringEl, stick.cx, stick.cy, stick.r);
+      place(knobEl, stick.cx, stick.cy, Math.round(stick.r * 0.42));
+      send("stick", "0,0," + t.toFixed(3));
+    }
+    function releaseJump(t) {
+      jump.id = null;
+      jumpEl.classList.remove("down");
+      send("jump", "0," + t.toFixed(3));
+    }
+    function releaseAll() {
+      var t = performance.now();
+      if (stick.id !== null) releaseStick(t);
+      if (jump.id !== null) releaseJump(t);
+    }
+
+    touchLayer.addEventListener("pointerdown", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var x = e.clientX, y = e.clientY;
+      if (stick.id === null && takesStick(x, y)) {
+        stick.id = e.pointerId;
+        if (stick.form === "float") { stick.cx = x; stick.cy = y; }
+        ringEl.classList.add("live");
+        place(ringEl, stick.cx, stick.cy, stick.r);
+        try { touchLayer.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointers */ }
+        stickVector(x, y, e.timeStamp);
+      } else if (jump.id === null && x >= window.innerWidth / 2) {
+        jump.id = e.pointerId;
+        jumpEl.classList.add("down");
+        try { touchLayer.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointers */ }
+        send("jump", "1," + e.timeStamp.toFixed(3));
+      }
+    });
+    touchLayer.addEventListener("pointermove", function (e) {
+      if (e.pointerId !== stick.id) return;
+      e.preventDefault(); e.stopPropagation();
+      stickVector(e.clientX, e.clientY, e.timeStamp);
+    });
+    function up(e) {
+      if (e.pointerId === stick.id) releaseStick(e.timeStamp);
+      else if (e.pointerId === jump.id) releaseJump(e.timeStamp);
+    }
+    touchLayer.addEventListener("pointerup", up);
+    touchLayer.addEventListener("pointercancel", up);
+    // The loader turns a swipe anywhere into an arrow key pulse; the
+    // controls' own touches must never reach it.
+    ["touchstart", "touchmove", "touchend", "touchcancel"].forEach(function (name) {
+      touchLayer.addEventListener(name, function (e) { e.stopPropagation(); e.preventDefault(); }, { passive: false });
+    });
+  })();
+  </script>
+  <!--sigil:app-->
+</body>
+</html>

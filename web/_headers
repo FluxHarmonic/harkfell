@@ -1,0 +1,6 @@
+# Cloudflare Pages headers (copied from Crash The Stack master e737d21,
+# web/_headers). The page is served cross-origin isolated, like Crash's.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin

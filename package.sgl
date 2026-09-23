@@ -1,0 +1,109 @@
+;;; Harkfell - a quiet exploration platformer about carrying lost harmonics
+;;; home, in Sigil.
+;;;
+;;; One source tree, two targets, the shape Crash The Stack uses (its master
+;;; e737d21): (harkfell main) is the seam that picks the shell, (harkfell
+;;; shell native) over sigil-desktop for the dev/release configs and
+;;; (harkfell shell web) over the browser's requestAnimationFrame for the
+;;; web config.
+;;;
+;;; The modules under (engine ...) are written for the shared Sigil game
+;;; engine Crash's P5 is to extract (ruling D6): no Harkfell names in them.
+;;;
+;;;   scripts/dev sigil build                       native (dev: bytecode)
+;;;   scripts/dev sigil build --config release      native, what you play
+;;;   scripts/dev sigil build --config web          browser (manifest has binaryen)
+;;;   scripts/host-web                              host a snapshot of build/web on wg0
+
+(import (sigil process) (sigil string) (sigil time) (sigil math) (sigil fs))
+
+(define sigil-repo "codeberg:sigil/sigil")
+(define app-repo "codeberg:sigil/sigil-desktop")
+(define graphics-repo "codeberg:sigil/sigil-graphics")
+
+;; The web build's version, stamped into the page (Crash's web-version):
+;; the git commit, plus the build's second when the tree was dirty, so two
+;; dirty builds of one commit are still two versions.
+(define (web-version)
+  (let* ((sha (string-trim (process-output->string "git" "rev-parse" "--short=12" "HEAD")))
+         (dirty (string-trim (process-output->string "git" "status" "--porcelain" "--untracked-files=no")))
+         (sha (if (string=? sha "") "unversioned" sha)))
+    (if (string=? dirty "")
+        sha
+        (string-append sha "-dirty-" (number->string (exact (floor (current-second))))))))
+
+;; After link-web-application: the page's __VERSION__ stamped, and the
+;; Pages edge headers (COOP/COEP) copied beside it.
+(define (stamp-web-version ctx)
+  (let* ((out (config-output-dir (context-config ctx)))
+         (page-path (path-join out "index.html"))
+         (page (read-file-string page-path)))
+    (write-file-string (path-join out "_headers") (read-file-string "web/_headers"))
+    (write-file-string page-path (string-replace page "__VERSION__" (web-version)))
+    (display "  web version ") (display (web-version)) (newline)
+    ctx))
+
+(package
+  name: "harkfell"
+  version: "0.0.1"
+  sigil: "0.22.5"
+  description: "A quiet exploration platformer about carrying lost harmonics home"
+  license: "GPL-3.0-or-later"
+  authors: (list "David Wilson <david@daviwil.com>")
+
+  entry: '(harkfell main)
+  bundle-name: "harkfell"
+
+  configs: (list
+    (config
+      name: 'dev
+      output-dir: "build/dev"
+      debug?: #t
+      optimize: 0
+      bundle?: #t)
+    (config
+      name: 'release
+      output-dir: "build/release"
+      debug?: #f
+      optimize: 2
+      backend: 'native
+      bundle?: #t)
+    ;; wasm32-wasi through zig, native codegen; the shell drives one frame
+    ;; per requestAnimationFrame dispatch (Crash's web config).
+    (config
+      name: 'web
+      output-dir: "build/web"
+      toolchain: 'zig
+      target: "wasm32-wasi"
+      backend: 'native
+      debug?: #f
+      optimize: 2
+      bundle?: #t
+      features: '(web wasm graphics)))
+
+  dependencies: (list
+    ;; Window and keyboard (GLFW); native only.
+    (from-git url: app-repo version: "^0.10.2" configs: '(dev release))
+    ;; Drawing, both targets.
+    (from-git url: graphics-repo version: "^0.11.4")
+    ;; Web only: the wasm runtime and loader, the WebGL2 bridge and app
+    ;; shell, and localStorage for (engine store).
+    (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.5" configs: '(web))
+    (from-git url: sigil-repo package: "sigil-wasm-gles3" version: ">=0.22.5" configs: '(web))
+    (from-git url: sigil-repo package: "sigil-browser" version: ">=0.22.5" configs: '(web)))
+
+  dev-dependencies: (list
+    (from-git url: sigil-repo package: "sigil-test" version: ">=0.22.5")
+    (from-git url: sigil-repo package: "sigil-test-runner" version: ">=0.22.5"))
+
+  tasks: (list
+    (task
+      name: 'build
+      description: "Compile the game (and, on the web config, link the browser app)"
+      steps: (list
+        (compile-sigil-modules sources: "src/**/*.sgl")
+        (lambda (ctx)
+          (if (memq (target-os ctx) '(wasm wasi))
+              (stamp-web-version
+                ((link-web-application name: "harkfell" html-mount-id: "status") ctx))
+              ctx))))))
