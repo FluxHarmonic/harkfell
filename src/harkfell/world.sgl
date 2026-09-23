@@ -1,0 +1,87 @@
+;;; (harkfell world) - One room, one body, and the soft return.
+;;;
+;;; The world steps at the fixed 60 Hz tick: the shells feed it one INTENT
+;;; per tick ((engine body)), whatever device the intent came from.
+;;;
+;;; The soft return (ruling D4): touching a hazard dims the screen for half
+;;; a second and puts you back where you entered the room. No lives, no
+;;; death animation. DIM-TICKS going dark (input ignored, the body holds
+;;; still), the body back at the entry at rest, DIM-TICKS coming back.
+;;; RETURNS counts them (the tests and the ?trace line read it). The low
+;;; tone of section 3 is A2's (sound).
+;;;
+;;; The entry is the room's @ marker: the body stands on the floor of that
+;;; cell, centered in it. A1's room changes make "where you entered" the
+;;; seam you came through; the world keeps it as a body, so that is a
+;;; change of what is stored, not of how the return works.
+
+(define-library (harkfell world)
+  (import (sigil struct)
+          (engine tilemap)
+          (engine room)
+          (engine body)
+          (engine tween)
+          (harkfell feel))
+
+  (export world world? world-new
+          world-room world-body world-entry world-phase world-timer
+          world-ticks world-returns world-tiles
+          world-tick world-dim DIM-TICKS
+          entry-body)
+
+  (begin
+    (define DIM-TICKS 15)
+
+    ;; phase: play, dark (dimming out), light (coming back). timer: ticks
+    ;; left in the phase. ticks: every tick stepped.
+    (define-struct world
+      (room default: #f)
+      (body default: #f)
+      (entry default: #f)
+      (phase default: 'play)
+      (timer default: 0)
+      (ticks default: 0)
+      (returns default: 0))
+
+    (define (world-tiles w) (room-tiles (world-room w)))
+
+    ;; The body standing in the entry cell, centered.
+    (define (entry-body r f)
+      (let* ((cell (or (room-marker r 'entry) (cons 1 1)))
+             (size (tilemap-size (room-tiles r))))
+        (body (body-at (+ (* size (car cell)) (/ (- size (feel-box-w f)) 2.0))
+                       (- (* size (+ (cdr cell) 1)) (feel-box-h f)))
+              mode: 'ground)))
+
+    (define (world-new r)
+      (let ((b (entry-body r HARKFELL-FEEL)))
+        (world room: r body: b entry: b)))
+
+    (define (world-tick w in)
+      (let ((w (world w ticks: (+ (world-ticks w) 1))))
+        (case (world-phase w)
+          ((play)
+           (let ((b (body-step (world-body w) in (world-tiles w) HARKFELL-FEEL)))
+             (if (memq 'hazard (body-events b))
+                 (world w body: b phase: 'dark timer: DIM-TICKS)
+                 (world w body: b))))
+          ((dark)
+           (if (<= (world-timer w) 1)
+               (world w
+                      body: (world-entry w)
+                      phase: 'light
+                      timer: DIM-TICKS
+                      returns: (+ (world-returns w) 1))
+               (world w timer: (- (world-timer w) 1))))
+          (else
+           (if (<= (world-timer w) 1)
+               (world w phase: 'play timer: 0)
+               (world w timer: (- (world-timer w) 1)))))))
+
+    ;; How dark the screen is, 0 (clear) to 1 (black), eased.
+    (define (world-dim w)
+      (let ((p (/ (* 1.0 (world-timer w)) DIM-TICKS)))
+        (case (world-phase w)
+          ((dark) (ease 'in-out-quad (- 1.0 p)))
+          ((light) (ease 'in-out-quad p))
+          (else 0.0))))))

@@ -1,0 +1,53 @@
+;;; (harkfell input) - Keys and the touch stick reduced to one intent a tick.
+;;;
+;;; Every device ends as an (engine body) intent: a horizontal and a
+;;; vertical direction, jump held, jump pressed this tick. The shells keep
+;;; the raw state (the keys held, the stick's sector, the touch jump
+;;; button) and ask this module for the tick's intent.
+;;;
+;;;   keyboard   arrows or WASD to move, climb and swim; Space or Z to
+;;;              jump (section 3's controls table)
+;;;   touch      the stick's sector ((engine stick)) and the jump button
+;;;   gamepad    not in A0: sigil-desktop 0.10.2 exposes no gamepad
+;;;
+;;; A press is an edge the shell latches until a tick consumes it: a
+;;; frame that runs no tick (the clock had less than a tick of time) keeps
+;;; the press for the next one, so a tap between two ticks is never lost.
+;;; A press and release inside one frame still jumps: the intent says
+;;; pressed, and not held, which is the shortest (tapped) jump.
+
+(define-library (harkfell input)
+  (import (sigil math)
+          (engine body)
+          (engine stick))
+
+  (export keys-h keys-v jump-key? jump-key-in?
+          tick-intent)
+
+  (begin
+    (define (held? keys k) (and (memq k keys) #t))
+
+    (define (keys-h keys)
+      (- (if (or (held? keys 'right) (held? keys 'd)) 1 0)
+         (if (or (held? keys 'left) (held? keys 'a)) 1 0)))
+
+    (define (keys-v keys)
+      (- (if (or (held? keys 'down) (held? keys 's)) 1 0)
+         (if (or (held? keys 'up) (held? keys 'w)) 1 0)))
+
+    (define (jump-key? k) (or (eq? k 'space) (eq? k 'z)))
+
+    (define (jump-key-in? keys)
+      (or (held? keys 'space) (held? keys 'z)))
+
+    (define (clamp1 n) (max -1 (min 1 n)))
+
+    ;; keys: the key symbols held. sector: the stick's ((engine stick)).
+    ;; touch-jump: the jump button is down. press: a jump press is latched.
+    (define (tick-intent keys sector touch-jump press)
+      (let ((hv (sector->hv sector))
+            (held (or (jump-key-in? keys) touch-jump)))
+        (intent h: (clamp1 (+ (keys-h keys) (car hv)))
+                v: (clamp1 (+ (keys-v keys) (cdr hv)))
+                jump: (or held press)
+                press: press)))))

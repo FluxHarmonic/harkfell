@@ -1,0 +1,312 @@
+// verify.mjs - A0's browser arm for the web build.
+//
+//   node verify.mjs [build/web] [--port N] [--cdp N] [--legs a,b,...]
+//                   [--record-replay PATH] [--replay-fixture PATH] [--shot PNG]
+//
+// Serves the build dir on 127.0.0.1 with COOP/COEP (the page is served
+// isolated everywhere else too), launches google-chrome headless with
+// software WebGL (SwiftShader), drives the page over the DevTools Protocol
+// (Node's built-in WebSocket, no puppeteer). The harness shape (the leak
+// guard, the process-group kill, the CDP plumbing) is Crash The Stack's
+// verify.mjs at master e737d21, much reduced.
+//
+// Legs, each printing PASS / FAIL <leg>: <detail>; any FAIL exits 1, a wait
+// that runs out prints TIMED-OUT <leg> with what it collected and exits 2:
+//
+//   boot       the game's boot line: "harkfell: boot stick float"
+//   render     the canvas holds the room: pixels in at least four color bins
+//              (sky, rock, rough rock, water, the body), read in the frame the
+//              game drew
+//   replay     ?replay: the trace, line for line, equals the web recording
+//              (test/fixtures/replay-web.txt); --record-replay writes it instead
+//   envelope   ?envelope: the measured envelope on the wasm build is the
+//              design target (gap standing 2, moving 3; ledge held 3, tap < 3)
+//   keys       ArrowRight held 0.5 s moves the body right
+//   float      ?stick=float: a touch in the lower-left quarter OUTSIDE the ring
+//              re-centres the stick there; a drag right moves the body right;
+//              the latency lines then carry numbers for IN and MOVE
+//   fixed      ?stick=fixed: the same touch outside the ring does nothing (the
+//              body stays put: the float leg's control), and a touch inside
+//              the ring with the same drag moves it
+//   jump       a touch on the right half is the jump button: the body rises,
+//              and the JUMP latency carries a number
+//   errors     no console error and no exception in any leg
+
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+const args = process.argv.slice(2);
+const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
+const VALUED = ["--port", "--cdp", "--legs", "--record-replay", "--replay-fixture", "--shot"];
+const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && VALUED.includes(args[i - 1])));
+const ROOT = path.resolve(positional[0] || "build/web");
+const PORT = parseInt(opt("--port", "8199"), 10);
+const CDP = parseInt(opt("--cdp", "9299"), 10);
+const RECORD = opt("--record-replay", null);
+const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
+const ALL_LEGS = ["boot", "render", "replay", "envelope", "keys", "float", "fixed", "jump", "errors"];
+const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
+
+if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
+const stamp = (fs.readFileSync(path.join(ROOT, "index.html"), "utf8").match(/version: "([^"]*)"/) || [])[1];
+const wasmStat = fs.statSync(path.join(ROOT, "harkfell.wasm"));
+console.log(`subject: ${ROOT} version ${stamp} harkfell.wasm ${wasmStat.size} bytes mtime ${wasmStat.mtime.toISOString()}`);
+
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".css": "text/css", ".png": "image/png" };
+const server = http.createServer((req, res) => {
+  const urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
+  const fp = path.join(ROOT, urlPath === "/" ? "/index.html" : urlPath);
+  if (fp !== ROOT && !fp.startsWith(ROOT + path.sep)) { res.writeHead(403).end(); return; }
+  fs.readFile(fp, (err, buf) => {
+    if (err) { res.writeHead(404).end("not found"); return; }
+    res.writeHead(200, { "Content-Type": TYPES[path.extname(fp)] || "application/octet-stream", "Cache-Control": "no-store",
+      "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" });
+    res.end(buf);
+  });
+});
+await new Promise((r) => server.listen(PORT, "127.0.0.1", r));
+
+// ---- no leaked chrome (Crash's guard) ----------------------------------------
+function leakedChromes() {
+  const out = [];
+  for (const pid of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+    let cmd = "";
+    try { cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" "); } catch { continue; }
+    if (/--user-data-dir=\/tmp\/harkfell-verify-/.test(cmd) && /chrome/.test(cmd) && !/--type=/.test(cmd)) out.push(pid);
+  }
+  return out;
+}
+{ const l = leakedChromes(); if (l.length) { console.log(`SETUP-FAILED: a harkfell-verify chrome is still alive: pids ${l.join(" ")}`); process.exit(2); } }
+
+const udd = fs.mkdtempSync("/tmp/harkfell-verify-chrome-");
+const chrome = spawn("google-chrome", [
+  "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
+  "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+  "--enable-webgl", "--ignore-gpu-blocklist",
+  `--remote-debugging-port=${CDP}`, `--user-data-dir=${udd}`,
+  "--window-size=1000,760", "about:blank",
+], { stdio: "ignore", detached: true });
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function killChromeGroup(sig) { try { process.kill(-chrome.pid, sig); } catch { /* gone */ } }
+let exiting = false;
+function shutdown(code) {
+  if (exiting) return; exiting = true;
+  try { server.close(); } catch { /* not listening */ }
+  killChromeGroup("SIGTERM");
+  setTimeout(() => { killChromeGroup("SIGKILL"); try { fs.rmSync(udd, { recursive: true, force: true }); } catch { /* scratch */ } process.exit(code); }, 1500);
+}
+process.on("exit", () => { killChromeGroup("SIGKILL"); try { fs.rmSync(udd, { recursive: true, force: true }); } catch { /* scratch */ } });
+process.on("SIGINT", () => shutdown(130));
+process.on("SIGTERM", () => shutdown(143));
+process.on("unhandledRejection", (err) => { console.log("EXCEPTION: " + (err && err.stack || err)); dump(); shutdown(2); });
+process.on("uncaughtException", (err) => { console.log("EXCEPTION: " + (err && err.stack || err)); dump(); shutdown(2); });
+setTimeout(() => { console.log(`TIMED-OUT whole run; did not run: ${notRun().join(" ")}`); dump(); shutdown(2); }, 600000).unref();
+
+let pageWs = null;
+for (let i = 0; i < 80 && !pageWs; i++) {
+  try { const ts = await (await fetch(`http://127.0.0.1:${CDP}/json`)).json(); const p = ts.find((t) => t.type === "page"); if (p && p.webSocketDebuggerUrl) pageWs = p.webSocketDebuggerUrl; } catch { /* not up */ }
+  await sleep(250);
+}
+if (!pageWs) { console.log("SETUP-FAILED: no chrome page target after 20 s"); shutdown(2); }
+
+const ws = new WebSocket(pageWs);
+let msgId = 0; const pending = new Map();
+let lines = [];
+const errors = [];
+function send(method, params = {}) {
+  return new Promise((res, rej) => { const id = ++msgId; pending.set(id, { res, rej }); ws.send(JSON.stringify({ id, method, params })); });
+}
+ws.addEventListener("message", (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.id && pending.has(msg.id)) { const { res, rej } = pending.get(msg.id); pending.delete(msg.id); msg.error ? rej(new Error(JSON.stringify(msg.error))) : res(msg.result); return; }
+  if (msg.method === "Runtime.consoleAPICalled") {
+    const text = (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
+    lines.push(text);
+    if (msg.params.type === "error") errors.push("console.error: " + text);
+  }
+  if (msg.method === "Runtime.exceptionThrown") errors.push("exception: " + (msg.params.exceptionDetails?.exception?.description || msg.params.exceptionDetails?.text));
+});
+await new Promise((res, rej) => { ws.addEventListener("open", res); ws.addEventListener("error", rej); });
+await send("Page.enable"); await send("Runtime.enable");
+await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+
+const results = [];
+const ran = new Set();
+let failed = false;
+function pass(leg, detail) { results.push(`PASS ${leg}: ${detail}`); console.log(`PASS ${leg}: ${detail}`); }
+function fail(leg, detail) { failed = true; results.push(`FAIL ${leg}: ${detail}`); console.log(`FAIL ${leg}: ${detail}`); }
+function notRun() { return LEGS.filter((l) => !ran.has(l)); }
+function dump() { console.log("--- last console lines ---"); for (const l of lines.slice(-30)) console.log("  " + l.slice(0, 200)); for (const e of errors) console.log("  ERR " + e.slice(0, 200)); }
+
+async function waitFor(pred, ms, leg) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { const v = pred(); if (v) return v; await sleep(50); }
+  console.log(`TIMED-OUT ${leg} after ${ms} ms; did not run: ${notRun().join(" ")}`); dump(); shutdown(2);
+  await sleep(10000);
+}
+const evaluate = async (expr) => (await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true })).result.value;
+
+async function open(query) {
+  lines = [];
+  await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/?${query}` });
+  await waitFor(() => lines.find((l) => l.startsWith("harkfell: boot")), 60000, "open " + query);
+  await sleep(300);
+}
+async function where() {
+  const before = lines.length;
+  await evaluate(`SigilWebApp.dispatch("where", "")`);
+  const l = await waitFor(() => lines.slice(before).find((x) => x.startsWith("harkfell: at ")), 5000, "where");
+  const [, , x, y, mode] = l.split(" ");
+  return { x: Number(x), y: Number(y), mode };
+}
+async function latency() {
+  const before = lines.length;
+  await evaluate(`SigilWebApp.dispatch("latency", "")`);
+  return await waitFor(() => lines.slice(before).find((x) => x.startsWith("harkfell: latency ")), 5000, "latency");
+}
+const touch = (type, pts) => send("Input.dispatchTouchEvent", { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id })) });
+const W = await evaluate("window.innerWidth"), H = await evaluate("window.innerHeight");
+
+// ---- the legs -------------------------------------------------------------------
+if (LEGS.includes("boot")) {
+  ran.add("boot");
+  await open("trace&touch&stick=float");
+  const b = lines.find((l) => l.startsWith("harkfell: boot"));
+  b === "harkfell: boot stick float" ? pass("boot", b) : fail("boot", b);
+}
+
+if (LEGS.includes("render")) {
+  ran.add("render");
+  if (!LEGS.includes("boot")) await open("trace");
+  const bins = await evaluate(`new Promise((resolve) => requestAnimationFrame(() => {
+    const c = document.getElementById("stage");
+    const gl = c.getContext("webgl2");
+    const px = new Uint8Array(4 * c.width * c.height);
+    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const seen = new Set();
+    for (let i = 0; i < px.length; i += 4 * 97) seen.add((px[i] >> 4) + "," + (px[i + 1] >> 4) + "," + (px[i + 2] >> 4));
+    resolve([seen.size, c.width, c.height]);
+  }))`);
+  bins[0] >= 4 ? pass("render", `${bins[0]} color bins on a ${bins[1]}x${bins[2]} canvas`) : fail("render", `only ${bins[0]} color bins`);
+  const SHOT = opt("--shot", null);
+  if (SHOT) {
+    const png = await send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(SHOT, Buffer.from(png.data, "base64"));
+    console.log(`note: screenshot ${SHOT}`);
+  }
+}
+
+if (LEGS.includes("replay")) {
+  ran.add("replay");
+  await open("trace&replay");
+  const done = await waitFor(() => lines.find((l) => l.startsWith("harkfell: replay-done")), 120000, "replay");
+  const trace = lines.filter((l) => l.startsWith("harkfell: replay ")).map((l) => l.slice("harkfell: replay ".length));
+  const text = trace.join("\n") + "\n";
+  if (RECORD) {
+    fs.writeFileSync(RECORD, text);
+    pass("replay", `recorded ${trace.length} lines to ${RECORD} (${done})`);
+  } else if (!fs.existsSync(FIXTURE)) {
+    fail("replay", `no recording at ${FIXTURE}; run with --record-replay first`);
+  } else {
+    const want = fs.readFileSync(FIXTURE, "utf8").split("\n").filter((l) => l.length);
+    let first = -1;
+    for (let i = 0; i < Math.max(want.length, trace.length); i++) if (want[i] !== trace[i]) { first = i; break; }
+    if (trace.length === 1800 && first < 0) pass("replay", `${trace.length} ticks identical to ${FIXTURE}`);
+    else fail("replay", `${trace.length} lines; first difference at line ${first + 1}: got "${trace[first]}" want "${want[first]}"`);
+  }
+}
+
+if (LEGS.includes("envelope")) {
+  ran.add("envelope");
+  await open("trace&envelope");
+  await waitFor(() => lines.find((l) => l === "harkfell: envelope-done"), 180000, "envelope");
+  const fig = {};
+  for (const l of lines.filter((x) => x.startsWith("harkfell: envelope "))) { const [, , name, value] = l.split(" "); fig[name] = Number(value); }
+  const ok = fig["gap-standing"] === 2 && fig["gap-moving"] === 3 && fig["ledge-held"] === 3 && fig["ledge-tap"] < 3;
+  (ok ? pass : fail)("envelope", JSON.stringify(fig));
+}
+
+if (LEGS.includes("keys")) {
+  ran.add("keys");
+  await open("trace");
+  const a = await where();
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await sleep(500);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  const b = await where();
+  b.x > a.x + 8 ? pass("keys", `x ${a.x} -> ${b.x}`) : fail("keys", `x ${a.x} -> ${b.x}`);
+}
+
+// the ring's home and radius as the page placed it
+async function ring() {
+  return await evaluate(`(() => { const r = document.getElementById("ring").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 }; })()`);
+}
+
+// A touch at (x, y), a drag of dx over steps, held for ms, then lifted.
+async function drag(x, y, dx, ms) {
+  await touch("touchStart", [[x, y, 1]]);
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [[x + (dx * i) / 6, y, 1]]); await sleep(16); }
+  await sleep(ms);
+  await touch("touchEnd", []);
+}
+
+if (LEGS.includes("float")) {
+  ran.add("float");
+  await open("trace&touch&stick=float");
+  const g = await ring();
+  // lower-left quarter, well outside the ring and its slack
+  const x = Math.min(W / 2 - 20, g.x + 2.2 * g.r), y = Math.max(H / 2 + 20, g.y - 0.3 * g.r);
+  const outside = Math.hypot(x - g.x, y - g.y) > 1.5 * g.r;
+  const a = await where();
+  await drag(x, y, g.r * 0.8, 500);
+  const b = await where();
+  const lat = await latency();
+  const m = lat.match(/in (\d+) .*move (\d+) /);
+  if (outside && b.x > a.x + 8 && m) pass("float", `touch at ${Math.round(x)},${Math.round(y)} (outside the ring): x ${a.x} -> ${b.x}; ${lat}`);
+  else fail("float", `outside ${outside}; x ${a.x} -> ${b.x}; ${lat}`);
+}
+
+if (LEGS.includes("fixed")) {
+  ran.add("fixed");
+  await open("trace&touch&stick=fixed");
+  const g = await ring();
+  const x = Math.min(W / 2 - 20, g.x + 2.2 * g.r), y = Math.max(H / 2 + 20, g.y - 0.3 * g.r);
+  const a = await where();
+  await drag(x, y, g.r * 0.8, 500);
+  const b = await where();
+  await drag(g.x, g.y, g.r * 0.8, 500);
+  const c = await where();
+  if (Math.abs(b.x - a.x) < 0.001 && c.x > b.x + 8) pass("fixed", `outside the ring: x stays ${a.x}; inside: x ${b.x} -> ${c.x}`);
+  else fail("fixed", `outside: x ${a.x} -> ${b.x}; inside: -> ${c.x}`);
+  // the stored form: a reload with no ?stick keeps fixed
+  await open("trace&touch");
+  const s = lines.find((l) => l.startsWith("harkfell: boot"));
+  s === "harkfell: boot stick fixed" ? pass("fixed", `stored: ${s}`) : fail("fixed", `stored form: ${s}`);
+}
+
+if (LEGS.includes("jump")) {
+  ran.add("jump");
+  await open("trace&touch&stick=float");
+  const a = await where();
+  await touch("touchStart", [[W * 0.85, H * 0.8, 2]]);
+  await sleep(180);
+  const b = await where();
+  await sleep(200);
+  await touch("touchEnd", []);
+  await sleep(600);
+  const lat = await latency();
+  const m = lat.match(/jump (\d+) /);
+  if (b.y < a.y - 10 && m) pass("jump", `y ${a.y} -> ${b.y} after 180 ms; ${lat}`);
+  else fail("jump", `y ${a.y} -> ${b.y}; ${lat}`);
+}
+
+if (LEGS.includes("errors")) {
+  ran.add("errors");
+  errors.length === 0 ? pass("errors", "no console error or exception") : fail("errors", errors.slice(0, 5).join(" | "));
+}
+
+console.log(failed ? "RESULT: FAIL" : "RESULT: PASS");
+shutdown(failed ? 1 : 0);

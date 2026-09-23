@@ -1,0 +1,29 @@
+;;; The view's placement on a window ((engine view)): the largest whole
+;;; scale in device pixels, centered; the sharp fallback where no whole
+;;; scale covers enough; and the window->view inverse.
+
+(import (sigil test)
+        (engine view))
+
+(test-group "view fit"
+  (test "a 1000x621 canvas takes the 400x176 view at 2x, centered"
+    (let ((f (view-fit 1000 621 400 176)))
+      (assert-equal 'integer (fit-mode f))
+      (assert-equal 2 (fit-scale f))
+      (assert-equal 100 (fit-x f))
+      (assert-equal 134 (fit-y f))
+      (assert-equal 800 (fit-w f))
+      (assert-equal 352 (fit-h f))))
+  (test "a phone in landscape at dpr 2 (1688x780 device px) is 4x"
+    (let ((f (view-fit 1688 780 400 176)))
+      (assert-equal 'integer (fit-mode f))
+      (assert-equal 4 (fit-scale f))))
+  (test "700x300 has no whole scale that covers 80%: sharp, through 2x"
+    (let ((f (view-fit 700 300 400 176)))
+      (assert-equal 'sharp (fit-mode f))
+      (assert-equal 2 (fit-up f))))
+  (test "window->view inverts the placement"
+    (let* ((f (view-fit 1000 621 400 176))
+           (p (window->view f 300 234 400 176)))
+      (assert-equal (cons 100.0 50.0) p)
+      (assert-false (window->view f 50 50 400 176)))))

@@ -1,0 +1,134 @@
+;;; (engine collide) - An axis-aligned box against a tilemap.
+;;;
+;;; A box is x y w h in pixels (floats are fine), covering [x, x+w) by
+;;; [y, y+h). Movement is one axis at a time: move-x then move-y, the usual
+;;; order for a platformer, so a body that is level with a ledge's top
+;;; slides onto it and a body a pixel below it is stopped by its side. A
+;;; move that would enter a solid tile stops flush against it and reports
+;;; the side it hit.
+;;;
+;;; A move longer than half a tile is taken in steps of at most half a
+;;; tile, so nothing tunnels through a one-tile wall at any speed.
+;;;
+;;; Pure: no platform.
+
+(define-library (engine collide)
+  (import (sigil math)
+          (engine tilemap))
+
+  (export span-lo span-hi
+          box-any? touching?
+          move-x move-y)
+
+  (begin
+    ;; The first and last tile index a span [a, a+len) overlaps.
+    (define (span-lo tm a)
+      (px->col tm a))
+
+    (define (span-hi tm a len)
+      (let* ((q (/ (+ a len) (tilemap-size tm)))
+             (f (exact (floor q))))
+        (if (= f q) (- f 1) f)))
+
+    ;; Does any tile the box overlaps satisfy (pred kind)?
+    (define (box-any? tm x y w h pred)
+      (let ((c0 (span-lo tm x))
+            (c1 (span-hi tm x w))
+            (r0 (span-lo tm y))
+            (r1 (span-hi tm y h)))
+        (let rows ((r r0))
+          (and (<= r r1)
+               (or (let cols ((c c0))
+                     (and (<= c c1)
+                          (or (pred (tilemap-ref tm c r))
+                              (cols (+ c 1)))))
+                   (rows (+ r 1)))))))
+
+    ;; Is there a tile satisfying pred in the one-pixel strip just outside
+    ;; the box on SIDE ('left 'right 'below 'above)? The strip spans the
+    ;; box's full length on that side.
+    (define (touching? tm x y w h side pred)
+      (case side
+        ((left) (box-any? tm (- x 1.0) y 1.0 h pred))
+        ((right) (box-any? tm (+ x w) y 1.0 h pred))
+        ((below) (box-any? tm x (+ y h) w 1.0 pred))
+        ((above) (box-any? tm x (- y 1.0) w 1.0 pred))
+        (else #f)))
+
+    (define (half-tile tm) (/ (tilemap-size tm) 2.0))
+
+    ;; The box moved dx along x: (new-x . hit), hit -1 (a wall on the
+    ;; left), 1 (on the right) or 0.
+    (define (move-x tm x y w h dx)
+      (let ((step (half-tile tm)))
+        (let loop ((x x) (left dx))
+          (if (= left 0)
+              (cons x 0)
+              (let* ((d (max (- step) (min step left)))
+                     (r (step-x tm x y w h d)))
+                (if (= (cdr r) 0)
+                    (loop (car r) (- left d))
+                    r))))))
+
+    (define (step-x tm x y w h d)
+      (let ((size (tilemap-size tm))
+            (r0 (span-lo tm y))
+            (r1 (span-hi tm y h)))
+        (define (col-solid? c)
+          (let rows ((r r0))
+            (and (<= r r1)
+                 (or (kind-solid? (tilemap-ref tm c r))
+                     (rows (+ r 1))))))
+        (cond ((> d 0)
+               (let ((old (span-hi tm x w))
+                     (new (span-hi tm (+ x d) w)))
+                 (let scan ((c (+ old 1)))
+                   (cond ((> c new) (cons (+ x d) 0))
+                         ((col-solid? c) (cons (- (* 1.0 c size) w) 1))
+                         (else (scan (+ c 1)))))))
+              ((< d 0)
+               (let ((old (span-lo tm x))
+                     (new (span-lo tm (+ x d))))
+                 (let scan ((c (- old 1)))
+                   (cond ((< c new) (cons (+ x d) 0))
+                         ((col-solid? c) (cons (* 1.0 (+ c 1) size) -1))
+                         (else (scan (- c 1)))))))
+              (else (cons x 0)))))
+
+    ;; The box moved dy along y: (new-y . hit), hit -1 (a ceiling), 1 (a
+    ;; floor) or 0.
+    (define (move-y tm x y w h dy)
+      (let ((step (half-tile tm)))
+        (let loop ((y y) (left dy))
+          (if (= left 0)
+              (cons y 0)
+              (let* ((d (max (- step) (min step left)))
+                     (r (step-y tm x y w h d)))
+                (if (= (cdr r) 0)
+                    (loop (car r) (- left d))
+                    r))))))
+
+    (define (step-y tm x y w h d)
+      (let ((size (tilemap-size tm))
+            (c0 (span-lo tm x))
+            (c1 (span-hi tm x w)))
+        (define (row-solid? r)
+          (let cols ((c c0))
+            (and (<= c c1)
+                 (or (kind-solid? (tilemap-ref tm c r))
+                     (cols (+ c 1))))))
+        (cond ((> d 0)
+               (let ((old (span-hi tm y h))
+                     (new (span-hi tm (+ y d) h)))
+                 (let scan ((r (+ old 1)))
+                   (cond ((> r new) (cons (+ y d) 0))
+                         ((row-solid? r) (cons (- (* 1.0 r size) h) 1))
+                         (else (scan (+ r 1)))))))
+              ((< d 0)
+               (let ((old (span-lo tm y))
+                     (new (span-lo tm (+ y d))))
+                 (let scan ((r (- old 1)))
+                   (cond ((< r new) (cons (+ y d) 0))
+                         ((row-solid? r) (cons (* 1.0 (+ r 1) size) -1))
+                         (else (scan (- r 1)))))))
+              (else (cons y 0)))))))

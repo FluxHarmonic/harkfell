@@ -1,0 +1,95 @@
+;;; (engine font) - A 3x5 bitmap font drawn as rectangles.
+;;;
+;;; COPIED from Crash The Stack master e737d21, src/crash/font.sgl, as ruling
+;;; D6 asks: only the 3x5 set (MINI-GLYPHS), draw-rows, draw-text-mini and
+;;; text-width-mini, unchanged, plus three marks this game's readout needs
+;;; (. / and -). The 5x7 set, the atlas codes and the block alphabet stay
+;;; in Crash. Harkfell needs very little text (ruling D8: no words in the
+;;; world); this is for the ?ms readout.
+
+(define-library (engine font)
+  (import (sigil graphics))
+
+  (export MINI-W MINI-H MINI-GLYPHS draw-rows draw-text-mini text-width-mini)
+
+  (begin
+    (define MINI-W 3)
+    (define MINI-H 5)
+
+    (define MINI-GLYPHS
+      '((#\0 "###" "#.#" "#.#" "#.#" "###")
+        (#\1 ".#." "##." ".#." ".#." "###")
+        (#\2 "##." "..#" ".#." "#.." "###")
+        (#\3 "###" "..#" ".##" "..#" "###")
+        (#\4 "#.#" "#.#" "###" "..#" "..#")
+        (#\5 "###" "#.." "##." "..#" "##.")
+        (#\6 ".##" "#.." "###" "#.#" "###")
+        (#\7 "###" "..#" ".#." ".#." ".#.")
+        (#\8 "###" "#.#" "###" "#.#" "###")
+        (#\9 "###" "#.#" "###" "..#" "##.")
+        (#\a ".#." "#.#" "###" "#.#" "#.#")
+        (#\b "##." "#.#" "##." "#.#" "##.")
+        (#\c ".##" "#.." "#.." "#.." ".##")
+        (#\d "##." "#.#" "#.#" "#.#" "##.")
+        (#\e "###" "#.." "##." "#.." "###")
+        (#\f "###" "#.." "##." "#.." "#..")
+        (#\g ".##" "#.." "#.#" "#.#" ".##")
+        (#\h "#.#" "#.#" "###" "#.#" "#.#")
+        (#\i "###" ".#." ".#." ".#." "###")
+        (#\j "..#" "..#" "..#" "#.#" ".#.")
+        (#\k "#.#" "#.#" "##." "#.#" "#.#")
+        (#\l "#.." "#.." "#.." "#.." "###")
+        (#\m "#.#" "###" "#.#" "#.#" "#.#")
+        (#\n "##." "#.#" "#.#" "#.#" "#.#")
+        (#\o ".#." "#.#" "#.#" "#.#" ".#.")
+        (#\p "##." "#.#" "##." "#.." "#..")
+        (#\q ".#." "#.#" "#.#" ".#." "..#")
+        (#\r "##." "#.#" "##." "#.#" "#.#")
+        (#\s ".##" "#.." ".#." "..#" "##.")
+        (#\t "###" ".#." ".#." ".#." ".#.")
+        (#\u "#.#" "#.#" "#.#" "#.#" "###")
+        (#\v "#.#" "#.#" "#.#" "#.#" ".#.")
+        (#\w "#.#" "#.#" "###" "###" "#.#")
+        (#\x "#.#" "#.#" ".#." "#.#" "#.#")
+        (#\y "#.#" "#.#" ".#." ".#." ".#.")
+        (#\z "###" "..#" ".#." "#.." "###")
+        ;; the keys button's label (the polish row: the ? button beside
+        ;; MENU carries its key the way SPC and ESC do)
+        (#\? "###" "..#" ".##" "..." ".#.")
+        (#\. "..." "..." "..." "..." ".#.")
+        (#\/ "..#" "..#" ".#." "#.." "#..")
+        (#\- "..." "..." "###" "..." "...")))
+
+    ;; Draw rows of cells ("#" lit) with their top-left at (x, y), cells
+    ;; scale px square, in the current color; the glyph sheets (P3) and the
+    ;; suit marks come through here too.
+    (define (draw-rows rows x y scale width)
+      (let loop ((rows rows) (r 0))
+        (unless (null? rows)
+          (let ((row (car rows)) (ry (+ y (* r scale))))
+            (let cells ((col 0) (run-start #f))
+              (cond ((= col width)
+                     (when run-start
+                       (draw-filled-rect (+ x (* run-start scale)) ry
+                                         (* (- col run-start) scale) scale)))
+                    ((char=? (string-ref row col) #\#)
+                     (cells (+ col 1) (or run-start col)))
+                    (else
+                     (when run-start
+                       (draw-filled-rect (+ x (* run-start scale)) ry
+                                         (* (- col run-start) scale) scale))
+                     (cells (+ col 1) #f)))))
+          (loop (cdr rows) (+ r 1)))))
+
+    ;; Draw a lowercase-letter string in the 3x5 set, one cell between letters.
+    (define (draw-text-mini text x y scale)
+      (let loop ((chars (string->list text)) (x x))
+        (unless (null? chars)
+          (let ((entry (assv (char-downcase (car chars)) MINI-GLYPHS)))
+            (when entry (draw-rows (cdr entry) x y scale MINI-W)))
+          (loop (cdr chars) (+ x (* scale (+ MINI-W 1)))))))
+
+    (define (text-width-mini text scale)
+      (let ((n (string-length text)))
+        (if (= n 0) 0 (- (* n scale (+ MINI-W 1)) scale))))
+))

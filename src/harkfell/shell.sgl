@@ -1,0 +1,256 @@
+;;; (harkfell shell) - What the native and web shells share: the fixed
+;;; clock, the input state, the world, the present, the ?ms readout.
+;;;
+;;; Shaped after Crash The Stack's (crash shell) at master e737d21 (the
+;;; fixed clock fed by each frame's wall dt, the readout drawn over the
+;;; frame), written fresh for one room and one body: Crash's shell is a
+;;; menu, two tables and a hub, none of which A0 has.
+;;;
+;;; Each frame the shell (native or web) calls shell-frame! with the
+;;; frame's wall dt. The clock ((engine tween)) turns it into whole 1/60 s
+;;; ticks (at most MAX-STEPS-PER-FRAME, the rest dropped and counted) and
+;;; the world steps once per tick with the intent of that tick
+;;; ((harkfell input)). Then shell-present! draws the room into its
+;;; 400x176 target and puts the target on the window at a whole scale
+;;; ((engine view)).
+;;;
+;;; Touch latency (the web page's ?ms). The page stamps every stick move
+;;; and jump press with the event's timeStamp (the performance.now()
+;;; clock, which is also the clock of the requestAnimationFrame timestamp
+;;; each frame arrives with). When a stick move changes the direction (to
+;;; a new sector that is not rest) or the jump button goes down, the shell
+;;; notes the stamp and where the body is drawn. Two times are kept for
+;;; each, in ms, over the last LAT-KEEP samples:
+;;;   IN     touch to the end of the first frame whose simulation used it
+;;;   MOVE   touch to the end of the first frame that draws the body at a
+;;;          different pixel (what the eye sees: from rest it includes the
+;;;          run's acceleration, ACCEL-TICKS long)
+;;;   JUMP   the same, for the jump button
+;;; "The end of a frame" is the frame's rAF timestamp plus the time the
+;;; frame's own work took (step and draw), so it is the moment the frame
+;;; was handed to the GPU, one vsync before it reaches the glass.
+
+(define-library (harkfell shell)
+  (import (sigil struct)
+          (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil time)
+          (sigil graphics)
+          (engine tween)
+          (engine view)
+          (engine body)
+          (engine stick)
+          (engine store)
+          (harkfell world)
+          (harkfell rooms)
+          (harkfell input)
+          (harkfell draw)
+          (harkfell settings))
+
+  (export shell-boot! shell-frame! shell-present! shell-reset-world!
+          shell-key-down! shell-key-up! shell-keys-clear!
+          shell-stick! shell-jump!
+          shell-set-ms! shell-set-stick-form! shell-stick-form
+          shell-world shell-clock shell-set-frame-stamp!
+          shell-latency-lines now-ms
+          VIEW-W VIEW-H)
+
+  (begin
+    (define LAT-KEEP 16)
+
+    (define *world* #f)
+    (define *clock* #f)
+    (define *keys* '())            ; key symbols held
+    (define *press* #f)            ; a jump press not yet used by a tick
+    (define *sector* 'none)        ; the stick's direction
+    (define *touch-jump* #f)       ; the jump button is down
+    (define *ms* #f)               ; the readout is on
+    (define *settings* #f)
+    (define *room-rt* #f)
+    (define *sharp-rt* #f)
+    (define *sharp-up* 0)
+    (define *frame-ms* 0.0)
+    (define *step-ms* 0.0)
+    (define *draw-ms* 0.0)
+    (define *frame-start* 0.0)     ; now-ms at the frame's start
+    (define *frame-stamp* #f)      ; the frame's rAF timestamp (web), else #f
+
+    ;; pending touch measurements: #f or (list t0 draw-x draw-y applied?)
+    (define *pending-move* #f)
+    (define *pending-jump* #f)
+    (define *lat-in* '())
+    (define *lat-move* '())
+    (define *lat-jump* '())
+
+    (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
+
+    (define (shell-world) *world*)
+    (define (shell-clock) *clock*)
+
+    ;; --- boot ------------------------------------------------------------------
+
+    (define (shell-boot!)
+      (set-store-app! "harkfell")
+      (set! *settings* (map (lambda (st)
+                              (let* ((d (store-read-datum (setting-key st))))
+                                (cons (setting-id st)
+                                      (if (and d (setting-value? st d)) d (setting-default st)))))
+                            SETTINGS))
+      (shell-reset-world!)
+      (set! *clock* (clock-new)))
+
+    (define (shell-reset-world!)
+      (set! *world* (world-new (load-test-room))))
+
+    (define (shell-stick-form) (settings-value *settings* 'stick))
+
+    ;; form: 'float or 'fixed; stored for the next boot.
+    (define (shell-set-stick-form! form)
+      (set! *settings* (settings-with *settings* 'stick form))
+      (store-write-datum! "stick" (settings-value *settings* 'stick)))
+
+    (define (shell-set-ms! on) (set! *ms* on))
+
+    ;; --- input ------------------------------------------------------------------
+
+    (define (shell-key-down! k)
+      (unless (memq k *keys*)
+        (set! *keys* (cons k *keys*))
+        (when (jump-key? k) (set! *press* #t))))
+
+    (define (shell-key-up! k)
+      (set! *keys* (filter (lambda (x) (not (eq? x k))) *keys*)))
+
+    ;; A hidden tab or a lost focus: every key up (a keyup missed while
+    ;; hidden would hold the key forever), the stick at rest.
+    (define (shell-keys-clear!)
+      (set! *keys* '())
+      (set! *sector* 'none)
+      (set! *touch-jump* #f))
+
+    (define (drawn-pos)
+      (let ((b (world-body *world*)))
+        (cons (exact (floor (body-x b))) (exact (floor (body-y b))))))
+
+    ;; The stick at (dx, dy) in ring radii, stamped t (ms, or #f).
+    (define (shell-stick! dx dy t)
+      (let ((s (stick-sector dx dy *sector*)))
+        (unless (eq? s *sector*)
+          (set! *sector* s)
+          (when (and t (not (eq? s 'none)))
+            (let ((p (drawn-pos)))
+              (set! *pending-move* (list t (car p) (cdr p) #f)))))))
+
+    ;; The touch jump button down (#t) or up (#f), stamped t.
+    (define (shell-jump! down t)
+      (when (and down (not *touch-jump*))
+        (set! *press* #t)
+        (when t
+          (let ((p (drawn-pos)))
+            (set! *pending-jump* (list t (car p) (cdr p) #f)))))
+      (set! *touch-jump* down))
+
+    (define (shell-set-frame-stamp! ms) (set! *frame-stamp* ms))
+
+    ;; --- one frame ----------------------------------------------------------------
+
+    ;; dt: the frame's wall seconds. Returns the ticks run.
+    (define (shell-frame! dt)
+      (set! *frame-start* (now-ms))
+      (set! *frame-ms* (* 1000.0 dt))
+      (set! *clock* (clock-advance *clock* dt))
+      (let loop ((i 0))
+        (when (< i (clock-steps *clock*))
+          (let ((in (tick-intent *keys* *sector* *touch-jump* *press*)))
+            (set! *press* #f)
+            (set! *world* (world-tick *world* in)))
+          (loop (+ i 1))))
+      (set! *step-ms* (- (now-ms) *frame-start*))
+      (clock-steps *clock*))
+
+    ;; --- the latency record ---------------------------------------------------------
+
+    (define (keep l x)
+      (let ((l (cons x l)))
+        (if (> (length l) LAT-KEEP) (list-head l LAT-KEEP) l)))
+
+    (define (list-head l n)
+      (if (or (= n 0) (null? l)) '() (cons (car l) (list-head (cdr l) (- n 1)))))
+
+    ;; After the frame's draw: settle the pending measurements. end: the
+    ;; frame's end on the stamp clock.
+    (define (settle-latency! ticks end)
+      (let ((p (drawn-pos)))
+        (define (settle pending into-moved!)
+          (cond ((not pending) #f)
+                (else
+                 (let* ((t0 (car pending))
+                        (applied (cadddr pending))
+                        (applied (or applied (and (> ticks 0) (begin (set! *lat-in* (keep *lat-in* (- end t0))) #t)))))
+                   (if (or (not (= (car p) (cadr pending))) (not (= (cdr p) (caddr pending))))
+                       (begin (into-moved! (- end t0)) #f)
+                       (list t0 (cadr pending) (caddr pending) applied))))))
+        (set! *pending-move* (settle *pending-move* (lambda (ms) (set! *lat-move* (keep *lat-move* ms)))))
+        (set! *pending-jump* (settle *pending-jump* (lambda (ms) (set! *lat-jump* (keep *lat-jump* ms)))))))
+
+    (define (ms-str x) (number->string (exact (round x))))
+
+    (define (tenths x)
+      (let* ((t (exact (round (* 10 x)))))
+        (string-append (number->string (quotient t 10)) "." (number->string (modulo t 10)))))
+
+    (define (stat-line name l)
+      (if (null? l)
+          (string-append name " -")
+          (string-append name " " (ms-str (car l))
+                         " avg " (ms-str (/ (apply + l) (length l)))
+                         " max " (ms-str (apply max l)))))
+
+    (define (shell-latency-lines)
+      (list (stat-line "in" *lat-in*)
+            (stat-line "move" *lat-move*)
+            (stat-line "jump" *lat-jump*)))
+
+    ;; --- the present ------------------------------------------------------------------
+
+    (define (ensure-targets! f)
+      (unless *room-rt*
+        (set! *room-rt* (make-render-target VIEW-W VIEW-H 'nearest)))
+      (when (and (eq? (fit-mode f) 'sharp) (not (= (fit-up f) *sharp-up*)))
+        (when *sharp-rt* (render-target-free! *sharp-rt*))
+        (set! *sharp-up* (fit-up f))
+        (set! *sharp-rt* (make-render-target (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*) 'linear))))
+
+    ;; Draw the frame onto a window of win-w x win-h pixels. ticks: what
+    ;; shell-frame! ran (for the latency record).
+    (define (shell-present! win-w win-h ticks)
+      (let ((t1 (now-ms))
+            (f (view-fit win-w win-h VIEW-W VIEW-H)))
+        (ensure-targets! f)
+        (begin-frame)
+        (set-blend-mode 'normal)
+        (with-render-target *room-rt*
+          (draw-world *world*))
+        (if (eq? (fit-mode f) 'integer)
+            (draw-render-target *room-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
+            (begin
+              (with-render-target *sharp-rt*
+                (draw-render-target *room-rt* 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
+              (draw-render-target *sharp-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))))
+        (when *ms*
+          (draw-readout (append (list (string-append "frame " (tenths *frame-ms*)
+                                                     " step " (tenths *step-ms*)
+                                                     " draw " (tenths *draw-ms*))
+                                      (string-append (symbol->string (fit-mode f))
+                                                     " x" (if (eq? (fit-mode f) 'integer)
+                                                              (number->string (fit-scale f))
+                                                              (tenths (fit-scale f)))
+                                                     " stick " (symbol->string (shell-stick-form))))
+                                (shell-latency-lines))
+                        (fit-x f) (fit-y f) (fit-w f)
+                        (max 1 (exact (floor (/ (fit-scale f) 2))))))
+        (end-frame)
+        (set! *draw-ms* (- (now-ms) t1))
+        (when *frame-stamp*
+          (settle-latency! ticks (+ *frame-stamp* (- (now-ms) *frame-start*))))))))

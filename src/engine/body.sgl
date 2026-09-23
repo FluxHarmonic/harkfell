@@ -1,0 +1,369 @@
+;;; (engine body) - A platformer body: run, jump, cling, climb, swim.
+;;;
+;;; One body moving through a tilemap ((engine tilemap)'s kinds), one fixed
+;;; tick at a time. Everything is in pixels and ticks (1/60 s at the clock
+;;; (engine tween) keeps), and every number that shapes the feel comes in
+;;; a FEEL record the game fills: the engine has the mechanics, the game
+;;; has the constants.
+;;;
+;;; Per tick the game hands in an INTENT: a horizontal and a vertical
+;;; direction (-1, 0 or 1 each), whether jump is held, and whether it was
+;;; pressed this tick. A keyboard, a gamepad and a touch stick all reduce
+;;; to that, so the physics cannot tell them apart and a recorded run of
+;;; intents replays exactly.
+;;;
+;;; The verbs:
+;;;   run        one top speed (RUN), reached through ACCEL, braked by DECEL
+;;;              (no input) and TURN (the other way); the AIR- variants in
+;;;              the air.
+;;;   jump       JUMP-V up; GRAVITY while rising and jump is held, GRAVITY
+;;;              x CUT-MUL once it is let go on the way up (the variable
+;;;              jump), GRAVITY x FALL-MUL falling, capped at MAX-FALL.
+;;;   coyote     a jump is still a jump for COYOTE ticks after walking off
+;;;              a ledge.
+;;;   buffer     a jump pressed up to BUFFER ticks before it can happen
+;;;              (a landing, a wall) still happens.
+;;;   slide      falling while pushing into a solid wall caps the fall at
+;;;              SLIDE-MAX.
+;;;   wall jump  jump while pushing into any wall (or while clinging):
+;;;              WALL-KICK-X away and WALL-JUMP-V up, horizontal input
+;;;              ignored for WALL-LOCK ticks.
+;;;   cling      pushing into a CLIMBABLE wall in the air (or pushing up
+;;;              beside it on the ground) holds it. Held, up and down climb
+;;;              at CLIMB, anything else stays put; pushing away lets go.
+;;;              Climbing past the wall's top hops onto it (MANTLE-V up,
+;;;              RUN toward it, input ignored for MANTLE-LOCK ticks).
+;;;   swim       with the box's center in water the body swims in any of
+;;;              eight directions at SWIM (SWIM-ACCEL to get there) and sinks
+;;;              at SINK with no input; jump with the head out of the water
+;;;              leaps WATER-JUMP-V.
+;;;   hazard     a hazard tile under the box (shrunk by HAZARD-INSET) or a
+;;;              fall out of the map's bottom adds 'hazard to the tick's
+;;;              events. What happens then is the game's.
+;;;
+;;; Each tick's EVENTS are a list of symbols: jump wall-jump land grab
+;;; mantle let-go splash hazard. The game reads them for sound and effects
+;;; and the tests read them to see a verb happen.
+;;;
+;;; Pure: no platform, no drawing, no randomness. Only + - * / and
+;;; comparisons touch the floats, so a run depends on nothing but its
+;;; inputs (whether two targets agree to the last bit is measured, not
+;;; assumed: see the replay gate).
+
+(define-library (engine body)
+  (import (sigil struct)
+          (sigil math)
+          (engine tilemap)
+          (engine collide))
+
+  (export feel feel?
+          feel-box-w feel-box-h feel-run feel-accel feel-decel feel-turn
+          feel-air-accel feel-air-decel feel-air-turn
+          feel-jump-v feel-gravity feel-fall-mul feel-cut-mul feel-max-fall
+          feel-coyote feel-buffer feel-slide-max
+          feel-wall-kick-x feel-wall-jump-v feel-wall-lock
+          feel-climb feel-mantle-v feel-mantle-lock
+          feel-swim feel-swim-accel feel-sink feel-water-jump-v feel-water-damp
+          feel-hazard-inset
+          intent intent? intent-h intent-v intent-jump intent-press
+          NO-INTENT
+          body body? body-at
+          body-x body-y body-vx body-vy body-mode body-side body-facing
+          body-coyote body-buffer body-lock body-jumping body-cut body-events
+          body-step body-grounded? body-center body-in-water?)
+
+  (begin
+    ;; --- the constants ------------------------------------------------------
+
+    (define-struct feel
+      (box-w default: 8.0)
+      (box-h default: 14.0)
+      (run default: 1.2)
+      (accel default: 0.08)
+      (decel default: 0.2)
+      (turn default: 0.2)
+      (air-accel default: 0.08)
+      (air-decel default: 0.05)
+      (air-turn default: 0.12)
+      (jump-v default: 5.0)
+      (gravity default: 0.23)
+      (fall-mul default: 1.6)
+      (cut-mul default: 3.0)
+      (max-fall default: 5.0)
+      (coyote default: 6)
+      (buffer default: 6)
+      (slide-max default: 1.0)
+      (wall-kick-x default: 1.2)
+      (wall-jump-v default: 5.0)
+      (wall-lock default: 10)
+      (climb default: 0.75)
+      (mantle-v default: 2.6)
+      (mantle-lock default: 10)
+      (swim default: 0.9)
+      (swim-accel default: 0.08)
+      (sink default: 0.25)
+      (water-jump-v default: 4.0)
+      (water-damp default: 0.35)
+      (hazard-inset default: 2.0))
+
+    ;; --- the input ------------------------------------------------------------
+
+    ;; h, v: -1, 0 or 1 (v is screen-down positive: -1 is up). jump: held
+    ;; this tick. press: went down this tick.
+    (define-struct intent
+      (h default: 0)
+      (v default: 0)
+      (jump default: #f)
+      (press default: #f))
+
+    (define NO-INTENT (intent))
+
+    ;; --- the body --------------------------------------------------------------
+
+    ;; x y: the box's top-left in pixels. mode: ground air cling swim.
+    ;; side: the wall held (cling), -1 or 1. facing: -1 or 1. coyote,
+    ;; buffer, lock: ticks left. jumping: a button jump still rising with
+    ;; jump held. cut: that rise was let go (the heavier gravity). events:
+    ;; this tick's.
+    (define-struct body
+      (x default: 0.0)
+      (y default: 0.0)
+      (vx default: 0.0)
+      (vy default: 0.0)
+      (mode default: 'air)
+      (side default: 1)
+      (facing default: 1)
+      (coyote default: 0)
+      (buffer default: 0)
+      (lock default: 0)
+      (jumping default: #f)
+      (cut default: #f)
+      (events default: '()))
+
+    ;; A body at rest at x y.
+    (define (body-at x y)
+      (body x: (* 1.0 x) y: (* 1.0 y)))
+
+    (define (body-center b f)
+      (cons (+ (body-x b) (/ (feel-box-w f) 2.0))
+            (+ (body-y b) (/ (feel-box-h f) 2.0))))
+
+    (define (body-grounded? b tm f)
+      (touching? tm (body-x b) (body-y b) (feel-box-w f) (feel-box-h f) 'below kind-solid?))
+
+    (define (body-in-water? b tm f)
+      (let ((c (body-center b f)))
+        (kind-water? (tile-at tm (car c) (cdr c)))))
+
+    (define (add-event b e)
+      (body b events: (cons e (body-events b))))
+
+    ;; --- small helpers ------------------------------------------------------------
+
+    (define (approach v target rate)
+      (if (< v target)
+          (min target (+ v rate))
+          (max target (- v rate))))
+
+    ;; A climbable tile beside the box's upper half on side s (the hands).
+    (define (hands-on? tm x y f s)
+      (let ((w (feel-box-w f))
+            (h (feel-box-h f)))
+        (box-any? tm
+                  (if (> s 0) (+ x w) (- x 1.0))
+                  y
+                  1.0
+                  (/ h 2.0)
+                  kind-climbable?)))
+
+    ;; A solid wall touching the box on side s.
+    (define (wall-on? tm x y f s)
+      (touching? tm x y (feel-box-w f) (feel-box-h f) (if (> s 0) 'right 'left) kind-solid?))
+
+    ;; The box overlaps water and its top row is out of it: a leap is allowed.
+    (define (head-out? tm x y f)
+      (let ((w (feel-box-w f))
+            (h (feel-box-h f)))
+        (and (box-any? tm x y w h kind-water?)
+             (not (kind-water? (tile-at tm (+ x (/ w 2.0)) y))))))
+
+    ;; --- one tick -------------------------------------------------------------------
+
+    (define (body-step b in tm f)
+      (let* ((b (body b
+                      buffer: (if (intent-press in) (feel-buffer f) (body-buffer b))
+                      events: '()))
+             (b (cond ((body-in-water? b tm f) (swim-step b in tm f))
+                      ((eq? (body-mode b) 'cling) (cling-step b in tm f))
+                      (else (platform-step b in tm f))))
+             (b (hazard-check b tm f)))
+        (body b
+              buffer: (max 0 (- (body-buffer b) 1))
+              lock: (max 0 (- (body-lock b) 1)))))
+
+    ;; The ground and the air.
+    (define (platform-step b in tm f)
+      (let* ((x (body-x b))
+             (y (body-y b))
+             (h (intent-h in))
+             (v (intent-v in))
+             (grounded (body-grounded? b tm f))
+             (coyote (if grounded (feel-coyote f) (body-coyote b)))
+             (locked (> (body-lock b) 0))
+             ;; horizontal speed
+             (vx (if locked
+                     (body-vx b)
+                     (let ((vx (body-vx b))
+                           (rate (cond ((= h 0) (if grounded (feel-decel f) (feel-air-decel f)))
+                                       ((< (* h (body-vx b)) 0) (if grounded (feel-turn f) (feel-air-turn f)))
+                                       (else (if grounded (feel-accel f) (feel-air-accel f))))))
+                       (approach vx (* h (feel-run f)) rate))))
+             ;; the wall a wall jump would kick off
+             (wall (cond ((eq? (body-mode b) 'cling) (body-side b))
+                         (grounded 0)
+                         ((and (not (= h 0)) (wall-on? tm x y f h)) h)
+                         (else 0)))
+             (jump? (> (body-buffer b) 0))
+             (launch (cond ((and jump? (or grounded (> coyote 0) (head-out? tm x y f))) 'jump)
+                           ((and jump? (not (= wall 0))) 'wall-jump)
+                           (else #f)))
+             (vx (if (eq? launch 'wall-jump) (* (- wall) (feel-wall-kick-x f)) vx))
+             (b (case launch
+                  ((jump)
+                   (add-event (body b vy: (- (feel-jump-v f)) jumping: #t cut: #f buffer: 0) 'jump))
+                  ((wall-jump)
+                   (add-event (body b
+                                    vy: (- (feel-wall-jump-v f))
+                                    jumping: #t
+                                    cut: #f
+                                    buffer: 0
+                                    lock: (+ (feel-wall-lock f) 1)
+                                    facing: (- wall))
+                              'wall-jump))
+                  (else b)))
+             (coyote (if launch 0 coyote))
+             (locked (> (body-lock b) 0))
+             ;; the variable jump: a rise let go is cut
+             (b (if (and (body-jumping b) (not (intent-jump in)))
+                    (body b jumping: #f cut: #t)
+                    b))
+             (vy (body-vy b))
+             (g (feel-gravity f))
+             (vy (+ vy (cond ((>= vy 0) (* g (feel-fall-mul f)))
+                             ((body-cut b) (* g (feel-cut-mul f)))
+                             (else g))))
+             (b (if (>= vy 0) (body b jumping: #f cut: #f) b))
+             ;; sliding down a wall pushed into
+             (vy (if (and (> vy (feel-slide-max f))
+                          (not grounded)
+                          (not (= h 0))
+                          (wall-on? tm x y f h))
+                     (feel-slide-max f)
+                     vy))
+             (vy (min vy (feel-max-fall f)))
+             (w (feel-box-w f))
+             (bh (feel-box-h f))
+             (mx (move-x tm x y w bh vx))
+             (x (car mx))
+             (vx (if (and (not (= (cdr mx) 0)) (not locked)) 0.0 vx))
+             (my (move-y tm x y w bh vy))
+             (y (car my))
+             (hit-y (cdr my))
+             (b (cond ((= hit-y 1)
+                       (let ((b (body b vy: 0.0 jumping: #f cut: #f)))
+                         (if grounded b (add-event b 'land))))
+                      ((= hit-y -1) (body b vy: 0.0 jumping: #f cut: #f))
+                      (else (body b vy: vy))))
+             (b (body b
+                      x: x
+                      y: y
+                      vx: vx
+                      facing: (if (= h 0) (body-facing b) h)
+                      coyote: (if grounded coyote (max 0 (- coyote 1)))))
+             (grounded-now (body-grounded? b tm f))
+             ;; grabbing a climbable wall
+             (grab (and (not (> (body-lock b) 0))
+                        (cond ((and (not (= h 0)) (or (not grounded-now) (< v 0))) h)
+                              ((and (= h 0) (< v 0)) (body-facing b))
+                              (else #f))))
+             (grab (and grab (hands-on? tm x y f grab) grab)))
+        (cond (grab
+               (add-event (body b mode: 'cling side: grab facing: grab vx: 0.0 vy: 0.0 jumping: #f cut: #f) 'grab))
+              ((body-in-water? b tm f)
+               (add-event (body b mode: 'swim vy: (* (body-vy b) (feel-water-damp f))) 'splash))
+              (grounded-now (body b mode: 'ground))
+              (else (body b mode: 'air)))))
+
+    ;; Holding a climbable wall.
+    (define (cling-step b in tm f)
+      (let ((s (body-side b))
+            (h (intent-h in))
+            (v (intent-v in)))
+        (cond ((> (body-buffer b) 0)
+               ;; the wall jump: platform-step kicks off the held side
+               (platform-step b in tm f))
+              ((= h (- s))
+               (platform-step (add-event (body b mode: 'air) 'let-go) in tm f))
+              (else
+               (let* ((x (body-x b))
+                      (my (move-y tm x (body-y b) (feel-box-w f) (feel-box-h f) (* v (feel-climb f))))
+                      (y (car my))
+                      (b (body b y: y vx: 0.0 vy: 0.0)))
+                 (cond ((hands-on? tm x y f s)
+                        (if (and (> v 0) (= (cdr my) 1))
+                            (body b mode: 'ground)
+                            b))
+                       ((< v 0)
+                        (add-event (body b
+                                         mode: 'air
+                                         vx: (* s (feel-run f))
+                                         vy: (- (feel-mantle-v f))
+                                         lock: (+ (feel-mantle-lock f) 1))
+                                   'mantle))
+                       (else
+                        (add-event (body b mode: 'air) 'let-go))))))))
+
+    ;; In the water.
+    (define (swim-step b in tm f)
+      (let* ((h (intent-h in))
+             (v (intent-v in))
+             (x (body-x b))
+             (y (body-y b))
+             (diag (if (and (not (= h 0)) (not (= v 0))) 0.7071 1.0))
+             (tx (* h (feel-swim f) diag))
+             (ty (if (= v 0) (feel-sink f) (* v (feel-swim f) diag)))
+             (vx (approach (body-vx b) tx (feel-swim-accel f)))
+             (vy (approach (body-vy b) ty (feel-swim-accel f)))
+             (leap (and (> (body-buffer b) 0) (head-out? tm x y f)))
+             (vy (if leap (- (feel-water-jump-v f)) vy))
+             (w (feel-box-w f))
+             (bh (feel-box-h f))
+             (mx (move-x tm x y w bh vx))
+             (x (car mx))
+             (vx (if (= (cdr mx) 0) vx 0.0))
+             (my (move-y tm x y w bh vy))
+             (y (car my))
+             (vy (if (= (cdr my) 0) vy 0.0))
+             (b (body b
+                      x: x
+                      y: y
+                      vx: vx
+                      vy: vy
+                      facing: (if (= h 0) (body-facing b) h)
+                      jumping: (and leap #t)
+                      cut: #f
+                      coyote: 0
+                      buffer: (if leap 0 (body-buffer b))))
+             (b (if leap (add-event b 'jump) b)))
+        (cond ((body-in-water? b tm f) (body b mode: 'swim))
+              ((body-grounded? b tm f) (body b mode: 'ground))
+              (else (body b mode: 'air)))))
+
+    (define (hazard-check b tm f)
+      (let* ((i (feel-hazard-inset f))
+             (w (- (feel-box-w f) (* 2.0 i)))
+             (h (- (feel-box-h f) (* 2.0 i))))
+        (if (or (box-any? tm (+ (body-x b) i) (+ (body-y b) i) w h kind-hazard?)
+                (> (body-y b) (tilemap-height tm)))
+            (add-event b 'hazard)
+            b)))))

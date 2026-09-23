@@ -1,0 +1,80 @@
+;;; (harkfell settings) - The settings, and where they live.
+;;;
+;;; COPIED from Crash The Stack master e737d21, src/crash/settings.sgl, as
+;;; ruling D6 asks. Kept: the setting record, the settings-in-force alist
+;;; and its verbs (settings-defaults, settings-value, settings-with,
+;;; settings-step, setting-ref, setting-value?), unchanged. Changed: the
+;;; module name; Crash's eight rows replaced by Harkfell's; Crash's groups,
+;;; schema version, retired keys, "when a change takes" and value labels
+;;; left out (a settings screen is not in A0).
+;;;
+;;; A0's one row: STICK, the touch joystick's form (ruling D25, both built
+;;; so David picks by feel): float (the hybrid: the ring rests at its home
+;;; spot and re-centres under a thumb that lands anywhere in the lower-left
+;;; quarter) or fixed (the ring stays where it is drawn). The page's
+;;; ?stick=fixed|float sets it and the store keeps it, so a phone stays on
+;;; the form last asked for until asked otherwise.
+;;;
+;;; Every setting is its own store key holding a plain datum (a symbol,
+;;; so a missing key, which reads as #f, is never mistaken for a value).
+;;; A missing or unreadable key is the default. Pure: the shell does the
+;;; store reads and writes.
+
+(define-library (harkfell settings)
+  (import (sigil struct))
+
+  (export setting setting? setting-id setting-name setting-values setting-default setting-key
+          SETTINGS SETTING-IDS setting-ref setting-value?
+          settings-defaults settings-value settings-with settings-step)
+
+  (begin
+    (define-struct setting
+      (id default: #f)
+      (name default: "")
+      (values default: '())        ; the values in stepping order
+      (default default: #f)
+      (key default: ""))           ; the store key
+
+    ;; Built with list, not quoted (Crash's wasm literal hazard).
+    (define SETTINGS
+      (list (setting id: 'stick name: "STICK" values: (list 'float 'fixed) default: 'float key: "stick")))
+
+    (define SETTING-IDS (map setting-id SETTINGS))
+
+    (define (setting-ref id)
+      (let loop ((ss SETTINGS))
+        (cond ((null? ss) #f)
+              ((eq? (setting-id (car ss)) id) (car ss))
+              (else (loop (cdr ss))))))
+
+    (define (setting-value? st v)
+      (and (member v (setting-values st)) #t))
+
+    ;; --- the settings in force -----------------------------------------------
+
+    (define (settings-defaults)
+      (map (lambda (st) (cons (setting-id st) (setting-default st))) SETTINGS))
+
+    (define (settings-value s id)
+      (let ((e (assq id s)))
+        (if e (cdr e) (let ((st (setting-ref id))) (and st (setting-default st))))))
+
+    ;; s with id at v (v must be one of the row's values; else s).
+    (define (settings-with s id v)
+      (let ((st (setting-ref id)))
+        (if (and st (setting-value? st v))
+            (map (lambda (e) (if (eq? (car e) id) (cons id v) e)) s)
+            s)))
+
+    ;; s with id stepped by delta (+1 forward, -1 back), wrapping.
+    (define (settings-step s id delta)
+      (let ((st (setting-ref id)))
+        (if (not st)
+            s
+            (let* ((vs (setting-values st))
+                   (n (length vs))
+                   (at (let loop ((l vs) (i 0))
+                         (cond ((null? l) 0)
+                               ((equal? (car l) (settings-value s id)) i)
+                               (else (loop (cdr l) (+ i 1)))))))
+              (settings-with s id (list-ref vs (modulo (+ at delta) n)))))))))

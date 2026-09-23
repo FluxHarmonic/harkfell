@@ -1,0 +1,110 @@
+;;; (harkfell replay) - A scripted input sequence and the positions it
+;;; produces, for the replay gate.
+;;;
+;;; The script is REPLAY-TICKS intents made from a fixed seed: a short
+;;; hand-written opening (run right over the 2-tile gap, jump the 3-tile
+;;; gap) and then segments of 4 to 40 ticks with a pseudo-random direction
+;;; and a pseudo-random jump hold, so the run falls in the pits (soft
+;;; returns), jumps, slides on walls and swims wherever it wanders. The
+;;; generator is the ZX81 LCG with a residue test (the onboarding's idiom:
+;;; modulo only), so the script is the same on every target.
+;;;
+;;; The trace is one line per tick of the world ((harkfell world)) in the
+;;; test room:
+;;;   TICK X Y VX VY MODE RETURNS
+;;; floats as number->string prints them, which round-trips exactly
+;;; (measured: 0.33333333333333331), so two traces that are equal as text
+;;; hold the same bits. The gate compares a run with the recording made on
+;;; the same target (test/fixtures/replay-native.txt, replay-web.txt);
+;;; whether the native and web recordings agree is recorded in the task
+;;; note, not assumed.
+
+(define-library (harkfell replay)
+  (import (sigil list)
+          (sigil math)
+          (sigil string)
+          (engine body)
+          (harkfell world)
+          (harkfell rooms))
+
+  (export REPLAY-TICKS REPLAY-SEED
+          replay-script replay-lines replay-trace-text
+          trace-line)
+
+  (begin
+    (define REPLAY-TICKS 1800)     ; 30 seconds
+    (define REPLAY-SEED 2609)
+
+    ;; The ZX81 generator: every product stays under 2^23, so no target can
+    ;; overflow a fixnum on it (the wasm build included).
+    (define (lcg-next s) (modulo (+ (* s 75) 74) 65537))
+
+    ;; (ticks h v jump) segments, the opening first.
+    (define OPENING
+      (list (list 30 1 0 #f)       ; run right from the entry
+            (list 14 1 0 #t)       ; jump the 2-tile gap
+            (list 4 1 0 #f)
+            (list 20 1 0 #t)       ; and the 3-tile one
+            (list 30 1 0 #f)))
+
+    (define (segments-from seed total)
+      (let loop ((s (lcg-next seed)) (left total) (acc '()))
+        (if (<= left 0)
+            (reverse acc)
+            (let* ((s1 (lcg-next s))
+                   (s2 (lcg-next s1))
+                   (s3 (lcg-next s2))
+                   (s4 (lcg-next s3))
+                   (n (min left (+ 4 (modulo s1 37))))
+                   (h (- (modulo s2 3) 1))
+                   (v (- (modulo s3 3) 1))
+                   (jump (< (modulo s4 100) 35)))
+              (loop s4 (- left n) (cons (list n h v jump) acc))))))
+
+    (define (opening-ticks)
+      (apply + (map car OPENING)))
+
+    ;; The script as a list of intents, one per tick, presses marked on
+    ;; each rising edge of jump.
+    (define (replay-script)
+      (let ((segs (append OPENING (segments-from REPLAY-SEED (- REPLAY-TICKS (opening-ticks))))))
+        (let loop ((segs segs) (was #f) (acc '()))
+          (if (null? segs)
+              (reverse acc)
+              (let* ((seg (car segs))
+                     (n (car seg))
+                     (h (cadr seg))
+                     (v (caddr seg))
+                     (jump (cadddr seg)))
+                (let ticks ((i 0) (was was) (acc acc))
+                  (if (= i n)
+                      (loop (cdr segs) was acc)
+                      (ticks (+ i 1)
+                             jump
+                             (cons (intent h: h v: v jump: jump press: (and jump (not was)))
+                                   acc)))))))))
+
+    (define (trace-line tick w)
+      (let ((b (world-body w)))
+        (string-append (number->string tick) " "
+                       (number->string (body-x b)) " "
+                       (number->string (body-y b)) " "
+                       (number->string (body-vx b)) " "
+                       (number->string (body-vy b)) " "
+                       (symbol->string (body-mode b)) " "
+                       (number->string (world-returns w)))))
+
+    ;; The trace, one string per tick.
+    (define (replay-lines)
+      (let loop ((w (world-new (load-test-room)))
+                 (script (replay-script))
+                 (tick 1)
+                 (acc '()))
+        (if (null? script)
+            (reverse acc)
+            (let ((w (world-tick w (car script))))
+              (loop w (cdr script) (+ tick 1) (cons (trace-line tick w) acc))))))
+
+    (define (replay-trace-text)
+      (apply string-append
+             (map (lambda (l) (string-append l "\n")) (replay-lines))))))

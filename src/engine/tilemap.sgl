@@ -1,0 +1,72 @@
+;;; (engine tilemap) - A grid of tile kinds.
+;;;
+;;; A tilemap is a width x height grid of square tiles, each holding a KIND
+;;; symbol. The engine gives four kinds a meaning (the rest are the game's
+;;; to use, and read as empty space to the collision code):
+;;;
+;;;   solid       blocks movement on every side
+;;;   climbable   blocks like solid, and a body can hold it and climb
+;;;   water       a body inside it swims
+;;;   hazard      touching it is the game's business (a soft return, say)
+;;;
+;;;   and air, the default, which is nothing.
+;;;
+;;; Outside the grid reads as the tilemap's EDGE kind (solid by default:
+;;; a room with no neighbours is closed).
+;;;
+;;; Pure: no platform. Positions are in pixels, rows and columns in tiles.
+
+(define-library (engine tilemap)
+  (import (sigil struct)
+          (sigil math))
+
+  (export tilemap tilemap? make-tilemap
+          tilemap-cols tilemap-rows tilemap-size tilemap-edge tilemap-cells
+          tilemap-ref tilemap-set tilemap-width tilemap-height
+          tile-at px->col
+          kind-solid? kind-climbable? kind-water? kind-hazard?)
+
+  (begin
+    (define-struct tilemap
+      (cols default: 0)
+      (rows default: 0)
+      (size default: 16)            ; pixels per tile side
+      (cells default: #f)           ; a vector of kinds, row-major
+      (edge default: 'solid))       ; the kind outside the grid
+
+    ;; cols x rows of air.
+    (define (make-tilemap cols rows size)
+      (tilemap cols: cols
+               rows: rows
+               size: size
+               cells: (make-vector (* cols rows) 'air)
+               edge: 'solid))
+
+    (define (tilemap-width tm) (* (tilemap-cols tm) (tilemap-size tm)))
+    (define (tilemap-height tm) (* (tilemap-rows tm) (tilemap-size tm)))
+
+    (define (tilemap-ref tm col row)
+      (if (and (>= col 0) (< col (tilemap-cols tm))
+               (>= row 0) (< row (tilemap-rows tm)))
+          (vector-ref (tilemap-cells tm) (+ col (* row (tilemap-cols tm))))
+          (tilemap-edge tm)))
+
+    ;; A copy with one cell changed (the grid is shared otherwise; nothing
+    ;; mutates a tilemap in place after it is built).
+    (define (tilemap-set tm col row kind)
+      (let ((cells (vector-copy (tilemap-cells tm))))
+        (vector-set! cells (+ col (* row (tilemap-cols tm))) kind)
+        (tilemap tm cells: cells)))
+
+    ;; The column (or row) a pixel coordinate falls in.
+    (define (px->col tm x)
+      (exact (floor (/ x (tilemap-size tm)))))
+
+    ;; The kind under a pixel point.
+    (define (tile-at tm x y)
+      (tilemap-ref tm (px->col tm x) (px->col tm y)))
+
+    (define (kind-solid? k) (or (eq? k 'solid) (eq? k 'climbable)))
+    (define (kind-climbable? k) (eq? k 'climbable))
+    (define (kind-water? k) (eq? k 'water))
+    (define (kind-hazard? k) (eq? k 'hazard))))

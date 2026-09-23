@@ -1,0 +1,285 @@
+;;; The movement verbs, each on a small room built for it, on the real
+;;; physics ((engine body) with (harkfell feel)).
+;;;
+;;;   wall jump   a chimney (two smooth walls two tiles apart, eight tiles
+;;;               high) is climbed by kicking between them; and a single
+;;;               smooth wall is NOT climbed by kicking off it and coming
+;;;               back (the control: the chimney's height comes from the
+;;;               second wall, not from the kick alone)
+;;;   climb       pushing into rough rock in the air holds it; up climbs;
+;;;               past the top the body hops onto it and stands there;
+;;;               pushing away lets go
+;;;   swim        a walk off a bank into a pool swims; down sinks to the
+;;;               floor; up and across reaches the far bank; jump with the
+;;;               head out leaps onto it
+;;;   soft return walking into a pit in the test room dims and returns the
+;;;               body to the entry, standing, once
+;;;   coyote      a jump pressed on the 6th tick after leaving a ledge is a
+;;;               jump; on the 7th it is not
+;;;   buffer      a jump pressed 5 ticks before the first grounded tick
+;;;               jumps on landing; 6 ticks before, it does not
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine tilemap)
+        (engine room)
+        (engine body)
+        (engine collide)
+        (harkfell feel)
+        (harkfell rooms)
+        (harkfell world)
+        (harkfell envelope))
+
+(define F HARKFELL-FEEL)
+
+(define (last l) (if (null? (cdr l)) (car l) (last (cdr l))))
+
+(define (tiles rows) (room-tiles (parse-harkfell-room rows)))
+
+;; A body standing in cell (col, row): its feet on the cell's bottom.
+(define (stand col row)
+  (body (body-at (+ (* 16 col) 4.0) (- (* 16 (+ row 1)) 14.0)) mode: 'ground))
+
+;; Run b under policy (tick b -> intent) for n ticks; returns the list of
+;; bodies, first to last.
+(define (history b tm policy n)
+  (let loop ((b b) (tick 0) (acc '()))
+    (if (= tick n)
+        (reverse acc)
+        (let ((b (body-step b (policy tick b) tm F)))
+          (loop b (+ tick 1) (cons b acc))))))
+
+(define (any-event? hist e)
+  (and (find (lambda (b) (memq e (body-events b))) hist) #t))
+
+(define (min-y hist) (apply min (map body-y hist)))
+
+(define (touching-side? b tm s)
+  (touching? tm (body-x b) (body-y b) (feel-box-w F) (feel-box-h F) (if (> s 0) 'right 'left) kind-solid?))
+
+;; --- wall jump ----------------------------------------------------------------
+
+(define CHIMNEY
+  (list "#######"
+        "#.....#"
+        "#.....#"
+        "#..#..#"
+        "#..#..#"
+        "#..#..#"
+        "#..#..#"
+        "#..#..#"
+        "#..#..#"
+        "#..#..#"
+        "#..#..#"
+        "#######"))
+;; Columns 1-2 are the chimney between the room's edge and the column-3
+;; wall, from row 3 (its top at y 48) down to the floor at row 11 (y 176).
+
+;; Kick between the walls: hold toward the wall being climbed to, press jump
+;; when touching it, then turn to the other wall.
+(define (chimney-policy tm)
+  (let ((dir 1) (was #f))
+    (lambda (tick b)
+      (when (memq 'wall-jump (body-events b)) (set! dir (- dir)))
+      (let* ((press (and (or (= tick 0) (touching-side? b tm dir)) (not was))))
+        (set! was press)
+        (intent h: dir jump: #t press: press)))))
+
+;; One wall on the right, open to the left: kick off it and come back.
+(define ONE-WALL
+  (list "############"
+        "#..........#"
+        "#..........#"
+        "#.........##"
+        "#.........##"
+        "#.........##"
+        "#.........##"
+        "#.........##"
+        "#.........##"
+        "#.........##"
+        "#.........##"
+        "############"))
+
+(define (one-wall-policy tm)
+  (let ((was #f))
+    (lambda (tick b)
+      (let ((press (and (or (= tick 0) (touching-side? b tm 1)) (not was))))
+        (set! was press)
+        (intent h: 1 jump: #t press: press)))))
+
+(test-group "wall jump"
+  (let* ((tm (tiles CHIMNEY))
+         (hist (history (stand 1 10) tm (chimney-policy tm) 600)))
+    (test "kicking between the chimney's walls climbs out of its top"
+      (assert-true (any-event? hist 'wall-jump))
+      ;; the chimney's top is y 48; the body's feet above it
+      (assert-true (< (+ (min-y hist) (feel-box-h F)) 48.0))))
+  (let* ((tm (tiles ONE-WALL))
+         (start (stand 9 10))
+         (hist (history start tm (one-wall-policy tm) 600))
+         (rise (- (body-y start) (min-y hist))))
+    (test "a single smooth wall is not climbed: no kick starts higher than the first (control)"
+      ;; measured: the first kick comes off the top of a jump (87 px up in
+      ;; all); every kick after it starts from near the floor, since the
+      ;; kick carries the body away and it falls before it can come back
+      (let ((kicks (filter-map (lambda (b) (and (memq 'wall-jump (body-events b)) (body-y b))) hist)))
+        (assert-true (>= (length kicks) 3))
+        (assert-true (every (lambda (y) (>= y (car kicks))) (cdr kicks)))
+        (assert-true (< rise (* 16 6.0)))))))
+
+;; --- climb -----------------------------------------------------------------------
+
+(define ROUGH
+  (list "##########"
+        "#........#"
+        "#........#"
+        "#.....%%%#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "##########"))
+;; Rough rock at column 6 from row 3 (top y 48) to the floor (row 10, y 160),
+;; with a shelf on top (row 3, columns 6-8) to stand on.
+
+(test-group "climb"
+  (let* ((tm (tiles ROUGH))
+         (hist (history (stand 5 9) tm (lambda (tick b) (intent h: 1 v: -1)) 400))
+         (end (last hist)))
+    (test "up and into rough rock holds it and climbs"
+      (assert-true (any-event? hist 'grab))
+      (assert-true (find (lambda (b) (eq? (body-mode b) 'cling)) hist)))
+    (test "past the top the body hops on and stands there"
+      (assert-true (any-event? hist 'mantle))
+      (assert-true (eq? (body-mode end) 'ground))
+      (assert-true (< (abs (- (+ (body-y end) (feel-box-h F)) 48.0)) 0.001))
+      (assert-true (> (body-x end) (* 16 6.0)))))
+  (let* ((tm (tiles ROUGH))
+         (hist (history (stand 5 9) tm
+                        (lambda (tick b) (if (< tick 60) (intent h: 1 v: -1) (intent h: -1)))
+                        90))
+         (at-60 (list-ref hist 59)))
+    (test "clinging with no input stays; pushing away lets go and falls"
+      (assert-true (eq? (body-mode at-60) 'cling))
+      (assert-true (any-event? hist 'let-go))
+      (assert-true (not (eq? (body-mode (last hist)) 'cling))))))
+
+;; --- swim ------------------------------------------------------------------------
+
+(define POOL
+  (list "############"
+        "#..........#"
+        "#..........#"
+        "#..........#"
+        "#..........#"
+        "####~~~~~###"
+        "####~~~~~###"
+        "####~~~~~###"
+        "####~~~~~###"
+        "############"))
+;; Banks at columns 1-3 and 9-10 (tops y 80); the pool columns 4-8, rows
+;; 5-8, its surface level with the banks.
+
+(test-group "swim"
+  (let* ((tm (tiles POOL))
+         (in (history (stand 2 4) tm (lambda (tick b) (intent h: 1)) 40))
+         (down (history (last in) tm (lambda (tick b) (intent v: 1)) 120))
+         (across (history (last down) tm
+                          (lambda (tick b) (intent h: 1 v: -1 jump: #t press: (= (modulo tick 10) 0)))
+                          240)))
+    (test "walking off the bank into the pool swims"
+      (assert-true (any-event? in 'splash))
+      (assert-true (eq? (body-mode (last in)) 'swim)))
+    (test "down sinks to the pool's floor"
+      (assert-true (> (body-y (last down)) (* 16 7.0))))
+    (test "up and across, jump with the head out: out onto the far bank"
+      (assert-true (any-event? across 'jump))
+      ;; standing on the far bank (x past column 9, feet at its top, y 80)
+      ;; at some tick; the policy keeps jumping after, so not the last
+      (assert-true (find (lambda (b)
+                           (and (eq? (body-mode b) 'ground)
+                                (> (body-x b) (* 16 9.0))
+                                (< (abs (- (+ (body-y b) (feel-box-h F)) 80.0)) 0.001)))
+                         across)))))
+
+;; --- soft return -------------------------------------------------------------------
+
+(test-group "soft return"
+  (let* ((w0 (world-new (load-test-room)))
+         (entry (world-body w0))
+         (right (intent h: 1)))
+    (let loop ((w w0) (tick 0) (saw-dark #f))
+      (if (or (= tick 400) (> (world-returns w) 0))
+          (begin
+            (test "walking into the first pit returns the body to the entry, once"
+              (assert-true saw-dark)
+              (assert-equal 1 (world-returns w))
+              (assert-true (eq? (world-phase w) 'light))
+              (assert-true (= (body-x (world-body w)) (body-x entry)))
+              (assert-true (= (body-y (world-body w)) (body-y entry)))
+              (assert-true (eq? (body-mode (world-body w)) 'ground)))
+            (test "the dark lasts half a second: 15 ticks out, 15 back"
+              (let run ((w w) (n 0))
+                (if (eq? (world-phase w) 'play)
+                    (assert-equal 15 n)
+                    (run (world-tick w right) (+ n 1))))))
+          (let ((w (world-tick w right)))
+            (loop w (+ tick 1) (or saw-dark (> (world-dim w) 0.5))))))))
+
+;; --- coyote and buffer --------------------------------------------------------------
+
+(define LEDGE
+  (list "################"
+        "#..............#"
+        "#..............#"
+        "#..............#"
+        "#..............#"
+        "#####..........#"
+        "#####..........#"
+        "#####..........#"
+        "################"))
+;; A ledge (columns 1-4, top y 80) three tiles above the floor (y 128).
+
+;; The tick the body last started on the ledge, running right from column 2.
+(define (last-grounded-tick tm)
+  (let loop ((b (stand 2 4)) (tick 0))
+    (let ((next (body-step b (intent h: 1) tm F)))
+      (if (and (body-grounded? b tm F) (not (body-grounded? next tm F)))
+          tick
+          (loop next (+ tick 1))))))
+
+;; Did a jump pressed on tick p (running right throughout) happen?
+(define (jumped-when-pressed-at tm p)
+  (any-event? (history (stand 2 4) tm (lambda (tick b) (intent h: 1 jump: (>= tick p) press: (= tick p))) 80)
+              'jump))
+
+(test-group "coyote time"
+  (let* ((tm (tiles LEDGE))
+         (t (last-grounded-tick tm)))
+    (test "a press on the 6th airborne tick still jumps"
+      (assert-true (jumped-when-pressed-at tm (+ t 6))))
+    (test "a press on the 7th does not"
+      (assert-false (jumped-when-pressed-at tm (+ t 7))))))
+
+;; Drop from the ledge's height with no input and find the first tick that
+;; starts grounded.
+(define (first-grounded-tick tm start)
+  (let loop ((b start) (tick 0))
+    (if (and (> tick 0) (body-grounded? b tm F))
+        tick
+        (loop (body-step b NO-INTENT tm F) (+ tick 1)))))
+
+(test-group "jump buffer"
+  (let* ((tm (tiles LEDGE))
+         (start (body (body-at 120.0 20.0) mode: 'air))
+         (g (first-grounded-tick tm start))
+         (jumps (lambda (p)
+                  (let ((hist (history start tm (lambda (tick b) (intent jump: (>= tick p) press: (= tick p))) (+ g 4))))
+                    (any-event? hist 'jump)))))
+    (test "a press 5 ticks before the first grounded tick jumps on landing"
+      (assert-true (jumps (- g 5))))
+    (test "a press 6 ticks before it does not"
+      (assert-false (jumps (- g 6))))))

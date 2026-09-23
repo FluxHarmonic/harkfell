@@ -1,0 +1,75 @@
+;;; (harkfell shell native) - The native shell: a sigil-desktop window.
+;;;
+;;; Shaped after Crash The Stack's (crash shell native) at master e737d21
+;;; (a window at a whole multiple of the view, wait-frame's dt into the
+;;; fixed clock, the keys polled each frame), cut down to what one room
+;;; needs.
+;;;
+;;;   harkfell              play (arrows or WASD, Space or Z to jump,
+;;;                         R back to the entry, Escape to quit)
+;;;   harkfell --ms         with the frame readout
+;;;   harkfell --replay     no window: run the replay script and print its
+;;;                         trace (the replay gate, (harkfell replay))
+;;;   harkfell --envelope   no window: print the measured movement envelope
+;;;
+;;; No gamepad: sigil-desktop 0.10.2 has GLFW's joystick code compiled in
+;;; but exposes none of it (harkfell-design section 9).
+
+(define-library (harkfell shell native)
+  (import (sigil io)
+          (sigil list)
+          (sigil process)
+          (sigil desktop)
+          (sigil graphics)
+          (harkfell shell)
+          (harkfell replay)
+          (harkfell envelope)
+          (harkfell feel))
+
+  (export native-main)
+
+  (begin
+    ;; Three times the view: 1200x528, a whole scale from the first frame.
+    (define WINDOW-W (* 3 VIEW-W))
+    (define WINDOW-H (* 3 VIEW-H))
+
+    ;; Every key the game listens to, as sigil-desktop names them.
+    (define KEYS (list 'left 'right 'up 'down 'a 'd 'w 's 'space 'z))
+
+    (define (poll-keys!)
+      (for-each (lambda (k)
+                  (when (key-pressed? k) (shell-key-down! k))
+                  (when (key-released? k) (shell-key-up! k)))
+                KEYS))
+
+    (define (print-replay!)
+      (for-each (lambda (l) (display l) (newline)) (replay-lines)))
+
+    (define (print-envelope!)
+      (for-each (lambda (p)
+                  (display (car p)) (display " ") (display (cdr p)) (newline))
+                (envelope-report HARKFELL-FEEL)))
+
+    (define (loop)
+      (lambda ()
+        (gfx-setup)
+        (set-viewport #f)
+        (set-letterbox-color 0.0 0.0 0.0)
+        (let frame ()
+          (let* ((dt (wait-frame)))
+            (poll-keys!)
+            (when (key-pressed? 'r) (shell-reset-world!))
+            (when (key-pressed? 'escape) (request-quit))
+            (let ((ticks (shell-frame! dt)))
+              (shell-present! (frame-width) (frame-height) ticks))
+            (unless (quit-requested?) (frame))))))
+
+    (define (native-main . _args)
+      (let ((args (cdr (command-line))))
+        (cond ((member "--replay" args) (print-replay!) 0)
+              ((member "--envelope" args) (print-envelope!) 0)
+              (else
+               (shell-boot!)
+               (shell-set-ms! (and (member "--ms" args) #t))
+               (run-game "Harkfell" WINDOW-W WINDOW-H (loop))
+               0))))))

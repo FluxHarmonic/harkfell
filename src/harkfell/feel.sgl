@@ -1,0 +1,77 @@
+;;; (harkfell feel) - The numbers that make Harkfell's movement feel the way
+;;; it does, in the units (engine body) takes: pixels and 1/60 s ticks.
+;;;
+;;; The design target (harkfell-design section 10, A0) is an envelope,
+;;; not these numbers: a 2-tile gap is easy from a standing start, a
+;;; 3-tile gap needs a moving start, a 4-tile gap is never possible
+;;; (coyote time included), a held jump reaches a 3-tile ledge and a tap
+;;; does not. test/test-envelope.sgl measures it on the real physics; the
+;;; numbers below are where tuning starts, in the design's own terms:
+;;;
+;;;   one speed (D24)    4.5 tiles/s = 72 px/s = 1.2 px/tick, reached in
+;;;                      ACCEL-TICKS
+;;;   held jump          3.25 tiles (52 px) at the apex, TIME-TO-APEX 0.36 s
+;;;   tap                about 1.25 tiles
+;;;   falling            1.6x the rising gravity
+;;;   coyote, buffer     6 ticks each
+;;;
+;;; GRAVITY and JUMP-V come from the apex height and time for the
+;;; discrete step (engine body) takes (velocity first, then position):
+;;; n ticks of rise cover n*v0 - g*n(n+1)/2, so v0 = g*T and
+;;; g = 2H / (T(T-1)) put the apex at H after T ticks.
+
+(define-library (harkfell feel)
+  (import (engine body))
+
+  (export TILE RUN-TILES-PER-S ACCEL-TICKS HELD-HEIGHT APEX-TICKS
+          HARKFELL-FEEL feel-with-run)
+
+  (begin
+    (define TILE 16)
+    (define RUN-TILES-PER-S 4.5)
+    ;; Ticks from rest to the one speed. Long enough that a standing start
+    ;; loses the width a 3-tile gap needs (the envelope's second clause);
+    ;; 15 ticks is 0.25 s.
+    (define ACCEL-TICKS 15)
+    (define HELD-HEIGHT 52.0)            ; 3.25 tiles
+    (define APEX-TICKS 21.6)             ; 0.36 s
+
+    (define RUN (/ (* RUN-TILES-PER-S TILE) 60.0))
+    (define GRAVITY (/ (* 2.0 HELD-HEIGHT) (* APEX-TICKS (- APEX-TICKS 1.0))))
+    (define JUMP-V (* GRAVITY APEX-TICKS))
+
+    (define HARKFELL-FEEL
+      (feel box-w: 8.0
+            box-h: 14.0
+            run: RUN
+            accel: (/ RUN ACCEL-TICKS)
+            decel: (/ RUN 6.0)
+            turn: (/ RUN 6.0)
+            air-accel: (/ RUN ACCEL-TICKS)
+            air-decel: (/ RUN 24.0)
+            air-turn: (/ RUN 10.0)
+            jump-v: JUMP-V
+            gravity: GRAVITY
+            fall-mul: 1.6
+            cut-mul: 2.8
+            max-fall: 7.0
+            coyote: 6
+            buffer: 6
+            slide-max: 1.0
+            wall-kick-x: RUN
+            wall-jump-v: JUMP-V
+            wall-lock: 10
+            climb: 0.75
+            mantle-v: 2.4
+            mantle-lock: 10
+            swim: 0.9
+            swim-accel: 0.08
+            sink: 0.25
+            water-jump-v: 4.0
+            water-damp: 0.35
+            hazard-inset: 2.0))
+
+    ;; The feel with the one speed changed and everything else kept (the
+    ;; envelope's sabotage raises it by a third).
+    (define (feel-with-run f run)
+      (feel f run: run wall-kick-x: run))))

@@ -1,0 +1,139 @@
+;;; (harkfell draw) - A0's grey boxes.
+;;;
+;;; The room is drawn into a 400x176 render target with nearest sampling,
+;;; one virtual pixel per texel; the shell then places that target on the
+;;; window at a whole scale ((engine view)). Colors are the placeholders
+;;; below; A4 brings the real palettes (section 7).
+;;;
+;;; What each kind looks like:
+;;;   rock (solid)       mid grey, a lighter top edge
+;;;   rough (climbable)  darker brown-grey with a speckle, so it reads as
+;;;                      something you could hold
+;;;   water              blue-grey over the body (you are in it)
+;;;   hazard             dull red with a darker ripple
+;;; The body is a pale 10x14 block (its collision box is 8x14, centered)
+;;; with a dark eye on the side it faces and two ears; clinging, the ears
+;;; lie back.
+
+(define-library (harkfell draw)
+  (import (sigil math)
+          (sigil graphics)
+          (engine tilemap)
+          (engine body)
+          (engine font)
+          (harkfell world))
+
+  (export VIEW-W VIEW-H draw-world draw-readout)
+
+  (begin
+    (define VIEW-W 400)
+    (define VIEW-H 176)
+
+    (define C-SKY '(0.15 0.17 0.21))
+    (define C-ROCK '(0.44 0.45 0.47))
+    (define C-ROCK-TOP '(0.58 0.59 0.61))
+    (define C-ROUGH '(0.36 0.33 0.30))
+    (define C-ROUGH-SPECK '(0.25 0.23 0.21))
+    (define C-WATER '(0.24 0.40 0.56 0.62))
+    (define C-WATER-TOP '(0.52 0.66 0.78 0.8))
+    (define C-HAZARD '(0.48 0.21 0.19))
+    (define C-HAZARD-RIPPLE '(0.34 0.13 0.12))
+    (define C-BODY '(0.92 0.88 0.80))
+    (define C-EYE '(0.12 0.12 0.14))
+    (define C-TEXT '(0.95 0.95 0.90))
+    (define C-TEXT-BG '(0.0 0.0 0.0 0.55))
+
+    (define (color! c) (apply set-color c))
+
+    (define (floor-int x) (exact (floor x)))
+
+    (define (draw-tile kind x y s tm col row)
+      (cond ((eq? kind 'solid)
+             (color! C-ROCK)
+             (draw-filled-rect x y s s)
+             (unless (kind-solid? (tilemap-ref tm col (- row 1)))
+               (color! C-ROCK-TOP)
+               (draw-filled-rect x y s 1)))
+            ((eq? kind 'climbable)
+             (color! C-ROUGH)
+             (draw-filled-rect x y s s)
+             (color! C-ROUGH-SPECK)
+             (draw-filled-rect (+ x 3) (+ y 2) 2 1)
+             (draw-filled-rect (+ x 10) (+ y 5) 2 1)
+             (draw-filled-rect (+ x 5) (+ y 9) 2 1)
+             (draw-filled-rect (+ x 12) (+ y 12) 2 1)
+             (draw-filled-rect (+ x 2) (+ y 14) 2 1))
+            ((eq? kind 'hazard)
+             (color! C-HAZARD)
+             (draw-filled-rect x y s s)
+             (color! C-HAZARD-RIPPLE)
+             (draw-filled-rect (+ x 2) (+ y 4) 5 1)
+             (draw-filled-rect (+ x 9) (+ y 9) 5 1))
+            (else #f)))
+
+    (define (draw-water tm s)
+      (let loop ((row 0))
+        (when (< row (tilemap-rows tm))
+          (let cols ((col 0))
+            (when (< col (tilemap-cols tm))
+              (when (kind-water? (tilemap-ref tm col row))
+                (color! C-WATER)
+                (draw-filled-rect (* col s) (* row s) s s)
+                (unless (kind-water? (tilemap-ref tm col (- row 1)))
+                  (color! C-WATER-TOP)
+                  (draw-filled-rect (* col s) (* row s) s 1)))
+              (cols (+ col 1))))
+          (loop (+ row 1)))))
+
+    (define (draw-body b)
+      (let* ((x (- (floor-int (body-x b)) 1))
+             (y (floor-int (body-y b)))
+             (face (body-facing b))
+             (clinging (eq? (body-mode b) 'cling)))
+        (color! C-BODY)
+        (draw-filled-rect x (+ y 3) 10 11)
+        ;; the ears: up, or lying back while clinging
+        (if clinging
+            (begin
+              (draw-filled-rect (if (> face 0) (+ x 1) (+ x 6)) (+ y 2) 3 1)
+              (draw-filled-rect (if (> face 0) (+ x 0) (+ x 7)) (+ y 1) 3 1))
+            (begin
+              (draw-filled-rect (+ x 2) y 1 3)
+              (draw-filled-rect (+ x 7) y 1 3)))
+        (color! C-EYE)
+        (draw-filled-rect (if (> face 0) (+ x 7) (+ x 2)) (+ y 6) 1 2)))
+
+    ;; The whole room, into the current target (0,0 is the room's corner).
+    (define (draw-world w)
+      (let* ((tm (world-tiles w))
+             (s (tilemap-size tm)))
+        (color! C-SKY)
+        (draw-filled-rect 0 0 VIEW-W VIEW-H)
+        (let loop ((row 0))
+          (when (< row (tilemap-rows tm))
+            (let cols ((col 0))
+              (when (< col (tilemap-cols tm))
+                (draw-tile (tilemap-ref tm col row) (* col s) (* row s) s tm col row)
+                (cols (+ col 1))))
+            (loop (+ row 1))))
+        (draw-body (world-body w))
+        (draw-water tm s)
+        (let ((d (world-dim w)))
+          (when (> d 0.0)
+            (set-color 0.0 0.0 0.0 d)
+            (draw-filled-rect 0 0 VIEW-W VIEW-H)))))
+
+    ;; Lines of text at the top right of the rectangle x y w, cells of
+    ;; SCALE px, over a dark band (the ?ms readout, in window pixels).
+    (define (draw-readout lines x y w scale)
+      (let* ((line-h (* scale 7))
+             (widest (let loop ((ls lines) (m 0))
+                       (if (null? ls) m (loop (cdr ls) (max m (text-width-mini (car ls) scale))))))
+             (left (- (+ x w) widest (* 3 scale))))
+        (color! C-TEXT-BG)
+        (draw-filled-rect (- left scale) y (+ widest (* 3 scale)) (+ (* line-h (length lines)) scale))
+        (color! C-TEXT)
+        (let loop ((ls lines) (ty (+ y scale)))
+          (unless (null? ls)
+            (draw-text-mini (car ls) left ty scale)
+            (loop (cdr ls) (+ ty line-h))))))))

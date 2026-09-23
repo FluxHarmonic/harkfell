@@ -1,0 +1,244 @@
+;;; (harkfell envelope) - The movement envelope, measured on the real physics.
+;;;
+;;; The design target (harkfell-design section 10, A0):
+;;;   - a 2-tile gap is easy from a standing start;
+;;;   - a 3-tile gap needs a moving start;
+;;;   - a 4-tile gap is never possible, coyote time included;
+;;;   - a held jump reaches a 3-tile ledge and a tap does not.
+;;; The landing rule: the body's 8 px box (its foot box) must overlap the far
+;;; ledge and stand on it.
+;;;
+;;; Every figure here comes from running (engine body) on a small room
+;;; built for the question, with a search over the inputs a player could
+;;; give, so "never possible" means "no input in the searched family
+;;; does it", and the families are stated beside each measure:
+;;;
+;;;   standing gap   at rest anywhere on the last tile before the gap
+;;;                  (every pixel position), jump and run pressed together
+;;;                  on the first tick and held.
+;;;   moving gap     a run-up of four tiles from rest (full speed after
+;;;                  ACCEL-TICKS), run held throughout, jump pressed on
+;;;                  every tick from well before the edge to past the end
+;;;                  of coyote time, and held.
+;;;   ledge          at rest 0 to 40 px from the ledge's face, jump pressed
+;;;                  on the first tick, pushing toward the ledge from tick 0,
+;;;                  4, 8, 12 or 16; HELD keeps jump down, a TAP lets it go
+;;;                  after TAP-TICKS. No second press, so no wall jump: the
+;;;                  ledge measures the jump alone.
+;;;
+;;; A gap's pit floor is a hazard: touching it ends the attempt, as the
+;;; soft return would.
+
+(define-library (harkfell envelope)
+  (import (sigil struct)
+          (sigil list)
+          (sigil math)
+          (sigil string)
+          (engine tilemap)
+          (engine body)
+          (engine room)
+          (harkfell feel)
+          (harkfell rooms))
+
+  (export TAP-TICKS
+          run-intents
+          gap-room ledge-room
+          gap-cleared-standing? gap-cleared-moving? standing-clears
+          ledge-reached?
+          widest-gap-standing widest-gap-moving highest-ledge
+          jump-rise
+          envelope-report)
+
+  (begin
+    (define TAP-TICKS 1)
+    (define MAX-TICKS 240)
+
+    ;; --- running the physics ---------------------------------------------------
+
+    ;; Step b through tm under (intent-at tick b) until (done? b tick) or
+    ;; MAX-TICKS. Returns the last body.
+    (define (run-intents b tm f intent-at done?)
+      (let loop ((b b) (tick 0))
+        (if (or (>= tick MAX-TICKS) (done? b tick))
+            b
+            (loop (body-step b (intent-at tick b) tm f) (+ tick 1)))))
+
+    ;; --- rooms built for a question ----------------------------------------------
+
+    ;; rows x cols of chars from (cell col row).
+    (define (grid cols rows cell)
+      (map (lambda (r)
+             (list->string (map (lambda (c) (cell c r)) (iota cols))))
+           (iota rows)))
+
+    ;; A floor at row FLOOR, RUNUP tiles of it, a gap of N tiles with a
+    ;; hazard at its bottom, then LAND tiles of floor. Walls all round,
+    ;; open sky above (seven rows of headroom).
+    (define GAP-FLOOR 8)
+    (define GAP-RUNUP 6)
+    (define GAP-LAND 5)
+
+    (define (gap-room n)
+      (let* ((cols (+ 1 GAP-RUNUP n GAP-LAND 1))
+             (rows (+ GAP-FLOOR 3)))
+        (parse-harkfell-room
+          (grid cols rows
+                (lambda (c r)
+                  (cond ((or (= r 0) (= c 0) (= c (- cols 1)) (= r (- rows 1))) #\#)
+                        ((< r GAP-FLOOR) #\.)
+                        ((and (> c GAP-RUNUP) (<= c (+ GAP-RUNUP n)))
+                         (if (= r (- rows 2)) #\^ #\.))
+                        (else #\#)))))))
+
+    ;; The pixel x of the gap's near edge and far edge.
+    (define (gap-near-edge) (* TILE (+ GAP-RUNUP 1)))
+    (define (gap-far-edge n) (* TILE (+ GAP-RUNUP 1 n)))
+
+    (define (standing-y f) (- (* TILE GAP-FLOOR) (feel-box-h f)))
+
+    ;; Landed on the far side: standing, box overlapping the far floor.
+    (define (landed-far? b tm f n)
+      (and (eq? (body-mode b) 'ground)
+           (> (+ (body-x b) (feel-box-w f)) (gap-far-edge n))))
+
+    (define (attempt-over? b tm f n)
+      (or (memq 'hazard (body-events b))
+          (landed-far? b tm f n)
+          (> (body-y b) (* TILE GAP-FLOOR))))
+
+    ;; One gap attempt from body b; #t when it lands on the far side.
+    (define (gap-attempt b tm f n intent-at)
+      (let ((end (run-intents b tm f intent-at
+                              (lambda (b tick)
+                                (and (> tick 0) (attempt-over? b tm f n))))))
+        (landed-far? end tm f n)))
+
+    (define (any-of xs pred)
+      (and (pair? xs) (or (pred (car xs)) (any-of (cdr xs) pred))))
+
+    ;; Standing: at rest at every whole-pixel x with the box still on the
+    ;; last tile (its right edge from the tile's left edge + 1 to the gap's
+    ;; edge + box - 1, i.e. overlapping the floor by 1 px or more).
+    (define (standing-xs f)
+      (let* ((edge (gap-near-edge))
+             (w (exact (feel-box-w f)))
+             (lo (- edge TILE))
+             (hi (- edge 1)))
+        (map (lambda (i) (+ lo i)) (iota (+ 1 (- hi lo))))))
+
+    (define (gap-cleared-standing? n f)
+      (let ((tm (room-tiles (gap-room n)))
+            (y (standing-y f)))
+        (any-of (standing-xs f)
+                (lambda (x)
+                  (gap-attempt (body (body-at x y) mode: 'ground)
+                               tm f n
+                               (lambda (tick b)
+                                 (intent h: 1 jump: #t press: (= tick 0))))))))
+
+    ;; The standing positions (of the last tile's 16) from which gap n is cleared.
+    (define (standing-clears n f)
+      (let ((tm (room-tiles (gap-room n)))
+            (y (standing-y f)))
+        (length (filter (lambda (x)
+                          (gap-attempt (body (body-at x y) mode: 'ground)
+                                       tm f n
+                                       (lambda (tick b)
+                                         (intent h: 1 jump: #t press: (= tick 0)))))
+                        (standing-xs f)))))
+
+    ;; Moving: four tiles of run-up from rest, the jump pressed on tick J
+    ;; for every J from 0 to the tick the box would have left the edge
+    ;; at full speed plus coyote time plus a margin.
+    (define (gap-cleared-moving? n f)
+      (let* ((tm (room-tiles (gap-room n)))
+             (y (standing-y f))
+             (x0 (- (gap-near-edge) (* 4 TILE)))
+             (last-j 90))
+        (any-of (iota (+ last-j 1))
+                (lambda (j)
+                  (gap-attempt (body (body-at x0 y) mode: 'ground)
+                               tm f n
+                               (lambda (tick b)
+                                 (intent h: 1 jump: (>= tick j) press: (= tick j))))))))
+
+    ;; --- ledges -----------------------------------------------------------------
+
+    (define LEDGE-FLOOR 9)
+    (define LEDGE-COL 8)
+
+    ;; A floor at row LEDGE-FLOOR, and from column LEDGE-COL on a smooth
+    ;; block N tiles high. Headroom: LEDGE-FLOOR - N - 1 rows.
+    (define (ledge-room n)
+      (let* ((cols (+ LEDGE-COL 5))
+             (rows (+ LEDGE-FLOOR 2)))
+        (parse-harkfell-room
+          (grid cols rows
+                (lambda (c r)
+                  (cond ((or (= r 0) (= c 0) (= c (- cols 1)) (= r (- rows 1))) #\#)
+                        ((>= r LEDGE-FLOOR) #\#)
+                        ((and (>= c LEDGE-COL) (>= r (- LEDGE-FLOOR n))) #\#)
+                        (else #\.)))))))
+
+    (define (on-ledge? b f n)
+      (and (eq? (body-mode b) 'ground)
+           (<= (+ (body-y b) (feel-box-h f)) (+ 0.001 (* TILE (- LEDGE-FLOOR n))))))
+
+    ;; hold: ticks jump stays down (#t: always).
+    (define (ledge-reached? n f hold)
+      (let* ((tm (room-tiles (ledge-room n)))
+             (y (- (* TILE LEDGE-FLOOR) (feel-box-h f)))
+             (face (* TILE LEDGE-COL))
+             (w (feel-box-w f)))
+        (any-of (iota 21)
+                (lambda (i)
+                  (let ((x (- face w (* 2 i))))
+                    (any-of (list 0 4 8 12 16)
+                            (lambda (r)
+                              (let ((end (run-intents
+                                           (body (body-at x y) mode: 'ground)
+                                           tm f
+                                           (lambda (tick b)
+                                             (intent h: (if (>= tick r) 1 0)
+                                                     jump: (or (eq? hold #t) (< tick hold))
+                                                     press: (= tick 0)))
+                                           (lambda (b tick)
+                                             (or (on-ledge? b f n)
+                                                 (and (> tick 2) (eq? (body-mode b) 'ground)))))))
+                                (on-ledge? end f n)))))))))
+
+    ;; --- the figures -----------------------------------------------------------------
+
+    (define (widest pred)
+      (let loop ((n 1) (best 0))
+        (if (and (<= n 6) (pred n))
+            (loop (+ n 1) n)
+            best)))
+
+    (define (widest-gap-standing f) (widest (lambda (n) (gap-cleared-standing? n f))))
+    (define (widest-gap-moving f) (widest (lambda (n) (gap-cleared-moving? n f))))
+    (define (highest-ledge f hold) (widest (lambda (n) (ledge-reached? n f hold))))
+
+    ;; The apex of a jump from a flat floor, in pixels above the start,
+    ;; with jump held for HOLD ticks (#t: throughout).
+    (define (jump-rise f hold)
+      (let* ((tm (room-tiles (ledge-room 0)))
+             (y0 (- (* TILE LEDGE-FLOOR) (feel-box-h f))))
+        (let loop ((b (body (body-at 32 y0) mode: 'ground)) (tick 0) (top y0))
+          (if (or (> tick 120) (and (> tick 2) (eq? (body-mode b) 'ground)))
+              (- y0 top)
+              (let ((b (body-step b
+                                  (intent jump: (or (eq? hold #t) (< tick hold)) press: (= tick 0))
+                                  tm f)))
+                (loop b (+ tick 1) (min top (body-y b))))))))
+
+    ;; Every figure, as an alist, for the gate and for `harkfell --envelope`.
+    (define (envelope-report f)
+      (list (cons 'rise-held (jump-rise f #t))
+            (cons 'rise-tap (jump-rise f TAP-TICKS))
+            (cons 'rise-tap-6 (jump-rise f 6))
+            (cons 'gap-standing (widest-gap-standing f))
+            (cons 'gap-moving (widest-gap-moving f))
+            (cons 'gap-2-standing-positions (standing-clears 2 f))
+            (cons 'ledge-held (highest-ledge f #t))
+            (cons 'ledge-tap (highest-ledge f TAP-TICKS))))))

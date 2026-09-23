@@ -1,0 +1,61 @@
+;;; (engine room) - A room read from text.
+;;;
+;;; A room is a grid of characters, one row per line, every row the same
+;;; length. A LEGEND maps each character to a tile kind ((engine tilemap)'s
+;;; vocabulary, or the game's own), and MARKERS map a character to a name:
+;;; a marker cell is recorded with its column and row and reads as air
+;;; (a spawn point, say). A character in neither is an error that names
+;;; the row and column, so a typo in a room file never becomes a silent
+;;; hole.
+;;;
+;;; This is A0's reader: one room, no header, no neighbours. The room
+;;; file format of the design (section 8) grows from it in A1.
+
+(define-library (engine room)
+  (import (sigil struct)
+          (sigil string)
+          (sigil list)
+          (engine tilemap))
+
+  (export room room? room-tiles room-markers room-marker
+          parse-room)
+
+  (begin
+    (define-struct room
+      (tiles default: #f)           ; a tilemap
+      (markers default: '()))       ; ((name col row) ...), in reading order
+
+    ;; The first marker of that name as (col . row), or #f.
+    (define (room-marker r name)
+      (let ((m (assq name (room-markers r))))
+        (and m (cons (cadr m) (caddr m)))))
+
+    ;; rows: a list of strings. legend: ((char . kind) ...). markers:
+    ;; ((char . name) ...). size: the tile side in pixels.
+    (define (parse-room rows legend markers size)
+      (when (null? rows)
+        (error "parse-room: no rows"))
+      (let* ((cols (string-length (car rows)))
+             (n (length rows))
+             (tm (make-tilemap cols n size))
+             (cells (vector-copy (tilemap-cells tm))))
+        (let loop ((rs rows) (row 0) (found '()))
+          (if (null? rs)
+              (room tiles: (tilemap tm cells: cells)
+                    markers: (reverse found))
+              (let ((line (car rs)))
+                (unless (= (string-length line) cols)
+                  (error "parse-room: row has the wrong width" row (string-length line) cols))
+                (let cell ((col 0) (found found))
+                  (if (= col cols)
+                      (loop (cdr rs) (+ row 1) found)
+                      (let* ((c (string-ref line col))
+                             (k (assv c legend))
+                             (m (assv c markers)))
+                        (cond (k
+                               (vector-set! cells (+ col (* row cols)) (cdr k))
+                               (cell (+ col 1) found))
+                              (m
+                               (cell (+ col 1) (cons (list (cdr m) col row) found)))
+                              (else
+                               (error "parse-room: unknown character" c row col)))))))))))))

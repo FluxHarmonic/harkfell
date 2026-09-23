@@ -1,20 +1,28 @@
 ;;; (harkfell main) - The entry, and the one seam between the two targets.
 ;;;
-;;; The project's scaffold: the package, the build configs (native dev and
-;;; release, the browser), the page and the serving scripts, with an entry
-;;; that builds on both targets and does nothing yet. Phase A0 (movement)
-;;; replaces it with the shells.
+;;; Copied in shape from Crash The Stack's (crash main) at master e737d21:
+;;; native builds run (harkfell shell native), a sigil-desktop window; web
+;;; builds run (harkfell shell web), one frame per requestAnimationFrame.
+;;; sigil-web-dispatch-event is what the browser loader calls for every
+;;; event and frame; the wasm runtime resolves it on the entry module, so
+;;; it lives here. Natively it is never called.
 
 (define-library (harkfell main)
-  (import (sigil io))
+  (cond-expand
+    (wasm (import (harkfell shell web)))
+    (else (import (harkfell shell native))))
 
   (export main sigil-web-dispatch-event)
 
   (begin
-    (define (main . args)
-      (cond-expand
-        (wasm 0)
-        (else (display "harkfell: nothing to play yet") (newline) 0)))
-
-    (define (sigil-web-dispatch-event type payload)
-      0)))
+    (cond-expand
+      (wasm
+       (define (main . args)
+         (web-main))
+       (define (sigil-web-dispatch-event type payload)
+         (web-dispatch type payload)))
+      (else
+       (define (main . args)
+         (apply native-main args))
+       (define (sigil-web-dispatch-event type payload)
+         0)))))

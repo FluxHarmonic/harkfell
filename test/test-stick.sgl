@@ -1,0 +1,45 @@
+;;; The touch stick's directions ((engine stick)): the wide left and right
+;;; sectors that keep "hold toward the wall" from slipping into a climb,
+;;; the hysteresis at a boundary, and the dead zone's two thresholds.
+;;; Offsets are in ring radii, dy down.
+
+(import (sigil test)
+        (sigil math)
+        (engine stick))
+
+;; A unit vector at deg degrees above the horizontal, to the right.
+(define (at deg r)
+  (let ((t (/ (* deg 3.141592653589793) 180.0)))
+    (list (* r (cos t)) (- (* r (sin t))))))
+
+(define (sector deg prev)
+  (let ((v (at deg 0.8)))
+    (stick-sector (car v) (cadr v) prev)))
+
+(test-group "stick sectors"
+  (test "straight right is e, straight up is n"
+    (assert-equal 'e (sector 0 'none))
+    (assert-equal 'n (sector 90 'none)))
+  (test "a thumb 25 degrees off horizontal is still e (the wide sector)"
+    (assert-equal 'e (sector 25 'none))
+    (assert-equal 'e (sector -25 'none)))
+  (test "past 30 degrees it is the diagonal"
+    (assert-equal 'ne (sector 33 'none))
+    (assert-equal 'se (sector -33 'none)))
+  (test "within 25 degrees of vertical is n"
+    (assert-equal 'n (sector 70 'none))
+    (assert-equal 'ne (sector 60 'none)))
+  (test "hysteresis: at 33 degrees, e held stays e; ne held stays ne at 27"
+    (assert-equal 'e (sector 33 'e))
+    (assert-equal 'ne (sector 27 'ne)))
+  (test "sector->hv"
+    (assert-equal (cons 1 -1) (sector->hv 'ne))
+    (assert-equal (cons 0 0) (sector->hv 'none))))
+
+(test-group "stick dead zone"
+  (test "from rest, 0.25 of the radius is still rest; 0.3 moves"
+    (assert-equal 'none (stick-sector 0.25 0.0 'none))
+    (assert-equal 'e (stick-sector 0.3 0.0 'none)))
+  (test "moving, 0.22 holds the direction; 0.18 lets go"
+    (assert-equal 'e (stick-sector 0.22 0.0 'e))
+    (assert-equal 'none (stick-sector 0.18 0.0 'e))))

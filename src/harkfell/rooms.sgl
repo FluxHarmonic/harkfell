@@ -1,0 +1,53 @@
+;;; (harkfell rooms) - A0's one room: grey boxes, 25x11 tiles of 16 px.
+;;;
+;;; What it holds, left to right (columns count from 0):
+;;;   - the entry (@) at the foot of a chimney: two smooth walls two tiles
+;;;     apart (the room's edge and the pillar at column 3), five tiles
+;;;     high, climbed by wall jumping between them; a shelf at its top;
+;;;   - a 2-tile gap (columns 4-5), then a 3-tile gap (8-10), each over a
+;;;     pit of brackish water (^, a hazard: the soft return);
+;;;   - a pool four tiles wide and two deep (~);
+;;;   - a 3-tile ledge (column 19) and a 4-tile one (the post at 20, seen
+;;;     from the floor at 21-22): the jump reaches the first, never the
+;;;     second;
+;;;   - a rough wall (%) at column 23, climbed from the floor to the top.
+;;;
+;;; Legend: # rock (solid), % rough rock (climbable), ~ water, ^ hazard,
+;;; . air, @ the entry.
+
+(define-library (harkfell rooms)
+  (import (engine room)
+          (harkfell feel))
+
+  (export TEST-ROOM-ROWS ROOM-LEGEND ROOM-MARKERS
+          load-test-room parse-harkfell-room)
+
+  (begin
+    (define TEST-ROOM-ROWS
+      (list "#########################"
+            "#.......................#"
+            "#.......................#"
+            "#..####................%#"
+            "#..#................#..%#"
+            "#..#...............##..%#"
+            "#..#...............##..%#"
+            "#@.................##..%#"
+            "####..##...##~~~~######%#"
+            "####^^##^^^##~~~~########"
+            "#########################"))
+
+    (define ROOM-LEGEND
+      (list (cons #\# 'solid)
+            (cons #\% 'climbable)
+            (cons #\~ 'water)
+            (cons #\^ 'hazard)
+            (cons #\. 'air)))
+
+    (define ROOM-MARKERS
+      (list (cons #\@ 'entry)))
+
+    (define (parse-harkfell-room rows)
+      (parse-room rows ROOM-LEGEND ROOM-MARKERS TILE))
+
+    (define (load-test-room)
+      (parse-harkfell-room TEST-ROOM-ROWS))))

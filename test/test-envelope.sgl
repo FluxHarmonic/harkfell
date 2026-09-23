@@ -1,0 +1,50 @@
+;;; The A0 gate's envelope leg: the movement envelope measured on the real
+;;; physics ((harkfell envelope)) is the design target of harkfell-design
+;;; section 10:
+;;;
+;;;   - a 2-tile gap is easy from a standing start: cleared, and from at
+;;;     least half of the standing positions on the last tile;
+;;;   - a 3-tile gap needs a moving start: not cleared standing, cleared
+;;;     moving;
+;;;   - a 4-tile gap is never possible, coyote time included: not cleared
+;;;     moving (the search presses jump on every tick through coyote time);
+;;;   - a held jump reaches a 3-tile ledge and not a 4-tile one, and a tap
+;;;     does not reach the 3-tile one.
+;;;
+;;; Positive control, in the leg itself: the same measurement with the one
+;;; speed raised by a third (and nothing else changed) clears the 4-tile
+;;; gap. So the 4-tile assertion is shown able to fail on the product: a
+;;; faster body does get across, and the search would see it. The
+;;; sabotage for the gate (raise RUN-TILES-PER-S by a third in
+;;; (harkfell feel)) is recorded in the task note.
+
+(import (sigil test)
+        (engine body)
+        (harkfell feel)
+        (harkfell envelope))
+
+(define F HARKFELL-FEEL)
+
+(test-group "envelope: gaps"
+  (test "a 2-tile gap is cleared from a standing start, from most positions"
+    (assert-true (gap-cleared-standing? 2 F))
+    (let ((n (standing-clears 2 F)))
+      (assert-true (>= n 8))))
+  (test "a 3-tile gap is not cleared from a standing start"
+    (assert-false (gap-cleared-standing? 3 F)))
+  (test "a 3-tile gap is cleared with a moving start"
+    (assert-true (gap-cleared-moving? 3 F)))
+  (test "a 4-tile gap is never cleared, coyote time included"
+    (assert-false (gap-cleared-moving? 4 F))))
+
+(test-group "envelope: ledges"
+  (test "a held jump reaches a 3-tile ledge"
+    (assert-true (ledge-reached? 3 F #t)))
+  (test "a held jump does not reach a 4-tile ledge"
+    (assert-false (ledge-reached? 4 F #t)))
+  (test "a tap does not reach a 3-tile ledge"
+    (assert-false (ledge-reached? 3 F TAP-TICKS))))
+
+(test-group "envelope: positive control"
+  (test "a third more speed clears the 4-tile gap (the search can see it)"
+    (assert-true (gap-cleared-moving? 4 (feel-with-run F (* (feel-run F) (/ 4.0 3.0)))))))

@@ -1,0 +1,162 @@
+;;; (harkfell shell web) - The browser shell.
+;;;
+;;; Shaped after Crash The Stack's (crash shell web) at master e737d21: the
+;;; generic loader (sigil-web-app.js) forwards DOM keydown and keyup by
+;;; key name, the gles3 app shell dispatches ("frame", ms) once per
+;;; requestAnimationFrame, and the page adds its own dispatches; all of
+;;; them arrive through (harkfell main)'s sigil-web-dispatch-event. One
+;;; frame per "frame" dispatch: the frame's dt into the fixed clock, the
+;;; ticks, the present.
+;;;
+;;; The page's dispatches:
+;;;   ("stick", "DX,DY,T")   the touch stick's offset in ring radii (DY
+;;;                          down), stamped with the event's timeStamp
+;;;   ("jump", "1,T"|"0,T")  the touch jump button down or up, stamped
+;;;   ("stick-form", "float"|"fixed")  ?stick= (stored); "?" answers
+;;;                          1 for float, 0 for fixed (the stored form)
+;;;   ("ms", "on")           the readout
+;;;   ("trace", "on")        the harkfell: lines below
+;;;   ("replay", "")         print the replay trace (the gate's web leg)
+;;;   ("envelope", "")       print the measured envelope
+;;;   ("visibility", ...)    the tab hidden or shown: keys up, clock restarts
+;;;   ("reset", "")          back to the entry
+;;;   ("where", "")          print "harkfell: at X Y MODE" (the arm's probe)
+;;;   ("latency", "")        print the latency lines of the ?ms readout
+;;;
+;;; Trace lines (with ?trace, on the console):
+;;;   harkfell: boot stick FORM          the stick form in force
+;;;   harkfell: replay LINE              one per tick of the replay
+;;;   harkfell: replay-done N            after the last
+;;;   harkfell: envelope NAME VALUE      one per figure
+;;;   harkfell: envelope-done
+;;;   harkfell: returns N                a soft return happened (N so far)
+;;; The replay and envelope lines print whether or not ?trace is on:
+;;; they are asked for.
+
+(define-library (harkfell shell web)
+  (import (sigil io)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (sigil browser gles3)
+          (engine body)
+          (harkfell world)
+          (harkfell shell)
+          (harkfell replay)
+          (harkfell envelope)
+          (harkfell feel))
+
+  (export web-main web-dispatch)
+
+  (begin
+    (define *last-ms* #f)
+    (define *trace* #f)
+    (define *returns* 0)
+
+    (define (say . parts)
+      (println "~a" (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts))))
+
+    ;; DOM key names -> the symbols (harkfell input) reads.
+    (define (dom-key->sym k)
+      (cond ((string=? k "ArrowLeft") 'left)
+            ((string=? k "ArrowRight") 'right)
+            ((string=? k "ArrowUp") 'up)
+            ((string=? k "ArrowDown") 'down)
+            ((string=? k " ") 'space)
+            ((or (string=? k "a") (string=? k "A")) 'a)
+            ((or (string=? k "d") (string=? k "D")) 'd)
+            ((or (string=? k "w") (string=? k "W")) 'w)
+            ((or (string=? k "s") (string=? k "S")) 's)
+            ((or (string=? k "z") (string=? k "Z")) 'z)
+            ((or (string=? k "r") (string=? k "R")) 'r)
+            (else #f)))
+
+    (define (frame-dt payload)
+      (let* ((ms (string->number payload))
+             (dt (if (and ms *last-ms*) (/ (- ms *last-ms*) 1000.0) 0.0)))
+        (when ms (set! *last-ms* ms))
+        dt))
+
+    (define (web-tick payload)
+      (let* ((dt (frame-dt payload))
+             (ms (string->number payload)))
+        (shell-set-frame-stamp! ms)
+        (let ((ticks (shell-frame! dt)))
+          (when (and *trace* (not (= (world-returns (shell-world)) *returns*)))
+            (set! *returns* (world-returns (shell-world)))
+            (say "returns" (number->string *returns*)))
+          (gles3-resize-to-display)
+          (shell-present! (gles3-canvas-width) (gles3-canvas-height) ticks))))
+
+    ;; "A,B,C" -> a list of numbers (#f for a field that is not one).
+    (define (fields payload)
+      (map string->number (string-split payload ",")))
+
+    (define (web-main)
+      (unless (gles3-use-canvas "#stage")
+        (error "harkfell web: no WebGL2 context for #stage"))
+      (gles3-resize-to-display)
+      (gfx-setup)
+      (set-viewport #f)
+      (set-letterbox-color 0.0 0.0 0.0)
+      (shell-boot!)
+      (gles3-start-loop "harkfell-web-tick")
+      0)
+
+    (define (web-dispatch type payload)
+      (cond ((string=? type "frame") (web-tick payload) 0)
+            ((string=? type "keydown")
+             (let ((k (dom-key->sym payload)))
+               (cond ((eq? k 'r) (shell-reset-world!))
+                     (k (shell-key-down! k))))
+             0)
+            ((string=? type "keyup")
+             (let ((k (dom-key->sym payload)))
+               (when k (shell-key-up! k)))
+             0)
+            ((string=? type "stick")
+             (let ((f (fields payload)))
+               (when (and (= (length f) 3) (car f) (cadr f))
+                 (shell-stick! (car f) (cadr f) (caddr f))))
+             0)
+            ((string=? type "jump")
+             (let ((f (fields payload)))
+               (when (and (= (length f) 2) (car f))
+                 (shell-jump! (= (car f) 1) (cadr f))))
+             0)
+            ((string=? type "stick-form")
+             (cond ((string=? payload "float") (shell-set-stick-form! 'float) 1)
+                   ((string=? payload "fixed") (shell-set-stick-form! 'fixed) 0)
+                   (else (if (eq? (shell-stick-form) 'float) 1 0))))
+            ((string=? type "ms") (shell-set-ms! (string=? payload "on")) 0)
+            ((string=? type "trace")
+             (set! *trace* (string=? payload "on"))
+             (say "boot" "stick" (symbol->string (shell-stick-form)))
+             0)
+            ((string=? type "replay")
+             (let ((lines (replay-lines)))
+               (for-each (lambda (l) (say "replay" l)) lines)
+               (say "replay-done" (number->string (length lines))))
+             0)
+            ((string=? type "envelope")
+             (for-each (lambda (p)
+                         (say "envelope" (symbol->string (car p)) (number->string (cdr p))))
+                       (envelope-report HARKFELL-FEEL))
+             (say "envelope-done")
+             0)
+            ((string=? type "visibility")
+             (set! *last-ms* #f)
+             (shell-keys-clear!)
+             0)
+            ;; the arm's probes: where the body is, and the latency lines
+            ;;   harkfell: at X Y MODE
+            ;;   harkfell: latency in ... move ... jump ...
+            ((string=? type "where")
+             (let ((b (world-body (shell-world))))
+               (say "at" (number->string (body-x b)) (number->string (body-y b)) (symbol->string (body-mode b))))
+             0)
+            ((string=? type "latency")
+             (apply say "latency" (shell-latency-lines))
+             0)
+            ((string=? type "reset") (shell-reset-world!) 0)
+            (else 0)))))
