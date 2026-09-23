@@ -63,6 +63,7 @@
             wall-lock: 10
             climb: 0.75
             mantle-v: 2.4
+            mantle-x: (/ RUN 2.0)
             mantle-lock: 10
             swim: 0.9
             swim-accel: 0.08

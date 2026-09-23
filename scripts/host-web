@@ -26,7 +26,9 @@ SRC=build/web
 DST=build/hosted
 HERE="$(pwd)"
 
-# The PID in build/host-PORT.pid if it is still ours: exe named $2, cwd here.
+# The PID in build/host-PORT.pid if it is still ours: exe named $2, cwd
+# here, and a command line containing $3 (a `node verify.mjs` run from this
+# checkout on a reused PID matches the first two and not the third).
 live_pid() {
   f="build/host-$1.pid"
   [ -f "$f" ] || return 0
@@ -35,11 +37,12 @@ live_pid() {
   cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
   [ "$(basename "${exe% (deleted)}")" = "$2" ] || return 0
   [ "$cwd" = "$HERE" ] || return 0
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -- "$3" || return 0
   echo "$pid"
 }
 
 stop_port() {
-  pid="$(live_pid "$1" "$2")"
+  pid="$(live_pid "$1" "$2" "$3")"
   if [ -n "$pid" ]; then
     kill "$pid" && echo "host-web: stopped $2 pid $pid (port $1)"
   elif [ -f "build/host-$1.pid" ]; then
@@ -49,19 +52,22 @@ stop_port() {
 }
 
 if [ "${1:-}" = "--stop" ]; then
-  stop_port "$PORT_TLS" node
-  stop_port "$PORT_HTTP" sigil
+  stop_port "$PORT_TLS" node serve-web-tls.mjs
+  stop_port "$PORT_HTTP" sigil "serve --dir"
   exit 0
 fi
 
 HOST="$(ip -4 -o addr show wg0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+if [ "$(printf '%s\n' "$HOST" | grep -c .)" -gt 1 ]; then
+  echo "host-web: wg0 has more than one IPv4 address ($(echo $HOST)); refusing to guess"; exit 1
+fi
 case "$HOST" in
   ""|0.0.0.0|"*") echo "host-web: refusing to bind to '${HOST:-<empty>}' (wg0 has no IPv4 address?)"; exit 1 ;;
 esac
 
 [ -f "$SRC/index.html" ] || { echo "host-web: $SRC/index.html missing; build --config web first"; exit 1; }
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  echo "host-web: the tree is dirty; the snapshot would not match a commit. Commit first."
+if [ -n "$(git status --porcelain)" ]; then
+  echo "host-web: the tree is dirty (untracked files count: one could be imported); the snapshot would not match a commit. Commit first."
   exit 1
 fi
 head="$(git rev-parse --short=12 HEAD)"
@@ -80,8 +86,8 @@ if [ ! -s build/tls/cert.pem ] || [ ! -s build/tls/key.pem ]; then
   echo "host-web: made a self-signed certificate for $HOST in build/tls/"
 fi
 
-stop_port "$PORT_TLS" node
-stop_port "$PORT_HTTP" sigil
+stop_port "$PORT_TLS" node serve-web-tls.mjs
+stop_port "$PORT_HTTP" sigil "serve --dir"
 rm -rf "$DST"
 cp -r "$SRC" "$DST"
 
@@ -90,9 +96,9 @@ echo $! > "build/host-$PORT_TLS.pid"
 setsid sigil serve --dir "$DST" --host "$HOST" --port "$PORT_HTTP" > "build/host-$PORT_HTTP.log" 2>&1 &
 echo $! > "build/host-$PORT_HTTP.pid"
 sleep 1
-for p in "$PORT_TLS:node" "$PORT_HTTP:sigil"; do
-  port="${p%%:*}"; name="${p##*:}"
-  if [ -z "$(live_pid "$port" "$name")" ]; then
+for p in "$PORT_TLS:node:serve-web-tls.mjs" "$PORT_HTTP:sigil:serve --dir"; do
+  port="${p%%:*}"; rest="${p#*:}"; name="${rest%%:*}"; pat="${rest#*:}"
+  if [ -z "$(live_pid "$port" "$name" "$pat")" ]; then
     echo "host-web: the $name server on $port exited at once; its log:"
     cat "build/host-$port.log"
     exit 1

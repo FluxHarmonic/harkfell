@@ -131,6 +131,10 @@
     });
     document.getElementById("stage").addEventListener("webglcontextlost", function () { die("webgl context lost"); });
 
+    // A lost focus (alt-tab with the window still visible) releases the keys
+    // and the touch controls too: a keyup that goes to another window would
+    // otherwise hold the key forever.
+    window.addEventListener("blur", function () { send("visibility", "blur"); releaseAll(); });
     document.addEventListener("visibilitychange", function () {
       send("visibility", document.visibilityState);
       if (document.visibilityState === "hidden") releaseAll();

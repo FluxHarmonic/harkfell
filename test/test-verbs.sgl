@@ -6,14 +6,17 @@
 ;;;               smooth wall is NOT climbed by kicking off it and coming
 ;;;               back (the control: the chimney's height comes from the
 ;;;               second wall, not from the kick alone)
-;;;   climb       pushing into rough rock in the air holds it; up climbs;
+;;;   climb       pushing into rough rock holds it; up climbs; no input holds
+;;;               still; a jump from the wall is a kick even when the grab was
+;;;               made from the ground, and a let-go gives no air jump;
 ;;;               past the top the body hops onto it and stands there;
 ;;;               pushing away lets go
 ;;;   swim        a walk off a bank into a pool swims; down sinks to the
 ;;;               floor; up and across reaches the far bank; jump with the
-;;;               head out leaps onto it
+;;;               head out leaps onto it, from the swim state itself
 ;;;   soft return walking into a pit in the test room dims and returns the
-;;;               body to the entry, standing, once
+;;;               body to the entry once; the dark and the light last 15 ticks
+;;;               each, counted from their first ticks
 ;;;   coyote      a jump pressed on the 6th tick after leaving a ledge is a
 ;;;               jump; on the 7th it is not
 ;;;   buffer      a jump pressed 5 ticks before the first grounded tick
@@ -172,14 +175,43 @@
       (assert-true (< (abs (- (+ (body-y end) (feel-box-h F)) 48.0)) 0.001))
       (assert-true (> (body-x end) (* 16 6.0)))))
   (let* ((tm (tiles ROUGH))
+         ;; grab from the ground (up and into the rock), climb 20 ticks,
+         ;; then 40 ticks of no input, then push away
          (hist (history (stand 5 9) tm
-                        (lambda (tick b) (if (< tick 60) (intent h: 1 v: -1) (intent h: -1)))
+                        (lambda (tick b)
+                          (cond ((< tick 20) (intent h: 1 v: -1))
+                                ((< tick 60) (intent))
+                                (else (intent h: -1))))
                         90))
-         (at-60 (list-ref hist 59)))
-    (test "clinging with no input stays; pushing away lets go and falls"
-      (assert-true (eq? (body-mode at-60) 'cling))
+         (at-20 (list-ref hist 19))
+         (at-59 (list-ref hist 58)))
+    (test "clinging with no input holds still; pushing away lets go and falls"
+      (assert-true (eq? (body-mode at-20) 'cling))
+      (assert-true (eq? (body-mode at-59) 'cling))
+      (assert-true (= (body-y at-20) (body-y at-59)))
       (assert-true (any-event? hist 'let-go))
-      (assert-true (not (eq? (body-mode (last hist)) 'cling))))))
+      (assert-true (not (eq? (body-mode (last hist)) 'cling)))))
+  (let* ((tm (tiles ROUGH))
+         ;; a grab made from the ground carries no ground jump: jump from the
+         ;; cling is a kick, and a let-go followed by a press is not a jump
+         ;; 60 ticks of climbing: about 45 px up, so a fall back to the floor
+         ;; takes longer than the 6-tick buffer (a press there would rightly
+         ;; jump on landing)
+         (up (history (stand 5 9) tm (lambda (tick b) (intent h: 1 v: -1)) 60))
+         (kick (history (last up) tm (lambda (tick b) (intent h: 1 jump: (= tick 0) press: (= tick 0))) 3))
+         (drop (history (last up) tm
+                        (lambda (tick b)
+                          (cond ((= tick 0) (intent h: -1))
+                                ((= tick 3) (intent jump: #t press: #t))
+                                (else (intent))))
+                        8)))
+    (test "a jump from a cling grabbed from the ground is a wall kick"
+      (assert-true (eq? (body-mode (last up)) 'cling))
+      (assert-true (any-event? kick 'wall-jump))
+      (assert-false (any-event? kick 'jump)))
+    (test "letting go from that cling and pressing jump is no air jump"
+      (assert-true (any-event? drop 'let-go))
+      (assert-false (any-event? drop 'jump)))))
 
 ;; --- swim ------------------------------------------------------------------------
 
@@ -219,6 +251,18 @@
                                 (< (abs (- (+ (body-y b) (feel-box-h F)) 80.0)) 0.001)))
                          across)))))
 
+
+;; The leap from the swim state itself: the center in the water (the body
+;; swims), the head above the surface (y 80), jump pressed.
+(test-group "swim leap"
+  (let* ((tm (tiles POOL))
+         (b (body (body-at 90.0 75.0) mode: 'swim))
+         (hist (history b tm (lambda (tick b) (intent jump: (< tick 4) press: (= tick 0))) 30)))
+    (test "a press with the head out leaps from the swim state"
+      (assert-true (body-in-water? b tm F))
+      (assert-true (memq 'jump (body-events (car hist))))
+      (assert-true (< (min-y hist) 60.0)))))
+
 ;; --- soft return -------------------------------------------------------------------
 
 (test-group "soft return"
@@ -234,14 +278,28 @@
               (assert-true (eq? (world-phase w) 'light))
               (assert-true (= (body-x (world-body w)) (body-x entry)))
               (assert-true (= (body-y (world-body w)) (body-y entry)))
-              (assert-true (eq? (body-mode (world-body w)) 'ground)))
-            (test "the dark lasts half a second: 15 ticks out, 15 back"
-              (let run ((w w) (n 0))
-                (if (eq? (world-phase w) 'play)
-                    (assert-equal 15 n)
-                    (run (world-tick w right) (+ n 1))))))
+              (assert-true (eq? (body-mode (world-body w)) 'ground))))
           (let ((w (world-tick w right)))
             (loop w (+ tick 1) (or saw-dark (> (world-dim w) 0.5))))))))
+
+
+;; The phases' lengths, each counted from its first tick: DARK from the
+;; hazard tick, LIGHT from the return.
+(define (phase-lengths)
+  (let loop ((w (world-new (load-test-room))) (tick 0) (phases '()))
+    (if (or (= tick 400) (and (pair? phases) (eq? (world-phase w) 'play) (eq? (car (car phases)) 'light)))
+        (reverse phases)
+        (let* ((w (world-tick w (intent h: 1)))
+               (p (world-phase w)))
+          (loop w (+ tick 1)
+                (cond ((eq? p 'play) phases)
+                      ((and (pair? phases) (eq? (car (car phases)) p))
+                       (cons (cons p (+ 1 (cdr (car phases)))) (cdr phases)))
+                      (else (cons (cons p 1) phases))))))))
+
+(test-group "soft return timing"
+  (test "half a second: 15 ticks dimming, 15 coming back"
+    (assert-equal (list (cons 'dark 15) (cons 'light 15)) (phase-lengths))))
 
 ;; --- coyote and buffer --------------------------------------------------------------
 

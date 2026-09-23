@@ -7,7 +7,7 @@
 ;;; can use: none, or one of e ne n nw w sw s se, as (h . v) with -1, 0
 ;;; or 1 in each (v is screen-down positive, so up is -1).
 ;;;
-;;; Tuned for clinging and wall jumping (Harkfell's D24): the left and
+;;; Tuned for clinging and wall jumping: the left and
 ;;; right sectors are the widest, so "hold toward the wall" does not slip
 ;;; into a diagonal (a climb) when the thumb wobbles:
 ;;;
@@ -16,8 +16,9 @@
 ;;;   diagonals 35 degrees each
 ;;;
 ;;; Two kinds of hysteresis keep a thumb resting on a boundary from
-;;; flickering between directions: the current sector is widened by
-;;; HYSTERESIS degrees on each side before the others are asked, and the
+;;; flickering between directions: the current sector is widened by 6
+;;; degrees on each side before the others are asked (the WIDE and NARROW
+;;; tangents below; change them together), and the
 ;;; dead zone engages below DEAD-OUT but lets go only below DEAD-IN.
 ;;;
 ;;; Angles are compared through tangents (|dy| < tan(a) * |dx|), so no
@@ -28,12 +29,11 @@
   (import (sigil math))
 
   (export stick-sector sector->hv
-          DEAD-IN DEAD-OUT HYSTERESIS)
+          DEAD-IN DEAD-OUT)
 
   (begin
     (define DEAD-IN 0.2)     ; below this the stick is at rest
     (define DEAD-OUT 0.28)   ; from rest, this far is needed to move
-    (define HYSTERESIS 6)    ; degrees
 
     ;; tan of 30, 36, 24 (the horizontal sectors' half-width: plain,
     ;; widened, narrowed) and of 25, 31, 19 (the vertical ones').

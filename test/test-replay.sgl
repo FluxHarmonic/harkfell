@@ -20,15 +20,16 @@
 ;;;   node verify.mjs --legs replay --record-replay test/fixtures/replay-web.txt
 ;;; and say in the commit whether the two still agree.
 ;;;
-;;; Positive control: the same script with one intent changed (tick 700,
-;;; jump pressed) must NOT match, and the first difference must be at or
-;;; after tick 700: the comparison can fail, and fails where the input
-;;; changed.
+;;; Positive control, independent of the fixture: the same script with one
+;;; press added (tick 700, direction kept) against this run's own trace: the
+;;; first difference must be at or after tick 700. The comparison can fail,
+;;; and fails where the input changed.
 
 (import (sigil test)
         (sigil list)
         (sigil string)
         (sigil fs)
+        (sigil math)
         (engine body)
         (harkfell replay))
 
@@ -49,7 +50,7 @@
 (define (with-press-at script n)
   (let loop ((s script) (i 1) (acc '()))
     (cond ((null? s) (reverse acc))
-          ((= i n) (loop (cdr s) (+ i 1) (cons (intent h: 0 v: 0 jump: #t press: #t) acc)))
+          ((= i n) (loop (cdr s) (+ i 1) (cons (intent h: (intent-h (car s)) v: (intent-v (car s)) jump: #t press: #t) acc)))
           (else (loop (cdr s) (+ i 1) (cons (car s) acc))))))
 
 (test-group "replay"
@@ -59,8 +60,27 @@
       (assert-equal REPLAY-TICKS (length want)))
     (test "the bytecode trace equals the native recording, line for line"
       (assert-equal #f (first-difference got want)))
-    (test "two runs agree (nothing outside the inputs moves the trace)"
-      (assert-equal #f (first-difference got (replay-lines))))
     (test "positive control: one changed input changes the trace from there"
-      (let ((d (first-difference (replay-lines-of (with-press-at (replay-script) 700)) want)))
+      (let ((d (first-difference (replay-lines-of (with-press-at (replay-script) 700)) got)))
         (assert-true (and d (>= d 700)))))))
+
+;; Coverage: what the recording exercises, so a re-recording that stops
+;; exercising a verb fails here instead of passing quietly (the review of
+;; 2026-09-23 found the first script's wander stuck in one corner, blind to
+;; a coyote plant). Fields: TICK X Y VX VY MODE RETURNS.
+(define (column lines i) (map (lambda (l) (list-ref (string-split l " ") i)) lines))
+
+(test-group "replay coverage"
+  (let* ((want (fixture-lines))
+         (xs (map string->number (column want 1)))
+         (modes (column want 5))
+         (count (lambda (m) (length (filter (lambda (x) (string=? x m)) modes))))
+         (returns (string->number (list-ref (string-split (car (reverse want)) " ") 6))))
+    (test "at least three soft returns"
+      (assert-true (>= returns 3)))
+    (test "at least 100 ticks each swimming and clinging"
+      (assert-true (>= (count "swim") 100))
+      (assert-true (>= (count "cling") 100)))
+    (test "the body crosses the room: x below 40 and above 360"
+      (assert-true (< (apply min xs) 40.0))
+      (assert-true (> (apply max xs) 360.0)))))

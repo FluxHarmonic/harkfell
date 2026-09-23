@@ -23,8 +23,9 @@
 //              design target (gap standing 2, moving 3; ledge held 3, tap < 3)
 //   keys       ArrowRight held 0.5 s moves the body right
 //   float      ?stick=float: a touch in the lower-left quarter OUTSIDE the ring
-//              re-centres the stick there; a drag right moves the body right;
-//              the latency lines then carry numbers for IN and MOVE
+//              re-centres the stick there: touch-down reads no direction, a
+//              drag LEFT reads w (from home it would read e), the body moves
+//              left, and the latency lines carry numbers for IN and MOVE
 //   fixed      ?stick=fixed: the same touch outside the ring does nothing (the
 //              body stays put: the float leg's control), and a touch inside
 //              the ring with the same drag moves it
@@ -275,17 +276,27 @@ if (LEGS.includes("float")) {
   ran.add("float");
   await open("trace&touch&stick=float");
   const g = await ring();
-  // lower-left quarter, well outside the ring and its slack
+  // lower-left quarter, well outside the ring and its slack, 2.2 radii right
+  // of home. Re-centring is what makes a drag LEFT from here read w: measured
+  // from home instead, the finger would still be right of it and read e.
   const x = Math.min(W / 2 - 20, g.x + 2.2 * g.r), y = Math.max(H / 2 + 20, g.y - 0.3 * g.r);
   const outside = Math.hypot(x - g.x, y - g.y) > 1.5 * g.r;
   const a = await where();
   const t0 = lines.length;
-  const b = await drag(x, y, g.r * 0.8, 100);
-  const read = lines.slice(t0).includes("harkfell: stick e");
+  await touch("touchStart", [[x, y, 1]]);
+  await sleep(100);
+  const t1 = lines.length;
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [[x - (g.r * 0.8 * i) / 6, y, 1]]); await sleep(16); }
+  await sleep(300);
+  const b = await where();
+  await touch("touchEnd", [[x - g.r * 0.8, y, 1]]);
+  const quietDown = !lines.slice(t0, t1).some((l) => l.startsWith("harkfell: stick"));
+  const read = lines.slice(t1).includes("harkfell: stick w");
+  const wrong = lines.slice(t1).includes("harkfell: stick e");
   const lat = await latency();
-  const m = lat.match(/in (\d+) /);
-  if (outside && read && b.x > a.x && m) pass("float", `touch at ${Math.round(x)},${Math.round(y)} (outside the ring) read as stick e; x ${a.x} -> ${b.x}; ${lat}`);
-  else fail("float", `outside ${outside}; stick e read ${read}; x ${a.x} -> ${b.x}; ${lat}`);
+  const m = lat.match(/in (\d+) .*move (\d+) /);
+  if (outside && quietDown && read && !wrong && b.x < a.x && m) pass("float", `touch at ${Math.round(x)},${Math.round(y)} (outside the ring) re-centred: no direction on touch-down, stick w on the drag left; x ${a.x} -> ${b.x}; ${lat}`);
+  else fail("float", `outside ${outside}; quiet on touch-down ${quietDown}; stick w ${read}; stick e (not re-centred) ${wrong}; x ${a.x} -> ${b.x}; ${lat}`);
 }
 
 if (LEGS.includes("fixed")) {

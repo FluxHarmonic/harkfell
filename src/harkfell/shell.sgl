@@ -17,18 +17,22 @@
 ;;; Touch latency (the web page's ?ms). The page stamps every stick move
 ;;; and jump press with the event's timeStamp (the performance.now()
 ;;; clock, which is also the clock of the requestAnimationFrame timestamp
-;;; each frame arrives with). When a stick move changes the direction (to
-;;; a new sector that is not rest) or the jump button goes down, the shell
-;;; notes the stamp and where the body is drawn. Two times are kept for
-;;; each, in ms, over the last LAT-KEEP samples:
+;;; each frame arrives with). A new stick direction (not rest) starts a MOVE
+;;; measurement and a jump press a JUMP one; each records, in ms, over the
+;;; last LAT-KEEP samples:
 ;;;   IN     touch to the end of the first frame whose simulation used it
-;;;   MOVE   touch to the end of the first frame that draws the body at a
-;;;          different pixel (what the eye sees: from rest it includes the
-;;;          run's acceleration, ACCEL-TICKS long)
-;;;   JUMP   the same, for the jump button
-;;; "The end of a frame" is the frame's rAF timestamp plus the time the
-;;; frame's own work took (step and draw), so it is the moment the frame
-;;; was handed to the GPU, one vsync before it reaches the glass.
+;;;   MOVE   touch to the end of the first frame that draws the body a pixel
+;;;          along the asked direction (from rest it includes the run's
+;;;          acceleration, ACCEL-TICKS long)
+;;;   JUMP   touch to the end of the first frame in which a jump or a wall
+;;;          kick launched
+;;; A measurement replaced before it settled, or not settled within
+;;; LAT-GIVE-UP ms (a push into a wall, a press that launched nothing), is
+;;; dropped and counted ("drop N" on the jump line), so the kept samples are
+;;; not silently biased. "The end of a frame" is the frame's rAF timestamp
+;;; plus the frame's own work: a LOWER bound on the glass (the gap between
+;;; the rAF timestamp and the callback, and the compositor's vsync after the
+;;; frame, are not in it).
 
 (define-library (harkfell shell)
   (import (sigil struct)
@@ -58,6 +62,7 @@
 
   (begin
     (define LAT-KEEP 16)
+    (define LAT-GIVE-UP 1000.0)   ; ms: a measurement not settled by then is dropped
 
     (define *world* #f)
     (define *clock* #f)
@@ -82,6 +87,8 @@
     (define *lat-in* '())
     (define *lat-move* '())
     (define *lat-jump* '())
+    (define *lat-dropped* 0)       ; measurements replaced or given up, not kept
+    (define *launched* #f)         ; a tick of this frame launched a jump or a kick
 
     (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
 
@@ -127,28 +134,47 @@
     (define (shell-keys-clear!)
       (set! *keys* '())
       (set! *sector* 'none)
-      (set! *touch-jump* #f))
+      (set! *touch-jump* #f)
+      (set! *press* #f))
 
     (define (drawn-pos)
       (let ((b (world-body *world*)))
         (cons (exact (floor (body-x b))) (exact (floor (body-y b))))))
 
-    ;; The stick at (dx, dy) in ring radii, stamped t (ms, or #f).
+    ;; A pending measurement: (list t0 x y applied h v), where t0 is the
+    ;; input's stamp, x y the body's drawn pixel then, applied whether a tick
+    ;; has used it (IN recorded), h v the direction asked for (MOVE settles on
+    ;; motion that way; JUMP ignores them).
+    (define (pending-new t h v)
+      (let ((p (drawn-pos)))
+        (list t (car p) (cdr p) #f h v)))
+
+    ;; A measurement replaced or abandoned before it settled is counted, not
+    ;; recorded, so the readout says how many samples it did not keep.
+    (define (drop-pending! pending)
+      (when pending (set! *lat-dropped* (+ *lat-dropped* 1))))
+
+    ;; The stick at (dx, dy) in ring radii, stamped t (ms, or #f). A new
+    ;; direction starts a MOVE measurement (the last one, if unsettled, is
+    ;; dropped); rest drops it.
     (define (shell-stick! dx dy t)
       (let ((s (stick-sector dx dy *sector*)))
         (unless (eq? s *sector*)
           (set! *sector* s)
-          (when (and t (not (eq? s 'none)))
-            (let ((p (drawn-pos)))
-              (set! *pending-move* (list t (car p) (cdr p) #f)))))))
+          (drop-pending! *pending-move*)
+          (set! *pending-move*
+                (and t
+                     (not (eq? s 'none))
+                     (let ((hv (sector->hv s)))
+                       (pending-new t (car hv) (cdr hv))))))))
 
     ;; The touch jump button down (#t) or up (#f), stamped t.
     (define (shell-jump! down t)
       (when (and down (not *touch-jump*))
         (set! *press* #t)
         (when t
-          (let ((p (drawn-pos)))
-            (set! *pending-jump* (list t (car p) (cdr p) #f)))))
+          (drop-pending! *pending-jump*)
+          (set! *pending-jump* (pending-new t 0 0))))
       (set! *touch-jump* down))
 
     (define (shell-set-frame-stamp! ms) (set! *frame-stamp* ms))
@@ -158,16 +184,21 @@
 
     ;; --- one frame ----------------------------------------------------------------
 
-    ;; dt: the frame's wall seconds. Returns the ticks run.
+    ;; dt: the frame's wall seconds. Returns the ticks run. Notes whether any
+    ;; tick launched a jump or a wall kick (JUMP settles on that).
     (define (shell-frame! dt)
       (set! *frame-start* (now-ms))
       (set! *frame-ms* (* 1000.0 dt))
       (set! *clock* (clock-advance *clock* dt))
+      (set! *launched* #f)
       (let loop ((i 0))
         (when (< i (clock-steps *clock*))
           (let ((in (tick-intent *keys* *sector* *touch-jump* *press*)))
             (set! *press* #f)
-            (set! *world* (world-tick *world* in)))
+            (set! *world* (world-tick *world* in))
+            (let ((ev (body-events (world-body *world*))))
+              (when (or (memq 'jump ev) (memq 'wall-jump ev))
+                (set! *launched* #t))))
           (loop (+ i 1))))
       (set! *step-ms* (- (now-ms) *frame-start*))
       (clock-steps *clock*))
@@ -181,21 +212,44 @@
     (define (list-head l n)
       (if (or (= n 0) (null? l)) '() (cons (car l) (list-head (cdr l) (- n 1)))))
 
+    (define (sign n) (cond ((> n 0) 1) ((< n 0) -1) (else 0)))
+
     ;; After the frame's draw: settle the pending measurements. end: the
-    ;; frame's end on the stamp clock.
+    ;; frame's end on the stamp clock (a lower bound on the glass: the time
+    ;; from the rAF timestamp to the callback's start is not in it, nor the
+    ;; compositor's vsync after it).
+    ;;   IN     the first frame whose ticks used the input
+    ;;   MOVE   the first frame that draws the body a pixel along the asked
+    ;;          direction (h or v); motion any other way does not settle it
+    ;;   JUMP   the first frame in which a tick launched a jump or a kick
+    ;; A measurement older than LAT-GIVE-UP ms (a push into a wall, a press
+    ;; that launched nothing) is dropped and counted.
     (define (settle-latency! ticks end)
       (let ((p (drawn-pos)))
-        (define (settle pending into-moved!)
+        (define (settle pending done? into!)
           (cond ((not pending) #f)
+                ((> (- end (car pending)) LAT-GIVE-UP) (drop-pending! pending) #f)
                 (else
                  (let* ((t0 (car pending))
-                        (applied (cadddr pending))
-                        (applied (or applied (and (> ticks 0) (begin (set! *lat-in* (keep *lat-in* (- end t0))) #t)))))
-                   (if (or (not (= (car p) (cadr pending))) (not (= (cdr p) (caddr pending))))
-                       (begin (into-moved! (- end t0)) #f)
-                       (list t0 (cadr pending) (caddr pending) applied))))))
-        (set! *pending-move* (settle *pending-move* (lambda (ms) (set! *lat-move* (keep *lat-move* ms)))))
-        (set! *pending-jump* (settle *pending-jump* (lambda (ms) (set! *lat-jump* (keep *lat-jump* ms)))))))
+                        (applied (or (cadddr pending)
+                                     (and (> ticks 0)
+                                          (begin (set! *lat-in* (keep *lat-in* (- end t0))) #t)))))
+                   (if (done? pending)
+                       (begin (into! (- end t0)) #f)
+                       (list t0 (cadr pending) (caddr pending) applied
+                             (list-ref pending 4) (list-ref pending 5)))))))
+        (set! *pending-move*
+              (settle *pending-move*
+                      (lambda (pd)
+                        (let ((h (list-ref pd 4))
+                              (v (list-ref pd 5)))
+                          (or (and (not (= h 0)) (= (sign (- (car p) (cadr pd))) h))
+                              (and (not (= v 0)) (= (sign (- (cdr p) (caddr pd))) v)))))
+                      (lambda (ms) (set! *lat-move* (keep *lat-move* ms)))))
+        (set! *pending-jump*
+              (settle *pending-jump*
+                      (lambda (pd) *launched*)
+                      (lambda (ms) (set! *lat-jump* (keep *lat-jump* ms)))))))
 
     (define (ms-str x) (number->string (exact (round x))))
 
@@ -213,7 +267,8 @@
     (define (shell-latency-lines)
       (list (stat-line "in" *lat-in*)
             (stat-line "move" *lat-move*)
-            (stat-line "jump" *lat-jump*)))
+            (string-append (stat-line "jump" *lat-jump*)
+                           " drop " (number->string *lat-dropped*))))
 
     ;; --- the present ------------------------------------------------------------------
 

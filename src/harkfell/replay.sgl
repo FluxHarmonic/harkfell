@@ -2,7 +2,7 @@
 ;;; produces, for the replay gate.
 ;;;
 ;;; The script is REPLAY-TICKS intents: a route through the whole room
-;;; (OPENING, below), then segments of 4 to 40 ticks with a pseudo-random
+;;; (OPENING, below), then segments of 4 to 90 ticks with a pseudo-random
 ;;; direction and jump hold from a fixed seed, so the run falls in the pits
 ;;; (soft returns), jumps, slides on walls and swims wherever it wanders. The
 ;;; generator is the ZX81 LCG with a residue test (the onboarding's idiom:
@@ -27,34 +27,37 @@
           (harkfell rooms))
 
   (export REPLAY-TICKS REPLAY-SEED
-          replay-script replay-lines replay-lines-of replay-trace-text
+          replay-script replay-script-from replay-lines replay-lines-of replay-trace-text
           trace-line)
 
   (begin
     (define REPLAY-TICKS 1800)     ; 30 seconds
-    (define REPLAY-SEED 2609)
+    (define REPLAY-SEED 14)     ; chosen for the wander: four soft returns in all
 
     ;; The ZX81 generator: every product stays under 2^23, so no target can
     ;; overflow a fixnum on it (the wasm build included).
     (define (lcg-next s) (modulo (+ (* s 75) 74) 65537))
 
     ;; (ticks h v jump) segments. The opening is a route through the whole
-    ;; room, found by driving it with reactive policies (kick when touching
-    ;; the wall, jump at the gap's lip, leap when the head is out) and
-    ;; baked here as the intents they gave, so the script is fixed input,
-    ;; not a controller: 628 ticks that walk into the first pit (a soft
-    ;; return), then climb the chimney by wall jumps,
-    ;; drop off the shelf, jump the 3-tile gap from a run, swim the pool
-    ;; and leap out, jump the 3-tile ledge, hop to the post, drop into the
-    ;; well, and climb the rough wall to its top. The pseudo-random
-    ;; segments after it wander from there (pits, slides, returns).
+    ;; room and back, found by driving it with reactive policies
+    ;; (tools/find-route.sgl) and baked here as the intents they gave, so
+    ;; the script is fixed input, not a controller: 1015 ticks that walk into
+    ;; the first pit (a soft return), climb the chimney by wall kicks, drop
+    ;; off the shelf, jump the 3-tile gap from a run, swim the pool and leap
+    ;; out, jump the 3-tile ledge, climb the post, drop into the well, climb
+    ;; the rough wall to its top; then back: drop into the well, climb the
+    ;; post out of it, down the ledge, swim the pool leftward, and a try at
+    ;; the 3-tile gap with no run-up that falls in (the second soft return).
+    ;; The pseudo-random segments after it wander from the entry.
     (define OPENING
-      (list (list 60 1 0 #f) (list 40 0 0 #f)
-            (list 1 -1 0 #t) (list 8 -1 0 #f) (list 1 -1 0 #t) (list 18 1 0 #f)
-            (list 1 1 0 #t) (list 2 -1 0 #f) (list 13 1 0 #f) (list 6 -1 0 #f)
-            (list 1 -1 0 #t) (list 92 1 0 #f) (list 40 1 0 #t) (list 32 1 0 #f)
-            (list 30 0 1 #f) (list 46 1 -1 #f) (list 37 1 -1 #t) (list 1 1 0 #f) (list 26 1 0 #t)
-            (list 9 1 0 #f) (list 30 1 0 #t) (list 19 1 0 #f) (list 115 1 -1 #f)))
+      (list (list 60 1 0 #f) (list 40 0 0 #f) (list 1 -1 0 #t) (list 8 -1 0 #f)
+            (list 1 -1 0 #t) (list 18 1 0 #f) (list 1 1 0 #t) (list 2 -1 0 #f)
+            (list 13 1 0 #f) (list 6 -1 0 #f) (list 1 -1 0 #t) (list 92 1 0 #f)
+            (list 40 1 0 #t) (list 32 1 0 #f) (list 30 0 1 #f) (list 46 1 -1 #f)
+            (list 37 1 -1 #t) (list 1 1 0 #f) (list 26 1 0 #t) (list 37 1 -1 #f)
+            (list 32 1 0 #f) (list 115 1 -1 #f) (list 41 -1 0 #f) (list 92 -1 -1 #f)
+            (list 59 -1 0 #f) (list 20 0 1 #f) (list 57 -1 -1 #f) (list 31 -1 -1 #t)
+            (list 1 -1 0 #f) (list 75 -1 0 #t)))
 
     (define (segments-from seed total)
       (let loop ((s (lcg-next seed)) (left total) (acc '()))
@@ -64,7 +67,7 @@
                    (s2 (lcg-next s1))
                    (s3 (lcg-next s2))
                    (s4 (lcg-next s3))
-                   (n (min left (+ 4 (modulo s1 37))))
+                   (n (min left (+ 4 (modulo s1 87))))
                    (h (- (modulo s2 3) 1))
                    (v (- (modulo s3 3) 1))
                    (jump (< (modulo s4 100) 35)))
@@ -75,8 +78,10 @@
 
     ;; The script as a list of intents, one per tick, presses marked on
     ;; each rising edge of jump.
-    (define (replay-script)
-      (let ((segs (append OPENING (segments-from REPLAY-SEED (- REPLAY-TICKS (opening-ticks))))))
+    (define (replay-script) (replay-script-from REPLAY-SEED))
+
+    (define (replay-script-from seed)
+      (let ((segs (append OPENING (segments-from seed (- REPLAY-TICKS (opening-ticks))))))
         (let loop ((segs segs) (was #f) (acc '()))
           (if (null? segs)
               (reverse acc)

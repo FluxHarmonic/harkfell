@@ -2,18 +2,18 @@
 ;;; ruling D6 asks. Changes: (crash store) -> (engine store); the native
 ;;; data directory name is set by the game with set-store-app! (it was the
 ;;; literal "crash-the-stack"), so the module names no game; STORE-KEYS is
-;;; gone (the game keeps its own list).
+;;; gone (the game keeps its own list); this header's Crash examples are
+;;; replaced by the general case.
 ;;;
 ;;; (engine store) - Where a save lives on each target.
 ;;;
-;;; One interface, two backends, picked at the import like (crash main):
-;;; on the web, the browser's localStorage through (sigil browser
-;;; local-storage) (blackICE's precedent); natively, one file per key
-;;; under the user's data directory ($XDG_DATA_HOME/crash-the-stack, or
-;;; ~/.local/share/crash-the-stack), which the gate points elsewhere with
-;;; set-store-root!. Keys are short names ("board", "settings"); values
-;;; are text. store-read-datum and store-write-datum! carry an
-;;; s-expression through, which is how (crash save)'s datum travels.
+;;; One interface, two backends, picked at the import: on the web, the
+;;; browser's localStorage through (sigil browser local-storage); natively,
+;;; one file per key under the user's data directory
+;;; ($XDG_DATA_HOME/<app>, or ~/.local/share/<app>, <app> as given to
+;;; set-store-app!), which a gate points elsewhere with set-store-root!.
+;;; Keys are short names; values are text. store-read-datum and
+;;; store-write-datum! carry an s-expression through.
 ;;;
 ;;; Nothing here raises: a missing key is #f, a failed write is #f (the
 ;;; shell may say so in the HUD), and a save that does not read back as

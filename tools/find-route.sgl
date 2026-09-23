@@ -90,6 +90,22 @@
       (cons (intent h: 1 v: -1 jump: (and (< (body-y b) 124.0) (> (body-x b) 250.0))) st)))
 
 (define (climb tick b st) (cons (intent h: 1 v: -1) st))
+(define (climb-left tick b st) (cons (intent h: -1 v: -1) st))
+
+;; The way back, leftward.
+(define (walk-left tick b st) (cons (intent h: -1) st))
+
+;; Run left; jump (and hold it) once the box's left edge passes x going
+;; left. The first tick lets jump go, as jump-at does.
+(define (jump-left-at x)
+  (lambda (tick b st)
+    (let ((go (and (> tick 0) (or st (< (body-x b) x)))))
+      (cons (intent h: -1 jump: go) go))))
+
+(define (swim-left tick b st)
+  (if (< tick 20)
+      (cons (intent v: 1) st)
+      (cons (intent h: -1 v: -1 jump: (and (< (body-y b) 124.0) (< (body-x b) 214.0))) st)))
 
 ;; Walk right into the first pit, then wait out the soft return.
 (define (pit tick b st) (cons (if (< tick 60) (intent h: 1) (intent)) st))
@@ -106,9 +122,20 @@
            (w (run-phase w 'to-pool walk-right (lambda (b w t) (eq? (body-mode b) 'swim)) 200))
            (w (run-phase w 'swim swim-across (lambda (b w t) (ground-at? b (lambda (b) (> (body-x b) 272.0)))) 400))
            (w (run-phase w 'ledge (jump-at 300.0) (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 70.0)))) 300))
-           (w (run-phase w 'post (jump-at 318.0) (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 55.0)))) 300))
+           (w (run-phase w 'post climb (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 55.0)))) 300))
            (w (run-phase w 'well walk-right (lambda (b w t) (ground-at? b (lambda (b) (> (body-y b) 100.0)))) 300))
-           (w (run-phase w 'climb climb (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 40.0)))) 600)))
+           (w (run-phase w 'climb climb (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 40.0)))) 600))
+           ;; and back: drop into the well, climb the post out of it, down
+           ;; the ledge to the floor, through the pool, and a try at the 3-tile
+           ;; gap leftward
+           (w (run-phase w 'drop walk-left (lambda (b w t) (or (eq? (body-mode b) 'cling) (ground-at? b (lambda (b) (> (body-y b) 100.0))))) 200))
+           (w (run-phase w 'up-post climb-left (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 55.0)))) 400))
+           (w (run-phase w 'down walk-left (lambda (b w t) (ground-at? b (lambda (b) (and (< (body-x b) 300.0) (> (body-y b) 100.0))))) 300))
+           (w (run-phase w 'into-pool walk-left (lambda (b w t) (eq? (body-mode b) 'swim)) 200))
+           (w (run-phase w 'swim-back swim-left (lambda (b w t) (ground-at? b (lambda (b) (< (body-x b) 200.0)))) 400))
+           ;; with no run-up after the leap the leftward jump falls short:
+           ;; the pit, and the second soft return, back at the entry
+           (w (run-phase w 'gap3-short (jump-left-at 178.0) (lambda (b w t) (and (= (world-returns w) 2) (eq? (world-phase w) 'play))) 300)))
       (display (list 'total (length *log*))) (newline)
       (display (rle *log*)) (newline)
       (assert-true #t))))

@@ -34,7 +34,8 @@
 ;;;              beside it on the ground) holds it. Held, up and down climb
 ;;;              at CLIMB, anything else stays put; pushing away lets go.
 ;;;              Climbing past the wall's top hops onto it (MANTLE-V up,
-;;;              RUN toward it, input ignored for MANTLE-LOCK ticks).
+;;;              MANTLE-X toward it, input ignored for MANTLE-LOCK ticks;
+;;;              slow enough to land on a one-tile top).
 ;;;   swim       with the box's center in water the body swims in any of
 ;;;              eight directions at SWIM (SWIM-ACCEL to get there) and sinks
 ;;;              at SINK with no input; jump with the head out of the water
@@ -64,7 +65,7 @@
           feel-jump-v feel-gravity feel-fall-mul feel-cut-mul feel-max-fall
           feel-coyote feel-buffer feel-slide-max
           feel-wall-kick-x feel-wall-jump-v feel-wall-lock
-          feel-climb feel-mantle-v feel-mantle-lock
+          feel-climb feel-mantle-v feel-mantle-x feel-mantle-lock
           feel-swim feel-swim-accel feel-sink feel-water-jump-v feel-water-damp
           feel-hazard-inset
           intent intent? intent-h intent-v intent-jump intent-press
@@ -100,6 +101,7 @@
       (wall-lock default: 10)
       (climb default: 0.75)
       (mantle-v default: 2.6)
+      (mantle-x default: 0.6)
       (mantle-lock default: 10)
       (swim default: 0.9)
       (swim-accel default: 0.08)
@@ -150,8 +152,12 @@
       (cons (+ (body-x b) (/ (feel-box-w f) 2.0))
             (+ (body-y b) (/ (feel-box-h f) 2.0))))
 
+    ;; Standing: flush on a solid top. The strip below the box is a
+    ;; thousandth of a pixel deep, so a body still falling a fraction of a
+    ;; pixel above a floor is in the air (a 1 px strip counted it as ground
+    ;; a tick early, and its landing then emitted no land event).
     (define (body-grounded? b tm f)
-      (touching? tm (body-x b) (body-y b) (feel-box-w f) (feel-box-h f) 'below kind-solid?))
+      (box-any? tm (body-x b) (+ (body-y b) (feel-box-h f)) (feel-box-w f) 0.001 kind-solid?))
 
     (define (body-in-water? b tm f)
       (let ((c (body-center b f)))
@@ -226,7 +232,10 @@
                          ((and (not (= h 0)) (wall-on? tm x y f h)) h)
                          (else 0)))
              (jump? (> (body-buffer b) 0))
-             (launch (cond ((and jump? (or grounded (> coyote 0) (head-out? tm x y f))) 'jump)
+             ;; clinging, a jump is always the kick off the wall (even standing
+             ;; at the wall's foot, where the ground jump would also qualify)
+             (launch (cond ((and jump? (eq? (body-mode b) 'cling)) 'wall-jump)
+                           ((and jump? (or grounded (> coyote 0) (head-out? tm x y f))) 'jump)
                            ((and jump? (not (= wall 0))) 'wall-jump)
                            (else #f)))
              (vx (if (eq? launch 'wall-jump) (* (- wall) (feel-wall-kick-x f)) vx))
@@ -290,7 +299,9 @@
                               (else #f))))
              (grab (and grab (hands-on? tm x y f grab) grab)))
         (cond (grab
-               (add-event (body b mode: 'cling side: grab facing: grab vx: 0.0 vy: 0.0 jumping: #f cut: #f) 'grab))
+               ;; coyote cleared: a grab made from the ground (or inside coyote
+               ;; time) must not carry a live ground jump onto the wall
+               (add-event (body b mode: 'cling side: grab facing: grab vx: 0.0 vy: 0.0 jumping: #f cut: #f coyote: 0) 'grab))
               ((body-in-water? b tm f)
                (add-event (body b mode: 'swim vy: (* (body-vy b) (feel-water-damp f))) 'splash))
               (grounded-now (body b mode: 'ground))
@@ -318,7 +329,7 @@
                        ((< v 0)
                         (add-event (body b
                                          mode: 'air
-                                         vx: (* s (feel-run f))
+                                         vx: (* s (feel-mantle-x f))
                                          vy: (- (feel-mantle-v f))
                                          lock: (+ (feel-mantle-lock f) 1))
                                    'mantle))
