@@ -61,7 +61,8 @@
   // controls, the parameters, the visibility word and a small guard.
   //
   // Parameters:
-  //   ?stick=float|fixed   the joystick form (D25); stored by the game, so
+  //   ?stick=fixed|float   the joystick form (D25; fixed by default, David's
+  //                        pick after playing both); stored by the game, so
   //                        the phone keeps it until asked otherwise.
   //                        float: the ring rests at its home spot and a
   //                        thumb landing anywhere in the lower-left quarter
@@ -149,7 +150,7 @@
     if (coarse || params.has("touch")) touchLayer.classList.add("on");
 
     // Sizes in CSS px, from the short side of the screen.
-    var stick = { form: "float", r: 60, homeX: 0, homeY: 0, cx: 0, cy: 0, id: null };
+    var stick = { form: "fixed", r: 60, homeX: 0, homeY: 0, cx: 0, cy: 0, id: null };
     var jump = { r: 46, x: 0, y: 0, id: null };
 
     function place(el, x, y, r) {

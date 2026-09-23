@@ -13,7 +13,8 @@
 // Legs, each printing PASS / FAIL <leg>: <detail>; any FAIL exits 1, a wait
 // that runs out prints TIMED-OUT <leg> with what it collected and exits 2:
 //
-//   boot       the game's boot line: "harkfell: boot stick float"
+//   boot       a fresh profile boots the default stick, "harkfell: boot stick
+//              fixed"; ?stick=float boots "harkfell: boot stick float"
 //   render     the canvas holds the room: pixels in at least four color bins
 //              (sky, rock, rough rock, water, the body), read in the frame the
 //              game drew
@@ -181,6 +182,10 @@ const W = await evaluate("window.innerWidth"), H = await evaluate("window.innerH
 // ---- the legs -------------------------------------------------------------------
 if (LEGS.includes("boot")) {
   ran.add("boot");
+  // a fresh profile with no ?stick: the default form, fixed (David's pick)
+  await open("trace&touch");
+  const d = lines.find((l) => l.startsWith("harkfell: boot"));
+  d === "harkfell: boot stick fixed" ? pass("boot", `default: ${d}`) : fail("boot", `default: ${d}`);
   await open("trace&touch&stick=float&ms");
   const b = lines.find((l) => l.startsWith("harkfell: boot"));
   b === "harkfell: boot stick float" ? pass("boot", b) : fail("boot", b);

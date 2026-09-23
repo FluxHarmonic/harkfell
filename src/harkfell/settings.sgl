@@ -13,7 +13,8 @@
 ;;; spot and re-centres under a thumb that lands anywhere in the lower-left
 ;;; quarter) or fixed (the ring stays where it is drawn). The page's
 ;;; ?stick=fixed|float sets it and the store keeps it, so a phone stays on
-;;; the form last asked for until asked otherwise.
+;;; the form last asked for until asked otherwise. David chose fixed after
+;;; playing both (2026-09-24), so fixed is the default.
 ;;;
 ;;; Every setting is its own store key holding a plain datum (a symbol,
 ;;; so a missing key, which reads as #f, is never mistaken for a value).
@@ -37,7 +38,7 @@
 
     ;; Built with list, not quoted (Crash's wasm literal hazard).
     (define SETTINGS
-      (list (setting id: 'stick name: "STICK" values: (list 'float 'fixed) default: 'float key: "stick")))
+      (list (setting id: 'stick name: "STICK" values: (list 'fixed 'float) default: 'fixed key: "stick")))
 
     (define SETTING-IDS (map setting-id SETTINGS))
 
