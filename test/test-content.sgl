@@ -1,0 +1,105 @@
+;;; The content gates that need no physics (harkfell-design section 8, gates
+;;; 1 and 2, and the region map), on the two-room fixture world
+;;; (test/fixtures/worlds/tiny) and on copies of it with one thing broken.
+;;; Each broken copy is the gate's named sabotage and must be red, naming the
+;;; file and the line:
+;;;
+;;;   parse and legend  a 24-character row; an undeclared character; a
+;;;                     creature from another region's roster; a field given
+;;;                     twice; a file that does not read; at: not matching the
+;;;                     file name; a ring-stone (o) with no ring-stone thing,
+;;;                     and a ring-stone thing on no o
+;;;   seams             one row of a shared left/right edge closed on one side
+;;;                     only; a hole in a floor above nothing
+;;;   the map           a title or an intent that differs from the room's; a
+;;;                     join in the map across a closed edge; an open edge the
+;;;                     map does not join
+;;;
+;;; The clean world is the positive control: no problems at all, so a red
+;;; below is the break and nothing else.
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine roomfile)
+        (engine worldmap)
+        (harkfell content)
+        (harkfell source))
+
+(define TINY (read-world-source "test/fixtures/worlds/tiny"))
+(define LEFT "world/rooms/testfen/x0y0.room")
+(define RIGHT "world/rooms/testfen/x1y0.room")
+(define MAP "world/regions/testfen.map")
+
+;; The source with one file's text passed through f.
+(define (with-file path f)
+  (map (lambda (e) (if (string=? (car e) path) (cons (car e) (f (cdr e))) e)) TINY))
+
+(define (problems src) (map problem->string (content-problems (load-content src))))
+
+;; Replace the first occurrence of a in s with b (the test refuses a missing a).
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a)
+             (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+
+(define (has? ps text) (and (find (lambda (p) (string-contains? p text)) ps) #t))
+
+(test-group "content: the clean world"
+  (test "the fixture world reads with no problems (the control)"
+    (assert-equal '() (problems TINY)))
+  (test "it has two rooms on one map"
+    (let ((ct (load-content TINY)))
+      (assert-equal 2 (length (content-rooms ct)))
+      (assert-true (content-room ct 0 0))
+      (assert-true (content-room ct 1 0)))))
+
+(test-group "content: parse and legend (gate 1)"
+  (test "a 24-character row is red, naming the file and the row's line"
+    (let ((ps (problems (with-file LEFT (lambda (t) (swap t "\"#                        \"\n   \"#            ###" "\"#                       \"\n   \"#            ###"))))))
+      (assert-true (has? ps "x0y0.room:15: grid row 7 is 24 characters, not 25"))))
+  (test "an undeclared character is red, naming the file, line, row and column"
+    (let ((ps (problems (with-file LEFT (lambda (t) (swap t "#            ###" "#     Q      ###"))))))
+      (assert-true (has? ps "x0y0.room:16: grid row 8 column 6: 'Q' is not in the legend"))))
+  (test "a creature from another region's roster is red, naming the file and line"
+    (let* ((src (with-file "world/world.sgl"
+                           (lambda (t) (string-append t "\n(region otherfen bounds: ((5 5) (6 6)) palette: (sky-1) roster: (heron))\n(creature heron behaviour: giant)\n"))))
+           (src (map (lambda (e) (if (string=? (car e) LEFT) (cons LEFT (swap (cdr e) "(frog at: (5 9))" "(heron at: (5 9))")) e)) src))
+           (ps (problems src)))
+      (assert-true (has? ps "x0y0.room:19: things: heron is not on testfen's roster"))))
+  (test "a field given twice is red"
+    (let ((ps (problems (with-file LEFT (lambda (t) (swap t "  title: \"Left\"" "  title: \"Left\"\n  title: \"Again\""))))))
+      (assert-true (has? ps "x0y0.room:4: field title: is given twice"))))
+  (test "a file that does not read is red"
+    (let ((ps (problems (with-file RIGHT (lambda (t) (swap t "(room" "(room ("))))))
+      (assert-true (has? ps "x1y0.room: does not read"))))
+  (test "a ring-stone in the grid with no ring-stone thing is red, and one thing off its stone is red"
+    (let ((ps (problems (with-file LEFT (lambda (t) (swap t "#            ###" "#     o      ###"))))))
+      (assert-true (has? ps "x0y0.room:7: grid: the ring-stone at (6 8) is not in things:")))
+    (let ((ps (problems (with-file LEFT (lambda (t) (swap t "(frog at: (5 9))" "(frog at: (5 9)) (ring-stone at: (7 9) overtone: 2)"))))))
+      (assert-true (has? ps "x0y0.room:19: things: ring-stone at: (7 9) is not on an o in the grid"))))
+  (test "at: not matching the file name is red"
+    (let ((ps (problems (with-file RIGHT (lambda (t) (swap t "at: (1 0)" "at: (2 0)"))))))
+      (assert-true (has? ps "x1y0.room:3: at: is (2 0) but the file is named x1y0")))))
+
+(test-group "content: seams (gate 2)"
+  (test "one row of a shared edge closed on one side only is red, naming both rooms and the row"
+    (let ((ps (problems (with-file RIGHT (lambda (t) (swap t "\"                        #\"\n   \"#######" "\"#                       #\"\n   \"#######"))))))
+      (assert-true (has? ps "x1y0 left edge and x0y0 right edge disagree on rows 8"))))
+  (test "a hole in a floor above nothing is red"
+    (let ((ps (problems (with-file LEFT (lambda (t) (swap t "   \"#########################\")\n  things:" "   \"#### ####################\")\n  things:"))))))
+      (assert-true (has? ps "x0y0 bottom edge opens onto no room, columns 4")))))
+
+(test-group "content: the region map"
+  (test "an intent that differs from the room's is red"
+    (let ((ps (problems (with-file MAP (lambda (t) (swap t "a gap to jump" "a gap to leap"))))))
+      (assert-true (has? ps "room B: the map's intent \"a gap to leap\" is not the file's \"a gap to jump\""))))
+  (test "an open shared edge the map does not join is red"
+    (let ((ps (problems (with-file MAP (lambda (t) (swap t "(\"A-B\")" "(\"A B\")"))))))
+      (assert-true (has? ps "x0y0 and x1y0 share an open edge, but the map does not join them"))))
+  (test "a map room with no file is red"
+    (let ((ps (problems (with-file MAP (lambda (t) (swap (swap t "(\"A-B\")" "(\"A-B-C\")") "(B \"Right\" \"a gap to jump\")" "(B \"Right\" \"a gap to jump\")\n   (C \"More\" \"nothing yet\")"))))))
+      (assert-true (has? ps "room C at x2y0 has no file")))))

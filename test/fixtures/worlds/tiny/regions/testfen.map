@@ -1,0 +1,8 @@
+(map
+  region: testfen
+  origin: (0 0)
+  layout:
+  ("A-B")
+  rooms:
+  ((A "Left" "a floor and a step")
+   (B "Right" "a gap to jump")))

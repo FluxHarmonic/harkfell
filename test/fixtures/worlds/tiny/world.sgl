@@ -1,0 +1,15 @@
+;;; A two-room fixture world for the content gates' own tests.
+(start region: testfen room: (0 0) cell: (2 9))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region testfen
+  name: "Test fen"
+  bounds: ((0 0) (3 3))
+  bed-channels: (wind water)
+  palette: (sky-1 stone-1 stone-2)
+  roster: (frog)
+  moments: (a-tune))
+
+(creature frog behaviour: hop)

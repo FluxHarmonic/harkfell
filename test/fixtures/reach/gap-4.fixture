@@ -1,0 +1,20 @@
+;; An impossible room: a four-tile gap over brackish water. The envelope
+;; (A0): a four-tile gap is never cleared, coyote time included.
+(fixture
+  name: "a four-tile gap"
+  expect: unreachable
+  why: "A0's envelope: 4 tiles never"
+  start: (2 8)
+  target: ((16 8) (20 8))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "###########    ##########"
+   "###########xxxx##########"))

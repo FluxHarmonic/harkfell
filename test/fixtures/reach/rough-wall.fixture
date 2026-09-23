@@ -1,0 +1,19 @@
+;; Positive control: the wall's face is rough rock, so it is climbed.
+(fixture
+  name: "a rough wall, six tiles"
+  expect: reachable
+  why: "rough rock is held and climbed, and the top is hopped onto"
+  start: (3 9)
+  target: ((18 3) (22 3))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#             %##########"
+   "#             %##########"
+   "#             %##########"
+   "#             %##########"
+   "#             %##########"
+   "#             %##########"
+   "#########################"))

@@ -1,0 +1,21 @@
+;; Positive control: the same wall with a second smooth wall two tiles from
+;; its face makes a chimney, climbed by kicking between the walls (A0's
+;; chimney is two tiles wide and five high).
+(fixture
+  name: "a two-tile chimney beside the wall"
+  expect: reachable
+  why: "A0's route climbs a two-wide chimney by wall kicks"
+  start: (3 9)
+  target: ((18 3) (22 3))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#          #  ###########"
+   "#          #  ###########"
+   "#          #  ###########"
+   "#          #  ###########"
+   "#          #  ###########"
+   "#             ###########"
+   "#########################"))

@@ -1,0 +1,144 @@
+;;; A1's room machinery on the real physics: the one-way ledge, the
+;;; autotiler's masks, and room changes with the soft return.
+;;;
+;;;   ledge        a body falling onto a ledge (=) lands on it and stands; a
+;;;                body jumping up from under it passes through and lands on
+;;;                top; a body walks through its side; the control: the same
+;;;                room with the ledge as rock stops the jump from below
+;;;   autotile     the mask of a lone block is 0, of a mass's inside 15, of a
+;;;                top edge 14 (right, down, left); a variant is the same every
+;;;                time and in range
+;;;   room change  in the two-room fixture world, walking right across the
+;;;                seam makes the right room current, counts one room entered,
+;;;                and makes the body at the crossing the entry; falling in
+;;;                the right room's pit then returns the body to that entry,
+;;;                not to the start in the left room
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine tilemap)
+        (engine body)
+        (engine autotile)
+        (engine worldmap)
+        (engine reach)
+        (harkfell feel)
+        (harkfell world)
+        (harkfell content)
+        (harkfell check)
+        (harkfell source)
+        (harkfell fixtures))
+
+(define F HARKFELL-FEEL)
+
+(define (run b tm policy n)
+  (let loop ((b b) (t 0) (acc '()))
+    (if (= t n) (reverse acc) (let ((b (body-step b (policy t b) tm F))) (loop b (+ t 1) (cons b acc))))))
+
+(define (last l) (if (null? (cdr l)) (car l) (last (cdr l))))
+
+;; --- the ledge ------------------------------------------------------------------
+
+;; A ledge at row 7, columns 3 to 7, three tiles above the floor's top
+;; (row 10): a held jump (3.25 tiles) clears it from below.
+(define LEDGE-ROWS
+  (list "#########################"
+        "#                       #"
+        "#                       #"
+        "#                       #"
+        "#                       #"
+        "#                       #"
+        "#                       #"
+        "#  =====                #"
+        "#                       #"
+        "#                       #"
+        "#########################"))
+
+(define (rows-with rows from to)
+  (map (lambda (r) (list->string (map (lambda (c) (if (char=? c from) to c)) (string->list r)))) rows))
+
+(test-group "rooms: the one-way ledge"
+  (test "a body falling onto the ledge lands and stands on it"
+    (let* ((tm (fixture-tilemap LEDGE-ROWS))
+           (h (run (body-at 60.0 20.0) tm (lambda (t b) NO-INTENT) 90)))
+      (assert-equal 'ground (body-mode (last h)))
+      (assert-equal (- (* 16.0 7) 14.0) (body-y (last h)))
+      (assert-true (and (find (lambda (b) (memq 'land (body-events b))) h) #t))))
+  (test "a body jumping up from under the ledge passes through and lands on top"
+    (let* ((tm (fixture-tilemap LEDGE-ROWS))
+           (b0 (stand-body tm F 4 9))
+           (h (run b0 tm (lambda (t b) (intent jump: #t press: (= t 0))) 80)))
+      (assert-equal 'ground (body-mode (last h)))
+      (assert-equal (- (* 16.0 7) 14.0) (body-y (last h)))))
+  (test "the control: with rock for the ledge, the same jump is stopped from below"
+    (let* ((tm (fixture-tilemap (rows-with LEDGE-ROWS #\= #\#)))
+           (b0 (stand-body tm F 4 9))
+           (h (run b0 tm (lambda (t b) (intent jump: #t press: (= t 0))) 80)))
+      (assert-equal (- (* 16.0 10) 14.0) (body-y (last h)))))
+  (test "a body walks through the ledge's side"
+    ;; standing at row 6's height beside the ledge is not possible without it;
+    ;; so: a ledge at floor level, walked into from the left
+    (let* ((tm (fixture-tilemap (list "#########################"
+                                      "#                       #"
+                                      "#                       #"
+                                      "#                       #"
+                                      "#                       #"
+                                      "#                       #"
+                                      "#                       #"
+                                      "#                       #"
+                                      "#                       #"
+                                      "#     ==                #"
+                                      "#########################")))
+           (b0 (stand-body tm F 2 9))
+           (h (run b0 tm (lambda (t b) (intent h: 1)) 120)))
+      (assert-true (> (body-x (last h)) (* 16 7))))))
+
+;; --- autotile ---------------------------------------------------------------------
+
+(test-group "rooms: autotile masks"
+  (let ((same? (lambda (grid)
+                 (lambda (c r)
+                   (and (>= r 0) (< r (length grid)) (>= c 0) (< c (string-length (list-ref grid r)))
+                        (char=? (string-ref (list-ref grid r) c) #\#))))))
+    (test "a lone block is 0"
+      (assert-equal 0 (tile-mask (same? (list "   " " # " "   ")) 1 1)))
+    (test "the inside of a mass is 15"
+      (assert-equal 15 (tile-mask (same? (list "###" "###" "###")) 1 1)))
+    (test "a top edge is right + down + left = 14"
+      (assert-equal 14 (tile-mask (same? (list "   " "###" "###")) 1 1)))
+    (test "a variant is the same every time and in range"
+      (assert-equal (tile-variant 37 5 4) (tile-variant 37 5 4))
+      (assert-true (every (lambda (c) (< -1 (tile-variant c 3 4) 4)) (iota 60))))))
+
+(define (every pred l) (or (null? l) (and (pred (car l)) (every pred (cdr l)))))
+
+;; --- room changes -------------------------------------------------------------------
+
+(test-group "rooms: room changes and the soft return"
+  (let* ((ct (load-content (read-world-source "test/fixtures/worlds/tiny")))
+         (tm (worldmap-tiles (content-map ct)))
+         (start (start-cell ct))
+         (w0 (world-at (content-map ct) (stand-body tm F (car start) (cdr start)))))
+    (test "the world starts in the left room"
+      (assert-equal 0 (placed-x (world-room w0))))
+    (test "walking right across the seam enters the right room, and the body there is the entry"
+      (let loop ((w w0) (t 0))
+        (cond ((> t 600) (assert-true #f))
+              ((= (placed-x (world-room w)) 1)
+               (assert-equal 1 (world-entered w))
+               (assert-true (eq? (world-entry w) (world-body w))))
+              (else (loop (world-tick w (intent h: 1 jump: (= (modulo t 40) 0) press: (= (modulo t 40) 0))) (+ t 1))))))
+    (test "the right room's pit returns the body to the seam, not to the start"
+      (let loop ((w w0) (t 0) (entry #f))
+        (cond ((> t 1500) (assert-true #f))
+              ((> (world-returns w) 0)
+               ;; back at the right room's entry, in the right room
+               (let ((w (let settle ((w w) (n 0)) (if (or (> n 40) (eq? (world-phase w) 'play)) w (settle (world-tick w NO-INTENT) (+ n 1))))))
+                 (assert-equal 1 (placed-x (world-room w)))
+                 (assert-equal (body-x entry) (body-x (world-body w)))))
+              (else
+               (let* ((in (if (= (placed-x (world-room w)) 0)
+                              (intent h: 1 jump: (= (modulo t 40) 0) press: (= (modulo t 40) 0))
+                              (intent h: 1)))
+                      (w2 (world-tick w in)))
+                 (loop w2 (+ t 1) (if (and (not entry) (= (placed-x (world-room w2)) 1)) (world-entry w2) entry)))))))))

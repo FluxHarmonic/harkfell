@@ -1,0 +1,24 @@
+;; Two smooth walls four tiles apart. Kicking across four tiles (56 px at the
+;; run speed, locked for 11 ticks) spends longer falling than the kick rose,
+;; so each crossing arrives lower than it left: not a chimney. A measured
+;; answer only for the searched patterns (the kick policy and its branches);
+;; recorded because BIBLE.md tells authors that four tiles apart is not a
+;; chimney.
+(fixture
+  name: "smooth walls four tiles apart"
+  expect: unreachable
+  why: "the chimney policy and the kick branches find no way up"
+  start: (3 9)
+  target: ((18 3) (22 3))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#         #    ##########"
+   "#         #    ##########"
+   "#         #    ##########"
+   "#         #    ##########"
+   "#         #    ##########"
+   "#              ##########"
+   "#########################"))

@@ -1,0 +1,19 @@
+(room
+  region: testfen
+  at: (0 0)
+  title: "Left"
+  intent: "a floor and a step"
+  bed: (wind 0.5)
+  grid:
+  ("#########################"
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#            ###         "
+   "#         ######        #"
+   "#########################")
+  things: ((frog at: (5 9))))

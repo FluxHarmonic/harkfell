@@ -1,0 +1,21 @@
+;; An impossible room: a smooth wall six tiles high with nothing to kick
+;; back from. A0 measured that a single smooth wall is not climbable (every
+;; kick after the first starts lower), and six tiles is past any jump.
+(fixture
+  name: "a single smooth wall, six tiles"
+  expect: unreachable
+  why: "A0: one smooth wall is not climbable; a held jump reaches 3.25 tiles"
+  start: (3 9)
+  target: ((18 3) (22 3))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#             ###########"
+   "#             ###########"
+   "#             ###########"
+   "#             ###########"
+   "#             ###########"
+   "#             ###########"
+   "#########################"))

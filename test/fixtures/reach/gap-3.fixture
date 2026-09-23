@@ -1,0 +1,19 @@
+;; Positive control: a three-tile gap is cleared with a run (A0's envelope).
+(fixture
+  name: "a three-tile gap"
+  expect: reachable
+  why: "A0's envelope: 3 tiles with a moving start"
+  start: (2 8)
+  target: ((16 8) (20 8))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "###########   ###########"
+   "###########xxx###########"))
