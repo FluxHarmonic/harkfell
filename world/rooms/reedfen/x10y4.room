@@ -1,0 +1,23 @@
+;; world/rooms/reedfen/x10y4.room
+(room
+  region: reedfen
+  at: (10 4)
+  title: "Climb Back"
+  intent: "rough rock taught where a fall costs nothing, then the climb home to the stone"
+  bed: (wind 0.2 water 0.2)
+  grid:
+  ("###  %###################"
+   "###  %###################"
+   "###  %##  ###      ##   #"
+   "###  %     #            #"
+   "###  %                  #"
+   "     %          %########"
+   "     %          %########"
+   "                %########"
+   "  |      |  ||  %########"
+   "  ||    |||  || %########"
+   "#########################")
+  things: ((fen-vole at: (12 9)))
+  decor: auto)
+;; The shelf on the right has a rough face: climb it, look around, drop
+;; off. The rough column at 5 goes up through the hole into the Old Stone.

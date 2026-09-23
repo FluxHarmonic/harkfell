@@ -1,0 +1,24 @@
+;; world/rooms/reedfen/x8y3.room
+(room
+  region: reedfen
+  at: (8 3)
+  title: "Fen Edge"
+  intent: "you step off the Hollow's rim and the land opens into reeds and sky"
+  bed: (wind 0.7 reeds 0.4 drone 0.2)
+  grid:
+  ("#########################"
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#%%%%%                   "
+   "#####%   |    |     |    "
+   "#####%  |||  |||   |||   "
+   "#####% ||||| |||| || ||  "
+   "####################  %##"
+   "####################  %##")
+  things: ((reedling flock: 5 zone: reeds))
+  decor: auto)
+;; The rim (left) is where the Hollow will join: rough rock you climb back
+;; up. The hole at columns 20-21 drops into the Root Hollow below; its right
+;; side is rough all the way down, the way back up.

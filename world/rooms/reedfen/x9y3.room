@@ -1,0 +1,26 @@
+;; world/rooms/reedfen/x9y3.room
+(room
+  region: reedfen
+  at: (9 3)
+  title: "Reed Bridge"
+  intent: "the first open water; a breath after the Hollow's climbs"
+  bed: (wind 0.4 water 0.8 reeds 0.5)
+  grid:
+  ("#########################"
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "         =======         "
+   "   ||  |         |  ||   "
+   " | #####~~~~~~~~~#####|  "
+   "########~~~~~~~~~########"
+   "#########################")
+  things: ((bellfrog at: (19 7))
+           (bellfrog at: (5 7))
+           (reedling flock: 5 zone: reeds))
+  moment: (tune: first-open-water when: first-visit)
+  decor: auto)
+;; A plank bridge (one-way: you jump up through it) over a pool two deep.
+;; Fall in and you swim; the banks are level with the water.

@@ -1,0 +1,25 @@
+;; world/rooms/reedfen/x10y3.room
+(room
+  region: reedfen
+  at: (10 3)
+  title: "Old Stone"
+  intent: "a mute stone seen before it can matter, across a gap that needs a run"
+  bed: (wind 0.6 reeds 0.3 drone 0.4)
+  grid:
+  ("#########################"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "  |  ||       |   o ||  #"
+   "###  %####   ############"
+   "###  %####xxx############")
+  things: ((ring-stone at: (18 8) overtone: 2)
+           (fen-vole at: (21 8)))
+  decor: auto)
+;; The gap (columns 10-12) is three tiles over brackish water: the
+;; envelope's edge, taken at a run from the runway (columns 5-9). The hole
+;; at columns 3-4 drops to the Climb Back; its right side is rough.

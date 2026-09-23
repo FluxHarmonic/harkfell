@@ -1,0 +1,30 @@
+;;; world/regions/reedfen.map - Reedfen's rooms, laid out, with one intent
+;;; each (harkfell-design section 8). Written before the rooms.
+;;;
+;;; A1 writes the region's western block: six rooms, three wide and two
+;;; deep, at x 8 to 10 and y 3 to 4. The surface (y 3) runs east from the rim
+;;; where the Hollow will join; the under-fen (y 4) is reached by falling
+;;; and left by climbing. A - or | in the layout joins two rooms: their shared
+;;; edge is open (the gates check it); no mark means a closed edge.
+;;;
+;;;   A Fen Edge    - B Reed Bridge - C Old Stone
+;;;   |                               |
+;;;   D Root Hollow - E Drowned Channel - F Climb Back
+;;;
+;;; The loop: A to B to C, down the hole in C to F, west through E (a swim)
+;;; to D, and up the shaft from D to A; or the other way round. Breaths: B
+;;; and D (two of six).
+(map
+  region: reedfen
+  origin: (8 3)
+  layout:
+  ("A-B-C"
+   "|   |"
+   "D-E-F")
+  rooms:
+  ((A "Fen Edge" "you step off the Hollow's rim and the land opens into reeds and sky")
+   (B "Reed Bridge" "the first open water; a breath after the Hollow's climbs")
+   (C "Old Stone" "a mute stone seen before it can matter, across a gap that needs a run")
+   (D "Root Hollow" "a breath under the reeds: low, dark and still, found by falling")
+   (E "Drowned Channel" "too wide to jump: the first swim, bank to bank")
+   (F "Climb Back" "rough rock taught where a fall costs nothing, then the climb home to the stone")))

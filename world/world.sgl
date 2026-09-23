@@ -1,0 +1,58 @@
+;;; world/world.sgl - The world bible's data (harkfell-design section 8).
+;;;
+;;; Read by the game and by the content gates (scripts/room-check). The
+;;; prose half is BIBLE.md; each region's rooms and intents are laid out in
+;;; regions/<region>.map before any room exists.
+;;;
+;;; A1's mini bible: one region, Reedfen, with a placeholder palette. The
+;;; gating graph, the hush and the other regions come with the phases that
+;;; need them.
+
+;; Where the game begins: the region, the room, the cell (column, row) the
+;; body stands in. The Hollow does not exist yet, so for A1 the world starts
+;; on Reedfen's western rim, where the way in from the Hollow will be.
+(start region: reedfen room: (8 3) cell: (2 4))
+
+;; The world palette: (role "#rrggbb" note). PLACEHOLDER colours for A1, so
+;; the rooms read; A4 replaces them with the real, dithered palettes. A
+;; region uses at most 16 roles.
+(palette
+  (sky-1 "#9fb3bf" "high sky, pale blue-grey")
+  (sky-2 "#b8c6c4" "middle sky")
+  (sky-3 "#d3d6c8" "sky near the horizon, a little warm")
+  (fog "#c9ccbf" "low mist over the water")
+  (reed-1 "#6f7a4c" "reed stalks, shade")
+  (reed-2 "#8a8f55" "reed stalks, lit")
+  (reed-3 "#b0a868" "seed heads, moss on rock")
+  (mud-1 "#4f4a3e" "peat and rough rock")
+  (mud-2 "#6b6250" "rough rock's grain, planks")
+  (water-1 "#4d6a72" "still water")
+  (water-2 "#9fb8ba" "the water's skin")
+  (stone-1 "#6e6f68" "smooth rock")
+  (stone-2 "#8e8f86" "rock's lit edge, the ring-stones")
+  (ember "#b8784a" "Reedfen's one warm accent: the brackish water")
+  (fur-1 "#e8e0cf" "the creature")
+  (fur-2 "#2a2a2e" "its eye"))
+
+(region reedfen
+  name: "Reedfen"
+  bounds: ((8 3) (15 7))
+  overtone: 2
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  mode: dorian
+  palette: (sky-1 sky-2 sky-3 fog reed-1 reed-2 reed-3 mud-1 mud-2
+            water-1 water-2 stone-1 stone-2 ember fur-1 fur-2)
+  hazard: brackish
+  tiles: reedfen
+  roster: (reedling bellfrog fen-vole pike heron-shape)
+  moments: (first-open-water frog-choir drowned-bell)
+  wander: (reeds-a reeds-b rain-on-reeds)
+  gives: ((overtone 2) (ability down)))
+
+;; The creatures (section 6): a behaviour kind each. None moves yet (A3).
+(creature reedling behaviour: flock)
+(creature bellfrog behaviour: hop)
+(creature fen-vole behaviour: burrow)
+(creature pike behaviour: swim)
+(creature heron-shape behaviour: giant)
