@@ -1,0 +1,66 @@
+;;; The A0 gate's replay leg, on the bytecode VM (this suite's target).
+;;;
+;;; The scripted input sequence ((harkfell replay): a route through the
+;;; whole room, then pseudo-random wandering, 1800 ticks) produces the same
+;;; positions every run. The recordings, one per shipped target:
+;;;
+;;;   test/fixtures/replay-native.txt   `build/release/bin/harkfell --replay`
+;;;                                      (scripts/gate-replay checks it)
+;;;   test/fixtures/replay-web.txt      the wasm build (verify.mjs, leg replay)
+;;;
+;;; This leg compares the bytecode VM's trace with the NATIVE recording:
+;;; the two were measured byte-identical (1800 of 1800 lines) when the
+;;; recording was made, so a difference here is a finding about the VM or
+;;; the codegen, and the message says which line.
+;;;
+;;; To re-record after a change to the physics, the room or the script:
+;;; re-derive the route (tools/find-route.sgl), rebuild the release and the
+;;; web build, then
+;;;   build/release/bin/harkfell --replay > test/fixtures/replay-native.txt
+;;;   node verify.mjs --legs replay --record-replay test/fixtures/replay-web.txt
+;;; and say in the commit whether the two still agree.
+;;;
+;;; Positive control: the same script with one intent changed (tick 700,
+;;; jump pressed) must NOT match, and the first difference must be at or
+;;; after tick 700: the comparison can fail, and fails where the input
+;;; changed.
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (sigil fs)
+        (engine body)
+        (harkfell replay))
+
+(define FIXTURE "test/fixtures/replay-native.txt")
+
+(define (fixture-lines)
+  (filter (lambda (l) (> (string-length l) 0))
+          (string-split (read-file-string FIXTURE) "\n")))
+
+;; The 1-based index of the first line where the two lists differ, or #f.
+(define (first-difference a b)
+  (let loop ((a a) (b b) (i 1))
+    (cond ((and (null? a) (null? b)) #f)
+          ((or (null? a) (null? b)) i)
+          ((string=? (car a) (car b)) (loop (cdr a) (cdr b) (+ i 1)))
+          (else i))))
+
+(define (with-press-at script n)
+  (let loop ((s script) (i 1) (acc '()))
+    (cond ((null? s) (reverse acc))
+          ((= i n) (loop (cdr s) (+ i 1) (cons (intent h: 0 v: 0 jump: #t press: #t) acc)))
+          (else (loop (cdr s) (+ i 1) (cons (car s) acc))))))
+
+(test-group "replay"
+  (let ((want (fixture-lines))
+        (got (replay-lines)))
+    (test "the recording holds 1800 ticks"
+      (assert-equal REPLAY-TICKS (length want)))
+    (test "the bytecode trace equals the native recording, line for line"
+      (assert-equal #f (first-difference got want)))
+    (test "two runs agree (nothing outside the inputs moves the trace)"
+      (assert-equal #f (first-difference got (replay-lines))))
+    (test "positive control: one changed input changes the trace from there"
+      (let ((d (first-difference (replay-lines-of (with-press-at (replay-script) 700)) want)))
+        (assert-true (and d (>= d 700)))))))

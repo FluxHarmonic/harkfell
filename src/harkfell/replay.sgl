@@ -1,11 +1,10 @@
 ;;; (harkfell replay) - A scripted input sequence and the positions it
 ;;; produces, for the replay gate.
 ;;;
-;;; The script is REPLAY-TICKS intents made from a fixed seed: a short
-;;; hand-written opening (run right over the 2-tile gap, jump the 3-tile
-;;; gap) and then segments of 4 to 40 ticks with a pseudo-random direction
-;;; and a pseudo-random jump hold, so the run falls in the pits (soft
-;;; returns), jumps, slides on walls and swims wherever it wanders. The
+;;; The script is REPLAY-TICKS intents: a route through the whole room
+;;; (OPENING, below), then segments of 4 to 40 ticks with a pseudo-random
+;;; direction and jump hold from a fixed seed, so the run falls in the pits
+;;; (soft returns), jumps, slides on walls and swims wherever it wanders. The
 ;;; generator is the ZX81 LCG with a residue test (the onboarding's idiom:
 ;;; modulo only), so the script is the same on every target.
 ;;;
@@ -28,7 +27,7 @@
           (harkfell rooms))
 
   (export REPLAY-TICKS REPLAY-SEED
-          replay-script replay-lines replay-trace-text
+          replay-script replay-lines replay-lines-of replay-trace-text
           trace-line)
 
   (begin
@@ -39,13 +38,23 @@
     ;; overflow a fixnum on it (the wasm build included).
     (define (lcg-next s) (modulo (+ (* s 75) 74) 65537))
 
-    ;; (ticks h v jump) segments, the opening first.
+    ;; (ticks h v jump) segments. The opening is a route through the whole
+    ;; room, found by driving it with reactive policies (kick when touching
+    ;; the wall, jump at the gap's lip, leap when the head is out) and
+    ;; baked here as the intents they gave, so the script is fixed input,
+    ;; not a controller: 628 ticks that walk into the first pit (a soft
+    ;; return), then climb the chimney by wall jumps,
+    ;; drop off the shelf, jump the 3-tile gap from a run, swim the pool
+    ;; and leap out, jump the 3-tile ledge, hop to the post, drop into the
+    ;; well, and climb the rough wall to its top. The pseudo-random
+    ;; segments after it wander from there (pits, slides, returns).
     (define OPENING
-      (list (list 30 1 0 #f)       ; run right from the entry
-            (list 14 1 0 #t)       ; jump the 2-tile gap
-            (list 4 1 0 #f)
-            (list 20 1 0 #t)       ; and the 3-tile one
-            (list 30 1 0 #f)))
+      (list (list 60 1 0 #f) (list 40 0 0 #f)
+            (list 1 -1 0 #t) (list 8 -1 0 #f) (list 1 -1 0 #t) (list 18 1 0 #f)
+            (list 1 1 0 #t) (list 2 -1 0 #f) (list 13 1 0 #f) (list 6 -1 0 #f)
+            (list 1 -1 0 #t) (list 92 1 0 #f) (list 40 1 0 #t) (list 32 1 0 #f)
+            (list 30 0 1 #f) (list 46 1 -1 #f) (list 37 1 -1 #t) (list 1 1 0 #f) (list 26 1 0 #t)
+            (list 9 1 0 #f) (list 30 1 0 #t) (list 19 1 0 #f) (list 115 1 -1 #f)))
 
     (define (segments-from seed total)
       (let loop ((s (lcg-next seed)) (left total) (acc '()))
@@ -94,16 +103,20 @@
                        (symbol->string (body-mode b)) " "
                        (number->string (world-returns w)))))
 
-    ;; The trace, one string per tick.
-    (define (replay-lines)
+    ;; The trace of a script (a list of intents), one string per tick; and
+    ;; the trace of the replay script.
+    (define (replay-lines-of script)
       (let loop ((w (world-new (load-test-room)))
-                 (script (replay-script))
+                 (script script)
                  (tick 1)
                  (acc '()))
         (if (null? script)
             (reverse acc)
             (let ((w (world-tick w (car script))))
               (loop w (cdr script) (+ tick 1) (cons (trace-line tick w) acc))))))
+
+    (define (replay-lines)
+      (replay-lines-of (replay-script)))
 
     (define (replay-trace-text)
       (apply string-append

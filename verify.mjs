@@ -30,6 +30,10 @@
 //              the ring with the same drag moves it
 //   jump       a touch on the right half is the jump button: the body rises,
 //              and the JUMP latency carries a number
+//   timing     a note, not an assertion: the rAF interval and how long after
+//              its timeStamp a synthetic touch reaches the page (headless
+//              Chrome delivers CDP touches ~90 ms late, so the latency legs
+//              prove the readout works, not what a phone measures)
 //   errors     no console error and no exception in any leg
 
 import http from "node:http";
@@ -46,7 +50,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "replay", "envelope", "keys", "float", "fixed", "jump", "errors"];
+const ALL_LEGS = ["boot", "render", "replay", "envelope", "keys", "float", "fixed", "jump", "timing", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -173,7 +177,7 @@ const W = await evaluate("window.innerWidth"), H = await evaluate("window.innerH
 // ---- the legs -------------------------------------------------------------------
 if (LEGS.includes("boot")) {
   ran.add("boot");
-  await open("trace&touch&stick=float");
+  await open("trace&touch&stick=float&ms");
   const b = lines.find((l) => l.startsWith("harkfell: boot"));
   b === "harkfell: boot stick float" ? pass("boot", b) : fail("boot", b);
 }
@@ -301,6 +305,17 @@ if (LEGS.includes("jump")) {
   const m = lat.match(/jump (\d+) /);
   if (b.y < a.y - 10 && m) pass("jump", `y ${a.y} -> ${b.y} after 180 ms; ${lat}`);
   else fail("jump", `y ${a.y} -> ${b.y}; ${lat}`);
+}
+
+if (LEGS.includes("timing")) {
+  ran.add("timing");
+  await open("trace&touch");
+  const iv = await evaluate(`new Promise((resolve) => { const ts = []; function f(t) { ts.push(t); if (ts.length < 61) requestAnimationFrame(f); else { const d = ts.slice(1).map((x, i) => x - ts[i]); d.sort((a, b) => a - b); resolve([d[0], d[30], d[59]]); } } requestAnimationFrame(f); })`);
+  await evaluate(`(() => { window.__lag = []; document.getElementById("touch").addEventListener("pointerdown", (e) => window.__lag.push(performance.now() - e.timeStamp), true); })()`);
+  await touch("touchStart", [[W * 0.85, H * 0.8, 3]]); await sleep(100); await touch("touchEnd", []);
+  const lag = await evaluate("window.__lag");
+  console.log(`note: timing: rAF interval min/median/max ${iv.map((x) => x.toFixed(1)).join("/")} ms; pointerdown handled ${lag.map((x) => x.toFixed(1)).join(",")} ms after its timeStamp`);
+  pass("timing", "measured (a note, not an assertion)");
 }
 
 if (LEGS.includes("errors")) {

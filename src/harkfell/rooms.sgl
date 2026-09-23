@@ -3,7 +3,8 @@
 ;;; What it holds, left to right (columns count from 0):
 ;;;   - the entry (@) at the foot of a chimney: two smooth walls two tiles
 ;;;     apart (the room's edge and the pillar at column 3), five tiles
-;;;     high, climbed by wall jumping between them; a shelf at its top;
+;;;     high, climbed by wall jumping between them; a two-tile shelf at its
+;;;     top (a walk off its end lands on the floor before the 3-tile gap);
 ;;;   - a 2-tile gap (columns 4-5), then a 3-tile gap (8-10), each over a
 ;;;     pit of brackish water (^, a hazard: the soft return);
 ;;;   - a pool four tiles wide and two deep (~);
@@ -27,7 +28,7 @@
       (list "#########################"
             "#.......................#"
             "#.......................#"
-            "#..####................%#"
+            "#..##..................%#"
             "#..#................#..%#"
             "#..#...............##..%#"
             "#..#...............##..%#"

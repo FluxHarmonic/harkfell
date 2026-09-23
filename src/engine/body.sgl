@@ -27,7 +27,9 @@
 ;;;              SLIDE-MAX.
 ;;;   wall jump  jump while pushing into any wall (or while clinging):
 ;;;              WALL-KICK-X away and WALL-JUMP-V up, horizontal input
-;;;              ignored for WALL-LOCK ticks.
+;;;              ignored for WALL-LOCK ticks. The kick's rise is not cut by
+;;;              letting go of jump (a tap kicks as high as a hold), so a
+;;;              chimney is climbed with one tap per wall.
 ;;;   cling      pushing into a CLIMBABLE wall in the air (or pushing up
 ;;;              beside it on the ground) holds it. Held, up and down climb
 ;;;              at CLIMB, anything else stays put; pushing away lets go.
@@ -234,7 +236,7 @@
                   ((wall-jump)
                    (add-event (body b
                                     vy: (- (feel-wall-jump-v f))
-                                    jumping: #t
+                                    jumping: #f
                                     cut: #f
                                     buffer: 0
                                     lock: (+ (feel-wall-lock f) 1)

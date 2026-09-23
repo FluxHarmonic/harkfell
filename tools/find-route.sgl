@@ -1,0 +1,114 @@
+;;; tools/find-route.sgl - Re-derive the replay's OPENING route.
+;;;
+;;;   scripts/dev sigil test --report tools/find-route.sgl
+;;;   then read the report's stdout: one (phase ...) line per phase, which
+;;;   must all end "done", and the route as (ticks h v jump) segments.
+;;;
+;;; The replay script ((harkfell replay)) opens with a route through the
+;;; whole test room, baked as fixed intents. Those intents only make the
+;;; route on the physics they were found on: when the feel constants or the
+;;; room change, run this, check every phase says done, paste the segments
+;;; into OPENING, and re-record both replay fixtures (the replay gate's
+;;; procedure is in test/test-replay.sgl).
+;;;
+;;; The route opens with a walk into the first pit (a soft return), then
+;;; runs the room. The policies react to the body (kick when touching the
+;;; wall, jump at a gap's lip, leap when the head is out of the water); the
+;;; log keeps the intents they produced, with presses on each rising edge
+;;; of jump, the same rule the replay applies.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine tilemap)
+        (engine room)
+        (engine body)
+        (engine collide)
+        (harkfell feel)
+        (harkfell rooms)
+        (harkfell world))
+
+(define TM (room-tiles (load-test-room)))
+
+(define (touch? b s)
+  (touching? TM (body-x b) (body-y b) 8.0 14.0 (if (> s 0) 'right 'left) kind-solid?))
+
+;; (h v jump) per tick, newest first; and jump as it was on the last tick
+;; logged, across phases, since the replay reads presses as rising edges
+;; over the whole script.
+(define *log* '())
+(define *was* #f)
+
+;; Run one phase: policy (tick b state) -> (intent . state) until
+;; (done? b w tick)
+;; or limit ticks. Prints one line; returns the world.
+(define (run-phase w name policy done? limit)
+  (let loop ((w w) (tick 0) (st #f))
+    (let ((b (world-body w)))
+      (if (or (done? b w tick) (= tick limit))
+          (begin
+            (display (list 'phase name 'ticks tick 'at (body-x b) (body-y b) (body-mode b)
+                           'returns (world-returns w) (if (done? b w tick) 'done 'LIMIT)))
+            (newline)
+            w)
+          (let* ((r (policy tick b st))
+                 (i (car r))
+                 (jump (intent-jump i))
+                 (i (intent h: (intent-h i) v: (intent-v i) jump: jump press: (and jump (not *was*)))))
+            (set! *log* (cons (list (intent-h i) (intent-v i) jump) *log*))
+            (set! *was* jump)
+            (loop (world-tick w i) (+ tick 1) (cdr r)))))))
+
+(define (rle log)
+  (let loop ((l (reverse log)) (acc '()))
+    (cond ((null? l) (reverse acc))
+          ((and (pair? acc) (equal? (cdar acc) (car l)))
+           (loop (cdr l) (cons (cons (+ 1 (caar acc)) (cdar acc)) (cdr acc))))
+          (else (loop (cdr l) (cons (cons 1 (car l)) acc))))))
+
+;; Kick between the room's edge and the pillar until above the shelf.
+(define (chimney tick b st)
+  (let* ((dir (or st -1))
+         (dir (if (memq 'wall-jump (body-events b)) (- dir) dir)))
+    (if (< (+ (body-y b) 14.0) 46.0)
+        (cons (intent h: 1) dir)
+        (cons (intent h: dir jump: (or (= tick 0) (touch? b dir))) dir))))
+
+(define (walk-right tick b st) (cons (intent h: 1) st))
+
+;; Run right; jump (and hold it) once the box's right edge passes x. The
+;; first tick lets jump go, so a jump held from the phase before is a fresh
+;; press here.
+(define (jump-at x)
+  (lambda (tick b st)
+    (let ((go (and (> tick 0) (or st (> (+ (body-x b) 8.0) x)))))
+      (cons (intent h: 1 jump: go) go))))
+
+(define (swim-across tick b st)
+  (if (< tick 30)
+      (cons (intent v: 1) st)
+      (cons (intent h: 1 v: -1 jump: (and (< (body-y b) 124.0) (> (body-x b) 250.0))) st)))
+
+(define (climb tick b st) (cons (intent h: 1 v: -1) st))
+
+;; Walk right into the first pit, then wait out the soft return.
+(define (pit tick b st) (cons (if (< tick 60) (intent h: 1) (intent)) st))
+
+(define (ground-at? b pred) (and (eq? (body-mode b) 'ground) (pred b)))
+
+(test-group "find route"
+  (test "route"
+    (let* ((w (world-new (load-test-room)))
+           (w (run-phase w 'pit pit (lambda (b w t) (and (= (world-returns w) 1) (eq? (world-phase w) 'play) (>= t 100))) 200))
+           (w (run-phase w 'chimney chimney (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 40.0)))) 900))
+           (w (run-phase w 'shelf walk-right (lambda (b w t) (ground-at? b (lambda (b) (and (> (body-x b) 96.0) (> (body-y b) 100.0))))) 300))
+           (w (run-phase w 'gap3 (jump-at 135.0) (lambda (b w t) (ground-at? b (lambda (b) (> (body-x b) 176.0)))) 300))
+           (w (run-phase w 'to-pool walk-right (lambda (b w t) (eq? (body-mode b) 'swim)) 200))
+           (w (run-phase w 'swim swim-across (lambda (b w t) (ground-at? b (lambda (b) (> (body-x b) 272.0)))) 400))
+           (w (run-phase w 'ledge (jump-at 300.0) (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 70.0)))) 300))
+           (w (run-phase w 'post (jump-at 318.0) (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 55.0)))) 300))
+           (w (run-phase w 'well walk-right (lambda (b w t) (ground-at? b (lambda (b) (> (body-y b) 100.0)))) 300))
+           (w (run-phase w 'climb climb (lambda (b w t) (ground-at? b (lambda (b) (< (body-y b) 40.0)))) 600)))
+      (display (list 'total (length *log*))) (newline)
+      (display (rle *log*)) (newline)
+      (assert-true #t))))

@@ -1,0 +1,44 @@
+#!/bin/sh
+# The replay gate's native leg (A0). Runs the release binary's replay and
+# compares it with the native recording, byte for byte; then says whether
+# the native and web recordings agree (a measurement, not an assertion:
+# floats on the two targets are not assumed to match).
+#
+#   scripts/gate-replay            after scripts/dev sigil build --config release
+#
+# Prints PASS or FAIL with the first differing line, and exits 0 or 1.
+# Exits 2 (SETUP-FAILED) when the binary or the recording is missing, or
+# the replay printed nothing: an empty trace is not a pass.
+set -u
+cd "$(dirname "$0")/.." || exit 2
+BIN=build/release/bin/harkfell
+WANT=test/fixtures/replay-native.txt
+WEB=test/fixtures/replay-web.txt
+[ -x "$BIN" ] || { echo "SETUP-FAILED: $BIN missing; build --config release first"; exit 2; }
+[ -s "$WANT" ] || { echo "SETUP-FAILED: $WANT missing or empty"; exit 2; }
+echo "subject: $BIN $(stat -c '%s bytes, mtime %y' "$BIN")"
+OUT="$(mktemp /tmp/harkfell-replay-XXXXXX)"
+trap 'rm -f "$OUT"' EXIT
+"$BIN" --replay > "$OUT"
+rc=$?
+lines=$(wc -l < "$OUT")
+if [ "$rc" -ne 0 ] || [ "$lines" -eq 0 ]; then
+  echo "SETUP-FAILED: the replay exited $rc with $lines lines"
+  exit 2
+fi
+if cmp -s "$OUT" "$WANT"; then
+  echo "PASS replay-native: $lines ticks identical to $WANT"
+  status=0
+else
+  echo "FAIL replay-native: first difference:"
+  diff "$OUT" "$WANT" | head -4
+  status=1
+fi
+if [ -s "$WEB" ]; then
+  if cmp -s "$WANT" "$WEB"; then
+    echo "note: the native and web recordings are identical ($(wc -l < "$WEB") lines)"
+  else
+    echo "note: the native and web recordings DIFFER, first at line $(cmp "$WANT" "$WEB" | awk '{print $NF}')"
+  fi
+fi
+exit $status

@@ -86,6 +86,16 @@
         (set! was press)
         (intent h: dir jump: #t press: press)))))
 
+;; The same with a tap per kick: jump down on the press tick only. A kick's
+;; rise is not cut by letting go, so taps climb as holds do.
+(define (chimney-tap-policy tm)
+  (let ((dir 1) (was #f))
+    (lambda (tick b)
+      (when (memq 'wall-jump (body-events b)) (set! dir (- dir)))
+      (let* ((press (and (or (= tick 0) (touching-side? b tm dir)) (not was))))
+        (set! was press)
+        (intent h: dir jump: press press: press)))))
+
 ;; One wall on the right, open to the left: kick off it and come back.
 (define ONE-WALL
   (list "############"
@@ -114,6 +124,10 @@
     (test "kicking between the chimney's walls climbs out of its top"
       (assert-true (any-event? hist 'wall-jump))
       ;; the chimney's top is y 48; the body's feet above it
+      (assert-true (< (+ (min-y hist) (feel-box-h F)) 48.0))))
+  (let* ((tm (tiles CHIMNEY))
+         (hist (history (stand 1 10) tm (chimney-tap-policy tm) 600)))
+    (test "a tap per kick climbs the chimney too (the kick is not cut)"
       (assert-true (< (+ (min-y hist) (feel-box-h F)) 48.0))))
   (let* ((tm (tiles ONE-WALL))
          (start (stand 9 10))
