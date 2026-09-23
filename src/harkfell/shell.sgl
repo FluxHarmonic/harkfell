@@ -50,7 +50,7 @@
 
   (export shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
-          shell-stick! shell-jump!
+          shell-stick! shell-jump! shell-sector
           shell-set-ms! shell-set-stick-form! shell-stick-form
           shell-world shell-clock shell-set-frame-stamp!
           shell-latency-lines now-ms
@@ -152,6 +152,9 @@
       (set! *touch-jump* down))
 
     (define (shell-set-frame-stamp! ms) (set! *frame-stamp* ms))
+
+    ;; The stick's direction in force (the web shell traces its changes).
+    (define (shell-sector) *sector*)
 
     ;; --- one frame ----------------------------------------------------------------
 

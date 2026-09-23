@@ -30,6 +30,8 @@
 ;;;   harkfell: envelope NAME VALUE      one per figure
 ;;;   harkfell: envelope-done
 ;;;   harkfell: returns N                a soft return happened (N so far)
+;;;   harkfell: stick SECTOR             the stick's direction changed (none e ne n ...)
+;;;   harkfell: jump down|up             the touch jump button
 ;;; The replay and envelope lines print whether or not ?trace is on:
 ;;; they are asked for.
 
@@ -115,14 +117,18 @@
                (when k (shell-key-up! k)))
              0)
             ((string=? type "stick")
-             (let ((f (fields payload)))
+             (let ((f (fields payload))
+                   (before (shell-sector)))
                (when (and (= (length f) 3) (car f) (cadr f))
-                 (shell-stick! (car f) (cadr f) (caddr f))))
+                 (shell-stick! (car f) (cadr f) (caddr f)))
+               (when (and *trace* (not (eq? before (shell-sector))))
+                 (say "stick" (symbol->string (shell-sector)))))
              0)
             ((string=? type "jump")
              (let ((f (fields payload)))
                (when (and (= (length f) 2) (car f))
-                 (shell-jump! (= (car f) 1) (cadr f))))
+                 (shell-jump! (= (car f) 1) (cadr f))
+                 (when *trace* (say "jump" (if (= (car f) 1) "down" "up")))))
              0)
             ((string=? type "stick-form")
              (cond ((string=? payload "float") (shell-set-stick-form! 'float) 1)

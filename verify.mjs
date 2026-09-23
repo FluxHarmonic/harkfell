@@ -30,6 +30,9 @@
 //              the ring with the same drag moves it
 //   jump       a touch on the right half is the jump button: the body rises,
 //              and the JUMP latency carries a number
+//   two        two fingers: the stick held right and the jump button pressed
+//              while it stays down: the body rises, and the game reads the
+//              stick as held through the jump finger's lift (its trace)
 //   timing     a note, not an assertion: the rAF interval and how long after
 //              its timeStamp a synthetic touch reaches the page (headless
 //              Chrome delivers CDP touches ~90 ms late, so the latency legs
@@ -50,7 +53,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "replay", "envelope", "keys", "float", "fixed", "jump", "timing", "errors"];
+const ALL_LEGS = ["boot", "render", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -305,6 +308,37 @@ if (LEGS.includes("jump")) {
   const m = lat.match(/jump (\d+) /);
   if (b.y < a.y - 10 && m) pass("jump", `y ${a.y} -> ${b.y} after 180 ms; ${lat}`);
   else fail("jump", `y ${a.y} -> ${b.y}; ${lat}`);
+}
+
+if (LEGS.includes("two")) {
+  ran.add("two");
+  await open("trace&touch&stick=float");
+  const g = await ring();
+  const a = await where();
+  // finger 1 on the stick, dragged right and held; finger 2 on the jump
+  // button while finger 1 stays down; finger 2 lifted, then finger 1. The
+  // game's own trace says what it read: the stick went e before the jump
+  // went down, the body rose, and the stick stayed e (no "stick none")
+  // from the jump finger's lift until the stick finger's.
+  const at = () => lines.length;
+  await touch("touchStart", [[g.x, g.y, 1]]);
+  for (let i = 1; i <= 3; i++) { await touch("touchMove", [[g.x + (g.r * 0.8 * i) / 3, g.y, 1]]); await sleep(16); }
+  const t0 = at();
+  await touch("touchStart", [[g.x + g.r * 0.8, g.y, 1], [W * 0.85, H * 0.8, 2]]);
+  await sleep(150);
+  const b = await where();
+  await touch("touchEnd", [[W * 0.85, H * 0.8, 2]]);   // CDP lifts the points LISTED (measured): the jump finger
+  await sleep(300);
+  const t1 = at();
+  await touch("touchEnd", [[g.x + g.r * 0.8, g.y, 1]]);
+  await sleep(100);
+  const before = lines.slice(0, t0), during = lines.slice(t0, t1), after = lines.slice(t1);
+  const e = before.includes("harkfell: stick e");
+  const down = during.includes("harkfell: jump down"), up = during.includes("harkfell: jump up");
+  const held = !during.includes("harkfell: stick none");
+  const released = after.includes("harkfell: stick none");
+  if (e && down && up && held && released && b.y < a.y - 10) pass("two", `stick e, jump down with it held, rose y ${a.y} -> ${b.y}, jump up with the stick still e, stick none only when its own finger lifted`);
+  else fail("two", `stick e ${e}, jump down ${down}, up ${up}, stick held through ${held}, released after ${released}, y ${a.y} -> ${b.y}`);
 }
 
 if (LEGS.includes("timing")) {
