@@ -26,7 +26,9 @@
 //   float      ?stick=float: a touch in the lower-left quarter OUTSIDE the ring
 //              re-centres the stick there: touch-down reads no direction, a
 //              drag LEFT reads w (from home it would read e), the body moves
-//              left, and the latency lines carry numbers for IN and MOVE
+//              left, and the latency lines carry numbers for IN and MOVE; a
+//              reload with no ?stick then boots float (the store answered,
+//              not the fixed default)
 //   fixed      ?stick=fixed: the same touch outside the ring does nothing (the
 //              body stays put: the float leg's control), and a touch inside
 //              the ring with the same drag moves it
@@ -302,6 +304,11 @@ if (LEGS.includes("float")) {
   const m = lat.match(/in (\d+) .*move (\d+) /);
   if (outside && quietDown && read && !wrong && b.x < a.x && m) pass("float", `touch at ${Math.round(x)},${Math.round(y)} (outside the ring) re-centred: no direction on touch-down, stick w on the drag left; x ${a.x} -> ${b.x}; ${lat}`);
   else fail("float", `outside ${outside}; quiet on touch-down ${quietDown}; stick w ${read}; stick e (not re-centred) ${wrong}; x ${a.x} -> ${b.x}; ${lat}`);
+  // the stored form: a reload with no ?stick keeps float, not the fixed
+  // default (so the store, not the default, is what answered)
+  await open("trace&touch");
+  const s = lines.find((l) => l.startsWith("harkfell: boot"));
+  s === "harkfell: boot stick float" ? pass("float", `stored: ${s}`) : fail("float", `stored form: ${s}`);
 }
 
 if (LEGS.includes("fixed")) {
@@ -318,10 +325,6 @@ if (LEGS.includes("fixed")) {
   const insideRead = lines.slice(t1).includes("harkfell: stick e");
   if (!outsideRead && b.x === a.x && insideRead && c.x > b.x) pass("fixed", `outside the ring: no stick read, x stays ${a.x}; inside: stick e, x ${b.x} -> ${c.x}`);
   else fail("fixed", `outside: read ${outsideRead}, x ${a.x} -> ${b.x}; inside: read ${insideRead}, x -> ${c.x}`);
-  // the stored form: a reload with no ?stick keeps fixed
-  await open("trace&touch");
-  const s = lines.find((l) => l.startsWith("harkfell: boot"));
-  s === "harkfell: boot stick fixed" ? pass("fixed", `stored: ${s}`) : fail("fixed", `stored form: ${s}`);
 }
 
 if (LEGS.includes("jump")) {

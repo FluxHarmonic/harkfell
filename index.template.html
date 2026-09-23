@@ -121,11 +121,13 @@
         try { return deliver.call(app, type, payload); }
         catch (err) { die("trap in " + type); throw err; }
       };
-      if (params.has("trace")) send("trace", "on");
-      if (params.has("ms")) send("ms", "on");
+      // the stick form first, so the trace's boot line reports the form in
+      // force, not the stored one ?stick is about to replace
       var form = params.get("stick");
       if (form === "float" || form === "fixed") send("stick-form", form);
       stick.form = send("stick-form", "?") === 1 ? "float" : "fixed";
+      if (params.has("trace")) send("trace", "on");
+      if (params.has("ms")) send("ms", "on");
       layout();
       if (params.has("replay")) setTimeout(function () { send("replay", ""); }, 50);
       if (params.has("envelope")) setTimeout(function () { send("envelope", ""); }, 50);
