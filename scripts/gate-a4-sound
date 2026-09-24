@@ -235,7 +235,7 @@ plant carrying-ignored "$S" \
   "        (and #f n 'carrying)))" \
   "$A4T" "carrying: 2, not carried: the moment does not play"
 plant still-ignored "$S" \
-  "                  ((and (eq? d 'play) (place-moment-still pl))
+  "                  ((and (memq d '(play blocked)) (place-moment-still pl))
                    (set! *still-wait*" \
   "                  ((and #f (place-moment-still pl))
                    (set! *still-wait*" \
