@@ -47,6 +47,11 @@
     ;; The native shell's fetcher: the file at path, from the working
     ;; directory (the repository's root, where the game runs).
     (define (native-fetcher path)
-      (if (file-exists? path)
-          (or (load-texture path) 'failed)
-          'failed))))
+      ;; load-texture takes a decoded image, not a path (measured: a path is
+      ;; "load-texture: expected valid image with pixel data")
+      (let ((img (and (file-exists? path) (load-image path))))
+        (if img
+            (let ((tex (load-texture img)))
+              (image-free! img)
+              (or tex 'failed))
+            'failed)))))
