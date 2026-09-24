@@ -1,0 +1,620 @@
+;;; (harkfell sound) - The sound of the place: the director (A2).
+;;;
+;;; harkfell-design section 5, as built into the game:
+;;;
+;;; THE BED. One motif player per region plays the region's bed tune (the
+;;; region's bed: field in world/world.sgl). Its channels are grouped the way
+;;; the room files name them: the region's bed-channels: list, whose first
+;;; three names are channels 1, 2 and 3 (Reedfen: wind water reeds) and whose
+;;; drone is DRONE-CHANNELS (4 H2, 5 H3, 6 H4, 7 H5, 8 H7; motif tunes have
+;;; at most 8 channels, so the fundamental, under the Hollow, is not a bed
+;;; channel). A2's Reedfen bed has two drone voices, H2 and H3.
+;;; On entering a room every channel RAMPS to the room's level over
+;;; ROOM-RAMP-S with player-ramp! (channel-volume . ch); a group the room does
+;;; not name goes to DEFAULT-LEVELS. A drone channel for a harmonic not
+;;; carried is muted (A3's pickups unmute them; ?carry= does it for
+;;; listening). Entering another region's room crossfades the beds over
+;;; BORDER-S.
+;;;
+;;; THE MOMENT. A room's fixed moment (moment: (tune: NAME ...)) is opened
+;;; ahead (sound-preopen!, at boot: an open is a frame-thread stall) and
+;;; started on the first visit the hush allows ((harkfell hush)). The bed
+;;; ducks DUCK-GAIN (6 dB) over DUCK-IN-S on its SOURCE GAIN, the mixer
+;;; factor 'duck, never on its channel volumes: player-ramp! keeps one ramp
+;;; per target, so a duck made of channel ramps would be wiped out by the next
+;;; room's levels (the gate in test/test-sound.sgl holds this). The moment
+;;; plays to its end and motif's release tail; the bed comes back over
+;;; DUCK-OUT-S from when its end is heard. Leaving the room does not stop
+;;; it; walking into a room whose own fixed moment is still armed fades it
+;;; out over FADE-S (and that room's moment stays armed: the hush counts
+;;; from the fade).
+;;;
+;;; LISTENING. Each unfound harmonic is a finding tone at its place (A2 has
+;;; H2's, at a placeholder room until A3 places the pickup): louder as you
+;;; get closer (TONE-DB-PER-ROOM), silent past TONE-ROOMS rooms (D22),
+;;; panned toward it (at most 60%, the speakers-first rule), brighter above
+;;; you and darker below. Standing still STILL-S seconds dips the bed 6 dB
+;;; (factor 'still), brings the tone forward 4 dB, and raises the ears toward
+;;; the strongest tone (sound-ears); moving brings the bed back.
+;;;
+;;; SPOT SOUNDS. One-shot cues rendered at boot from short tunes, scheduled
+;;; with a rate range each: the bellfrogs of the room croak from where they
+;;; sit (panned by x, quieter with distance), reed birds call in rooms with
+;;; reeds, water plops in rooms with water. The soft return has its low tone.
+;;;
+;;;   (sound-boot! content say)      the world is loaded: beds known, cues queued
+;;;   (sound-frame! now dt place)    every frame in play (place: the place struct, below)
+;;;   (sound-set-carry! hs)          harmonics carried: (2 3 ...)
+;;;   (sound-set-tone-room! x y)     where H2's finding tone is (a door for listening)
+;;;   (sound-ears)                   #f, or up | left | right | below: the ears' point
+;;;   (sound-lines)                  the readout's lines
+;;;   (sound-hush) (sound-bed-levels) (sound-moment-playing)   for the gates
+
+(define-library (harkfell sound)
+  (import (sigil core)
+          (sigil math)
+          (sigil struct)
+          (sigil list)
+          (sigil string)
+          (motif tune)
+          (motif tune player)
+          (engine mixer)
+          (harkfell tunes)
+          (harkfell hush))
+
+  (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
+          sound-ears sound-lines sound-hush sound-bed-levels sound-moment-playing sound-reset!
+          sound-set-rng! strip-uncarried
+          place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
+          bed-channels-of group-channels
+          DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
+          DRONE-CHANNELS DEFAULT-LEVELS BED-ID MOMENT-ID TONE-ID)
+
+  (begin
+    (define DUCK-GAIN 0.5)       ; -6 dB
+    (define DUCK-IN-S 2.0)
+    (define DUCK-OUT-S 4.0)
+    (define ROOM-RAMP-S 2.0)
+    (define BORDER-S 4.0)
+    (define FADE-S 2.0)
+    (define STILL-S 1.0)         ; standing still this long sharpens listening
+    (define STILL-IN-S 1.0)
+    (define STILL-OUT-S 1.5)
+    (define TONE-GAIN 0.63)      ; the tone in its own room, at rest
+    (define TONE-FORWARD 1.585)  ; +4 dB while still (the product is held under 1)
+    (define TONE-ROOMS 3.0)      ; D22: audible from up to three rooms away
+    (define TONE-DB-PER-ROOM 4.0)
+    (define ROOM-W 400.0)        ; a room in pixels (25 x 11 tiles of 16)
+    (define ROOM-H 176.0)
+    (define MAX-PAN 0.6)
+    (define DRONE-CHANNELS '(4 5 6 7 8))
+    (define HARMONIC-CHANNEL '((2 . 4) (3 . 5) (4 . 6) (5 . 7) (7 . 8)))
+    (define DEFAULT-LEVELS '((wind . 0.5) (water . 0.4) (reeds . 0.4) (texture . 0.4) (drone . 0.6)))
+    (define BED-ID "bed")
+    (define MOMENT-ID "moment")
+    (define TONE-ID "tone-h2")
+    (define TONE-TUNE "tone-h2")
+
+    ;; What the director is told each frame about where the player is.
+    ;;   key      the room's key (any equal?-comparable value), or #f outside the world
+    ;;   region   the region's symbol; bed-tune its bed's tune name; groups its bed-channels
+    ;;   levels   the room's bed: as an alist ((wind . 0.4) ...)
+    ;;   moment   the room's fixed moment's tune name, or #f
+    ;;   frogs    the room's bellfrogs' x positions in room pixels
+    ;;   px py    the body's centre in world pixels; rx ry the room's coordinate
+    ;;   still    the body is at rest this frame
+    ;;   returns  soft returns so far
+    (define-struct place
+      (key default: #f) (region default: #f) (bed-tune default: #f) (groups default: '())
+      (levels default: '()) (moment default: #f) (frogs default: '()) (water default: #f)
+      (px default: 0.0) (py default: 0.0) (rx default: 0) (ry default: 0)
+      (still default: #f) (returns default: 0))
+
+    ;; --- state ---------------------------------------------------------------------
+    (define *say* (lambda parts #f))
+    (define *hush* (hush-new))
+    (define *key* #f)
+    (define *region* #f)
+    (define *bed-tune* #f)
+    (define *room-levels* '())
+    (define *groups* '())
+    (define *bed-player* #f)
+    (define *bed-src* #f)
+    (define *levels* '())         ; ((ch . #(from to t0 dur)) ...): what the channels were asked for
+    (define *carry* '())          ; harmonics carried
+    (define *moments* '())        ; ((name . player) ...) opened ahead
+    (define *moment* #f)          ; (name . player) playing
+    (define *moment-key* #f)
+    (define *tone-player* #f)
+    (define *tone-room* (cons 11 3))   ; PLACEHOLDER: east of A1's six rooms, until A3 places H2
+    (define *tone-cutoff* #f)
+    (define *pan* (cons 1.0 1.0)) ; the tone's L R gains
+    (define *still-for* 0.0)
+    (define *still* #f)
+    (define *ears* #f)
+    (define *returns* 0)
+    (define *cues* '())           ; ((name . cue) ...)
+    (define *cue-queue* '())      ; names still to render
+    (define *next* '())           ; ((spot . t) ...) when each spot sound is next due
+    (define *now* 0.0)
+    (define *seed* 20260924)
+
+    (define (sound-hush) *hush*)
+    (define (sound-moment-playing) (and *moment* (car *moment*)))
+    (define (sound-ears) *ears*)
+    ;; A change of what is carried reopens the bed on the next frame (its
+    ;; drone notes are chosen at open: strip-uncarried).
+    (define *carry-changed* #f)
+    (define (sound-set-carry! hs)
+      (unless (equal? hs *carry*)
+        (set! *carry* hs)
+        (set! *carry-changed* #t)))
+    (define (sound-set-tone-room! x y) (set! *tone-room* (cons x y)))
+    (define (sound-set-rng! seed) (set! *seed* seed))
+
+    ;; MINSTD (only modulo is bound here): a number in [0, 1)
+    (define (rand!)
+      (set! *seed* (modulo (* *seed* 48271) 2147483647))
+      (/ *seed* 2147483647.0))
+    (define (rand-in lo hi) (+ lo (* (- hi lo) (rand!))))
+
+    ;; Back to nothing playing (tests; a world reload).
+    (define (sound-reset!)
+      (for-each (lambda (s) (mixer-remove! (source-id s))) (mixer-sources))
+      (when *bed-player* (player-close! *bed-player*))
+      (when *moment* (player-close! (cdr *moment*)))
+      (for-each (lambda (m) (player-close! (cdr m))) *moments*)
+      (when *tone-player* (player-close! *tone-player*))
+      (set! *hush* (hush-new)) (set! *key* #f) (set! *region* #f) (set! *groups* '())
+      (set! *bed-player* #f) (set! *bed-src* #f) (set! *levels* '()) (set! *moments* '())
+      (set! *moment* #f) (set! *moment-key* #f) (set! *tone-player* #f) (set! *tone-cutoff* #f)
+      (set! *still-for* 0.0) (set! *still* #f) (set! *ears* #f) (set! *next* '()) (set! *waiting* #f))
+
+    ;; --- channels and levels ------------------------------------------------------------
+    ;; groups: the region's bed-channels, e.g. (wind water reeds drone)
+    (define (bed-channels-of groups)
+      (let loop ((gs groups) (ch 1) (acc '()))
+        (cond ((null? gs) (reverse acc))
+              ((eq? (car gs) 'drone) (loop (cdr gs) ch (cons (cons 'drone DRONE-CHANNELS) acc)))
+              (else (loop (cdr gs) (+ ch 1) (cons (list (car gs) ch) acc))))))
+
+    (define (group-channels groups g)
+      (let ((e (assq g (bed-channels-of groups)))) (if e (cdr e) '())))
+
+    (define (level-now ch now)
+      (let ((e (assv ch *levels*)))
+        (if (not e)
+            1.0
+            (let* ((r (cdr e)) (from (vector-ref r 0)) (to (vector-ref r 1)) (t0 (vector-ref r 2)) (dur (vector-ref r 3)))
+              (cond ((<= now t0) from)
+                    ((or (<= dur 0.0) (>= now (+ t0 dur))) to)
+                    (else (+ from (* (- to from) (/ (- now t0) dur)))))))))
+
+    ;; Every channel's current target: ((ch . level) ...), for the gates and the readout.
+    (define (sound-bed-levels) (map (lambda (e) (cons (car e) (vector-ref (cdr e) 1))) *levels*))
+
+    (define (room-level levels g)
+      (let ((e (assq g levels)))
+        (cond (e (cdr e))
+              ((assq g DEFAULT-LEVELS) (cdr (assq g DEFAULT-LEVELS)))
+              (else 0.5))))
+
+    ;; Ramp every channel of the bed to the room's levels.
+    (define (apply-room-levels! levels now secs)
+      (when *bed-player*
+        (for-each
+          (lambda (gc)
+            (let ((v (room-level levels (car gc))))
+              (for-each (lambda (ch)
+                          (let ((from (level-now ch now)))
+                            (player-ramp! *bed-player* (cons 'channel-volume ch) from v (* 1000.0 secs))
+                            (set! *levels* (cons (cons ch (vector from v now secs))
+                                                 (filter (lambda (e) (not (eqv? (car e) ch))) *levels*)))))
+                        (cdr gc))))
+          (bed-channels-of *groups*))))
+
+    ;; The bed as opened: the notes of every drone channel whose harmonic is
+    ;; not carried are dropped. Measured (native dev build, 20 s of reedfen-bed
+    ;; at 32000): as written 6.6 s of pull, channels 4 and 5 MUTED 6.4 s (a
+    ;; muted channel still synthesises), their notes dropped 4.9 s.
+    (define (strip-uncarried t carry)
+      (let ((drop (filter-map* (lambda (hc) (and (not (memv (car hc) carry)) (cdr hc))) HARMONIC-CHANNEL)))
+        (tune-with-patterns t
+          (map (lambda (p)
+                 (tune-pattern p cells: (filter (lambda (c) (not (and (memv (cell-channel c) drop) (number? (cell-note c)))))
+                                                (tune-pattern-cells p))))
+               (tune-patterns t)))))
+
+    (define (filter-map* f l)
+      (let loop ((l l) (acc '()))
+        (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+    (define (apply-mutes!)
+      (when *bed-player*
+        (for-each (lambda (hc) (player-mute! *bed-player* (cdr hc) (not (memv (car hc) *carry*))))
+                  HARMONIC-CHANNEL)))
+
+    ;; --- opening -------------------------------------------------------------------------
+    (define (open name loop?)
+      (let ((t (tune-parsed name)))
+        (and t (guard (e (#t (*say* "sound" "error" "open" name) #f))
+                 (open-tune-player t (mixer-rate) loop: loop?)))))
+
+    (define (open-bed name)
+      (let ((t (tune-parsed name)))
+        (and t (guard (e (#t (*say* "sound" "error" "open" name) #f))
+                 (open-tune-player (strip-uncarried t *carry*) (mixer-rate) loop: #t)))))
+
+    (define (pull-of p) (lambda (out off n) (player-pull! p out off n)))
+
+    ;; A room's fixed moment, opened ahead (the first open of a tune is a
+    ;; frame-thread stall; do it while nothing is at stake).
+    (define (sound-preopen! name)
+      (unless (assoc name *moments*)
+        (let ((p (open name #f)))
+          (when p (set! *moments* (cons (cons name p) *moments*))))))
+
+    (define (take-moment! name)
+      (let ((e (assoc name *moments*)))
+        (if e
+            (begin (set! *moments* (filter (lambda (m) (not (eq? m e))) *moments*)) (cdr e))
+            (open name #f))))
+
+    ;; --- the bed ---------------------------------------------------------------------------
+    ;; A new bed for the region (a region entered, or what is carried changed):
+    ;; the old one crossfades out over BORDER-S under an id of its own, keeping
+    ;; its sink and its factors (its duck, its stillness); the new one fades in.
+    ;; A bed that will not open leaves the old one playing as it was (review M2).
+    (define *outs* 0)
+    (define (open-region-bed! region groups bed-tune levels now)
+      (let* ((old-src *bed-src*) (old-player *bed-player*) (first? (not old-src))
+             (p (and bed-tune (open-bed bed-tune))))
+        (if (not p)
+            (*say* "sound" "error" "no-bed" (if bed-tune bed-tune "none"))
+            (begin
+              (set! *region* region)
+              (set! *groups* groups)
+              (set! *bed-tune* bed-tune)
+              (set! *levels* '())
+              (set! *bed-player* p)
+              (when old-src
+                (set! *outs* (+ *outs* 1))
+                (let ((out-id (string-append BED-ID "-out-" (number->string *outs*))))
+                  (mixer-rename! BED-ID out-id)
+                  (source-factor! old-src 'fade 0.0 BORDER-S now)
+                  (mixer-at! (+ now BORDER-S) (lambda () (mixer-remove! out-id) (player-close! old-player)))))
+              (set! *bed-src* (mixer-add! BED-ID (pull-of p) #t))
+              (new-bed-levels! levels now first?)))))
+
+    (define (enter-region! pl now)
+      (open-region-bed! (place-region pl) (place-groups pl) (place-bed-tune pl) (place-levels pl) now))
+
+    (define (new-bed-levels! levels now first?)
+      (let ((pl-levels levels))
+          (when *bed-src*
+            ;; channels start at the room's levels (no ramp from 1), the
+            ;; source fades in (the first bed over a second, a border over BORDER-S)
+            (apply-room-levels! pl-levels now 0.0)
+            (apply-mutes!)
+            (source-factor! *bed-src* 'fade 0.0 0.0 now)
+            (source-factor! *bed-src* 'fade 1.0 (if first? 1.0 BORDER-S) now)
+            (when (and *moment* (mixer-find MOMENT-ID) (source-live? (mixer-find MOMENT-ID)))
+              (source-factor! *bed-src* 'duck DUCK-GAIN 0.0 now))
+            (when *still* (source-factor! *bed-src* 'still DUCK-GAIN 0.0 now)))))
+
+    ;; --- moments ---------------------------------------------------------------------------
+    (define (start-moment! name key now)
+      (let ((p (take-moment! name)))
+        (when p
+          (set! *moment* (cons name p))
+          (set! *moment-key* key)
+          (set! *hush* (hush-started *hush* name key))
+          (*say* "sound" "moment" name "start")
+          (let ((s (mixer-add! MOMENT-ID (pull-of p) #t)))
+            (duck-bed! now)
+            (source-on-end! s (lambda (t)
+                                (when (and *moment* (eq? (cdr *moment*) p))
+                                  (moment-over! t)
+                                  (*say* "sound" "moment" name "end"))
+                                (player-close! p)))))))
+
+    ;; The duck: the bed's SOURCE gain, never its channels (see the header).
+    (define (duck-bed! now)
+      (when *bed-src* (source-factor! *bed-src* 'duck DUCK-GAIN DUCK-IN-S now)))
+
+    (define (unduck-bed! t)
+      (when *bed-src* (source-factor! *bed-src* 'duck 1.0 DUCK-OUT-S t)))
+
+    (define (moment-over! t)
+      (set! *moment* #f)
+      (set! *moment-key* #f)
+      (set! *hush* (hush-ended *hush*))
+      (unduck-bed! t))
+
+    ;; Walking into a room whose own fixed moment is still armed: the playing
+    ;; moment fades out and leaves.
+    (define (fade-moment! now)
+      (let ((s (mixer-find MOMENT-ID)) (m *moment*))
+        (when (and s m)
+          (*say* "sound" "moment" (car m) "fade")
+          (source-factor! s 'fade 0.0 FADE-S now)
+          (source-on-end! s #f)
+          (moment-over! now)
+          (mixer-at! (+ now FADE-S) (lambda () (mixer-remove! MOMENT-ID) (player-close! (cdr m)))))))
+
+    ;; --- a room entered ----------------------------------------------------------------------
+    (define (enter-room! pl now)
+      (set! *key* (place-key pl))
+      (set! *hush* (hush-enter *hush* (place-key pl)))
+      (set! *next* '())
+      (set! *room-levels* (place-levels pl))
+      (if (not (eq? (place-region pl) *region*))
+          (enter-region! pl now)
+          (apply-room-levels! (place-levels pl) now ROOM-RAMP-S))
+      (let ((m (place-moment pl)))
+        (when m
+          (let ((d (hush-fixed-decision *hush* (place-key pl))))
+            (cond ((and *moment* (not (eq? d 'spent))) (fade-moment! now))
+                  ((eq? d 'play) (start-moment! m (place-key pl) now))
+                  (else #f))
+            (*say* "sound" "room" "moment" m (symbol->string d))))))
+
+    ;; --- listening: the tone, stillness, the ears ----------------------------------------------
+    (define (clamp lo hi x) (max lo (min hi x)))
+
+    (define (tone-geometry pl)
+      ;; the tone's place: the centre of its room, in world pixels
+      (let* ((tx (+ (* ROOM-W (car *tone-room*)) (/ ROOM-W 2.0)))
+             (ty (+ (* ROOM-H (cdr *tone-room*)) (/ ROOM-H 2.0)))
+             (dx (/ (- tx (place-px pl)) ROOM-W))
+             (dy (/ (- ty (place-py pl)) ROOM-H)))
+        (list dx dy (sqrt (+ (* dx dx) (* dy dy))))))
+
+    (define (tone-gain d)
+      (cond ((> d (+ TONE-ROOMS 0.5)) 0.0)
+            (else (let ((g (* TONE-GAIN (expt 10.0 (/ (* -1.0 TONE-DB-PER-ROOM (max 0.0 (- d 0.5))) 20.0)))))
+                    ;; the last half room fades to nothing
+                    (if (> d TONE-ROOMS) (* g (- 1.0 (* 2.0 (- d TONE-ROOMS)))) g)))))
+
+    ;; brighter above you, darker below, darker with distance: a low-pass
+    ;; corner in Hz, or #f for none (in the same room). Done by a one-pole
+    ;; low-pass in the tone's own pull, not with player-set-instrument-param!:
+    ;; that swaps a fresh voice graph in mid-note (the note is held from row 0,
+    ;; so the fresh envelope re-attacks) and keeps every old graph in the
+    ;; player's roots (review M6).
+    (define (tone-cutoff d dy)
+      (let ((base (cond ((< d 0.75) #f) ((< d 1.75) 2000.0) (else 900.0))))
+        (and base
+             (cond ((< dy -0.5) (* base 1.5))
+                   ((> dy 0.5) (* base 0.6))
+                   (else base)))))
+
+    ;; the one-pole's coefficient for a corner (1.0: no filtering), eased
+    ;; toward its target each frame so a change of band is not a step
+    (define *tone-a* 1.0)
+    (define *tone-a-target* 1.0)
+    (define *lp-l* 0.0)
+    (define *lp-r* 0.0)
+    (define (corner->a fc)
+      (if fc (- 1.0 (exp (/ (* -2.0 3.14159265 fc) (mixer-rate)))) 1.0))
+
+    (define (tone-pull p)
+      (lambda (out off n)
+        (and (player-pull! p out off n)
+             (let ((gl (car *pan*)) (gr (cdr *pan*)) (a *tone-a*))
+               (let loop ((i 0) (yl *lp-l*) (yr *lp-r*))
+                 (if (< i n)
+                     (let* ((o (+ off (* 8 i)))
+                            (yl (+ yl (* a (- (bytevector-ieee-single-ref out o 'little) yl))))
+                            (yr (+ yr (* a (- (bytevector-ieee-single-ref out (+ o 4) 'little) yr)))))
+                       (bytevector-ieee-single-set! out o (* gl yl) 'little)
+                       (bytevector-ieee-single-set! out (+ o 4) (* gr yr) 'little)
+                       (loop (+ i 1) yl yr))
+                     (begin (set! *lp-l* yl) (set! *lp-r* yr))))
+               #t))))
+
+    (define (close-tone!)
+      (mixer-remove! TONE-ID)
+      (when *tone-player* (player-close! *tone-player*))
+      (set! *tone-player* #f))
+
+    (define (tone-frame! pl now)
+      (when (and (not (memv 2 *carry*)) (not *tone-player*) (tune-text TONE-TUNE))
+        (set! *tone-player* (open TONE-TUNE #t))
+        (when *tone-player*
+          (let ((s (mixer-add! TONE-ID (tone-pull *tone-player*) #t)))
+            (source-factor! s 'dist 0.0 0.0 now))))
+      (let ((s (mixer-find TONE-ID)))
+        (when s
+          (if (memv 2 *carry*)
+              ;; carried: the tone fades and its player closes (review M5)
+              (unless (> (source-factor s 'dist now) 0.99)
+                (source-factor! s 'dist 0.0 0.5 now)
+                (let ((p *tone-player*))
+                  (mixer-at! (+ now 0.6) (lambda () (when (eq? p *tone-player*) (close-tone!))))))
+              (let* ((g (tone-geometry pl)) (dx (car g)) (dy (cadr g)) (d (caddr g))
+                     (pan (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx))))
+                (source-factor! s 'dist (tone-gain d) 0.25 now)
+                ;; equal power, at most MAX-PAN toward it; neither side above unity
+                (let ((a (* 0.25 3.14159265 (+ pan 1.0))))
+                  (set! *pan* (cons (min 1.0 (* 1.41421356 (cos a))) (min 1.0 (* 1.41421356 (sin a))))))
+                (set! *tone-a-target* (corner->a (tone-cutoff d dy)))
+                (set! *tone-a* (+ *tone-a* (* 0.1 (- *tone-a-target* *tone-a*)))))))))
+
+    (define (still-frame! pl dt now)
+      (set! *still-for* (if (place-still pl) (+ *still-for* dt) 0.0))
+      (let ((now-still (>= *still-for* STILL-S)))
+        (unless (eq? now-still *still*)
+          (set! *still* now-still)
+          (when *bed-src*
+            (source-factor! *bed-src* 'still (if now-still DUCK-GAIN 1.0) (if now-still STILL-IN-S STILL-OUT-S) now))
+          (let ((s (mixer-find TONE-ID)))
+            (when s (source-factor! s 'still (if now-still TONE-FORWARD 1.0) (if now-still STILL-IN-S STILL-OUT-S) now)))))
+      (set! *ears*
+            (and *still*
+                 (let* ((g (tone-geometry pl)) (dx (car g)) (dy (cadr g)) (d (caddr g)))
+                   (cond ((or (memv 2 *carry*) (> d (+ TONE-ROOMS 0.5)) (< d 0.3)) 'up)
+                         ((>= (abs dx) (abs dy)) (if (> dx 0) 'right 'left))
+                         ((< dy 0) 'up)
+                         (else 'below))))))
+
+    ;; --- spot sounds ---------------------------------------------------------------------------
+    ;; (name tune lo hi gain): rendered from assets/tunes/TUNE.cts at boot
+    (define SPOTS
+      '((frog "spot-frog" 5.0 14.0 0.55)
+        (bird "spot-bird" 14.0 32.0 0.35)
+        (plop "spot-plop" 7.0 18.0 0.4)
+        (return "return-tone" 0.0 0.0 0.5)))
+
+    (define (spot-ref name) (assq name SPOTS))
+
+    ;; Render the queued cues a few blocks a frame (review M7: a whole cue at
+    ;; once, its notes and motif's 2 s release tail, was one long frame each).
+    (define CUE-BLOCK 1024)
+    (define CUE-BLOCKS-PER-FRAME 4)
+    (define *cue-job* #f)         ; #(name player chunks frames) being rendered
+    (define *cue-buf* (make-bytevector (* 8 CUE-BLOCK) 0))
+
+    (define (render-next-cue!)
+      (when (and (not *cue-job*) (pair? *cue-queue*))
+        (let* ((name (car *cue-queue*))
+               (spec (spot-ref name))
+               (p (and spec (open (cadr spec) #f))))
+          (set! *cue-queue* (cdr *cue-queue*))
+          (when p (set! *cue-job* (vector name p '() 0)))))
+      (when *cue-job*
+        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (* 6 (mixer-rate))))
+          (let loop ((k 0))
+            (when (< k CUE-BLOCKS-PER-FRAME)
+              (let ((more (and (< (vector-ref j 3) limit) (player-pull! p *cue-buf* 0 CUE-BLOCK))))
+                (if more
+                    (begin
+                      (vector-set! j 2 (cons (mono-of *cue-buf* CUE-BLOCK) (vector-ref j 2)))
+                      (vector-set! j 3 (+ (vector-ref j 3) CUE-BLOCK))
+                      (loop (+ k 1)))
+                    (finish-cue! j))))))))
+
+    (define (finish-cue! j)
+      (let* ((frames (vector-ref j 3))
+             (out (make-bytevector (* 4 frames) 0)))
+        (player-close! (vector-ref j 1))
+        (let fill ((cs (reverse (vector-ref j 2))) (at 0))
+          (when (pair? cs)
+            (bytevector-copy! out (* 4 at) (car cs) 0 (bytevector-length (car cs)))
+            (fill (cdr cs) (+ at CUE-BLOCK))))
+        (set! *cues* (cons (cons (vector-ref j 0) (make-cue out frames)) *cues*))
+        (set! *cue-job* #f)))
+
+    (define (mono-of buf n)
+      (let ((m (make-bytevector (* 4 n) 0)))
+        (let loop ((i 0))
+          (when (< i n)
+            (bytevector-ieee-single-set! m (* 4 i)
+              (* 0.5 (+ (bytevector-ieee-single-ref buf (* 8 i) 'little)
+                        (bytevector-ieee-single-ref buf (+ 4 (* 8 i)) 'little)))
+              'little)
+            (loop (+ i 1))))
+        m))
+
+    (define (cue! name gain pan)
+      (let ((c (assq name *cues*)))
+        (when c (mixer-cue! (cdr c) gain pan))))
+
+    (define (due? name now lo hi)
+      (let ((e (assq name *next*)))
+        (cond ((not e) (set! *next* (cons (cons name (+ now (rand-in (* 0.3 lo) hi))) *next*)) #f)
+              ((>= now (cdr e))
+               (set! *next* (cons (cons name (+ now (rand-in lo hi)))
+                                  (filter (lambda (x) (not (eq? (car x) name))) *next*)))
+               #t)
+              (else #f))))
+
+    (define (spots-frame! pl now)
+      (let ((frogs (place-frogs pl))
+            (reeds (room-level (place-levels pl) 'reeds))
+            (water (room-level (place-levels pl) 'water))
+            (bx (- (place-px pl) (* ROOM-W (place-rx pl)))))
+        (when (and (pair? frogs) (due? 'frog now 5.0 14.0))
+          (let* ((fx (list-ref frogs (min (- (length frogs) 1) (exact (floor (* (rand!) (length frogs)))))))
+                 (dist (abs (- fx bx))))
+            (cue! 'frog (* 0.55 (- 1.0 (* 0.5 (min 1.0 (/ dist ROOM-W))))) (clamp (- MAX-PAN) MAX-PAN (/ (- fx bx) 200.0)))))
+        (when (and (> reeds 0.2) (due? 'bird now 14.0 32.0))
+          (cue! 'bird (* 0.35 reeds 1.5) (rand-in (- MAX-PAN) MAX-PAN)))
+        (when (and (> water 0.3) (due? 'plop now 7.0 18.0))
+          (cue! 'plop (* 0.4 water) (rand-in (- MAX-PAN) MAX-PAN)))))
+
+    ;; --- boot and the frame ----------------------------------------------------------------------
+    ;; moments: the fixed moments' tune names the world holds (opened ahead,
+    ;; one per frame after boot, like the cues).
+    (define *to-open* '())
+
+    (define (sound-boot! moments say)
+      (set! *say* say)
+      (set! *to-open* moments)
+      (set! *cue-queue* (map car SPOTS))
+      (for-each tune-text (append moments (list TONE-TUNE) (map cadr SPOTS))))
+
+    ;; One piece of deferred work a frame: a cue render or a moment open,
+    ;; whichever has its text; never while a moment plays.
+    (define (boot-work!)
+      (cond (*cue-job* (render-next-cue!))
+            ((and (pair? *cue-queue*) (tune-text (cadr (spot-ref (car *cue-queue*)))))
+             (render-next-cue!))
+            ((and (pair? *to-open*) (tune-text (car *to-open*)))
+             (sound-preopen! (car *to-open*))
+             (set! *to-open* (cdr *to-open*)))
+            (else #f)))
+
+    ;; Every frame. place: #f outside the world (the test room, the atlas).
+    (define (sound-frame! now dt pl)
+      (set! *now* now)
+      (unless pl (set! *ears* #f))
+      (when pl
+        (set! *hush* (hush-tick *hush* dt))
+        (unless (moment-busy?) (boot-work!))
+        ;; A room entry waits until its bed's and its moment's texts are in (on
+        ;; the web the page fetches them; tune-text asks): handled on the first
+        ;; frame they are, so the bed opens and the moment is decided with them
+        ;; (the first headless run entered at once and never had a bed).
+        ;; Not forever: after TEXT-WAIT-S the room is entered with what there
+        ;; is (a tune that never comes: a failed fetch), so the levels, the hush
+        ;; count and the rest still follow the player.
+        (when (not (equal? (place-key pl) *key*))
+          (unless (and *waiting* (equal? (car *waiting*) (place-key pl)))
+            (set! *waiting* (cons (place-key pl) now)))
+          (when (or (texts-ready? pl) (>= (- now (cdr *waiting*)) TEXT-WAIT-S))
+            (set! *waiting* #f)
+            (enter-room! pl now)))
+        ;; what is carried changed: the bed reopens with its drone notes (not a
+        ;; visit: no hush count, no moment decision; review LOW)
+        (when (and *carry-changed* *region* *bed-tune*)
+          (set! *carry-changed* #f)
+          (open-region-bed! *region* *groups* *bed-tune* *room-levels* now))
+        (when (> (place-returns pl) *returns*)
+          (set! *returns* (place-returns pl))
+          (cue! 'return 0.5 0.0))
+        (still-frame! pl dt now)
+        (tone-frame! pl now)
+        (spots-frame! pl now)))
+
+    (define (moment-busy?) (and *moment* #t))
+
+    (define TEXT-WAIT-S 3.0)
+    (define *waiting* #f)          ; (key . since): a room entry waiting for its texts
+
+    (define (texts-ready? pl)
+      (and (or (not (place-bed-tune pl)) (tune-text (place-bed-tune pl)))
+           (or (not (place-moment pl)) (tune-text (place-moment pl)))))
+
+    (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
+
+    (define (sound-lines)
+      (let ((h *hush*))
+        (list (string-append "sound " (if *moment* (string-append "moment " (symbol->string* (car *moment*))) "quiet")
+                             " still " (if *still* "yes" "no")
+                             " ears " (if *ears* (symbol->string *ears*) "-"))
+              (string-append "hush played " (r1 (hush-played h)) " rooms " (number->string (hush-rooms h))
+                             " wander " (symbol->string (hush-why-wander h))
+                             " spent " (number->string (length (hush-spent h)))))))
+
+    (define (symbol->string* x) (if (symbol? x) (symbol->string x) x))))

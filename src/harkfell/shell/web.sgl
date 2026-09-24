@@ -33,6 +33,12 @@
 ;;;   ("tap", "X,Y")         a click or tap in canvas pixels (the atlas and the
 ;;;                          sheet enter the room under it)
 ;;;   ("test-room", "")      ?test-room: A0's grey room
+;;;   ("gesture", NAME)      a user gesture: resume the audio context (A2)
+;;;   ("bench", "")          ?bench: the phone measurement ((harkfell bench))
+;;;   ("carry", "2,3")       ?carry=: the harmonics carried (their drone voices sound)
+;;;   ("tone", "X,Y")        ?tone=: the room H2's finding tone sounds from
+;;;   ("tune-chunk", TEXT)   part of a tune's text, then
+;;;   ("tune-done", NAME)    the text is complete (the answer to a fetch line)
 ;;;
 ;;; Trace lines (with ?trace, on the console):
 ;;;   harkfell: boot stick FORM          the stick form in force
@@ -47,6 +53,11 @@
 ;;;   harkfell: problem FILE:LINE: ...   one per problem (printed always)
 ;;;   harkfell: room REGION:X,Y          the body entered a room (with ?trace,
 ;;;                                      and always after a goto or a tap)
+;;;   harkfell: audio RATE STATE         the mixer opened (always)
+;;;   harkfell: fetch NAME               a tune is wanted: the page fetches
+;;;                                      assets/tunes/NAME.cts (always)
+;;;   harkfell: bench ...                the measurement's lines (always; see
+;;;                                      (harkfell bench))
 ;;; The replay and envelope lines print whether or not ?trace is on:
 ;;; they are asked for.
 
@@ -61,7 +72,9 @@
           (harkfell shell)
           (harkfell replay)
           (harkfell envelope)
-          (harkfell feel))
+          (harkfell feel)
+          (harkfell tunes)
+          (harkfell audio))
 
   (export web-main web-dispatch)
 
@@ -71,6 +84,7 @@
     (define *returns* 0)
     (define *world-files* '())      ; the page's files, until world-done
     (define *room* #f)              ; the last room label traced
+    (define *work-ms* 0.0)          ; A2: the last frame's work (the bench reads it)
 
     (define (say . parts)
       (println "~a" (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts))))
@@ -98,9 +112,11 @@
 
     (define (web-tick payload)
       (let* ((dt (frame-dt payload))
-             (ms (string->number payload)))
+             (ms (string->number payload))
+             (w0 (now-ms)))
         (shell-set-frame-stamp! ms)
         (let ((ticks (shell-frame! dt)))
+          (audio-frame! (* 1000.0 dt) *work-ms*)
           (when (and *trace* (not (= (world-returns (shell-world)) *returns*)))
             (set! *returns* (world-returns (shell-world)))
             (say "returns" (number->string *returns*)))
@@ -108,7 +124,8 @@
             (set! *room* (shell-room-label))
             (say "room" *room*))
           (gles3-resize-to-display)
-          (shell-present! (gles3-canvas-width) (gles3-canvas-height) ticks))))
+          (shell-present! (gles3-canvas-width) (gles3-canvas-height) ticks)
+          (set! *work-ms* (- (now-ms) w0)))))
 
     ;; "A,B,C" -> a list of numbers (#f for a field that is not one).
     (define (fields payload)
@@ -122,6 +139,10 @@
       (set-viewport #f)
       (set-letterbox-color 0.0 0.0 0.0)
       (shell-boot!)
+      ;; A2: the sound. A tune the wasm lacks is asked of the page
+      ;; ("harkfell: fetch NAME"; it answers with tune-chunk and tune-done).
+      (tunes-set-want! (lambda (name) (say "fetch" name)))
+      (audio-boot! say)
       (gles3-start-loop "harkfell-web-tick")
       0)
 
@@ -201,6 +222,7 @@
                (for-each (lambda (p) (say "problem" p)) ps)
                (set! *world-files* '())
                (shell-goto-start!)
+               (audio-world! (shell-content))
                (if (null? ps) 1 0)))
             ((string=? type "goto")
              (if (let* ((parts (string-split payload "@"))
@@ -227,4 +249,11 @@
                (when r (set! *room* r) (say "room" r))
                (if r 1 0)))
             ((string=? type "test-room") (shell-test-room!) 0)
+            ;; A2
+            ((string=? type "gesture") (audio-gesture!) 0)
+            ((string=? type "bench") (audio-bench!) 0)
+            ((string=? type "carry") (audio-carry! payload) 0)
+            ((string=? type "tone") (audio-tone-room! payload) 0)
+            ((string=? type "tune-chunk") (tunes-chunk! payload) 0)
+            ((string=? type "tune-done") (tunes-done! payload) 0)
             (else 0)))))

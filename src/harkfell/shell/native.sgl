@@ -50,7 +50,8 @@
           (harkfell feel)
           (harkfell source)
           (harkfell cli)
-          (harkfell fixtures))
+          (harkfell fixtures)
+          (harkfell audio))
 
   (export native-main)
 
@@ -136,9 +137,14 @@
               (guard (x (#t (say "harkfell: live reload skipped a look: "
                                  (if (error-object? x) (error-object-message x) "an error"))))
                 (check-reload!)))
-            (let ((ticks (shell-frame! dt)))
-              (shell-present! (frame-width) (frame-height) ticks))
+            (let* ((w0 (now-ms))
+                   (ticks (shell-frame! dt)))
+              (audio-frame! (* 1000.0 dt) *work-ms*)
+              (shell-present! (frame-width) (frame-height) ticks)
+              (set! *work-ms* (- (now-ms) w0)))
             (unless (quit-requested?) (frame (+ n 1)))))))
+
+    (define *work-ms* 0.0)     ; A2: the last frame's work (the bench reads it)
 
     ;; Loads the world; enters --room's door or the start. #f (after saying
     ;; why) when there is nothing to play.
@@ -151,6 +157,7 @@
                   (key (arg-value args "--room")))
               (for-each (lambda (p) (say "harkfell: " p)) ps)
               (set! *mtimes* (source-mtimes dir))
+              (audio-world! (shell-content))
               (cond ((and key (let* ((a (arg-value args "--at"))
                                      (cr (and a (map string->number (string-split a ","))))
                                      (at (and cr (= (length cr) 2) (car cr) (cadr cr) (cons (car cr) (cadr cr)))))
@@ -173,6 +180,12 @@
               (else
                (shell-boot!)
                (shell-set-ms! (and (member "--ms" args) #t))
+               ;; A2: the sound; --bench runs the phone measurement natively
+               (audio-boot! (lambda parts (say (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts)))))
+               (when (member "--bench" args) (audio-bench!))
+               (let ((c (arg-value args "--carry")) (t (arg-value args "--tone")))
+                 (when c (audio-carry! c))
+                 (when t (audio-tone-room! t)))
                (if (or (member "--test-room" args) (enter-world! args))
                    (begin
                      (run-game "Harkfell" WINDOW-W WINDOW-H (loop))

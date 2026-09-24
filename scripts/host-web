@@ -91,7 +91,7 @@ stop_port "$PORT_HTTP" sigil "serve --dir"
 rm -rf "$DST"
 cp -r "$SRC" "$DST"
 
-setsid node scripts/serve-web-tls.mjs "$DST" "$PORT_TLS" --isolate > "build/host-$PORT_TLS.log" 2>&1 &
+setsid node scripts/serve-web-tls.mjs "$DST" "$PORT_TLS" --isolate --log > "build/host-$PORT_TLS.log" 2>&1 &
 echo $! > "build/host-$PORT_TLS.pid"
 setsid sigil serve --dir "$DST" --host "$HOST" --port "$PORT_HTTP" > "build/host-$PORT_HTTP.log" 2>&1 &
 echo $! > "build/host-$PORT_HTTP.pid"

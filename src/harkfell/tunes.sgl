@@ -1,0 +1,88 @@
+;;; (harkfell tunes) - The game's .cts tunes by name: their text and their parse.
+;;;
+;;; A tune lives at assets/tunes/NAME.cts. Natively its text is read from
+;;; there (the game runs from the repository's root, as scripts/dev does);
+;;; on the web the page fetches it and hands the text over in chunks
+;;; (tunes-chunk!, tunes-done!), and a name the wasm needs and does not have
+;;; is asked for through the WANT hook (the web shell prints a line the page
+;;; answers with a fetch).
+;;;
+;;; Parsing is a known stall on a phone (Crash's M1: a tune open is up to
+;;; ~260 ms of the frame thread), so the parse is kept apart from the open:
+;;; tune-parsed parses once and keeps the value, and each parse's cost is
+;;; recorded (tunes-parse-ms).
+;;;
+;;;   (tune-text name)          the text, or #f (natively: read on first use)
+;;;   (tune-parsed name)        the tune value, or #f (no text, or it does not read)
+;;;   (tunes-provide! name text)
+;;;   (tunes-chunk! s) (tunes-done! name)   the page's delivery
+;;;   (tunes-set-want! proc)     (proc name): a text is missing
+;;;   (tunes-parse-ms name)     the last parse's ms, or #f
+
+(define-library (harkfell tunes)
+  (import (sigil core)
+          (sigil string)
+          (sigil time)
+          (sigil io)
+          (sigil fs)
+          (motif tune))
+
+  (export tune-text tune-parsed tunes-provide! tunes-chunk! tunes-done!
+          tunes-set-want! tunes-parse-ms tune-path tune-exists?)
+
+  (begin
+    (define *texts* '())        ; ((name . text) ...)
+    (define *parsed* '())       ; ((name . tune) ...)
+    (define *parse-ms* '())     ; ((name . ms) ...)
+    (define *chunks* '())
+    (define *want* #f)
+    (define *wanted* '())
+
+    (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
+
+    (define (tune-path name) (string-append "assets/tunes/" name ".cts"))
+
+    ;; Natively: does the file exist (the content check's question)
+    (define (tune-exists? name) (file-exists? (tune-path name)))
+
+    (define (tunes-set-want! proc) (set! *want* proc))
+
+    (define (tunes-provide! name text)
+      (set! *texts* (cons (cons name text) (filter (lambda (e) (not (string=? (car e) name))) *texts*)))
+      (set! *parsed* (filter (lambda (e) (not (string=? (car e) name))) *parsed*)))
+
+    (define (tunes-chunk! s) (set! *chunks* (cons s *chunks*)))
+
+    (define (tunes-done! name)
+      (tunes-provide! name (apply string-append (reverse *chunks*)))
+      (set! *chunks* '()))
+
+    (define (tune-text name)
+      (let ((e (assoc name *texts*)))
+        (cond (e (cdr e))
+              (*want*
+               (unless (member name *wanted*)
+                 (set! *wanted* (cons name *wanted*))
+                 (*want* name))
+               #f)
+              ((tune-exists? name)
+               (let ((text (read-file-string (tune-path name))))
+                 (tunes-provide! name text)
+                 text))
+              (else #f))))
+
+    (define (tune-parsed name)
+      (let ((e (assoc name *parsed*)))
+        (if e
+            (cdr e)
+            (let ((text (tune-text name)))
+              (and text
+                   (let* ((t0 (now-ms))
+                          (t (guard (x (#t #f)) (read-tune-string text))))
+                     (set! *parse-ms* (cons (cons name (- (now-ms) t0)) *parse-ms*))
+                     ;; a text that does not read is remembered as #f: not parsed again
+                     (set! *parsed* (cons (cons name t) *parsed*))
+                     t))))))
+
+    (define (tunes-parse-ms name)
+      (let ((e (assoc name *parse-ms*))) (and e (cdr e))))))

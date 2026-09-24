@@ -1,0 +1,224 @@
+;;; (harkfell bench) - The phone measurement A2 starts with (?bench).
+;;;
+;;; harkfell-design section 5 ("Budget, to measure, not assume") and section
+;;; 10 A2: the bed alone, the bed plus a moment player, a region-border
+;;; crossfade (three players), and the cost of opening a tune, on David's
+;;; phone at 32000, against a 4 ms music budget and the frame budget. The
+;;; game's room runs underneath as it would in play; nothing is asked of the
+;;; player but to leave the phone on the page.
+;;;
+;;; The other tunes are S0's (copied into assets/tunes): bed-reedfen (8 channels:
+;;; wind, water, reeds and the drone H2 H3 H4 H5 H7, EVERY channel unmuted:
+;;; the heaviest a bed gets, the end of the game with H7), moment-reedfen,
+;;; and bed-hollow as the second region's bed.
+;;;
+;;; The run, in 30 s phases, each measured over its last 25 s (from 5 s in):
+;;;   a2bed      A2's own bed as it ships (reedfen-bed: wind, water, reeds; the
+;;;              drone's H2 and H3 notes dropped since nothing is carried)
+;;;   a2moment   the same, plus the fixed moment (first-open-water, looped)
+;;;              and the duck on the bed's source gain
+;;;   bed        S0's full Reedfen bed, all 8 channels sounding (the heaviest
+;;;              a bed gets: the end of the game, with H7)
+;;;   moment     the full bed plus the moment
+;;;   border     the full bed, the moment and a second region's bed
+;;;              (bed-hollow), the beds at half each: three players
+;;;   opens      the full bed alone; every 3 s a parse and open (then a close)
+;;;              of the moment, then of bed-hollow, three times each: one
+;;;              open line each, with the frame's work and the dry frames of
+;;;              the next 2.5 s
+;;; About 2.9 minutes in all. A2's two phases also run the finding tone
+;;; (tone-h2, at a distance's gain: it synthesises whatever its gain), as
+;;; play does. "music" is ms per 60 fps frame of audio (Crash's unit, the
+;;; budget's); a phone at 30 fps pays twice that per frame it draws, which
+;;; "per-second" (ms of synthesis per second of audio) states without a
+;;; frame rate.
+;;;
+;;; Lines (through say, "harkfell: bench ..."; the page beacons them):
+;;;   bench start rate R state S
+;;;   bench open NAME parse P open O work W dry D     (ms, ms, the frame's work ms, starved frames in the next 2.5 s)
+;;;   bench PHASE music M budget 4 per SRC/M/P95 ... pump P50/P95/MAX frame P50/P95/MAX work P50/P95/MAX over33 N frames N dry-sounding N dry-tail N
+;;;   bench done
+
+(define-library (harkfell bench)
+  (import (sigil core)
+          (sigil math)
+          (sigil string)
+          (sigil list)
+          (sigil time)
+          (motif tune)
+          (motif tune player)
+          (engine mixer)
+          (harkfell tunes)
+          (only (harkfell sound) strip-uncarried))
+
+  (export bench-start! bench-frame! bench-running? bench-done?)
+
+  (begin
+    (define A2-BED "reedfen-bed")
+    (define A2-MOMENT "first-open-water")
+    (define TONE "tone-h2")
+    (define BED-A "bed-reedfen")
+    (define BED-B "bed-hollow")
+    (define MOMENT "moment-reedfen")
+    (define BUDGET-MS 4.0)
+
+    (define *on* #f)
+    (define *done* #f)
+    (define *say* #f)
+    (define *t0* #f)              ; the clock at the run's start (s)
+    (define *step* 0)             ; the next scheduled step
+    (define *frames* '())         ; frame intervals (ms) in the window
+    (define *works* '())          ; frame work (ms) in the window
+    (define *opens* '())          ; ((name parse open work) ...) of the open series
+    (define *pending-open* #f)    ; (name parse open work dry-before t) awaiting its dry figure
+    (define *players* '())        ; ((name . player) ...) open
+
+    (define (bench-running?) *on*)
+    (define (bench-done?) *done*)
+
+    (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
+    (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
+    (define (n x) (number->string (exact (round x))))
+
+    (define (bench-start! say)
+      (set! *on* #t)
+      (set! *say* say)
+      ;; ask for the texts now (on the web the page fetches them)
+      (for-each tune-text (list A2-BED A2-MOMENT TONE BED-A BED-B MOMENT)))
+
+    (define (ready?) (and (tune-text A2-BED) (tune-text A2-MOMENT) (tune-text TONE) (tune-text BED-A) (tune-text BED-B) (tune-text MOMENT)))
+
+    ;; parse + open, timed separately. Answers (player parse-ms open-ms).
+    (define (open-timed name loop?)
+      (let* ((t0 (now-ms))
+             (t (read-tune-string (tune-text name)))
+             (t1 (now-ms))
+             (p (open-tune-player t (mixer-rate) loop: loop?))
+             (t2 (now-ms)))
+        (list p (- t1 t0) (- t2 t1))))
+
+    (define (start-source! id name loop? work-at)
+      (let* ((o (open-timed name loop?))
+             (p (car o)))
+        (set! *players* (cons (cons id p) *players*))
+        (*say* "bench" "open" name "parse" (r1 (cadr o)) "open" (r1 (caddr o)) "live")
+        (let ((s (mixer-add! id (lambda (out off k) (player-pull! p out off k)) #t)))
+          s)))
+
+    (define (stop-source! id)
+      (mixer-remove! id)
+      (let ((e (assoc id *players*)))
+        (when e (player-close! (cdr e)))
+        (set! *players* (filter (lambda (x) (not (equal? (car x) id))) *players*))))
+
+    (define (reset-window!)
+      (set! *frames* '())
+      (set! *works* '())
+      (mixer-stats-reset!))
+
+    (define (trip l) (list (median-of l) (percentile-of l 0.95) (if (null? l) 0.0 (apply max l))))
+    (define (first3 l) (list (car l) (cadr l) (caddr l)))
+    (define (slash l) (string-join (map r1 l) "/"))
+
+    (define (report! phase)
+      (let* ((st (mixer-stats))
+             (per (stats-ref st 'sources)))
+        (apply *say*
+               (append (list "bench" phase "music" (r1 (stats-ref st 'frame-ms)) "budget" (r1 BUDGET-MS))
+                       (apply append (map (lambda (p) (list "per" (string-append (car p) "/" (r1 (cadr p)) "/" (r1 (caddr p))))) per))
+                       ;; the same cost as ms of synthesis per second of audio
+                       ;; (under 1000 keeps up; independent of the frame rate)
+                       (list "per-second" (r1 (* 60.0 (stats-ref st 'frame-ms)))
+                             "pump" (slash (first3 (stats-ref st 'pump)))
+                             "frame" (slash (trip *frames*))
+                             "work" (slash (trip *works*))
+                             "over33" (n (length (filter (lambda (x) (> x 33.4)) *frames*)))
+                             "frames" (n (length *frames*))
+                             "dry-sounding" (n (stats-ref st 'dry-sounding))
+                             "dry-tail" (n (stats-ref st 'dry-tail)))))))
+
+    (define (dry-now) (stats-ref (mixer-stats) 'dry-sounding))
+
+    ;; one open of the series: parse + open + close, with bed A sounding
+    (define (series-open! name work)
+      (let* ((o (open-timed name #t)))
+        (player-close! (car o))
+        (set! *pending-open* (list name (cadr o) (caddr o) (dry-now) (+ (mixer-now) 2.5)))))
+
+    ;; (t . action), seconds from the start
+    (define (duck! id) (source-factor! (mixer-find id) 'duck 0.5 2.0 (mixer-now)))
+    (define STEPS
+      (list (cons 0.0 (lambda () (mixer-stats-reset!) (start-a2-bed!)
+                         (source-factor! (start-source! "tone" TONE #t 0) 'dist 0.1 0.0 (mixer-now))))
+            (cons 5.0 reset-window!)
+            (cons 30.0 (lambda () (report! "a2bed") (start-source! "moment" A2-MOMENT #t 0) (duck! "a2")))
+            (cons 35.0 reset-window!)
+            (cons 60.0 (lambda () (report! "a2moment") (stop-source! "moment") (stop-source! "a2") (stop-source! "tone")
+                          (mixer-stats-reset!) (start-source! "bed-a" BED-A #t 0)))
+            (cons 65.0 reset-window!)
+            (cons 90.0 (lambda () (report! "bed") (start-source! "moment" MOMENT #t 0) (duck! "bed-a")))
+            (cons 95.0 reset-window!)
+            (cons 120.0 (lambda () (report! "moment")
+                          (start-source! "bed-b" BED-B #t 0)
+                          (source-factor! (mixer-find "bed-a") 'fade 0.5 4.0 (mixer-now))
+                          (source-factor! (mixer-find "bed-b") 'fade 0.0 0.0 (mixer-now))
+                          (source-factor! (mixer-find "bed-b") 'fade 0.5 4.0 (mixer-now))))
+            (cons 125.0 reset-window!)
+            (cons 150.0 (lambda () (report! "border")
+                           (stop-source! "moment")
+                           (stop-source! "bed-b")
+                           (source-factor! (mixer-find "bed-a") 'fade 1.0 1.0 (mixer-now))
+                           (source-factor! (mixer-find "bed-a") 'duck 1.0 1.0 (mixer-now))
+                           (reset-window!)))
+            (cons 152.0 (lambda () (series-open! MOMENT 0)))
+            (cons 155.0 (lambda () (series-open! BED-B 0)))
+            (cons 158.0 (lambda () (series-open! MOMENT 0)))
+            (cons 161.0 (lambda () (series-open! BED-B 0)))
+            (cons 164.0 (lambda () (series-open! MOMENT 0)))
+            (cons 167.0 (lambda () (series-open! BED-B 0)))
+            (cons 170.0 (lambda () (report! "opens")
+                           (stop-source! "bed-a")
+                           (*say* "bench" "done")
+                           (set! *done* #t)
+                           (set! *on* #f)))))
+
+    ;; A2's bed as the director opens it: nothing carried, so the drone's
+    ;; notes are dropped (a muted channel still synthesises).
+    (define (start-a2-bed!)
+      (let* ((t0 (now-ms))
+             (t (strip-uncarried (read-tune-string (tune-text A2-BED)) '()))
+             (t1 (now-ms))
+             (p (open-tune-player t (mixer-rate) loop: #t))
+             (t2 (now-ms)))
+        (set! *players* (cons (cons "a2" p) *players*))
+        (*say* "bench" "open" A2-BED "parse" (r1 (- t1 t0)) "open" (r1 (- t2 t1)) "live")
+        (mixer-add! "a2" (lambda (out off k) (player-pull! p out off k)) #t)))
+
+    ;; Every frame while running: now (s, the shell's clock), the frame's
+    ;; interval and its work (ms, the frame before this one: the work of the
+    ;; frame in progress is not known yet).
+    (define (bench-frame! now frame-ms work-ms)
+      (when *on*
+        (cond
+          ((not *t0*)
+           (when (ready?)
+             (set! *t0* now)
+             (*say* "bench" "start" "rate" (n (mixer-rate)) "state" (symbol->string (mixer-state)))))
+          (else
+           (set! *frames* (cons frame-ms *frames*))
+           (set! *works* (cons work-ms *works*))
+           ;; the open series' dry figure, and the work of the frame that opened
+           (when (and *pending-open* (= (length *pending-open*) 5))
+             (set! *pending-open* (append *pending-open* (list work-ms))))
+           (when (and *pending-open* (>= now (list-ref *pending-open* 4)) (= (length *pending-open* ) 6))
+             (let ((p *pending-open*))
+               (*say* "bench" "open" (list-ref p 0) "parse" (r1 (list-ref p 1)) "open" (r1 (list-ref p 2))
+                      "work" (r1 (list-ref p 5)) "dry" (n (- (dry-now) (list-ref p 3))))
+               (set! *pending-open* #f)))
+           (let loop ()
+             (when (< *step* (length STEPS))
+               (let ((s (list-ref STEPS *step*)))
+                 (when (>= (- now *t0*) (car s))
+                   (set! *step* (+ *step* 1))
+                   ((cdr s))
+                   (loop)))))))))))

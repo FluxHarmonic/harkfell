@@ -1,0 +1,141 @@
+;;; (harkfell audio) - What both shells call for the sound, once a frame, and
+;;; the adapter from the world to the sound director's PLACE.
+;;;
+;;;   (audio-boot! say)          open the mixer (suspended on the web until a gesture)
+;;;   (audio-world! content)     the world loaded: the director learns its moments
+;;;   (audio-gesture!)           a user gesture: resume the context (the web's autoplay policy)
+;;;   (audio-bench!)             ?bench / --bench: the phone measurement ((harkfell bench));
+;;;                              the director is silent while it runs
+;;;   (audio-carry! "2,3")       ?carry= / --carry: the harmonics carried (A3's pickups do this in play)
+;;;   (audio-tone-room! "X,Y")   ?tone= / --tone: where H2's finding tone is
+;;;   (audio-frame! frame-ms work-ms)   every frame, after the world's ticks
+;;;   (audio-lines)              the readout's sound lines
+
+(define-library (harkfell audio)
+  (import (sigil core)
+          (sigil time)
+          (sigil math)
+          (sigil list)
+          (sigil string)
+          (engine mixer)
+          (engine body)
+          (engine worldmap)
+          (harkfell world)
+          (harkfell content)
+          (harkfell shell)
+          (harkfell tunes)
+          (harkfell sound)
+          (harkfell bench))
+
+  (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
+          audio-carry! audio-tone-room! audio-lines world-place room-moment-name)
+
+  (begin
+    (define *say* (lambda parts #f))
+    (define *last* #f)
+
+    (define (audio-now) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+
+    (define (audio-boot! say)
+      (set! *say* say)
+      (mixer-open!)
+      (shell-set-extra-lines! audio-lines)
+      (*say* "audio" (number->string (mixer-rate)) (symbol->string (mixer-state))))
+
+    (define (audio-gesture!) (mixer-resume!))
+
+    (define (audio-bench!) (sound-reset!) (bench-start! *say*))
+
+    ;; "2,3" -> (2 3)
+    (define (numbers s) (filter number? (map string->number (string-split s ","))))
+
+    (define (audio-carry! s) (sound-set-carry! (numbers s)))
+
+    (define (audio-tone-room! s)
+      (let ((n (numbers s)))
+        (when (= (length n) 2) (sound-set-tone-room! (car n) (cadr n)))))
+
+    ;; --- the adapter -------------------------------------------------------------------
+    (define (kw-ref l name)
+      (let find ((l l))
+        (cond ((or (not (pair? l)) (null? (cdr l))) #f)
+              ((and (keyword? (car l)) (string=? (keyword->string (car l)) name)) (cadr l))
+              (else (find (cdr l))))))
+
+    ;; A room's fixed moment as a tune name (a string), or #f.
+    (define (room-moment-name rm)
+      (let* ((m (room-moment rm))
+             (t (and (list? m) (kw-ref m "tune"))))
+        (and (symbol? t) (symbol->string t))))
+
+    (define (region-of ct sym)
+      (find (lambda (r) (eq? (region-name r) sym)) (content-regions ct)))
+
+    ;; bed: (wind 0.4 water 0.8) -> ((wind . 0.4) (water . 0.8))
+    (define (plist->alist l)
+      (if (and (pair? l) (pair? (cdr l)))
+          (cons (cons (car l) (cadr l)) (plist->alist (cddr l)))
+          '()))
+
+    (define TILE 16)
+
+    ;; The place the director needs, from the running world; #f outside the
+    ;; written world (A0's test room, the atlas, the sheet).
+    (define (world-place w ct)
+      (let* ((p (and w (world-room w)))
+             (rm (and p (placed-data p))))
+        (and rm ct
+             (let* ((reg (region-of ct (room-region rm)))
+                    (b (world-body w))
+                    (wm (world-map w))
+                    (bed (region-field reg 'bed))
+                    (frogs (filter-map (lambda (t)
+                                         (and (pair? t) (eq? (car t) 'bellfrog)
+                                              (let ((at (kw-ref (cdr t) "at")))
+                                                (and (pair? at) (+ (* TILE (car at)) (/ TILE 2.0))))))
+                                       (let ((ts (room-things rm))) (if (list? ts) ts '())))))
+               (place key: (room-label rm)
+                           region: (room-region rm)
+                           bed-tune: (cond ((string? bed) bed) ((symbol? bed) (symbol->string bed)) (else #f))
+                           groups: (or (region-field reg 'bed-channels) '())
+                           levels: (plist->alist (room-bed rm))
+                           moment: (room-moment-name rm)
+                           frogs: frogs
+                           ;; ABSOLUTE world pixels: the map's pixels start at its
+                           ;; westmost and northmost room (x0 y0), not at room (0 0)
+                           px: (+ (body-x b) 4.0 (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)))
+                           py: (+ (body-y b) 6.0 (* (worldmap-rows wm) (worldmap-size wm) (worldmap-y0 wm)))
+                           rx: (room-x rm) ry: (room-y rm)
+                           still: (and (eq? (world-phase w) 'play)
+                                       (memq (body-mode b) '(ground))
+                                       (< (abs (body-vx b)) 0.01)
+                                       (< (abs (body-vy b)) 0.01))
+                           returns: (world-returns w))))))
+
+    (define (filter-map f l)
+      (let loop ((l l) (acc '()))
+        (if (null? l) (reverse acc)
+            (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+    (define (audio-world! ct)
+      (when ct
+        (let ((ms (filter-map (lambda (p) (room-moment-name (placed-data p))) (content-rooms ct))))
+          (sound-boot! ms *say*))))
+
+    (define (audio-frame! frame-ms work-ms)
+      (let ((now (audio-now)))
+        (if (or (bench-running?) (bench-done?))
+            (when (bench-running?) (bench-frame! now frame-ms work-ms))
+            (let ((dt (if *last* (min 0.25 (- now *last*)) 0.0)))
+              (sound-frame! now dt (world-place (shell-world) (shell-content)))))
+        (set! *last* now)
+        (mixer-pump! now)))
+
+    (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
+
+    (define (audio-lines)
+      (let ((st (mixer-stats)))
+        (append (sound-lines)
+                (list (string-append "music " (r1 (stats-ref st 'frame-ms)) " ms/frame pump "
+                                     (r1 (car (stats-ref st 'pump))) " dry " (number->string (stats-ref st 'dry-sounding))
+                                     " rate " (number->string (mixer-rate)))))))))

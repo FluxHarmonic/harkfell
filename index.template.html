@@ -8,6 +8,24 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Harkfell</title>
+  <script>
+    // A2: the sound renders at ?rate=N Hz (default 32000, the rate Crash's
+    // phone measurements chose; ?rate=device for the device's own) and the
+    // browser resamples to the device. The WebAudio bridge opens
+    // `new AudioContext()` with no options, so the page supplies the rate by
+    // wrapping the constructor before the loader runs (the S0 sketchbook's way).
+    (function () {
+      var p = new URLSearchParams(location.search).get("rate");
+      var want = p === "device" ? 0 : Number(p || 32000);
+      var Base = window.AudioContext || window.webkitAudioContext;
+      if (want > 0 && Base) {
+        var Wrapped = function (opts) { return new Base(Object.assign({ sampleRate: want }, opts || {})); };
+        Wrapped.prototype = Base.prototype;
+        window.AudioContext = Wrapped;
+        if (window.webkitAudioContext) window.webkitAudioContext = Wrapped;
+      }
+    })();
+  </script>
   <!-- version: "__VERSION__" -->
   <style>
     /* The page is the room: the canvas fills the viewport and the game
@@ -42,6 +60,12 @@
     #dead { position: fixed; inset: 0; z-index: 3; display: flex; align-items: center;
             justify-content: center; background: rgba(0, 0, 0, 0.8); color: #ddd; font: 48px sans-serif; }
     #dead[hidden] { display: none; }
+
+    /* ?bench: the measurement's lines, and the tap that starts it */
+    #bench { position: fixed; left: 0; right: 0; top: 0; z-index: 4; max-height: 70vh; overflow: auto;
+             margin: 0; padding: 8px; background: rgba(0, 0, 0, 0.78); color: #cfe; font: 11px/1.35 ui-monospace, monospace;
+             white-space: pre-wrap; word-break: break-all; }
+    #bench[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -52,6 +76,7 @@
     <div id="jumpbtn"></div>
   </div>
   <div id="dead" hidden>&#x21bb;</div>
+  <pre id="bench" hidden></pre>
   <div id="status"></div>
 
   <script>
@@ -90,6 +115,15 @@
   //                        region sheet); a tap enters a room.
   //   ?still               the world does not step (screenshots).
   //   ?test-room           A0's grey test room instead of the world.
+  //   ?rate=N|device       the sound's render rate (A2; default 32000).
+  //   ?carry=2,3           play as if carrying those harmonics: their drone
+  //                        voices sound in the bed (A3's pickups do this).
+  //   ?tone=X,Y            the room H2's finding tone sounds from (default
+  //                        11,3: a placeholder east of Reedfen's six rooms).
+  //   ?bench               the phone measurement (A2, (harkfell bench)): a tap
+  //                        starts it; about 3.3 minutes; its lines show at the
+  //                        top and are sent to the host (bench-report?LINE), so
+  //                        the numbers need no transcribing.
   //
   // The guard follows Crash The Stack's page guard (master e737d21) in
   // spirit, much reduced: a FATAL line, a trap out of a dispatch or a lost
@@ -107,6 +141,63 @@
       deadCard.hidden = false;
     }
     deadCard.addEventListener("click", function () { location.reload(); });
+
+    // ---- A2: the sound's lines -------------------------------------------
+    //   harkfell: fetch NAME   the wasm wants assets/tunes/NAME.cts: fetched and
+    //                          handed over in 8 KB chunks, then tune-done
+    //   harkfell: bench ...    ?bench's lines: shown, and sent to the host
+    var benchEl = document.getElementById("bench");
+    var fetched = {}, tries = {};
+    function fetchTune(name) {
+      if (!/^[a-z0-9-]+$/.test(name) || fetched[name]) return;
+      fetched[name] = true;
+      fetch("assets/tunes/" + name + ".cts").then(function (r) {
+        if (!r.ok) throw new Error("tune " + name + " " + r.status);
+        return r.text();
+      }).then(function (text) {
+        for (var i = 0; i < text.length; i += 8192) send("tune-chunk", text.slice(i, i + 8192));
+        send("tune-done", name);
+      }, function (err) {
+        // a failed fetch is tried again, three times in all, 2 s apart (the
+        // wasm asks for a name once; review M4)
+        fetched[name] = false;
+        tries[name] = (tries[name] || 0) + 1;
+        if (tries[name] < 3) setTimeout(function () { fetchTune(name); }, 2000);
+        else console.error("harkfell: " + err.message);
+      });
+    }
+    function report(line) {
+      benchEl.textContent += line + "\n";
+      benchEl.scrollTop = benchEl.scrollHeight;
+      try { fetch("bench-report?" + encodeURIComponent(line), { cache: "no-store" }).catch(function () {}); } catch (err) { /* offline */ }
+    }
+    var log = console.log;
+    console.log = function () {
+      var line = String(arguments[0] || "");
+      if (line.indexOf("harkfell: fetch ") === 0) fetchTune(line.slice(16).trim());
+      else if (line.indexOf("harkfell: bench ") === 0 || (benchOn && line.indexOf("harkfell: audio ") === 0)) report(line);
+      return log.apply(console, arguments);
+    };
+    // Every gesture may resume the audio context (the autoplay policy); the
+    // capture phase sees the touch controls' events before they stop them.
+    ["pointerdown", "pointerup", "touchend", "click", "keydown"].forEach(function (n) {
+      document.addEventListener(n, function () { send("gesture", n); }, true);
+    });
+    var benchOn = params.has("bench");
+    if (benchOn) {
+      benchEl.hidden = false;
+      benchEl.textContent = "Harkfell sound measurement. Tap anywhere to start; it takes about 3.3 minutes. Leave the phone on this page with the screen on.\n";
+      var begun = false;
+      document.addEventListener("pointerup", function () {
+        if (begun) return;
+        begun = true;
+        report("harkfell: bench env version " + (document.documentElement.innerHTML.match(/version: "([^"]*)"/) || [0, "?"])[1] +
+               " isolated " + (self.crossOriginIsolated ? 1 : 0) + " rate-param " + (params.get("rate") || "32000") +
+               " cores " + (navigator.hardwareConcurrency || "?") + " dpr " + (window.devicePixelRatio || 1) +
+               " ua " + navigator.userAgent.replace(/\s+/g, "_"));
+        withApp(function () { send("gesture", "bench"); send("bench", ""); });
+      }, true);
+    }
     var warn = console.warn;
     console.warn = function () {
       var s = String(arguments[0] || "");
@@ -150,6 +241,8 @@
       if (window.HARKFELL_WORLD_LIVE) console.log("harkfell: page world live " + files.length + " files");
       files.forEach(function (f) { send("world-file", f[0] + "\n" + f[1]); });
       if (files.length) send("world-done", "");
+      if (params.get("carry")) send("carry", params.get("carry"));
+      if (params.get("tone")) send("tone", params.get("tone"));
       if (params.has("test-room")) send("test-room", "");
       var room = params.get("room");
       if (room) send("goto", params.get("at") ? room + "@" + params.get("at") : room);

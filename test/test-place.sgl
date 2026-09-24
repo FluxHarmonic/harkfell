@@ -1,0 +1,83 @@
+;;; The adapter from the running world to the sound director's PLACE
+;;; ((harkfell audio) world-place), on the real world (world/): the place's
+;;; px py are ABSOLUTE world pixels, room (rx, ry) spanning x 400*rx ..
+;;; 400*(rx+1) and y 176*ry .. 176*(ry+1), which is the frame the director's
+;;; tone and spot-sound maths use. The world map's own pixels start at its
+;;; westmost and northmost room (worldmap-x0/y0: Reedfen's (8 3)), not at
+;;; room (0 0); the first build passed those through and put H2's tone eight
+;;; rooms away from every room (the adversarial review's H1, 2026-09-24).
+;;; Checked in two rooms, so a constant offset cannot pass by luck.
+
+(import (sigil test)
+        (sigil list)
+        (engine worldmap)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (engine mixer)
+        (harkfell sound)
+        (harkfell audio))
+
+(define CT (load-content (read-world-source "world")))
+
+;; The body standing in room (x, y) at its start cell, as a world.
+(define (world-in x y)
+  (let* ((rm (content-room CT x y))
+         (cell (room-start-cell CT rm)))
+    (world-at (content-map CT)
+              (cell-body (worldmap-tiles (content-map CT)) HARKFELL-FEEL (car cell) (cdr cell)))))
+
+(define (inside? pl)
+  (and (<= (* 400 (place-rx pl)) (place-px pl) (* 400 (+ 1 (place-rx pl))))
+       (<= (* 176 (place-ry pl)) (place-py pl) (* 176 (+ 1 (place-ry pl))))))
+
+(test-group "place: absolute world pixels"
+  (test "the world loads clean (the control)"
+    (assert-equal '() (content-problems CT)))
+  (test "Fen Edge (8 3): the body's place is inside room (8 3)'s absolute span"
+    (let ((pl (world-place (world-in 8 3) CT)))
+      (assert-equal 8 (place-rx pl))
+      (assert-true (inside? pl))))
+  (test "Climb Back (10 4): inside room (10 4)'s absolute span"
+    (let ((pl (world-place (world-in 10 4) CT)))
+      (assert-equal 10 (place-rx pl))
+      (assert-equal 4 (place-ry pl))
+      (assert-true (inside? pl))))
+  (test "Reed Bridge carries its moment and its frogs, in room pixels"
+    (let ((pl (world-place (world-in 9 3) CT)))
+      (assert-equal "first-open-water" (place-moment pl))
+      (assert-equal 2 (length (place-frogs pl)))
+      (assert-true (every (lambda (x) (< 0 x 400)) (place-frogs pl))))))
+
+;; Listening, end to end on the real world: the director given the adapter's
+;; place, standing still for 3 s. H2's tone is at its placeholder room (11 3),
+;; east of Old Stone (10 3); Fen Edge (8 3) is three rooms from it. The tone
+;; must sound in both, louder in Old Stone, and the ears must lean east.
+(define (listen-in x y)
+  (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+  (sound-reset!)
+  (sound-set-tone-room! 11 3)
+  (let* ((w (world-in x y))
+         (base (world-place w CT))
+         (pl (place base still: #t)))
+    (let loop ((f 0))
+      (let ((now (/ f 30.0)))
+        (when (<= now 3.0)
+          (sound-frame! now (if (= f 0) 0.0 (/ 1 30.0)) pl)
+          (mixer-pump! now)
+          (loop (+ f 1)))))
+    (let ((s (mixer-find TONE-ID)))
+      (list (sound-ears) (and s (source-gain s 3.0))))))
+
+(define OLD-STONE (listen-in 10 3))
+(define FEN-EDGE (listen-in 8 3))
+
+(test-group "place: listening on the real world"
+  (test "in Old Stone, still: the ears lean east and the tone sounds"
+    (assert-equal 'right (car OLD-STONE))
+    (assert-true (> (cadr OLD-STONE) 0.2)))
+  (test "in Fen Edge, three rooms away: fainter, but there"
+    (assert-equal 'right (car FEN-EDGE))
+    (assert-true (< 0.0 (cadr FEN-EDGE) (cadr OLD-STONE)))))

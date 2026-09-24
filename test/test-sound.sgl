@@ -1,0 +1,122 @@
+;;; A2's gate 4 (harkfell-design section 10): a room change during a moment
+;;; ramps the bed's channels to the new room's levels while the duck on the
+;;; source gain holds. Run through the REAL director, the real motif player
+;;; and the real bed tune (assets/tunes/reedfen-bed.cts), in the mixer's
+;;; headless mode, measured at the bed's output (its samples times its
+;;; source gain), not by reading the director's own bookkeeping: the defect
+;;; this guards is motif's one-ramp-per-target rule, so the check has to go
+;;; through motif.
+;;;
+;;; The measurement: two runs of the same bed from t = 0, so the seeded noise
+;;; is the same sample for sample and only the levels differ.
+;;;   scenario   Reed Bridge (its fixed moment starts, the bed ducks), then at
+;;;              5 s into Old Stone (different levels; the moment plays on)
+;;;   reference  Old Stone from the start: its levels, no moment, no duck
+;;; Over 8 s to 10 s (the room's 2 s ramp is done at 7 s) the scenario's bed
+;;; must be the reference's times the duck: 0.5, -6 dB. The sabotage in
+;;; scripts/gate-sound (the duck made of channel ramps) puts it back at the
+;;; reference's level, a ratio near 1.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine mixer)
+        (harkfell hush)
+        (harkfell sound))
+
+(define RATE 32000)
+(define GROUPS '(wind water reeds drone))
+
+(define REED-BRIDGE
+  (place key: "reedfen:9,3" region: 'reedfen bed-tune: "reedfen-bed" groups: GROUPS
+         levels: '((wind . 0.4) (water . 0.8) (reeds . 0.5)) moment: "first-open-water"
+         px: 3800.0 py: 620.0 rx: 9 ry: 3))
+
+(define OLD-STONE
+  (place key: "reedfen:10,3" region: 'reedfen bed-tune: "reedfen-bed" groups: GROUPS
+         levels: '((wind . 0.6) (reeds . 0.3) (drone . 0.4)) moment: #f
+         px: 4200.0 py: 620.0 rx: 10 ry: 3))
+
+;; The bed's energy between t-lo and t-hi: the sum of its squared samples
+;; times its source gain squared, block by block.
+(define *energy* 0.0)
+(define *t* 0.0)
+(define *lo* 8.0)
+(define *hi* 10.0)
+
+(define (tap id buf n gain)
+  (when (and (string=? id BED-ID) (>= *t* *lo*) (< *t* *hi*))
+    (let loop ((i 0) (acc 0.0))
+      (if (< i (* 2 n))
+          (let ((x (bytevector-ieee-single-ref buf (* 4 i) 'little)))
+            (loop (+ i 1) (+ acc (* x x))))
+          (set! *energy* (+ *energy* (* gain gain acc)))))))
+
+;; Run the director from 0 to `until` s at 30 frames a second; `plan` gives
+;; the place for a time. Answers the bed's energy in the window.
+(define (run plan until)
+  (mixer-open-headless! RATE tap)
+  (sound-reset!)
+  (set! *energy* 0.0)
+  (let loop ((f 0))
+    (let ((now (/ f 30.0)))
+      (when (<= now until)
+        (set! *t* now)
+        (sound-frame! now (if (= f 0) 0.0 (/ 1 30.0)) (plan now))
+        (mixer-pump! now)
+        (loop (+ f 1)))))
+  *energy*)
+
+(define (db x) (* 10.0 (/ (log x) (log 10.0))))
+
+(define SCENARIO (run (lambda (t) (if (< t 5.0) REED-BRIDGE OLD-STONE)) 10.2))
+(define SCENARIO-MOMENT (sound-moment-playing))
+(define SCENARIO-LEVELS (sound-bed-levels))
+(define REFERENCE (run (lambda (t) OLD-STONE) 10.2))
+(define REFERENCE-MOMENT (sound-moment-playing))
+
+(test-group "sound: gate 4, a room change during a moment"
+  (test "both runs measured something (the window is not empty)"
+    (assert-true (> REFERENCE 1.0e-3))
+    (assert-true (> SCENARIO 1.0e-4)))
+  (test "the moment was playing through the window (it is what the duck is for)"
+    (assert-equal "first-open-water" SCENARIO-MOMENT)
+    (assert-false REFERENCE-MOMENT))
+  (test "the bed's channels went to Old Stone's levels (wind 0.6, water the default 0.4, reeds 0.3, drone 0.4)"
+    (assert-equal 0.6 (cdr (assv 1 SCENARIO-LEVELS)))
+    (assert-equal 0.4 (cdr (assv 2 SCENARIO-LEVELS)))
+    (assert-equal 0.3 (cdr (assv 3 SCENARIO-LEVELS)))
+    (assert-equal 0.4 (cdr (assv 4 SCENARIO-LEVELS))))
+  (test "and the duck held: the bed sits 6 dB under the same room without a moment (within 1.5 dB)"
+    (let ((d (db (/ SCENARIO REFERENCE))))
+      (display "  scenario / reference: ") (display d) (display " dB") (newline)
+      (assert-true (< -7.5 d -4.5)))))
+
+;; A change of what is carried reopens the bed with its drone notes (a
+;; crossfade over 4 s). During a moment, the bed going out and the bed coming
+;; in both keep the duck (review M1: the outgoing bed was a fresh source and
+;; jumped 6 dB up for its fade), and it is not a visit (no hush count).
+(define CARRY-AT 6.0)
+(define *carried* #f)
+(define ROOMS-BEFORE #f)
+(define (carry-plan t)
+  (when (and (>= t CARRY-AT) (not *carried*))
+    (set! *carried* #t)
+    (set! ROOMS-BEFORE (hush-rooms (sound-hush)))
+    (sound-set-carry! '(2)))
+  REED-BRIDGE)
+(run carry-plan 7.0)
+(define BEDS (filter (lambda (s) (let ((id (source-id s))) (and (>= (string-length id) 3) (string=? (substring id 0 3) "bed"))))
+                     (mixer-sources)))
+(define NOW 7.0)
+
+(test-group "sound: a carry change during a moment"
+  (test "two beds sound during the crossfade (the old one renamed, the new one as bed)"
+    (assert-equal 2 (length BEDS))
+    (assert-true (mixer-find BED-ID)))
+  (test "both hold the duck"
+    (for-each (lambda (s) (assert-equal 0.5 (source-factor s 'duck NOW))) BEDS))
+  (test "and the moment still plays"
+    (assert-equal "first-open-water" (sound-moment-playing)))
+  (test "it was not a visit: the hush's room count did not move"
+    (assert-equal ROOMS-BEFORE (hush-rooms (sound-hush)))))

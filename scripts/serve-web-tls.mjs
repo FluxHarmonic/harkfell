@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // COPIED from Crash The Stack master e737d21 (scripts/serve-web-tls.mjs),
-// unchanged but for this header. Harkfell hosts on wg0 8797 (https) with
+// changed only by this header and by A2's --log (one line per request on
+// stdout, and GET /bench-report?LINE answered 204: the page's ?bench sends
+// its measurement lines there, so they land in the host log). Harkfell hosts on wg0 8797 (https) with
 // --isolate; the S0 sketchbook runs its own instance on 8795.
 // Host a build directory over HTTPS on the WireGuard address, for the phone.
 //
@@ -27,6 +29,7 @@ const [dir, portArg, ...flags] = process.argv.slice(2);
 if (!dir || !portArg) { console.error("usage: serve-web-tls.mjs DIR PORT [--isolate]"); process.exit(2); }
 const port = Number(portArg);
 const isolate = flags.includes("--isolate");
+const logging = flags.includes("--log");
 const root = path.resolve(dir);
 if (!fs.existsSync(path.join(root, "index.html"))) { console.error(`serve-web-tls: ${root}/index.html missing`); process.exit(1); }
 
@@ -38,7 +41,9 @@ const key = fs.readFileSync("build/tls/key.pem"), cert = fs.readFileSync("build/
 const MIME = { html: "text/html; charset=utf-8", js: "text/javascript", mjs: "text/javascript", wasm: "application/wasm", json: "application/json",
   css: "text/css", cts: "text/plain; charset=utf-8", png: "image/png", svg: "image/svg+xml", webmanifest: "application/manifest+json", txt: "text/plain; charset=utf-8", md: "text/plain; charset=utf-8" };
 const server = https.createServer({ key, cert }, (req, res) => {
+  if (logging) console.log(new Date().toISOString() + " " + req.socket.remoteAddress + " " + req.method + " " + req.url);
   const urlPath = decodeURIComponent(new URL(req.url, "https://x").pathname);
+  if (urlPath === "/bench-report") { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
   let fp = path.normalize(path.join(root, urlPath));
   if (!fp.startsWith(root)) { res.writeHead(403); res.end(); return; }
   try { if (fs.statSync(fp).isDirectory()) fp = path.join(fp, "index.html"); } catch { /* falls to the read */ }

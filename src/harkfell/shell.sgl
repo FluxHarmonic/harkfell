@@ -56,7 +56,9 @@
           (engine roomfile)
           (harkfell content)
           (harkfell check)
-          (harkfell legend))
+          (harkfell legend)
+          (harkfell sound)
+          (harkfell ears))
 
   (export shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
@@ -67,6 +69,7 @@
           shell-load-content! shell-content shell-goto! shell-goto-start!
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
           shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-view-size
+          shell-set-extra-lines!
           VIEW-W VIEW-H)
 
   (begin
@@ -110,6 +113,10 @@
     (define *last-fit* #f)         ; the last frame's fit (a tap maps through it)
 
     (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
+
+    ;; A2: more readout lines (the sound's), from whoever sets them
+    (define *extra-lines* (lambda () '()))
+    (define (shell-set-extra-lines! proc) (set! *extra-lines* proc))
 
     (define (shell-world) *world*)
     (define (shell-clock) *clock*)
@@ -455,7 +462,11 @@
         (begin-frame)
         (set-blend-mode 'normal)
         (with-render-target *room-rt*
-          (draw-play *world*))
+          (draw-play *world*)
+          ;; A2: the listening ears, over the body while you stand still
+          (when (and (world-room *world*) (sound-ears))
+            (let ((o (world-origin *world*)))
+              (draw-ears (world-body *world*) (car o) (cdr o) (sound-ears)))))
         (if (eq? (fit-mode f) 'integer)
             (draw-render-target *room-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
             (begin
@@ -471,7 +482,8 @@
                                                               (number->string (fit-scale f))
                                                               (tenths (fit-scale f)))
                                                      " stick " (symbol->string (shell-stick-form))))
-                                (shell-latency-lines))
+                                (shell-latency-lines)
+                                (*extra-lines*))
                         (fit-x f) (fit-y f) (fit-w f)
                         (max 1 (exact (floor (/ (fit-scale f) 2))))))
         (end-frame)

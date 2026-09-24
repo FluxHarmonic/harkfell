@@ -1,0 +1,76 @@
+;;; The world's sounds exist (A2): every room's fixed moment and every
+;;; region's bed names a tune at assets/tunes/NAME.cts that reads as a tune.
+;;; A1's content gate checks that a moment's name is one of its region's
+;;; moments:; this checks there is a file behind it, so a typo or a missing
+;;; file is red here rather than silent in play (the director skips a tune it
+;;; cannot open).
+;;;
+;;; The control and the break: the real world (clean), and a copy whose Reed
+;;; Bridge names a moment with no file (red, naming the room and the tune).
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (motif tune)
+        (engine worldmap)
+        (harkfell content)
+        (harkfell source)
+        (harkfell tunes)
+        (harkfell audio))
+
+(define WORLD (read-world-source "world"))
+
+;; Every sound the content names, as (what . tune-name).
+(define (named-tunes ct)
+  (append
+    (filter-map* (lambda (p)
+                   (let* ((rm (placed-data p)) (m (room-moment-name rm)))
+                     (and m (cons (string-append (room-label rm) " moment") m))))
+                 (content-rooms ct))
+    (filter-map* (lambda (r)
+                   (let ((b (region-field r 'bed)))
+                     (and b (cons (string-append (symbol->string (region-name r)) " bed")
+                                  (if (symbol? b) (symbol->string b) b)))))
+                 (content-regions ct))))
+
+(define (filter-map* f l)
+  (let loop ((l l) (acc '()))
+    (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+;; The problems: a name with no file, or a file that does not read.
+(define (tune-problems ct)
+  (filter-map* (lambda (e)
+                 (cond ((not (tune-exists? (cdr e)))
+                        (string-append (car e) ": no " (tune-path (cdr e))))
+                       ((not (guard (x (#t #f)) (read-tune-string (tune-text (cdr e)))))
+                        (string-append (car e) ": " (tune-path (cdr e)) " does not read"))
+                       (else #f)))
+               (named-tunes ct)))
+
+(define (ends-with? s suf)
+  (let ((n (string-length s)) (m (string-length suf)))
+    (and (>= n m) (string=? (substring s (- n m) n) suf))))
+
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a)
+             (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+
+(test-group "tunes: every named sound has its file"
+  (test "the world names at least one moment and one bed (the check has a subject)"
+    (let ((ns (named-tunes (load-content WORLD))))
+      (assert-true (find (lambda (e) (string-contains? (car e) "moment")) ns))
+      (assert-true (find (lambda (e) (string-contains? (car e) "bed")) ns))))
+  (test "the real world: every one exists and reads (the control)"
+    (assert-equal '() (tune-problems (load-content WORLD))))
+  (test "a moment with no file is red, naming the room and the path"
+    (let* ((src (map (lambda (e)
+                       (if (ends-with? (car e) "x9y3.room")
+                           (cons (car e) (swap (cdr e) "tune: first-open-water" "tune: frog-choir"))
+                           e))
+                     WORLD))
+           (ps (tune-problems (load-content src))))
+      (assert-true (member "reedfen:9,3 moment: no assets/tunes/frog-choir.cts" ps)))))
