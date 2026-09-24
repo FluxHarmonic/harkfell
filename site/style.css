@@ -1,0 +1,163 @@
+/* harkfell.com: one quiet page.
+   Colours are Harkfell's own palette roles (world/world.sgl): the ground is
+   the start screen's pure black (D32, D37), the text is the creature's fur,
+   and the one warm accent is H2's amber. The type is IM Fell (D34), self-
+   hosted and subset to Latin (site/fonts/OFL.txt). */
+
+@font-face {
+  font-family: "IM Fell English";
+  src: url("/fonts/im-fell-english-roman.woff2") format("woff2");
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IM Fell English";
+  src: url("/fonts/im-fell-english-italic.woff2") format("woff2");
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IM Fell English SC";
+  src: url("/fonts/im-fell-english-sc.woff2") format("woff2");
+  font-display: swap;
+}
+
+:root {
+  --ground: #000000;   /* black: the start screen, the card, the letterbox */
+  --fur-1: #ede5d3;    /* the creature's fur: the text */
+  --fur-2: #b8ab95;    /* its fur in shade: quieter text */
+  --stone: #767470;    /* hol-stone-3: rules and borders */
+  --h2: #eaa648;       /* H2, amber: the one warm accent */
+  --bracken: #b0643a;  /* hol-bracken: the accent pressed */
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--ground); }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--fur-1);
+  font-family: "IM Fell English", Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+}
+
+main, footer {
+  max-width: 848px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+/* The shots are 400x176 view pixels, drawn crisp at a whole scale where
+   the width allows: 2x from 832 CSS px, 1x from 432, and on a narrower
+   phone the width of the column (the only place a non-whole scale shows). */
+.shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+@media (min-width: 432px) { .shot { width: 400px; } }
+@media (min-width: 832px) { .shot { width: 800px; } }
+
+header {
+  text-align: center;
+  padding: 4.5rem 0 2.5rem;
+}
+
+h1 {
+  margin: 0;
+  font-family: "IM Fell English SC", "IM Fell English", Georgia, serif;
+  font-weight: normal;
+  font-size: clamp(3rem, 11vw, 5.5rem);
+  letter-spacing: 0.12em;
+  line-height: 1;
+  /* the letter-spacing trails the last letter; pull it back so the name centres */
+  margin-right: -0.12em;
+}
+
+.tagline {
+  margin: 1rem 0 0;
+  font-style: italic;
+  color: var(--fur-2);
+}
+
+.pitch {
+  max-width: 34em;
+  margin: 2.5rem auto 0;
+}
+.pitch p { margin: 0 0 1em; }
+
+.listen {
+  text-align: center;
+  margin: 2.5rem 0 0;
+}
+.listen em { color: var(--fur-2); }
+
+.play {
+  text-align: center;
+  margin: 2rem 0 3.5rem;
+}
+
+.play a {
+  display: inline-block;
+  font-family: "IM Fell English SC", "IM Fell English", Georgia, serif;
+  font-size: 1.75rem;
+  letter-spacing: 0.12em;
+  color: var(--ground);
+  background: var(--h2);
+  padding: 0.35em 1.4em 0.4em 1.52em;
+  border-radius: 2px;
+  text-decoration: none;
+}
+.play a:hover, .play a:focus-visible { background: var(--fur-1); }
+.play a:active { background: var(--bracken); }
+.play a:focus-visible { outline: 2px solid var(--fur-1); outline-offset: 4px; }
+
+.play .how {
+  display: block;
+  margin-top: 0.8rem;
+  font-size: 1rem;
+  font-style: italic;
+  color: var(--fur-2);
+}
+
+.rooms { margin: 0; }
+.rooms .shot { margin-bottom: 2.5rem; }
+
+.early {
+  max-width: 34em;
+  margin: 0 auto 4rem;
+  color: var(--fur-2);
+}
+
+a { color: var(--h2); }
+a:hover { color: var(--fur-1); }
+
+footer {
+  border-top: 1px solid var(--stone);
+  padding-top: 2.5rem;
+  padding-bottom: 4rem;
+  text-align: center;
+  font-size: 1rem;
+  color: var(--fur-2);
+}
+footer .mark { display: inline-block; margin-bottom: 1.5rem; }
+footer .mark img { display: block; width: 190px; height: auto; }
+footer p { margin: 0 0 0.6em; }
+
+.lost {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+.lost h1 { font-size: clamp(2.5rem, 9vw, 4rem); }
+.lost p { color: var(--fur-2); font-style: italic; }

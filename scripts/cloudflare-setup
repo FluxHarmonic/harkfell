@@ -1,0 +1,155 @@
+#!/bin/sh
+# The one-time Cloudflare account changes harkfell.com needs. DAVID RUNS THIS;
+# workers do not create projects, buckets or DNS records, and do not hold the
+# tokens that can.
+#
+#   scripts/cloudflare-setup             report only: what exists, what each
+#                                        step below would do (no writes)
+#   scripts/cloudflare-setup --create    create the Pages project `harkfell`
+#                                        (production branch master) and the
+#                                        private R2 bucket `harkfell-wasm`.
+#                                        Nothing is public after this: the
+#                                        project has no deployment and no domain
+#   scripts/cloudflare-setup --domain    attach harkfell.com and www.harkfell.com
+#                                        to the project, and create their proxied
+#                                        CNAMEs to harkfell.pages.dev where no
+#                                        record exists. THIS IS THE STEP THAT
+#                                        MAKES THE SITE PUBLIC: run it after the
+#                                        first production publish has been
+#                                        checked on its pages.dev URL
+#
+# Environment (for every mode):
+#   CLOUDFLARE_API_TOKEN   a token with the scopes below
+#   CLOUDFLARE_ACCOUNT_ID  the account id (wrangler whoami prints it)
+#
+# TOKEN SCOPES (see topics/cloudflare-r2-token-scopes). Two tokens, so the one
+# that is kept for publishing cannot touch DNS or any other bucket:
+#
+#   SETUP token (for this script; delete it or let it expire afterwards)
+#     Account  Cloudflare Pages            Edit    create the project, attach domains
+#     Account  Workers R2 Storage          Edit    create the bucket. ACCOUNT-WIDE:
+#                                                  it reaches every bucket, which is
+#                                                  why this token is not kept
+#     Zone     DNS                         Edit    harkfell.com only (--domain)
+#     Zone     Zone                        Read    harkfell.com only (the zone id)
+#
+#   PUBLISH token (for scripts/publish-web; keep it in its own env file)
+#     Account  Cloudflare Pages            Edit    `wrangler pages deploy`
+#     Account  Workers R2 Storage Bucket Item Write, on harkfell-wasm only
+#              (permission group 2efd5506f9c8494dacb1fa10a3e7d5b6, resource
+#              com.cloudflare.edge.r2.bucket.<acct>_default_harkfell-wasm)
+#                                                  the wasm upload and read-back
+#     Probe it before trusting it: a read-only list of any OTHER bucket must be 403.
+#     (Whether `wrangler r2 object put/get --remote` accepts a bucket-item token
+#     is not yet tested here; if it refuses, that is the finding to report, not a
+#     reason to widen the token.)
+#
+# The bucket stays private: the only way to its objects is the Pages Function
+# (functions/play/w/[[path]].js) through the WASM binding in wrangler.jsonc,
+# which `wrangler pages deploy` applies. Old objects are never deleted by any
+# script: a cached page must keep finding the wasm it was built against.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+PROJECT="${HARKFELL_PAGES_PROJECT:-harkfell}"
+BUCKET="${HARKFELL_WASM_BUCKET:-harkfell-wasm}"
+ZONE_NAME=harkfell.com
+DOMAINS="harkfell.com www.harkfell.com"
+TARGET="$PROJECT.pages.dev"
+MODE=report
+case "${1:-}" in
+  "") ;;
+  --create) MODE=create ;;
+  --domain) MODE=domain ;;
+  *) echo "cloudflare-setup: unknown argument ${1}"; exit 2 ;;
+esac
+say() { echo "cloudflare-setup: $*"; }
+
+command -v wrangler > /dev/null || { say "wrangler not on PATH"; exit 1; }
+command -v jq > /dev/null || { say "jq not on PATH"; exit 1; }
+[ -n "${CLOUDFLARE_API_TOKEN:-}" ] || { say "CLOUDFLARE_API_TOKEN not set"; exit 1; }
+[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || { say "CLOUDFLARE_ACCOUNT_ID not set (wrangler whoami prints it)"; exit 1; }
+API=https://api.cloudflare.com/client/v4
+# api METHOD PATH [JSON]: the response body; exits on success:false
+api() {
+  if [ -n "${3:-}" ]; then
+    out="$(curl -sS -X "$1" "$API$2" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data "$3")"
+  else
+    out="$(curl -sS -X "$1" "$API$2" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
+  fi
+  if [ "$(printf '%s' "$out" | jq -r '.success')" != true ]; then
+    say "API $1 $2 refused: $(printf '%s' "$out" | jq -c '.errors')"
+    exit 1
+  fi
+  printf '%s' "$out"
+}
+
+say "account $CLOUDFLARE_ACCOUNT_ID, project $PROJECT, bucket $BUCKET, mode $MODE"
+
+# ---- the project and the bucket ------------------------------------------------
+PROJ_JSON="$(curl -sS "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
+if [ "$(printf '%s' "$PROJ_JSON" | jq -r '.success')" = true ]; then
+  HAVE_PROJECT=1
+  say "Pages project $PROJECT exists: production branch $(printf '%s' "$PROJ_JSON" | jq -r '.result.production_branch'), domains $(printf '%s' "$PROJ_JSON" | jq -r '.result.domains | join(" ")')"
+else
+  HAVE_PROJECT=0
+  say "Pages project $PROJECT does not exist ($(printf '%s' "$PROJ_JSON" | jq -c '.errors[0].message'))"
+fi
+if wrangler r2 bucket list 2>/dev/null | grep -q "^name: *$BUCKET$"; then
+  HAVE_BUCKET=1; say "R2 bucket $BUCKET exists"
+else
+  HAVE_BUCKET=0; say "R2 bucket $BUCKET does not exist"
+fi
+
+if [ "$MODE" = create ]; then
+  if [ "$HAVE_PROJECT" = 0 ]; then
+    wrangler pages project create "$PROJECT" --production-branch master
+    say "created Pages project $PROJECT (no deployment, no custom domain: nothing is public)"
+  fi
+  if [ "$HAVE_BUCKET" = 0 ]; then
+    wrangler r2 bucket create "$BUCKET"
+    say "created R2 bucket $BUCKET (private)"
+  fi
+  say "next: a preview publish (scripts/publish-web DIR \"<line>\" --preview), checked on its pages.dev URL"
+  exit 0
+fi
+
+# ---- the domain ----------------------------------------------------------------------
+ZONE_ID="$(api GET "/zones?name=$ZONE_NAME" | jq -r '.result[0].id // empty')"
+[ -n "$ZONE_ID" ] || { say "no zone $ZONE_NAME visible to this token"; exit 1; }
+say "zone $ZONE_NAME is $ZONE_ID; its records for the site's names:"
+for d in $DOMAINS; do
+  recs="$(api GET "/zones/$ZONE_ID/dns_records?name=$d" | jq -r '.result[] | "\(.type) \(.name) -> \(.content) proxied=\(.proxied)"')"
+  say "  $d: ${recs:-none}"
+done
+
+if [ "$MODE" = report ]; then
+  say "report only. --create would make whatever is missing above; --domain would attach $DOMAINS"
+  say "to $PROJECT and create proxied CNAMEs to $TARGET where no record exists (and refuse where one does)"
+  exit 0
+fi
+
+# --domain
+[ "$HAVE_PROJECT" = 1 ] || { say "REFUSED: the project does not exist; --create first"; exit 1; }
+DEPLOYS="$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?env=production" | jq '.result | length')"
+[ "$DEPLOYS" -gt 0 ] || { say "REFUSED: $PROJECT has no production deployment yet; publish and check it on $TARGET first"; exit 1; }
+for d in $DOMAINS; do
+  existing="$(api GET "/zones/$ZONE_ID/dns_records?name=$d" | jq -r '.result[] | "\(.type) \(.content)"')"
+  if [ -n "$existing" ] && [ "$existing" != "CNAME $TARGET" ]; then
+    say "REFUSED: $d already has records ($existing); not replacing them. Remove them by hand if they are stale, then rerun"
+    exit 1
+  fi
+done
+for d in $DOMAINS; do
+  if printf '%s' "$PROJ_JSON" | jq -e --arg d "$d" '.result.domains | index($d)' > /dev/null; then
+    say "$d is already attached to $PROJECT"
+  else
+    api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains" "{\"name\":\"$d\"}" > /dev/null
+    say "attached $d to $PROJECT"
+  fi
+  if [ -z "$(api GET "/zones/$ZONE_ID/dns_records?name=$d" | jq -r '.result[]? | .id')" ]; then
+    api POST "/zones/$ZONE_ID/dns_records" "{\"type\":\"CNAME\",\"name\":\"$d\",\"content\":\"$TARGET\",\"proxied\":true,\"comment\":\"harkfell.com on Pages (scripts/cloudflare-setup)\"}" > /dev/null
+    say "created CNAME $d -> $TARGET (proxied)"
+  fi
+done
+say "done. Cloudflare validates the domains and issues certificates (minutes); then"
+say "node scripts/verify-live.mjs https://harkfell.com <the staged DIR that was published>"

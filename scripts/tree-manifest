@@ -1,0 +1,22 @@
+#!/bin/sh
+# Print the identity of a deploy: one "sha256  path" line per file.
+#
+#   scripts/tree-manifest DIR
+#
+# Every file under DIR (the staged tree, as `wrangler pages deploy` would
+# upload it), then every file under functions/ and wrangler.jsonc prefixed
+# with @ (the deploy takes those from the repo root, not from DIR, so a
+# Function edited after the gate ran would otherwise ship unverified). The
+# functions are read from DISK, not from git: wrangler deploys whatever is
+# in the directory, tracked or not.
+#
+# stage-web writes this beside the tree (DIR.manifest, with a header);
+# verify-site.mjs and publish-web recompute it and refuse on any difference.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+DIR="${1:-}"
+[ -n "$DIR" ] && [ -d "$DIR" ] || { echo "tree-manifest: give the staged directory" >&2; exit 2; }
+( cd "$DIR" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum ) | sed 's|  \./|  |'
+[ -d functions ] || { echo "tree-manifest: functions/ missing (the wasm route)" >&2; exit 1; }
+[ -f wrangler.jsonc ] || { echo "tree-manifest: wrangler.jsonc missing" >&2; exit 1; }
+{ find functions -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum; sha256sum wrangler.jsonc; } | sed 's|  |  @|'

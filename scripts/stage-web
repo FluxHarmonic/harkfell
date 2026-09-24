@@ -1,0 +1,99 @@
+#!/bin/sh
+# Stage the deploy tree of harkfell.com: the landing at the root, the game
+# under /play/. verify-site.mjs verifies the staged tree, host-site serves it
+# on wg0, and publish-web deploys exactly it.
+#
+#   scripts/stage-web DIR
+#   HARKFELL_WEB_DIR=build/remote-web-<sha> scripts/stage-web DIR
+#
+# DIR is emptied and filled, and DIR.manifest is written beside it (never
+# inside it, so it is not deployed): a header naming the game build and the
+# commit, then scripts/tree-manifest's line per file. Any DIR.verified from
+# an earlier run is deleted first, so a restaged tree is unverified until
+# verify-site.mjs passes on it.
+#
+# The parts, and where each comes from:
+#   /                 site/: index.html, 404.html, style.css, _headers, the
+#                     fonts (with OFL.txt), the shots, the mark, the favicon
+#   /play/            the game's built tree (HARKFELL_WEB_DIR, default
+#                     build/web): index.html, sigil-wasm-bridges.js and .json,
+#                     assets/. Never bin/, native/, the build's own _headers
+#                     (it isolates every path; the site's _headers scopes
+#                     isolation to /play/*) or the asyncify list.
+#   /play/w/<sha16>/harkfell.wasm
+#                     the wasm, at the path its content hash names, and the
+#                     page's data-wasm rewritten to point there. In production
+#                     that path is the R2 Function (functions/play/w/); here
+#                     it is a file, so the host and the arm load the same path
+#                     the deployment serves. publish-web moves it to R2.
+# A missing part is a refusal, not a partial tree.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+DIR="${1:-}"
+[ -n "$DIR" ] || { echo "stage-web: give the directory to stage into"; exit 1; }
+case "$DIR" in /|.|..|site|site/|functions|functions/) echo "stage-web: refusing to stage into '$DIR'"; exit 1 ;; esac
+WEB="${HARKFELL_WEB_DIR:-build/web}"
+CAP=26214400   # Cloudflare Pages' per-file limit, 25 MiB
+
+# favicon.ico: the game's page has no icon link, so the browser asks the
+# root for /favicon.ico from /play/ and a 404 lands in its console
+for f in index.html 404.html style.css _headers favicon.png favicon.ico mark.png fonts/OFL.txt; do
+  [ -f "site/$f" ] || { echo "stage-web: site/$f missing"; exit 1; }
+done
+[ -n "$(find site/fonts -name '*.woff2')" ] || { echo "stage-web: site/fonts has no woff2"; exit 1; }
+[ -e site/play ] && { echo "stage-web: site/play exists; the site must not claim the game's path"; exit 1; }
+for f in index.html harkfell.wasm sigil-wasm-bridges.js sigil-wasm-bridges.json assets/sigil-web-app.js; do
+  [ -f "$WEB/$f" ] || { echo "stage-web: $WEB/$f missing; build --config web first (or set HARKFELL_WEB_DIR)"; exit 1; }
+done
+STAMP="$(grep -o 'version: "[^"]*"' "$WEB/index.html" | head -1 | cut -d'"' -f2)"
+case "$STAMP" in
+  "") echo "stage-web: $WEB/index.html carries no version stamp"; exit 1 ;;
+  *-dirty-*) echo "stage-web: $WEB was built from a dirty tree (stamp $STAMP); a staged tree must name a commit"; exit 1 ;;
+esac
+[ -n "$(find "$WEB/assets/refs" -type f 2>/dev/null | head -1)" ] && { echo "stage-web: $WEB/assets/refs has files; refs never ship"; exit 1; }
+grep -c 'data-wasm="harkfell"' "$WEB/index.html" | grep -qx 1 || { echo "stage-web: $WEB/index.html does not say data-wasm=\"harkfell\" exactly once; the page changed shape"; exit 1; }
+
+rm -f "$DIR.verified" "$DIR.manifest"
+rm -rf "$DIR"
+mkdir -p "$DIR"
+cp -r site/. "$DIR/"
+
+mkdir -p "$DIR/play"
+for f in index.html sigil-wasm-bridges.js sigil-wasm-bridges.json; do cp "$WEB/$f" "$DIR/play/$f"; done
+cp -r "$WEB/assets" "$DIR/play/assets"
+# what the build left beside the page that is not staged, said out loud: a
+# new file the page loads would show here first (and in verify-site's play
+# leg as a failed request)
+SKIPPED="$(cd "$WEB" && ls -A | grep -v -x -E 'index.html|sigil-wasm-bridges.js|sigil-wasm-bridges.json|assets|harkfell.wasm|bin|native|_headers|asyncify-onlylist.generated.txt|BUILD-SHA|BUILD-SIGIL|.sigil-package-cache' || true)"
+[ -z "$SKIPPED" ] || echo "stage-web: NOT staged from $WEB (unknown to this script): $(echo $SKIPPED)"
+
+SHA16="$(sha256sum "$WEB/harkfell.wasm" | cut -c1-16)"
+mkdir -p "$DIR/play/w/$SHA16"
+cp "$WEB/harkfell.wasm" "$DIR/play/w/$SHA16/harkfell.wasm"
+cmp -s "$WEB/harkfell.wasm" "$DIR/play/w/$SHA16/harkfell.wasm" || { echo "stage-web: the wasm copy differs from $WEB/harkfell.wasm"; exit 1; }
+sed -i "s|data-wasm=\"harkfell\"|data-wasm=\"w/$SHA16/harkfell\"|" "$DIR/play/index.html"
+grep -c "data-wasm=\"w/$SHA16/harkfell\"" "$DIR/play/index.html" | grep -qx 1 || { echo "stage-web: the rewrite of play/index.html's data-wasm did not land exactly once"; exit 1; }
+grep -q 'data-wasm="harkfell"' "$DIR/play/index.html" && { echo "stage-web: play/index.html still names the bare wasm"; exit 1; }
+
+# the tree's invariants: one wasm, where the page points; nothing over the
+# cap except that wasm (publish-web moves it to R2); no dotfiles
+WASMS="$(cd "$DIR" && find . -name '*.wasm' | sed 's|^\./||')"
+[ "$WASMS" = "play/w/$SHA16/harkfell.wasm" ] || { echo "stage-web: the staged tree's wasm files are not exactly play/w/$SHA16/harkfell.wasm:"; echo "$WASMS" | sed 's/^/  /'; exit 1; }
+BIG="$(cd "$DIR" && find . -type f -size +${CAP}c ! -name '*.wasm' | sed 's|^\./||')"
+[ -z "$BIG" ] || { echo "stage-web: files over Pages' 25 MiB cap: $BIG"; exit 1; }
+DOT="$(cd "$DIR" && find . -name '.*' ! -name . | head -5)"
+[ -z "$DOT" ] || { echo "stage-web: dotfiles in the tree: $DOT"; exit 1; }
+[ -e "$DIR/play/_headers" ] && { echo "stage-web: play/_headers staged; only the root _headers is read by Pages"; exit 1; }
+
+{
+  echo "# harkfell.com staged tree"
+  echo "# web-dir $WEB"
+  echo "# web-stamp $STAMP"
+  echo "# head $(git rev-parse HEAD)"
+  echo "# wasm $SHA16 $(stat -c%s "$WEB/harkfell.wasm")"
+  scripts/tree-manifest "$DIR"
+} > "$DIR.manifest"
+HEAD12="$(git rev-parse --short=12 HEAD)"
+echo "stage-web: staged $(find "$DIR" -type f | wc -l) files ($(du -sh "$DIR" | cut -f1)) in $DIR; manifest $DIR.manifest ($(sha256sum "$DIR.manifest" | cut -c1-16))"
+echo "stage-web: game built at $STAMP from $WEB; HEAD is $HEAD12$([ "$STAMP" = "$HEAD12" ] || echo " (DIFFERENT: fine for a preview, publish-web will refuse)")"
+echo "stage-web: wasm $(stat -c%s "$WEB/harkfell.wasm") bytes -> /play/w/$SHA16/harkfell.wasm"
