@@ -76,7 +76,7 @@
           shell-load-content! shell-content shell-goto! shell-goto-start!
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
           shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-view-size
-          shell-set-extra-lines! shell-set-carry! shell-take-news!
+          shell-set-extra-lines! shell-set-carry! shell-take-news! shell-take-body-events!
           VIEW-W VIEW-H)
 
   (begin
@@ -221,6 +221,10 @@
     ;; (the sound plays it, the draw flashes it).
     (define *frame-news* '())
     (define (shell-take-news!) *frame-news*)
+    ;; A4 sound: every tick's body events since the last take, oldest first, each
+    ;; (event . vy-before): the sound reads jumps and landings once a frame
+    (define *body-events* (quote ()))
+    (define (shell-take-body-events!) (let ((l (reverse *body-events*))) (set! *body-events* (quote ())) l))
 
     (define (body-in-cell cell)
       (cell-body (worldmap-tiles (content-map *content*)) HARKFELL-FEEL (car cell) (cdr cell)))
@@ -493,7 +497,10 @@
             ;; the creature wakes on the first input (D15: the first input is yours)
             (when (and *waking* (or (not (= (intent-h in) 0)) (not (= (intent-v in) 0)) (intent-jump in)))
               (set! *waking* #f))
-            (set! *world* (world-tick *world* in))
+            (let ((vy0 (body-vy (world-body *world*))))   ; A4 sound: the fall speed before the tick
+              (set! *world* (world-tick *world* in))
+              (for-each (lambda (e) (set! *body-events* (cons (cons e vy0) *body-events*)))
+                        (body-events (world-body *world*))))
             (let ((ev (body-events (world-body *world*))))
               (when (or (memq 'jump ev) (memq 'wall-jump ev))
                 (set! *launched* #t))))
