@@ -72,8 +72,8 @@
   bed: "hollow-bed"
   bed-channels: (wind water hum drone)
   mode: ionian
-  palette: (sky-1 sky-2 sky-3 fog reed-1 reed-2 reed-3 mud-1 mud-2
-            water-1 water-2 stone-1 stone-2 ember fur-1 fur-2)
+  palette: (hol-sky-1 hol-sky-2 hol-sky-3 hol-sky-4 hol-stone-1 hol-stone-2 hol-stone-3 hol-stone-4
+            hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
   tiles: hollow
   roster: (reedling lantern-moth)
   moments: (high-fell hollow-answers)
