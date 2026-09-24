@@ -21,8 +21,13 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 
-const base = (process.argv[2] || "").replace(/\/$/, "");
-const dir = (process.argv[3] || "").replace(/\/$/, "");
+// --wrangler-dev: the target is `wrangler pages dev` (scripts/pages-dev-check),
+// whose local asset server answers /_headers with 502 (it looks for
+// _headers/index.html). That one answer is then allowed, and said.
+const WDEV = process.argv.includes("--wrangler-dev");
+const pos = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const base = (pos[0] || "").replace(/\/$/, "");
+const dir = (pos[1] || "").replace(/\/$/, "");
 if (!/^https?:\/\//.test(base) || !dir) { console.log("usage: verify-live.mjs https://origin STAGED-DIR"); process.exit(2); }
 const manifest = path.resolve(dir) + ".manifest";
 if (!fs.existsSync(manifest)) { console.log(`SETUP-FAILED: ${manifest} missing`); process.exit(2); }
@@ -111,9 +116,9 @@ else {
     got.push(`${p} ${r.status}`);
     if (r.status === 404 && notFoundSha && sha256(buf) === notFoundSha) pages++;
   }
-  const bad = got.filter((g) => !/ 404$/.test(g));
+  const bad = got.filter((g) => !/ 404$/.test(g) && !(WDEV && g === "/_headers 502"));
   if (bad.length) fail("missing", `not 404: ${bad.join(", ")}`);
-  else pass("missing", `${got.join(", ")}; ${pages} of ${probes.length} with the staged 404.html byte for byte (the Function answers its own 404 for a wasm path)`);
+  else pass("missing", `${got.join(", ")}${WDEV && got.includes("/_headers 502") ? " (/_headers 502: wrangler's local asset server, allowed under --wrangler-dev)" : ""}; ${pages} of ${probes.length} with the staged 404.html byte for byte (the Function answers its own 404 for a wasm path)`);
 }
 
 console.log(`RESULT: ${failed ? "FAIL" : "PASS"} (${failed} failed)`);
