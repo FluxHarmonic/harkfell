@@ -464,7 +464,7 @@
         (with-render-target *room-rt*
           (draw-play *world*)
           ;; A2: the listening ears, over the body while you stand still
-          (when (and (world-room *world*) (sound-ears))
+          (when (and (world-room *world*) (sound-ears) (not (sound-ears-flick)))
             (let ((o (world-origin *world*)))
               (draw-ears (world-body *world*) (car o) (cdr o) (sound-ears)))))
         (if (eq? (fit-mode f) 'integer)

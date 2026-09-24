@@ -65,6 +65,7 @@
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
           sound-ears sound-lines sound-hush sound-bed-levels sound-moment-playing sound-reset!
           sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING
+          sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
@@ -142,6 +143,21 @@
     (define (sound-hush) *hush*)
     (define (sound-moment-playing) (and *moment* (car *moment*)))
     (define (sound-ears) *ears*)
+
+    ;; The ears FLICK (David, 2026-09-24: "Small flick would probably be more
+    ;; noticable. I feel like the ears are long enough"): when they rise, and
+    ;; again every FLICK-EVERY seconds while you listen, they drop to rest and
+    ;; back twice (FLICK-STEP each), so the eye catches the change.
+    (define FLICK-EVERY 4.0)
+    (define FLICK-LEN 0.36)
+    (define FLICK-STEP 0.09)
+    (define *ears-at* 0.0)             ; when the ears last rose
+    ;; t: seconds since the ears rose. #t while they are down in a flick.
+    (define (ears-flick? t)
+      (let ((u (- t (* FLICK-EVERY (floor (/ t FLICK-EVERY))))))
+        (and (< u FLICK-LEN)
+             (even? (exact (floor (/ u FLICK-STEP)))))))
+    (define (sound-ears-flick) (and *ears* (ears-flick? (- *now* *ears-at*))))
     ;; A change of what is carried reopens the bed on the next frame (its
     ;; drone notes are chosen at open: strip-uncarried).
     (define *carry-changed* #f)
@@ -468,6 +484,11 @@
           (let ((s (mixer-find TONE-ID)))
             (when s (source-factor! s 'still (if now-still TONE-FORWARD 1.0) (if now-still STILL-IN-S STILL-OUT-S) now)))
           (apply-room-levels! *room-levels* now (if now-still DRONE-UP-S DRONE-DOWN-S) 'drone)))
+      (let ((was *ears*))
+        (set-ears! pl)
+        (when (and *ears* (not was)) (set! *ears-at* now))))
+
+    (define (set-ears! pl)
       (set! *ears*
             (and *still*
                  (let* ((g (tone-geometry pl)) (dx (car g)) (dy (cadr g)) (d (caddr g)))
@@ -482,7 +503,7 @@
       '((frog "spot-frog" 5.0 14.0 0.55)
         (bird "spot-bird" 14.0 32.0 0.35)
         (plop "spot-plop" 7.0 18.0 0.4)
-        (return "return-tone" 0.0 0.0 0.7)))
+        (return "return-tone" 0.0 0.0 0.5)))
 
     (define (spot-ref name) (assq name SPOTS))
 
@@ -621,7 +642,8 @@
           (open-region-bed! *region* *groups* *bed-tune* *room-levels* now))
         (when (> (place-returns pl) *returns*)
           (set! *returns* (place-returns pl))
-          (cue! 'return 0.7 0.0))
+          ;; 0.5: "a little too loud" at 0.7 (David, 2026-09-24)
+          (cue! 'return 0.5 0.0))
         (still-frame! pl dt now)
         (tone-frame! pl now)
         (spots-frame! pl now)))

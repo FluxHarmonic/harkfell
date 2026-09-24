@@ -102,7 +102,7 @@ green_all() {
   green test/test-hush.sgl 11
   green test/test-sound.sgl 13
   green test/test-tunes.sgl 3
-  green test/test-place.sgl 6
+  green test/test-place.sgl 8
 }
 
 # A named test must pass unplanted (in the green arm's output).

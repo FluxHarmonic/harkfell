@@ -81,3 +81,17 @@
   (test "in Fen Edge, three rooms away: fainter, but there"
     (assert-equal 'right (car FEN-EDGE))
     (assert-true (< 0.0 (cadr FEN-EDGE) (cadr OLD-STONE)))))
+
+;; The ears' flick (David, 2026-09-24): down and back twice in the first
+;; 0.36 s after they rise (0.09 s steps), again every 4 s, and up otherwise.
+(test-group "place: the ears flick"
+  (test "down, up, down, up in the first 0.36 s"
+    (assert-true (ears-flick? 0.0))
+    (assert-false (ears-flick? 0.1))
+    (assert-true (ears-flick? 0.2))
+    (assert-false (ears-flick? 0.3)))
+  (test "then up, until the next flick 4 s after they rose"
+    (assert-false (ears-flick? 0.4))
+    (assert-false (ears-flick? 2.0))
+    (assert-false (ears-flick? 3.95))
+    (assert-true (ears-flick? 4.05))))
