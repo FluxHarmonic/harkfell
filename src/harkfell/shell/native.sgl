@@ -96,8 +96,16 @@
                                   (or (not old) (not (= (cdr old) (cdr e))))))
                               now))
              (gone (filter (lambda (e) (not (assoc (car e) now))) *mtimes*))
-             (fresh (append (map (lambda (e) (cons (car e) (read-file-string (room-file-path *world-dir* (car e)))))
-                                 changed)
+             ;; a file that cannot be read now (mid-save, a dangling link) waits
+             ;; for the next look: it is left out of *mtimes* below
+             (read (map (lambda (e)
+                          (cons (car e)
+                                (guard (x (#t (say "harkfell: cannot read " (car e) " yet") 'unreadable))
+                                  (read-file-string (room-file-path *world-dir* (car e))))))
+                        changed))
+             (unread (filter (lambda (p) (eq? (cdr p) 'unreadable)) read))
+             (now (filter (lambda (e) (not (assoc (car e) unread))) now))
+             (fresh (append (filter (lambda (p) (not (eq? (cdr p) 'unreadable))) read)
                             (map (lambda (e) (cons (car e) #f)) gone))))
         (set! *mtimes* now)
         (unless (null? fresh)
@@ -120,8 +128,12 @@
             (poll-keys!)
             (when (key-pressed? 'r) (shell-reset-world!))
             (when (key-pressed? 'escape) (request-quit))
+            ;; nothing a reload meets may take the frame down: an error is
+            ;; reported and the game plays on with the last good world
             (when (and (shell-content) (= (modulo n RELOAD-EVERY) 0))
-              (check-reload!))
+              (guard (x (#t (say "harkfell: live reload skipped a look: "
+                                 (if (error-object? x) (error-object-message x) "an error"))))
+                (check-reload!)))
             (let ((ticks (shell-frame! dt)))
               (shell-present! (frame-width) (frame-height) ticks))
             (unless (quit-requested?) (frame (+ n 1)))))))

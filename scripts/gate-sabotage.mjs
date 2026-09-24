@@ -85,7 +85,7 @@ function changedCells(dir) {
   let n = 0;
   const rd = path.join(ROOT, "world/rooms");
   for (const region of fs.readdirSync(rd)) {
-    for (const file of fs.readdirSync(path.join(rd, region))) {
+    for (const file of fs.readdirSync(path.join(rd, region)).filter((n) => n.endsWith(".room") && !/^[.#]/.test(n))) {
       const a = fs.readFileSync(path.join(rd, region, file), "utf8");
       const b = fs.readFileSync(path.join(dir, "rooms", region, file), "utf8");
       for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) n++;

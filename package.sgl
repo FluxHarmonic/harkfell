@@ -57,6 +57,11 @@
   (let ((n (string-length s)) (m (string-length suf)))
     (and (>= n m) (string=? (substring s (- n m) n) suf))))
 
+;; A world file, not an editor's lock or autosave (.#x.room, #x.room#):
+;; the same rule as (harkfell source)'s world-file-name?.
+(define (world-name? n suf)
+  (and (has-suffix? n suf) (not (memv (string-ref n 0) (list #\. #\#)))))
+
 ;; The world's files the game reads (the same set (harkfell source) reads
 ;; natively), as a JSON array of [path, text] for the page.
 (define (world-json)
@@ -64,7 +69,7 @@
                   (if (file-exists? "world/world.sgl") (list "world/world.sgl") '())
                   (if (directory? "world/regions")
                       (map (lambda (n) (string-append "world/regions/" n))
-                           (filter (lambda (n) (has-suffix? n ".map")) (sorted-dir "world/regions")))
+                           (filter (lambda (n) (world-name? n ".map")) (sorted-dir "world/regions")))
                       '())
                   (if (directory? "world/rooms")
                       (apply append
@@ -72,7 +77,7 @@
                                     (let ((d (string-append "world/rooms/" r)))
                                       (if (directory? d)
                                           (map (lambda (n) (string-append d "/" n))
-                                               (filter (lambda (n) (has-suffix? n ".room")) (sorted-dir d)))
+                                               (filter (lambda (n) (world-name? n ".room")) (sorted-dir d)))
                                           '())))
                                   (sorted-dir "world/rooms")))
                       '()))))

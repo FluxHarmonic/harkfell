@@ -125,6 +125,15 @@
     (let ((ps (problems (with-file LEFT (lambda (t) (swap t "   \"#########################\")\n  things:" "   \"#### ####################\")\n  things:"))))))
       (assert-true (has? ps "x0y0 bottom edge opens onto no room, columns 4")))))
 
+(test-group "content: which files are the world's"
+  (test "a room file and a map count; an editor's lock, autosave or hidden file does not (David's crash, 2026-09-24)"
+    (assert-true (world-file-name? "x9y3.room" ".room"))
+    (assert-true (world-file-name? "reedfen.map" ".map"))
+    (assert-false (world-file-name? ".#x9y3.room" ".room"))
+    (assert-false (world-file-name? "#x9y3.room#" ".room"))
+    (assert-false (world-file-name? "x9y3.room~" ".room"))
+    (assert-false (world-file-name? ".x9y3.room" ".room"))))
+
 (test-group "content: the region map"
   (test "an intent that differs from the room's is red"
     (let ((ps (problems (with-file MAP (lambda (t) (swap t "a gap to jump" "a gap to leap"))))))

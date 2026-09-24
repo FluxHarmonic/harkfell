@@ -22,6 +22,10 @@
 #   two       a change that needs two files: the Reed Bridge's title changed
 #             in the room file alone is refused (the map disagrees); then in
 #             the map too, and both are taken together
+#   lock      Emacs's lock file (.#x9y3.room, a symlink to nowhere) appears
+#             beside the room while it is edited: the game keeps running and
+#             prints no error, and an edit saved after it still reloads (David
+#             hit a crash here, 2026-09-24)
 # The window is the one owned by the game's PID; a capture that fails (an
 # empty hash) is SETUP-FAILED, never a "picture held".
 # The game is stopped by its own PID (exe = the release binary, cwd = this
@@ -113,6 +117,17 @@ case "$both" in
     else echo "FAIL two: the room alone was not refused"; fails=$((fails+1)); fi ;;
   *) echo "FAIL two: no reload naming both files (last: $both)"; fails=$((fails+1)) ;;
 esac
+# lock: a dangling .#x9y3.room, as Emacs makes it, then an edit
+ln -s "daviwil@host.12345:1727000000" "$W/rooms/reedfen/.#x9y3.room"
+[ -L "$W/rooms/reedfen/.#x9y3.room" ] || { echo "SETUP-FAILED: the lock link did not land"; exit 2; }
+sleep 2
+r2=$(grep -c "harkfell: reloaded" "$LOG")
+sed -i 's/"         #######         "/"         =======         "/' "$ROOM"
+i=0; while [ $i -lt 8 ] && [ "$(grep -c "harkfell: reloaded" "$LOG")" -le "$r2" ]; do sleep 0.5; i=$((i+1)); done
+if [ -d "/proc/$GPID" ] && ! grep -q "Scheme error\|cannot open file\|skipped a look" "$LOG" && [ "$(grep -c "harkfell: reloaded" "$LOG")" -gt "$r2" ]; then
+  echo "PASS lock: the lock file ignored, the game running, the next edit reloaded"
+else echo "FAIL lock"; fails=$((fails+1)); fi
+rm -f "$W/rooms/reedfen/.#x9y3.room"
 echo "--- game log"; cat "$LOG"
 [ $fails -eq 0 ] && echo "PASS drive-reload" || echo "FAIL drive-reload: $fails legs"
 exit $fails

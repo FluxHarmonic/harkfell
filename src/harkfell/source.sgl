@@ -7,19 +7,29 @@
 ;;; builds the same list from the files baked into it.
 ;;;
 ;;; Read: world.sgl, regions/*.map, rooms/*/*.room. Nothing else (BIBLE.md
-;;; is for people).
+;;; is for people), and never an editor's own files: a name starting with
+;;; "." or "#" is skipped (Emacs's lock file .#x9y3.room is a symlink to
+;;; nowhere and ends in .room; reading it crashed the running game, found
+;;; by David editing a room, 2026-09-24).
 
 (define-library (harkfell source)
   (import (sigil list)
           (sigil string)
           (sigil fs))
 
-  (export read-world-source source-mtimes room-file-path)
+  (export read-world-source source-mtimes room-file-path world-file-name?)
 
   (begin
     (define (ends-with? s suffix)
       (let ((n (string-length s)) (m (string-length suffix)))
         (and (>= n m) (string=? (substring s (- n m) n) suffix))))
+
+    ;; A name the world may hold: ends in suffix, and is not an editor's
+    ;; lock, autosave or hidden file.
+    (define (world-file-name? n suffix)
+      (and (ends-with? n suffix)
+           (> (string-length n) 0)
+           (not (memv (string-ref n 0) (list #\. #\#)))))
 
     (define (sorted-list dir)
       (list-sort string<?
@@ -39,7 +49,7 @@
         (let ((rd (string-append dir "/regions")))
           (if (directory? rd)
               (map (lambda (n) (cons (string-append "world/regions/" n) (string-append rd "/" n)))
-                   (filter (lambda (n) (ends-with? n ".map")) (sorted-list rd)))
+                   (filter (lambda (n) (world-file-name? n ".map")) (sorted-list rd)))
               '()))
         (let ((rd (string-append dir "/rooms")))
           (if (directory? rd)
@@ -49,7 +59,7 @@
                               (if (directory? d)
                                   (map (lambda (n) (cons (string-append "world/rooms/" region "/" n)
                                                          (string-append d "/" n)))
-                                       (filter (lambda (n) (ends-with? n ".room")) (sorted-list d)))
+                                       (filter (lambda (n) (world-file-name? n ".room")) (sorted-list d)))
                                   '())))
                           (sorted-list rd)))
               '()))))

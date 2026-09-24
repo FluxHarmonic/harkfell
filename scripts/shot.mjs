@@ -116,13 +116,15 @@ async function waitLine(re, ms) {
 // The working tree's world (the files (harkfell source) reads), handed to the
 // page before it loads, so a shot shows the rooms as they are on disk now and
 // not as they were when build/web was built. --baked uses the built page's.
+// a world file, not an editor's lock or autosave (.#x.room): (harkfell source)'s rule
+const worldName = (n, suf) => n.endsWith(suf) && !/^[.#]/.test(n);
 function worldFiles(dir) {
   const out = [];
   if (fs.existsSync(path.join(dir, "world.sgl"))) out.push("world.sgl");
   const rd = path.join(dir, "regions");
-  if (fs.existsSync(rd)) for (const n of fs.readdirSync(rd).sort()) if (n.endsWith(".map")) out.push("regions/" + n);
+  if (fs.existsSync(rd)) for (const n of fs.readdirSync(rd).sort()) if (worldName(n, ".map")) out.push("regions/" + n);
   const rm = path.join(dir, "rooms");
-  if (fs.existsSync(rm)) for (const r of fs.readdirSync(rm).sort()) for (const n of fs.readdirSync(path.join(rm, r)).sort()) if (n.endsWith(".room")) out.push("rooms/" + r + "/" + n);
+  if (fs.existsSync(rm)) for (const r of fs.readdirSync(rm).sort()) for (const n of fs.readdirSync(path.join(rm, r)).sort()) if (worldName(n, ".room")) out.push("rooms/" + r + "/" + n);
   return out.map((f) => ["world/" + f, fs.readFileSync(path.join(dir, f), "utf8")]);
 }
 if (!args.includes("--baked")) {
