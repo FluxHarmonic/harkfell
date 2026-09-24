@@ -1,0 +1,152 @@
+#!/bin/sh
+# A2's sound gates (harkfell-design section 10, A2), green and red.
+#
+#   scripts/gate-sound              the green arm: test-hush, test-sound, test-tunes
+#   scripts/gate-sound --sabotage   the three named sabotages, each must go RED
+#
+# The gates:
+#   1  a fixed moment plays once on the first visit the hush allows, not on the next
+#   2  a fixed moment blocked by the hush stays armed and plays on the following visit
+#   3  the hush blocks a wandering moment on EACH of its two conditions, allows it on both
+#   4  a room change during a moment ramps the bed's channels while the duck holds
+#      (measured through motif, at the bed's output: test/test-sound.sgl)
+#   +  every room moment and region bed names a .cts that exists and reads
+#   +  the place the director is given is in absolute world pixels (test-place)
+#
+# The sabotages (each planted in a COMMITTED file, checked to have landed by
+# hash and by grep, run, and restored with git checkout; the restore is
+# checked against the pre-plant hash):
+#   first-visit   hush.sgl forgets the spent flag      -> gate 1 red
+#   rooms-half    hush.sgl drops the rooms-entered test -> gate 3 red
+#   blocked-spent hush.sgl spends a moment on any visit  -> gate 2 red
+#   relative-px   audio.sgl passes the map's own pixels (the review's H1)
+#                 -> the listening test on the real world red
+#   channel-duck  sound.sgl ducks with channel ramps    -> gate 4 red
+# A leg is RED only if the test run exits non-zero AND the named test is
+# reported failing (not merely absent from the passes). --sabotage runs the
+# green arm first and requires every named test to PASS unplanted, so a test
+# already red at HEAD cannot be scored as a caught sabotage. An interrupt
+# restores the file being planted.
+#
+# Exit: 0 all as expected, 1 a gate or a sabotage leg went the wrong way,
+# 2 SETUP-FAILED (a plant did not land, a restore did not restore, a dirty file).
+set -u
+cd "$(dirname "$0")/.." || exit 2
+TMP="$(mktemp -d /tmp/harkfell-gate-sound-XXXXXX)"
+PLANTED=""
+trap 'if [ -n "$PLANTED" ]; then git checkout HEAD -- "$PLANTED"; echo "interrupted: restored $PLANTED"; fi; rm -rf "$TMP"' EXIT
+trap 'exit 130' INT TERM
+FAIL=0
+
+hash() { sha256sum "$1" | cut -c1-16; }
+
+# run FILE WANT-PASSED: the test file's run, green when rc=0 and exactly
+# WANT-PASSED tests passed with none failing.
+green() {
+  out="$TMP/$(basename "$1").out"
+  scripts/dev sigil test "$1" > "$out" 2>&1
+  rc=$?
+  line="$(grep -a 'Tests:' "$out" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"
+  passed="$(echo "$line" | sed -n 's/.*Tests: *\([0-9][0-9]*\) passed.*/\1/p')"
+  total="$(echo "$line" | sed -n 's/.*(\([0-9][0-9]*\) total).*/\1/p')"
+  if [ "$rc" -eq 0 ] && [ "${passed:-x}" = "$2" ] && [ "${total:-y}" = "$2" ]; then
+    echo "GREEN $1: $passed of $total passed"
+  else
+    echo "NOT GREEN $1: rc=$rc, '$line' (want $2 of $2)"; sed 's/\x1b\[[0-9;]*m//g' "$out" | grep -a '✗' | head -5
+    FAIL=1
+  fi
+}
+
+# plant NAME FILE OLD NEW TESTFILE TESTNAME
+plant() {
+  name=$1 file=$2 old=$3 new=$4 tf=$5 tn=$6
+  if ! git diff --quiet HEAD -- "$file"; then echo "SETUP-FAILED $name: $file differs from HEAD (commit before planting)"; exit 2; fi
+  before="$(hash "$file")"
+  OLD="$old" NEW="$new" node -e '
+    const fs=require("fs"); const f=process.argv[1]; const s=fs.readFileSync(f,"utf8");
+    const n=s.split(process.env.OLD).length-1;
+    if(n!==1){console.error("anchor found "+n+" times");process.exit(3)}
+    fs.writeFileSync(f, s.replace(process.env.OLD, process.env.NEW));' "$file"
+  prc=$?
+  PLANTED="$file"
+  after="$(hash "$file")"
+  if [ "$prc" -ne 0 ] || [ "$before" = "$after" ] || ! grep -qF "$new" "$file"; then
+    echo "SETUP-FAILED $name: the plant did not land (rc $prc, hash $before -> $after)"
+    git checkout HEAD -- "$file"; exit 2
+  fi
+  changed="$(git diff --numstat HEAD -- "$file" | awk '{print $1+$2}')"
+  echo "planted $name in $file ($before -> $after, $changed lines changed)"
+  out="$TMP/$name.out"
+  scripts/dev sigil test "$tf" > "$out" 2>&1
+  rc=$?
+  clean="$(sed 's/\x1b\[[0-9;]*m//g' "$out")"
+  git checkout HEAD -- "$file"
+  PLANTED=""
+  restored="$(hash "$file")"
+  if [ "$restored" != "$before" ]; then echo "SETUP-FAILED $name: restore gave $restored, not $before"; exit 2; fi
+  if [ "$rc" -ne 0 ] && echo "$clean" | grep -a '✗' | grep -qF "$tn"; then
+    echo "RED $name (as it must be): rc=$rc; failing: $tn"
+    echo "$clean" | grep -a 'scenario / reference' | head -1
+  else
+    echo "NOT RED $name: rc=$rc; the sabotage was not caught by '$tn'"
+    echo "$clean" | grep -a 'Tests:' | tail -1
+    FAIL=1
+  fi
+  echo "restored $file ($restored)"
+}
+
+# The green arm: each file's run, and every named test seen passing.
+green_all() {
+  green test/test-hush.sgl 11
+  green test/test-sound.sgl 8
+  green test/test-tunes.sgl 3
+  green test/test-place.sgl 6
+}
+
+# A named test must pass unplanted (in the green arm's output).
+passes() {
+  sed 's/\x1b\[[0-9;]*m//g' "$TMP/$(basename "$1").out" | grep -a '✓' | grep -qF "$2" \
+    || { echo "SETUP-FAILED: '$2' does not pass unplanted; a sabotage leg on it would prove nothing"; exit 2; }
+}
+
+if [ "${1:-}" = "--sabotage" ]; then
+  green_all
+  [ "$FAIL" -eq 0 ] || { echo "SETUP-FAILED: the green arm is not green; no sabotage leg can be scored"; exit 2; }
+  passes test/test-hush.sgl "the next visit, long after the hush has passed, does not"
+  passes test/test-hush.sgl "4 minutes played but only 5 rooms entered: blocked"
+  passes test/test-hush.sgl "and plays on the following visit once the hush allows"
+  passes test/test-sound.sgl "and the duck held"
+  passes test/test-place.sgl "in Old Stone, still: the ears lean east and the tone sounds"
+  plant first-visit src/harkfell/hush.sgl \
+    "      (cond ((member key (hush-spent h)) 'spent)
+            ((hush-playing h) 'blocked)" \
+    "      (cond ((hush-playing h) 'blocked)" \
+    test/test-hush.sgl "the next visit, long after the hush has passed, does not"
+  plant rooms-half src/harkfell/hush.sgl \
+    "                 (rooms-short (< (cdr s) WANDER-ROOMS)))" \
+    "                 (rooms-short #f))" \
+    test/test-hush.sgl "4 minutes played but only 5 rooms entered: blocked"
+  plant blocked-spent src/harkfell/hush.sgl \
+    "    (define (hush-enter h key) (hush h rooms: (+ (hush-rooms h) 1)))" \
+    "    (define (hush-enter h key) (hush h rooms: (+ (hush-rooms h) 1) spent: (cons key (hush-spent h))))" \
+    test/test-hush.sgl "and plays on the following visit once the hush allows"
+  plant channel-duck src/harkfell/sound.sgl \
+    "      (when *bed-src* (source-factor! *bed-src* 'duck DUCK-GAIN DUCK-IN-S now)))" \
+    "      (when *bed-player*
+        (for-each (lambda (e)
+                    (let ((ch (car e)) (v (vector-ref (cdr e) 1)))
+                      (player-ramp! *bed-player* (cons 'channel-volume ch) v (* DUCK-GAIN v) (* 1000.0 DUCK-IN-S))))
+                  *levels*)))" \
+    test/test-sound.sgl "and the duck held"
+  plant relative-px src/harkfell/audio.sgl \
+    "                           px: (+ (body-x b) 4.0 (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)))
+                           py: (+ (body-y b) 6.0 (* (worldmap-rows wm) (worldmap-size wm) (worldmap-y0 wm)))" \
+    "                           px: (+ (body-x b) 4.0) py: (+ (body-y b) 6.0)" \
+    test/test-place.sgl "in Old Stone, still: the ears lean east and the tone sounds"
+  if [ "$FAIL" -eq 0 ]; then echo "GATE-SOUND SABOTAGE: all five RED"; else echo "GATE-SOUND SABOTAGE: a leg was not caught"; fi
+  exit $FAIL
+fi
+
+green_all
+if [ "$FAIL" -eq 0 ]; then echo "GATE-SOUND GREEN"; else echo "GATE-SOUND RED"; fi
+exit $FAIL
