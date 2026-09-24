@@ -6,9 +6,22 @@
 ;;; shell's route (its ensure-texture!), for any number of paths at once. A
 ;;; fetch that has not landed after GIVE-UP asks (about ten seconds at one
 ;;; ask a frame) is failed for good: (harkfell images) stops asking.
+;;;
+;;; No fetch starts until HOLD-MS after the first ask. Measured 2026-09-24
+;;; in headless Chrome (a CDP probe logging Network.loadingFailed):
+;;;   - every request in flight at one moment just after the page's boot is
+;;;     aborted (net::ERR_ABORTED), whether the wasm or the page's own JS
+;;;     issued it;
+;;;   - the same request issued 0.2 s later lands;
+;;;   - the gles3 bridge logs each abort as a console error and never
+;;;     marks the slot ready.
+;;; The start screen asks for its words on its first frame, inside that
+;;; moment, so without the hold its words never came. What aborts them is
+;;; not found; the page's own tune fetches retry around the same window.
 
 (define-library (harkfell shell web-images)
   (import (sigil core)
+          (sigil time)
           (sigil graphics)
           (sigil graphics image)
           (sigil list)
@@ -18,15 +31,21 @@
 
   (begin
     (define GIVE-UP 600)
+    (define HOLD-MS 1000.0)
     (define *pending* '())      ; ((path handle . asks) ...)
+    (define *first-ask* #f)     ; ms, the first ask
+
+    (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
 
     (define (drop! path)
       (set! *pending* (filter (lambda (e) (not (string=? (car e) path))) *pending*)))
 
     (define (web-fetcher path)
+      (unless *first-ask* (set! *first-ask* (now-ms)))
       (let ((e (assoc path *pending*)))
         (cond ((not e)
-               (set! *pending* (cons (cons path (cons (gles3-fetch-image path) 0)) *pending*))
+               (when (> (- (now-ms) *first-ask*) HOLD-MS)
+                 (set! *pending* (cons (cons path (cons (gles3-fetch-image path) 0)) *pending*)))
                #f)
               ((gles3-image-ready? (cadr e))
                (drop! path)
