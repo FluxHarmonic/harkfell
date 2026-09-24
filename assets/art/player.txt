@@ -1,0 +1,353 @@
+# The player: a small long-eared creature (harkfell-design section 7,
+# "Animation budget"). CC BY 4.0.
+#
+# F fur, f fur in shade, k the eye and the pads. The same three slots in
+# every region, so the creature is the same creature everywhere.
+#
+# Every frame faces right; the game mirrors it for left. A frame stands on
+# the body's box: its bottom row is the box's bottom, its columns centred
+# on the box (the box is 8 x 14; the resting ears are columns 2 and 7 of a
+# 10-wide frame, where A2's listening ears grow from).
+
+# idle: breathing (a, b), and an ear flick now and then (c)
+= idle-a
+..F....F..
+..Ff...Ff.
+..Ff...Ff.
+..FFFFFFF.
+.FFFFFFFFF
+.FFFFFFkFF
+.FFFFFFkFF
+.FFFFFFFFf
+ffFFFFFFF.
+fFFFFFFFF.
+.fFFFFFFf.
+.fFFFFFFf.
+..ffffff..
+..kk..kk..
+
+= idle-b
+..........
+..F....F..
+..Ff...Ff.
+..Ff...Ff.
+..FFFFFFF.
+.FFFFFFFFF
+.FFFFFFkFF
+.FFFFFFkFf
+ffFFFFFFFf
+fFFFFFFFFf
+.fFFFFFFFf
+.fFFFFFFf.
+..ffffff..
+..kk..kk..
+
+= idle-c
+.........F
+..F....FF.
+..Ff..FF..
+..Ff..F...
+..FFFFFFF.
+.FFFFFFFFF
+.FFFFFFkFF
+.FFFFFFkFF
+.FFFFFFFFf
+ffFFFFFFF.
+fFFFFFFFF.
+.fFFFFFFf.
+..ffffff..
+..kk..kk..
+
+# run: six frames, the body low and forward, the ears streaming back
+= run-a
+..........
+.FF....F..
+..FF...Ff.
+...FF..Ff.
+...FFFFFFF
+..FFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+..fFFFFff.
+..ff..ff..
+.kk....kk.
+..........
+
+= run-b
+..........
+..........
+FF....F...
+.FF...Ff..
+..FFFFFFFF
+..FFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+..fFFFFff.
+...ffff...
+...kkkk...
+..........
+
+= run-c
+..........
+.FF....F..
+..FF...Ff.
+...FF..Ff.
+...FFFFFFF
+..FFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+.ffFFFFFf.
+kf......fk
+k........k
+..........
+
+= run-d
+..........
+.FF....F..
+..FF...Ff.
+...FF..Ff.
+...FFFFFFF
+..FFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+..fFFFFff.
+..ff..ff..
+.kk....kk.
+..........
+
+= run-e
+..........
+..........
+FF....F...
+.FF...Ff..
+..FFFFFFFF
+..FFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+..fFFFFff.
+...ffff...
+...kkkk...
+..........
+
+= run-f
+..........
+.FF....F..
+..FF...Ff.
+...FF..Ff.
+...FFFFFFF
+..FFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+.ffFFFFFf.
+kf......fk
+k........k
+..........
+
+# jump: rising, stretched, ears laid back; the top of the arc; the fall,
+# ears up like a dropped hare's
+= jump-a
+F.........
+.FF...F...
+..FF..Ff..
+...FFFFFF.
+..FFFFFkFF
+..FFFFFkFF
+.FFFFFFFFf
+.FFFFFFFF.
+.fFFFFFFf.
+.fFFFFFFf.
+..fFFFFf..
+..ff..ff..
+..k....k..
+..........
+
+= jump-b
+..........
+..F....F..
+..Ff...Ff.
+..FFFFFFF.
+.FFFFFFFFF
+.FFFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+.kfFFFFfk.
+..........
+..........
+..........
+
+= fall-a
+..F.....F.
+..Ff...Ff.
+..Ff...Ff.
+..Ff..Ff..
+..FFFFFFF.
+.FFFFFFFFF
+.FFFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+.ffFFFFff.
+.k......k.
+..........
+
+= fall-b
+.F.......F
+..F....Ff.
+..Ff...Ff.
+..Ff..Ff..
+..FFFFFFF.
+.FFFFFFFFF
+.FFFFFFkFF
+.FFFFFFkFF
+fFFFFFFFFf
+fFFFFFFFF.
+.fFFFFFFf.
+.ffFFFFff.
+k........k
+..........
+
+# cling: flat to the wall on its right, paws on it, ears flat back
+= cling-a
+..........
+..........
+FFF.......
+.FFFFFF...
+..FFFFFFF.
+.FFFFFFkFk
+.FFFFFFkF.
+.FFFFFFFFk
+fFFFFFFFF.
+fFFFFFFFF.
+.fFFFFFFfk
+.fFFFFFFf.
+..fffffffk
+..........
+
+# climb: up the wall, paw over paw (a b c b)
+= climb-a
+..........
+..........
+FFF......k
+.FFFFFF..k
+..FFFFFFF.
+.FFFFFFkF.
+.FFFFFFkF.
+.FFFFFFFF.
+fFFFFFFFF.
+fFFFFFFFF.
+.fFFFFFFf.
+.fFFFFFFfk
+..ffffff.k
+..........
+
+= climb-b
+..........
+..........
+..........
+FFF.......
+.FFFFFF..k
+..FFFFFFFk
+.FFFFFFkF.
+.FFFFFFkF.
+.FFFFFFFF.
+fFFFFFFFFk
+fFFFFFFFFk
+.fFFFFFFf.
+.fFFFFFFf.
+..ffffff..
+
+= climb-c
+..........
+..........
+FFF.......
+.FFFFFF...
+..FFFFFFF.
+.FFFFFFkFk
+.FFFFFFkFk
+.FFFFFFFF.
+fFFFFFFFF.
+fFFFFFFFF.
+.fFFFFFFf.
+.fFFFFFFf.
+..ffffffk.
+........k.
+
+# swim: level in the water, head up, ears back, paddling
+= swim-a
+..............
+..............
+..............
+..............
+..............
+FF............
+.FFF......FF..
+..FFF...FFFFF.
+...FFFFFFFFkF.
+..fFFFFFFFFkFF
+.ffFFFFFFFFFF.
+..fFFFFFFFFf..
+...ff.k..k....
+..........k...
+
+= swim-b
+..............
+..............
+..............
+..............
+..............
+..............
+FFF.......FF..
+.FFFF...FFFFF.
+...FFFFFFFFkF.
+..fFFFFFFFFkFF
+.ffFFFFFFFFFF.
+..fFFFFFFFFf..
+...ffk....k...
+....k.........
+
+= swim-c
+..............
+..............
+..............
+..............
+..............
+FF............
+.FFF......FF..
+..FFF...FFFFF.
+...FFFFFFFFkF.
+..fFFFFFFFFkFF
+.ffFFFFFFFFFF.
+..fFFFFFFFFf..
+...ff..kk.....
+..............
+
+= swim-d
+..............
+..............
+..............
+..............
+..............
+..............
+FFF.......FF..
+.FFFF...FFFFF.
+...FFFFFFFFkF.
+..fFFFFFFFFkFF
+.ffFFFFFFFFFF.
+..fFFFFFFFFf..
+..k.fk...k....
+..............

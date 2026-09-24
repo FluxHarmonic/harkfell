@@ -51,7 +51,7 @@
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
           draw-overview present-overview! overview-size overview-room-at draw-news!
-          slot)
+          slot player-frame)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -395,24 +395,59 @@
 
     ;; --- the body ----------------------------------------------------------------------------
 
-    ;; The body with its box's top-left at (bx, by). (A0's block, in the
-    ;; player's slots, until the frames are drawn.)
-    (define (draw-body-at b bx by)
-      (let* ((x (- (floor-int bx) 1))
-             (y (floor-int by))
-             (face (body-facing b))
-             (clinging (eq? (body-mode b) 'cling)))
-        (paint! 'fur-1)
-        (draw-filled-rect x (+ y 3) 10 11)
-        (if clinging
-            (begin
-              (draw-filled-rect (if (> face 0) (+ x 1) (+ x 6)) (+ y 2) 3 1)
-              (draw-filled-rect (if (> face 0) (+ x 0) (+ x 7)) (+ y 1) 3 1))
-            (begin
+    ;; The player's frame for a body at tick t (assets/art/player.txt):
+    ;;   ground   idle, breathing (a b) with an ear flick now and then (c);
+    ;;            running, six frames paced by the distance run, so the feet
+    ;;            do not slide
+    ;;   air      jump-a rising fast, jump-b at the top, fall a/b coming down
+    ;;   cling    cling-a held still; climbing, a b c b paced by the height
+    ;;   swim     a to d paddling while it moves, a at rest
+    (define RUN-FRAMES (vector "run-a" "run-b" "run-c" "run-d" "run-e" "run-f"))
+    (define CLIMB-FRAMES (vector "climb-a" "climb-b" "climb-c" "climb-b"))
+    (define SWIM-FRAMES (vector "swim-a" "swim-b" "swim-c" "swim-d"))
+
+    (define (step-of v per n) (modulo (floor-int (/ v per)) n))
+
+    (define (player-frame b t)
+      (let ((vx (body-vx b)) (vy (body-vy b)))
+        (case (body-mode b)
+          ((swim) (if (or (> (abs vx) 0.2) (> (abs vy) 0.3)) (vector-ref SWIM-FRAMES (step-of t 8 4)) "swim-a"))
+          ((cling) (if (> (abs vy) 0.05) (vector-ref CLIMB-FRAMES (step-of (body-y b) 3.0 4)) "cling-a"))
+          ((ground)
+           (cond ((> (abs vx) 0.15) (vector-ref RUN-FRAMES (step-of (body-x b) 3.5 6)))
+                 ((< (modulo t 347) 9) "idle-c")
+                 ((< (modulo t 80) 40) "idle-a")
+                 (else "idle-b")))
+          (else
+           (cond ((< vy -1.2) "jump-a")
+                 ((< vy 0.7) "jump-b")
+                 ((< (modulo t 12) 6) "fall-a")
+                 (else "fall-b"))))))
+
+    (define *player-cells* '())    ; ((name . atlas index) ...)
+    (define (player-cell name)
+      (let ((e (assoc name *player-cells*)))
+        (if e
+            (cdr e)
+            (let ((i (atlas-index (string-append "player/" name))))
+              (set! *player-cells* (cons (cons name i) *player-cells*))
+              i))))
+
+    ;; The body with its box's top-left at (bx, by): its frame standing on
+    ;; the box's bottom, centred on it, mirrored facing left.
+    (define (draw-body-at b bx by t)
+      (let ((i (and (atlas-ready?) (player-cell (player-frame b t)))))
+        (if i
+            (let* ((sz (atlas-size i))
+                   (x (- (floor-int (+ bx 4)) (floor-int (/ (car sz) 2))))
+                   (y (- (floor-int (+ by 14)) (cdr sz))))
+              (set-color 1.0 1.0 1.0 1.0)
+              (atlas-draw! i x y (body-facing b)))
+            (let ((x (- (floor-int bx) 1)) (y (floor-int by)))
+              (paint! 'fur-1)
+              (draw-filled-rect x (+ y 3) 10 11)
               (draw-filled-rect (+ x 2) y 1 3)
-              (draw-filled-rect (+ x 7) y 1 3)))
-        (paint! 'ink)
-        (draw-filled-rect (if (> face 0) (+ x 7) (+ x 2)) (+ y 6) 1 2)))
+              (draw-filled-rect (+ x 7) y 1 3)))))
 
     ;; --- A0: the test room -----------------------------------------------------------------------
 
@@ -440,7 +475,7 @@
                 (cols (+ col 1))))
             (loop (+ row 1))))
         (let ((b (world-body w)))
-          (draw-body-at b (body-x b) (body-y b)))
+          (draw-body-at b (body-x b) (body-y b) (world-ticks w)))
         (with-additive-blend
           (paint-water!)
           (let loop ((row 0))
@@ -505,7 +540,7 @@
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
               (for-each (lambda (c) (unless (eyes? c) (draw-critter c ox oy t slot)))
                         (filter (lambda (c) (not ((kind? 'moth) c))) cs))
-              (draw-body-at b (- (body-x b) ox) (- (body-y b) oy))
+              (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (draw-water! rm)
               (for-each (lambda (c) (draw-critter c ox oy t slot)) (filter eyes? cs))
               (for-each (lambda (pk)
@@ -536,6 +571,7 @@
     ;; pass, the ears), resolve it. Outside any pass.
     (define (present-play! w after)
       (ensure-render!)
+      (atlas-ensure!)
       (let* ((p (world-room w))
              (rm (and p (placed-data p)))
              (region (if rm (room-region rm) 'none)))

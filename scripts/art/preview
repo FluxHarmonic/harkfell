@@ -1,0 +1,70 @@
+#!/bin/sh
+# A sheet's cells as a PNG in a region's palette, for looking at art without
+# building the game (the game's own atlas is the one that ships).
+#
+#   scripts/art/preview SHEET REGION OUT.png [--scale N] [--only PREFIX]
+#
+# SHEET is assets/art/SHEET.txt; REGION a region of world/world.sgl whose
+# palette: lists the sixteen roles in slot order. Cells are laid left to
+# right in file order, wrapping at 480 px, on the region's sky-1, each
+# scaled N times (default 6). "_" draws as nothing. "h" is H2's colour.
+set -eu
+export LC_ALL=C
+cd "$(dirname "$0")/../.." || exit 1
+SHEET="$1"; REGION="$2"; OUT="$3"; shift 3
+SCALE=6; ONLY=""
+while [ $# -gt 0 ]; do
+  case "$1" in --scale) SCALE="$2"; shift 2 ;; --only) ONLY="$2"; shift 2 ;; *) echo "preview: unknown $1"; exit 1 ;; esac
+done
+src="assets/art/$SHEET.txt"
+[ -f "$src" ] || { echo "preview: no $src"; exit 1; }
+# the region's roles in slot order, then their hexes
+roles="$(awk -v r="$REGION" '
+  $0 ~ "^\\(region " r "$" || $0 ~ "^\\(region " r " " { inr = 1 }
+  inr && /palette: \(/ { grab = 1; sub(/.*palette: \(/, "") }
+  grab { line = line " " $0; if ($0 ~ /\)/) { sub(/\).*/, "", line); print line; exit } }
+' world/world.sgl)"
+[ -n "$roles" ] || { echo "preview: region $REGION has no palette: in world/world.sgl"; exit 1; }
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+for role in $roles h2 black; do
+  hex="$(awk -v role="$role" '$0 ~ "^ *\\(" role " \"#" { l = $0; sub(/^[^"]*"#/, "", l); print substr(l, 1, 6); exit }' world/world.sgl)"
+  [ -n "$hex" ] || { echo "preview: role $role has no colour"; exit 1; }
+  echo "$hex"
+done > "$tmp/pal"
+[ "$(wc -l < "$tmp/pal")" -eq 18 ] || { echo "preview: $REGION's palette: has $(($(wc -l < "$tmp/pal") - 2)) roles, want 16"; exit 1; }
+awk -v scale="$SCALE" -v only="$ONLY" -v palf="$tmp/pal" '
+  BEGIN {
+    keys = "abcd1234567wxFfk"
+    n = 0; while ((getline l < palf) > 0) pal[n++] = l
+    for (i = 1; i <= 16; i++) slot[substr(keys, i, 1)] = i - 1
+    slot["h"] = 16; slot["0"] = 17
+  }
+  function hx(s, i) { return index("0123456789abcdef", tolower(substr(s, i, 1))) - 1 }
+  function rgb(k) { p = pal[k]; return (hx(p,1)*16+hx(p,2)) " " (hx(p,3)*16+hx(p,4)) " " (hx(p,5)*16+hx(p,6)) }
+  /^#/ || /^[ \t]*$/ { next }
+  /^= / { name = substr($0, 3); take = (only == "" || index(name, only) == 1); if (take) { c++; h[c] = 0; w[c] = 0 }; next }
+  take { h[c]++; w[c] = length($0); row[c, h[c]] = $0 }
+  END {
+    W = 480; x = 4; y = 4; line = 0
+    for (i = 1; i <= c; i++) {
+      cw = w[i] * scale; ch = h[i] * scale
+      if (x + cw > W - 4) { x = 4; y += line + 6; line = 0 }
+      px[i] = x; py[i] = y; x += cw + 6; if (ch > line) line = ch
+    }
+    H = y + line + 4
+    for (yy = 0; yy < H; yy++) for (xx = 0; xx < W; xx++) img[xx, yy] = rgb(0)
+    for (i = 1; i <= c; i++)
+      for (r = 1; r <= h[i]; r++)
+        for (q = 1; q <= w[i]; q++) {
+          ch = substr(row[i, r], q, 1)
+          if (ch == "." || ch == "_") continue
+          col = rgb(slot[ch])
+          for (sy = 0; sy < scale; sy++) for (sx = 0; sx < scale; sx++)
+            img[px[i] + (q-1)*scale + sx, py[i] + (r-1)*scale + sy] = col
+        }
+    print "P3"; print W, H; print 255
+    for (yy = 0; yy < H; yy++) for (xx = 0; xx < W; xx++) print img[xx, yy]
+  }' "$src" > "$tmp/out.ppm"
+convert "$tmp/out.ppm" +set date:create +set date:modify -define png:exclude-chunks=date,time,tIME,tEXt,zTXt "$OUT"
+echo "preview: $SHEET in $REGION -> $OUT"
