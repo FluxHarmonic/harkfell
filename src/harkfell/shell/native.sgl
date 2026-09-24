@@ -226,7 +226,8 @@
                      ;; A4 look: --look start|card [--kind keys|touch|both]
                      (let ((lk (arg-value args "--look")))
                        (when lk
-                         (shell-set-look! (string->symbol lk) (string->symbol (or (arg-value args "--kind") "keys")))))
+                         (shell-set-look! (string->symbol lk) (string->symbol (or (arg-value args "--kind") "keys")))
+                         (let ((a (arg-value args "--look-alpha"))) (when a (shell-set-look-alpha! (string->number a))))))
                      (run-game "Harkfell" WINDOW-W WINDOW-H (loop))
                      0)
                    1)))))))

@@ -47,7 +47,7 @@
           (harkfell draw)
           (harkfell images))
 
-  (export title-set-content! start-reset! draw-start! draw-card!
+  (export title-set-content! start-reset! draw-start! draw-card! draw-reveal!
           card-fade CARD-SECONDS start-moths TEXT-LAYOUT type-scale)
 
   (begin
@@ -63,12 +63,11 @@
     (define (type-path id k) (string-append "assets/type/" id "@" (number->string k) ".png"))
 
     ;; Where each line of words stands, its centre in view pixels:
-    ;; (id x y slot-name).
+    ;; (id x y slot-name). D35 (David, 2026-09-24): the name is not on the
+    ;; start screen; it comes at the first homecoming (draw-reveal!).
     (define TEXT-LAYOUT
-      (list (list "wordmark" 200 60 'sky-4)
-            (list "listen" 200 104 'fur-2)
-            (list "step" 200 121 'fur-2)))
-
+      (list (list "listen" 200 84 (quote fur-2))
+            (list "step" 200 101 (quote fur-2))))
     ;; --- the palette ------------------------------------------------------------------------
 
     (define *content* #f)
@@ -188,17 +187,29 @@
         (set-color 1.0 1.0 1.0 1.0)
         (draw-render-target (room-color-rt) (fit-x f) (fit-y f) (fit-w f) (fit-h f))))
 
-    ;; A line of words centred on view (vx, vy), at the window's resolution.
-    (define (draw-words! f id vx vy rgb alpha)
+    ;; An image (PREFIX@K.png, one per whole scale) centred on view (vx, vy),
+    ;; at the window's resolution, in colour rgb; fade 0..1 by alpha, or by
+    ;; the dither dissolve when dissolve? (the card, the reveal). -> the
+    ;; rectangle it took, in window pixels (x y w h), or #f while it loads.
+    (define (draw-image! f prefix vx vy rgb fade dissolve?)
       (let* ((s (/ (fit-w f) (* 1.0 VIEW-W)))
              (k (type-scale s))
-             (tex (image-texture (type-path id k))))
-        (when tex
-          (let* ((z (/ s k))
-                 (w (* z (texture-width tex))) (h (* z (texture-height tex)))
-                 (cx (+ (fit-x f) (* vx s))) (cy (+ (fit-y f) (* vy s))))
-            (set-color (car rgb) (cadr rgb) (caddr rgb) alpha)
-            (draw-texture tex (floor-int (- cx (/ w 2))) (floor-int (- cy (/ h 2))) w h)))))
+             (tex (image-texture (string-append prefix "@" (number->string k) ".png"))))
+        (and tex
+             (let* ((z (/ s k))
+                    (w (* z (texture-width tex))) (h (* z (texture-height tex)))
+                    (x (floor-int (- (+ (fit-x f) (* vx s)) (/ w 2))))
+                    (y (floor-int (- (+ (fit-y f) (* vy s)) (/ h 2)))))
+               (if dissolve?
+                   (begin (set-color (car rgb) (cadr rgb) (caddr rgb) 1.0)
+                          (draw-texture-dissolved! tex x y w h fade s))
+                   (begin (set-color (car rgb) (cadr rgb) (caddr rgb) fade)
+                          (draw-texture tex x y w h)))
+               (list x y w h)))))
+
+    ;; A line of words centred on view (vx, vy), at the window's resolution.
+    (define (draw-words! f id vx vy rgb alpha)
+      (draw-image! f (string-append "assets/type/" id) vx vy rgb alpha #f))
 
     ;; Which second line (D32): kind 'both "Press any key, or touch, to step
     ;; in.", 'keys drops "or touch" (the desktop build), 'touch drops "any
@@ -269,12 +280,31 @@
             ((< s CARD-SECONDS) (- 1.0 (/ (- s 2.8) 1.2)))
             (else 0.0)))
 
-    ;; The card on a window of w x h pixels at alpha 0..1 (the mark comes and
-    ;; goes by the dither, never by a translucency), after begin-frame.
+    ;; The card on a window of w x h pixels at alpha 0..1, after begin-frame:
+    ;; black, and the Flux Harmonic mark (assets/mark, David's mark in the
+    ;; palette's cream and oranges) at the window's resolution, smooth-edged,
+    ;; coming and going by the dither (never a translucency); once it has
+    ;; resolved, "presents" under it (Crash's card), in the text's dimmer cream.
+    (define MARK-Y 80)
     (define (draw-card! w h alpha t)
-      (let ((f (fit-of w h)))
-        (set! *tick* (floor-int (* 60.0 t)))
-        (pixel-pass!
-          (lambda () (draw-cell-centred! (cell "mark/flux-harmonic") 200 88 1))
-          (- 1.0 alpha))
-        (present-view! f)))))
+      (let ((f (fit-of w h)) (white (list 1.0 1.0 1.0)))
+        (set-color 0.0 0.0 0.0 1.0)
+        (draw-filled-rect 0 0 w h)
+        (set-blend-mode (quote normal))
+        (let ((r (and (> alpha 0.0) (draw-image! f "assets/mark/mark" 200 MARK-Y white alpha #t))))
+          (when (and r (>= alpha 0.999))
+            (let* ((s (/ (fit-w f) (* 1.0 VIEW-W)))
+                   (bottom (/ (- (+ (cadr r) (cadddr r)) (fit-y f)) s)))
+              (draw-words! f "presents" 200 (+ bottom 9) (vector-ref (rgb) (slot-of (quote fur-2))) 1.0))))))
+
+    ;; D35: the name at the first homecoming, over the play view (drawn after
+    ;; the room is on the window): the wordmark in the creature's cream,
+    ;; high over the room, at the window's resolution, coming and going by
+    ;; the dither. alpha 0..1 is the caller's (CONTENT's: in, hold, out); t,
+    ;; seconds since it began, is not needed yet. Play and input go on.
+    (define REVEAL-Y 40)
+    (define (draw-reveal! w h alpha t)
+      (when (> alpha 0.0)
+        (set-blend-mode (quote normal))
+        (draw-image! (fit-of w h) "assets/type/wordmark" 200 REVEAL-Y
+                     (vector-ref (rgb) (slot-of (quote fur-1))) alpha #t)))))

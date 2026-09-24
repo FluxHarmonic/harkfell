@@ -51,7 +51,8 @@
           paint-slot! paint-slot-a! paint-water! paint-light!
           strip-bytes make-strips strips-update! draw-strips!
           ensure-render! room-index-rt room-color-rt
-          resolve! sway-composite! sway-offset draw-texture-scattered! GLSL-PREFIX VERT-SOURCE)
+          resolve! sway-composite! sway-offset draw-texture-scattered! draw-texture-dissolved!
+          GLSL-PREFIX VERT-SOURCE)
 
   (begin
     (define VIEW-W 400)
@@ -272,6 +273,41 @@
        "    ivec2 q = clamp(p + ivec2(int(floor(jx + 0.5)), int(floor(jy + 0.5))), ivec2(0), ivec2(u_size) - 1);\n"
        "    fragColor = texelFetch(iTexChannel0_iSmpChannel0, q, 0);\n"
        "}\n"))
+
+    ;; The dither dissolve for an image drawn at the window's resolution (the
+    ;; card's mark, the name's reveal): each pixel shows while u_fade is over
+    ;; the Bayer threshold of the view pixel it lies in (u_cell device pixels
+    ;; a side), so the image comes and goes in the pixel world's own dots, and
+    ;; is whole, smooth-edged, at u_fade 1.
+    (define DISSOLVE-FRAGMENT
+      (string-append
+       GLSL-PREFIX
+       "uniform sampler2D iTexChannel0_iSmpChannel0;\n"
+       "uniform float u_fade;\n"
+       "uniform float u_cell;\n"
+       "in vec2 texUV;\n"
+       "in vec4 iColor;\n"
+       "out vec4 fragColor;\n"
+       "float bayer(int x, int y) {\n"
+       "    int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);\n"
+       "    return (float(m[(y & 3) * 4 + (x & 3)]) + 0.5) / 16.0;\n"
+       "}\n"
+       "void main() {\n"
+       "    ivec2 c = ivec2(floor(gl_FragCoord.xy / max(u_cell, 1.0)));\n"
+       "    if (u_fade < bayer(c.x, c.y)) discard;\n"
+       "    fragColor = texture(iTexChannel0_iSmpChannel0, texUV) * iColor;\n"
+       "}\n"))
+
+    (define *dissolve* #f)
+
+    ;; tex drawn into (x y w h) of the current pass, in the current colour,
+    ;; dissolved to fade 0..1 in dots cell device pixels a side.
+    (define (draw-texture-dissolved! tex x y w h fade cell)
+      (unless *dissolve* (set! *dissolve* (load-shader VERT-SOURCE DISSOLVE-FRAGMENT 'normal)))
+      (set-shader-uniform *dissolve* 'u_fade (inexact fade))
+      (set-shader-uniform *dissolve* 'u_cell (inexact cell))
+      (with-shader *dissolve*
+        (draw-texture tex x y w h)))
 
     (define *blur* #f)
 

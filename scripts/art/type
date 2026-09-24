@@ -19,6 +19,9 @@
 #   step-both    IM Fell English italic: D32's second line, keys and touch
 #   step-keys    ... keys only (the desktop build)
 #   step-touch   ... touch only
+#   presents     IM Fell English SC, under the card's mark once it has
+#                resolved (as Crash's card), smaller and wider spaced
+#                than the wordmark
 set -eu
 export LC_ALL=C
 cd "$(dirname "$0")/../.." || exit 1
@@ -48,7 +51,8 @@ item listen     IMFeENrm28P 9.5 0 "Harkfell is a game of listening. Headphones b
 item step-both  IMFeENit28P 9.5 0 "Press any key, or touch, to step in."
 item step-keys  IMFeENit28P 9.5 0 "Press any key to step in."
 item step-touch IMFeENit28P 9.5 0 "Touch to step in."
-[ "$n" -eq 40 ] || { echo "type: made $n images, want 40"; exit 1; }
+item presents   IMFeENsc28P 7.5 34 "presents"
+[ "$n" -eq 48 ] || { echo "type: made $n images, want 48"; exit 1; }
 # all made: only now do they replace the old ones (a failure part way leaves
 # the old set whole, not a mix)
 cp "$out_dir"/*.png assets/type/

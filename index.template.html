@@ -275,9 +275,12 @@
         touchLayer.classList.remove("on");
         send("look", look + " " + (params.get("kind") || (coarse ? "touch" : (lookTouchy ? "both" : "keys"))));
       }
+      // ?look=reveal: play as a door does, with D35's reveal of the name over
+      // the room on a loop (the controls stay, play goes on)
+      if (look === "reveal") send("look", "reveal both");
       var door = room || params.has("atlas") || params.get("sheet") || params.has("test-room") ||
                  params.has("replay") || params.has("envelope") || params.has("bench") || params.get("carry") ||
-                 params.get("frame") === "off" || look === "start" || look === "card";
+                 params.get("frame") === "off" || look === "start" || look === "card" || look === "reveal";
       if (files.length && !door) {
         var touchy = (navigator.maxTouchPoints || 0) > 0;
         var kind = coarse ? "touch" : (touchy ? "both" : "keys");

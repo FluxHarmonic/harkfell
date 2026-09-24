@@ -190,7 +190,7 @@
                   (when (<= k 8)
                     (assert-true (file-exists? (string-append "assets/type/" id "@" (number->string k) ".png")))
                     (loop (+ k 1)))))
-              (list "wordmark" "listen" "step-both" "step-keys" "step-touch")))
+              (list "wordmark" "listen" "step-both" "step-keys" "step-touch" "presents")))
   (test "a scale picks the nearest image, 1 to 8"
     (assert-equal 2 (type-scale 2.0))
     (assert-equal 3 (type-scale 2.6))
@@ -199,11 +199,13 @@
   (test "the fonts ship with their licence (OFL)"
     (for-each (lambda (f) (assert-true (file-exists? (string-append "assets/fonts/" f))))
               (list "IMFeENrm28P.ttf" "IMFeENit28P.ttf" "IMFeENsc28P.ttf" "OFL.txt")))
-  (test "the mark is in its four slots only, and reserved"
-    (let ((rows (cell "mark/flux-harmonic")))
-      (assert-true (> (length rows) 20))
-      (assert-false (any (lambda (r) (any (lambda (ch) (not (memv ch (list #\0 #\F #\x #\h)))) (string->list r))) rows))
-      (assert-true (file-exists? "assets/RESERVED.md"))))
+  (test "the mark is made at every whole scale, reserved, and its raw never ships"
+    (let loop ((k 1))
+      (when (<= k 8)
+        (assert-true (file-exists? (string-append "assets/mark/mark@" (number->string k) ".png")))
+        (loop (+ k 1))))
+    (assert-true (file-exists? "assets/RESERVED.md"))
+    (assert-false (file-exists? "assets/refs")))
   (test "the waking frames exist and are the player's slots only"
     (for-each (lambda (n) (assert-true (cell (string-append "player/" n)))) (list "wake-a" "wake-b" "wake-c"))
     (assert-equal "wake-c" (waking-frame 10))
