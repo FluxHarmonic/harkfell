@@ -54,4 +54,6 @@
    (Q "Under the Heron's Water" "a long swim beneath the widest water to the far bank")
    (Z "The Mound's Roots" "the last climb, through roots, up to the far mound")
    (W "Drowned Steps" "old steps going down into still water: the way to the bell")
-   (V "The Drowned Bell" "a bell the old people sank, hanging in deep water: swim down and listen")))
+   (V "The Drowned Bell" "a bell the old people sank, hanging in deep water: swim down and listen"))
+  ;; A4: the Fen Edge's west edge opens onto the Hollow's Rim (x7y3)
+  borders: ((A west)))

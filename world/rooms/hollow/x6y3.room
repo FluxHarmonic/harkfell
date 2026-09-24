@@ -1,0 +1,23 @@
+;; world/rooms/hollow/x6y3.room
+(room
+  region: hollow
+  at: (6 3)
+  title: "The Chimney"
+  intent: "two walls a jump apart over soft turf: the first wall-jump, where a slip costs nothing"
+  bed: (wind 0.2 hum 0.2 drone 0.3)
+  grid:
+  ("          ##  ###########"
+   "          ##  ###########"
+   "          ##  ###########"
+   "                         "
+   "                         "
+   "  |  |      ||    |   |  "
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The cleft (columns 12-13) between smooth walls opens above the turf: jump
+;; into it and kick from wall to wall, up to the Cairn. The valley runs on
+;; under it.

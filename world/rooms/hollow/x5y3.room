@@ -1,0 +1,23 @@
+;; world/rooms/hollow/x5y3.room
+(room
+  region: hollow
+  at: (5 3)
+  title: "Standing Stones"
+  intent: "a row of old standing stones to climb along, on the path between the bowl and the rim"
+  bed: (wind 0.5 hum 0.2 drone 0.4)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "       #  #     #        "
+   "    #  #  #  #  #  #     "
+   " |  #| #  # |# |#  #|  | "
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((reedling flock: 5 zone: reeds))
+  decor: auto)
+;; Six stones two and three tiles tall, two tiles apart: hop along their
+;; tops. The Wind Gap's notch is overhead.

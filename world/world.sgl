@@ -9,9 +9,9 @@
 ;;; need them.
 
 ;; Where the game begins: the region, the room, the cell (column, row) the
-;; body stands in. The Hollow does not exist yet, so for A1 the world starts
-;; on Reedfen's western rim, where the way in from the Hollow will be.
-(start region: reedfen room: (8 3) cell: (2 4))
+;; body stands in. A4: the bottom of the Hollow's bowl, beside the stone
+;; (the design's section 4: you wake over the hum).
+(start region: hollow room: (4 3) cell: (15 8))
 
 ;; The world palette: (role "#rrggbb" note). PLACEHOLDER colours for A1, so
 ;; the rooms read; A4 replaces them with the real, dithered palettes. A
@@ -43,6 +43,25 @@
   (h5 "#e6a0b4" "H5, rose")
   (h7 "#a47ce0" "H7, a violet no region uses"))
 
+;; The Hollow (A4): the start, a bowl on the fell above the fen; seven rooms
+;; wide and two high, west of Reedfen (topics/harkfell-a4-region-maps). It
+;; gives nothing: it holds the first gate (the bowl's H2 stone) and the way
+;; down (the H3 stone under it), and shows the ways on. PLACEHOLDER palette
+;; roles until the look track's hol-* roles are merged.
+(region hollow
+  name: "The Hollow"
+  bounds: ((1 2) (7 3))
+  bed: "hollow-bed"
+  bed-channels: (wind water hum drone)
+  mode: ionian
+  palette: (sky-1 sky-2 sky-3 fog reed-1 reed-2 reed-3 mud-1 mud-2
+            water-1 water-2 stone-1 stone-2 ember fur-1 fur-2)
+  tiles: hollow
+  roster: (reedling lantern-moth)
+  moments: (high-fell hollow-answers)
+  wander: (stones-remember)
+  gives: ())
+
 (region reedfen
   name: "Reedfen"
   bounds: ((8 3) (17 5))
@@ -55,8 +74,8 @@
   hazard: brackish
   tiles: reedfen
   roster: (reedling bellfrog lantern-moth fen-vole pike heron-shape)
-  moments: (first-open-water frog-choir seed-wind drowned-bell)
-  wander: (reeds-a reeds-b rain-on-reeds)
+  moments: (first-open-water frog-choir drowned-bell)
+  wander: (seed-wind)
   gives: ((overtone 2) (ability down)))
 
 ;; The creatures (section 6): a behaviour kind each. A3 brings the first

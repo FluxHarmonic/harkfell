@@ -51,7 +51,10 @@
 
 (define RIGHT (intent h: 1 v: 0 jump: #f press: #f))
 
-(define (the-stone w) (car (world-stones w)))
+;; The Old Stone's ring-stone (x10y3, cell (21,8)): A4 added the Hollow's two,
+;; so "the" stone is found by its place, not by its order.
+(define OLD-STONE-CELL (local->global CT (content-room CT 10 3) 21 8))
+(define (the-stone w) (find (lambda (s) (equal? (stone-cell s) OLD-STONE-CELL)) (world-stones w)))
 (define (stone-cell-kind w)
   (let ((c (stone-cell (the-stone w)))) (tilemap-ref (world-tiles w) (car c) (cdr c))))
 (define (kinds news) (map car news))
@@ -60,9 +63,11 @@
 (test-group "gates: the world has one stone and one harmonic"
   (test "the world loads clean"
     (assert-equal '() (content-problems CT)))
-  (test "one ring-stone, in the Old Stone, keyed to 2"
-    (assert-equal 1 (length (content-stones CT)))
-    (assert-equal 2 (stone-overtone (car (content-stones CT)))))
+  (test "three ring-stones: the Old Stone's and the bowl's keyed to 2, the one under the bowl to 3"
+    (assert-equal 3 (length (content-stones CT)))
+    (assert-equal '(2 2 3) (list-sort < (map stone-overtone (content-stones CT))))
+    (assert-true (the-stone (world-standing 10 3 18 8 '())))
+    (assert-equal 2 (stone-overtone (the-stone (world-standing 10 3 18 8 '())))))
   (test "one pickup, on the Far Mound (A4 moved it there from the Drowned Channel)"
     (assert-equal 1 (length (content-pickups CT)))
     (assert-equal (local->global CT (content-room CT 17 3) 22 3) (pickup-cell (car (content-pickups CT))))))

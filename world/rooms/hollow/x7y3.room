@@ -1,0 +1,21 @@
+;; world/rooms/hollow/x7y3.room
+(room
+  region: hollow
+  at: (7 3)
+  title: "The Rim"
+  intent: "the bowl's lip, where the land drops away and the fen's sky opens below"
+  bed: (wind 0.7 water 0.2 hum 0.1 drone 0.3)
+  grid:
+  ("######  ^^^             #"
+   "######  ^^^              "
+   "######  ^^^              "
+   "        ^^^              "
+   "  |     ^^^    |   |  |  "
+   "        ^^^     #########"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; East, the Fen Edge. The updraft rises from here past the Updraft Edge.

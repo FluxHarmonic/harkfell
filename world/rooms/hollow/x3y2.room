@@ -1,0 +1,24 @@
+;; world/rooms/hollow/x3y2.room
+(room
+  region: hollow
+  at: (3 2)
+  title: "The Tops"
+  intent: "the roof of the fell under the whole sky, with the fen shining far off to the east"
+  bed: (wind 0.9 hum 0.1 drone 0.4)
+  grid:
+  ("                         "
+   "                         "
+   "     ###                 "
+   "    #####                "
+   "   #######               "
+   "  ########%              "
+   " #########% #############"
+   " #########% #############"
+   "##########%              "
+   "##########%              "
+   "##########%              ")
+  moment: (tune: high-fell when: first-visit)
+  decor: auto)
+;; The summit (columns 5-7). Its east face (column 10) is rough all the way
+;; down into the West Slope: the climb up. East of it the tops path runs on
+;; a spine of rock over the bowl's sky.

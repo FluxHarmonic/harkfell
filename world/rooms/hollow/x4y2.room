@@ -1,0 +1,22 @@
+;; world/rooms/hollow/x4y2.room
+(room
+  region: hollow
+  at: (4 2)
+  title: "Above the Bowl"
+  intent: "the bowl's north rim, where the stones below make a ring you can only see from here"
+  bed: (wind 0.6 hum 0.4 drone 0.5)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "   |    |                "
+   "#########       #########"
+   "#########  ###  #########"
+   "           ###           "
+   "                         "
+   "                         ")
+  decor: auto)
+;; The tops path crosses the sky over the bowl on a stepping stone
+;; (columns 11-13); a slip drops you into the bowl, which is home.

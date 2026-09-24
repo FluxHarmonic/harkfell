@@ -1,0 +1,22 @@
+;; world/rooms/hollow/x5y2.room
+(room
+  region: hollow
+  at: (5 2)
+  title: "Wind Gap"
+  intent: "a notch in the fell where the wind is loudest, crossed at a run; miss, and you drop to the stones"
+  bed: (wind 1.0 drone 0.3)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "###########   ###########"
+   "###########   ###########"
+   "                         "
+   "                         "
+   "                         ")
+  decor: auto)
+;; A thin spine of rock with a three-tile notch (columns 11-13): cleared
+;; at a run, and a miss falls to the Standing Stones below.

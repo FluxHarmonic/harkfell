@@ -17,6 +17,7 @@
    "~~~~~~~~~~~~~~~~~~~~~~~##"
    "~~~~~~~~~~~~~~~~~~~~~~###"
    "#########################")
+  moment: (tune: drowned-bell when: first-visit)
   decor: auto)
 ;; The bell hangs from the roof on its stem (columns 16-17), its mouth
 ;; open at row 6. Up through the Root Hall's pool, or west to the steps.

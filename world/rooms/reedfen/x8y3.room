@@ -7,10 +7,10 @@
   bed: (wind 0.7 reeds 0.4 drone 0.2)
   grid:
   ("#                        "
-   "#                        "
-   "#                        "
-   "#                        "
-   "#                        "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
    "#%%%%%                   "
    "#####%   |    |     |    "
    "#####%  |||  |||   |||   "
@@ -19,6 +19,6 @@
    "####################  %##")
   things: ((reedling flock: 5 zone: reeds))
   decor: auto)
-;; The rim (left) is where the Hollow will join: rough rock you climb back
-;; up. The hole at columns 20-21 drops into the Root Hollow below; its right
+;; The rim (left) is where the Hollow joins (A4): its west edge opens onto
+;; the Hollow's Rim at rows 1-4, under the rock tip at row 0. The hole at columns 20-21 drops into the Root Hollow below; its right
 ;; side is rough all the way down, the way back up.

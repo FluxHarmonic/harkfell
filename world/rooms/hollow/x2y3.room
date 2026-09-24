@@ -1,0 +1,24 @@
+;; world/rooms/hollow/x2y3.room
+(room
+  region: hollow
+  at: (2 3)
+  title: "The Old Cut"
+  intent: "a doorway the old people cut into the fell, blocked by fallen rock, and the wind sounding a note inside: the way to the Pipes, heard and not yet"
+  bed: (wind 0.4 hum 0.3 drone 0.3)
+  grid:
+  ("#           %############"
+   "            %############"
+   "            %############"
+   "            %############"
+   "            %############"
+   "   #####    %############"
+   "   #####                 "
+   " |####  |     |     | |  "
+   "#########################"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The doorway is the low recess at columns 6-7, row 7, cut into the block of
+;; old stone (columns 3-7), and the fallen rock fills it behind (columns
+;; 3-5); a fallen block (column 2) is a step up onto it. The fell's rough
+;; west face (column 12) climbs to the Heather Shelf.

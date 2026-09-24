@@ -21,6 +21,7 @@
            (bellfrog at: (7 7))
            (bellfrog at: (12 7))
            (bellfrog at: (18 7)))
+  moment: (tune: frog-choir when: first-visit still: 6)
   decor: auto)
 ;; Two three-tile reaches of pool water either side of a stone in the
 ;; middle: jump them at a run, or fall in and swim; nothing here harms.

@@ -42,22 +42,23 @@
 //              Chrome delivers CDP touches ~90 ms late, so the latency legs
 //              prove the readout works, not what a phone measures)
 //   world      (A1) the page hands over the baked world and it loads clean:
-//              "harkfell: world 8 files, 0 problems", and a plain boot enters
-//              the world's start (reedfen:8,3)
+//              "harkfell: world 39 files, 0 problems" (A4: 36 rooms, two maps
+//              and world.sgl), and a plain boot enters the world's start
+//              (hollow:4,3)
 //   door       (A1) ?room=reedfen:10,4 boots into that room ("harkfell: room
 //              reedfen:10,4") with the body inside the room's slot; a room that
 //              does not exist answers "harkfell: no-room"; &at=4,7 stands the
 //              body in cell (4,7) of the Reed Bridge, and &at=4,9 (rock) is
 //              refused
 //   atlas      (A1) ?atlas shows every room at quarter scale ("harkfell: view
-//              atlas 308 94"); a click on the Drowned Channel's picture enters
+//              atlas 1736 186": x 1..17, y 2..5); a click on the Drowned Channel's picture enters
 //              it ("harkfell: room reedfen:9,4") and play resumes
 //   atlas2     (A1) the atlas at devicePixelRatio 2 on a 200x150 CSS viewport
 //              (a 400x300 canvas): the fit is not a whole scale ('sharp'), and a
 //              click mapped through CSS pixels, device pixels and the fractional
 //              fit still enters the Drowned Channel
 //   sheet      (A1) ?sheet=reedfen: the region's rooms at full scale ("harkfell:
-//              view sheet:reedfen 1216 364")
+//              view sheet:reedfen 4044 544": x 8..17, y 3..5)
 //   frame      (A4) a plain boot (?frame=on&new) runs the frame: the start
 //              screen waits for a gesture (no "frame start-out" in 5 s), then a
 //              key goes on, and start-out, card, hold, dawn and play follow in
@@ -254,7 +255,7 @@ if (LEGS.includes("world")) {
   await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "world");
   const w = lines.find((l) => l.startsWith("harkfell: world "));
   const r = lines.find((l) => l.startsWith("harkfell: room "));
-  (w === "harkfell: world 8 files, 0 problems" && r === "harkfell: room reedfen:8,3" ? pass : fail)("world", `${w}; ${r}`);
+  (w === "harkfell: world 39 files, 0 problems" && r === "harkfell: room hollow:4,3" ? pass : fail)("world", `${w}; ${r}`);
 }
 
 if (LEGS.includes("door")) {
@@ -263,16 +264,16 @@ if (LEGS.includes("door")) {
   await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door");
   const r = lines.find((l) => l.startsWith("harkfell: room "));
   const at = await where();
-  // reedfen:10,4 is the third room across (x 8..10) and the second down (y 3..4)
-  const inside = at.x >= 2 * 400 && at.x < 3 * 400 && at.y >= 176 && at.y < 2 * 176;
+  // reedfen:10,4 is the tenth room across (the map starts at x 1) and the third down (at y 2)
+  const inside = at.x >= 9 * 400 && at.x < 10 * 400 && at.y >= 2 * 176 && at.y < 3 * 176;
   await open("trace&room=reedfen:40,40");
   await sleep(500);
   const none = lines.find((l) => l.startsWith("harkfell: no-room"));
-  // &at: cell (4,7) of reedfen:9,3 (the second room across, the first down)
+  // &at: cell (4,7) of reedfen:9,3 (the ninth room across, the second down)
   await open("trace&room=reedfen:9,3&at=4,7");
   await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door at");
   const a2 = await where();
-  const inCell = Math.floor((a2.x + 4) / 16) === 25 + 4 && Math.floor((a2.y + 7) / 16) === 7;
+  const inCell = Math.floor((a2.x + 4) / 16) === 8 * 25 + 4 && Math.floor((a2.y + 7) / 16) === 11 + 7;
   await open("trace&room=reedfen:9,3&at=4,9");
   await sleep(500);
   const rock = lines.find((l) => l.startsWith("harkfell: no-room"));
@@ -292,18 +293,21 @@ if (LEGS.includes("atlas")) {
   await open("trace&atlas");
   const v = await waitFor(() => lines.find((l) => l.startsWith("harkfell: view atlas")), 10000, "atlas");
   const [, , , vw, vh] = v.split(" ").map((x, i) => (i >= 3 ? Number(x) : x));
-  // the game fits the atlas at the largest whole scale, centred
+  // the game fits the atlas at the largest whole scale, centred, or (A4: the
+  // 36-room atlas is wider than the canvas) at a fractional 'sharp' fit
+  // ((engine view): the whole scale k if k/s >= 0.8, else the float fit s)
   const cw = await evaluate("document.getElementById('stage').width"), ch = await evaluate("document.getElementById('stage').height");
-  const k = Math.floor(Math.min(cw / vw, ch / vh));
-  const ox = Math.floor((cw - vw * k) / 2), oy = Math.floor((ch - vh * k) / 2);
-  // the Drowned Channel, x9y4: the second column and row of 102x46 cells (a 2 px gap, rooms at 1/4)
-  const px = 2 + 102 * 1 + 50, py = 2 + 46 * 1 + 22;
+  const sc = Math.min(cw / vw, ch / vh), kk = Math.floor(sc);
+  const k = (kk >= 1 && kk / sc >= 0.8) ? kk : sc;
+  const ox = Math.floor((cw - Math.floor(vw * k)) / 2), oy = Math.floor((ch - Math.floor(vh * k)) / 2);
+  // the Drowned Channel, x9y4: column 8 and row 2 of 102x46 cells (a 2 px gap, rooms at 1/4; the atlas starts at x1 y2)
+  const px = 2 + 102 * 8 + 50, py = 2 + 46 * 2 + 22;
   const before = lines.length;
   await clickCanvas(ox + px * k, oy + py * k);
   await waitFor(() => lines.slice(before).find((l) => l.startsWith("harkfell: room ")), 5000, "atlas click");
   const r = lines.slice(before).find((l) => l.startsWith("harkfell: room "));
   const a = await where(); await sleep(400); const b = await where();
-  (v === "harkfell: view atlas 308 94" && r === "harkfell: room reedfen:9,4" ? pass : fail)("atlas", `${v}; clicked canvas ${ox + px * k},${oy + py * k} (scale ${k}); ${r}; body at ${b.x},${b.y}`);
+  (v === "harkfell: view atlas 1736 186" && r === "harkfell: room reedfen:9,4" ? pass : fail)("atlas", `${v}; clicked canvas ${ox + px * k},${oy + py * k} (scale ${k}); ${r}; body at ${b.x},${b.y}`);
 }
 
 if (LEGS.includes("atlas2")) {
@@ -320,7 +324,7 @@ if (LEGS.includes("atlas2")) {
   const f = sharp ? sc : k;
   const w = Math.floor(f * vw), h = Math.floor(f * vh);
   const ox = Math.floor((cw - w) / 2), oy = Math.floor((ch - h) / 2);
-  const px = 2 + 102 * 1 + 50, py = 2 + 46 * 1 + 22;
+  const px = 2 + 102 * 8 + 50, py = 2 + 46 * 2 + 22;
   const before = lines.length;
   await clickCanvas(ox + px * (w / vw), oy + py * (h / vh));
   await waitFor(() => lines.slice(before).find((l) => l.startsWith("harkfell: room ")), 5000, "atlas2 click");
@@ -333,7 +337,7 @@ if (LEGS.includes("sheet")) {
   ran.add("sheet");
   await open("trace&sheet=reedfen");
   const v = await waitFor(() => lines.find((l) => l.startsWith("harkfell: view sheet")), 10000, "sheet");
-  (v === "harkfell: view sheet:reedfen 1216 364" ? pass : fail)("sheet", v);
+  (v === "harkfell: view sheet:reedfen 4044 544" ? pass : fail)("sheet", v);
 }
 
 if (LEGS.includes("replay")) {

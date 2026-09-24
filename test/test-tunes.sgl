@@ -82,18 +82,24 @@
       (assert-true (member "reedfen:9,3 moment: no assets/tunes/no-such-moment.cts" ps)))))
 
 ;; A3: every cue the director renders, and for every harmonic placed in the
-;; world (a pickup or a ring-stone) its finding tone, its pickup cue, its
-;; ring and its near miss: each has a file that reads. The director plays
+;; world its sounds: a pickup's finding tone, pickup cue, ring and near miss;
+;; a ring-stone's hum (its tone), ring and near miss (A4: a stone never plays
+;; a pickup cue, and the bowl's sealed H3 stone has no H3 pickup in the
+;; slice). Each has a file that reads. The director plays
 ;; nothing for a harmonic whose tune is missing, so a missing file would be
 ;; silent in play.
 (define (a3-tunes ct)
   (append (sound-cue-tunes)
           (apply append
-                 (map (lambda (n)
-                        (map (lambda (base) (string-append base (number->string n)))
-                             (list "tone-h" "pickup-h" "ring-h" "miss-h")))
-                      (append (map pickup-overtone (content-pickups ct))
-                              (map stone-overtone (content-stones ct)))))))
+                 (append
+                   (map (lambda (n)
+                          (map (lambda (base) (string-append base (number->string n)))
+                               (list "tone-h" "pickup-h" "ring-h" "miss-h")))
+                        (map pickup-overtone (content-pickups ct)))
+                   (map (lambda (n)
+                          (map (lambda (base) (string-append base (number->string n)))
+                               (list "tone-h" "ring-h" "miss-h")))
+                        (map stone-overtone (content-stones ct)))))))
 
 (define (unreadable names)
   (filter (lambda (n) (not (and (tune-exists? n) (guard (x (#t #f)) (read-tune-string (tune-text n))))))

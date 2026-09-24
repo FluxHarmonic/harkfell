@@ -1,0 +1,47 @@
+;;; world/regions/hollow.map - The Hollow's rooms, laid out, with one intent
+;;; each (harkfell-design section 8), approved by David on
+;;; topics/harkfell-a4-region-maps ("Looks good as a start!"). Laid out
+;;; seven wide and two high (x 1..7, y 2..3) rather than the sketch's 6x3:
+;;; the sketch left four empty slots inside the bounds, and the rooms beside
+;;; them would have had to be closed toward them (rock lids over the Rim and
+;;; Scree End). Every room and intent is the sketch's.
+;;;
+;;;   x1   x2   x3   x4   x5   x6   x7
+;;;   M -  S -  T -  B -  W -  K -  U      y2  the tops (sky above)
+;;;        |    |    |    |    |    |
+;;;   E -  O -  L -  H -  P -  C -  R      y3  the valley; R opens east
+;;;                                            to Reedfen's Fen Edge
+;;;
+;;; The valley runs west to east from Scree End to the Rim and on into the
+;;; fen. Three ways lead up to the tops: the Old Cut's rough face (to the
+;;; Heather Shelf), the West Slope's (to the Tops) and the Chimney (to the
+;;; Cairn). Every other way down is a drop: from the tops' path into the
+;;; bowl, onto the Standing Stones through the Wind Gap's notch, off the
+;;; Updraft Edge onto the Rim. Moth Hollow is behind the Heather Shelf's
+;;; false wall. The start, the Hollow (H), has the bowl's H2 stone and,
+;;; behind it, the H3 stone that seals the way down.
+;;;
+;;; Breaths: M, S, B, K, T (five of fourteen).
+(map
+  region: hollow
+  origin: (1 2)
+  layout:
+  ("M-S-T-B-W-K-U"
+   "  | | | | | |"
+   "E-O-L-H-P-C-R")
+  rooms:
+  ((H "The Hollow" "where you wake: a bowl of turf over a low hum, and a mute stone at its heart")
+   (P "Standing Stones" "a row of old standing stones to climb along, on the path between the bowl and the rim")
+   (R "The Rim" "the bowl's lip, where the land drops away and the fen's sky opens below")
+   (L "West Slope" "rough rock taught where a fall only lands you back in the grass")
+   (O "The Old Cut" "a doorway the old people cut into the fell, blocked by fallen rock, and the wind sounding a note inside: the way to the Pipes, heard and not yet")
+   (E "Scree End" "the Hollow's west edge, where scree falls into mist and birches stand far off: the way to Glasswood, not yet")
+   (S "Heather Shelf" "a breath on a high shelf of heather, where reedlings feed")
+   (C "The Chimney" "two walls a jump apart over soft turf: the first wall-jump, where a slip costs nothing")
+   (B "Above the Bowl" "the bowl's north rim, where the stones below make a ring you can only see from here")
+   (W "Wind Gap" "a notch in the fell where the wind is loudest, crossed at a run; miss, and you drop to the stones")
+   (M "Moth Hollow" "a hollow behind a false wall that a careful eye finds, where the moths sleep")
+   (K "Cairn" "the highest stone, alone on the top where the chimney comes out: a place to stand still")
+   (T "The Tops" "the roof of the fell under the whole sky, with the fen shining far off to the east")
+   (U "Updraft Edge" "seeds rising past the fell's edge higher than any jump: the way to Cloudstair, shown and not yet"))
+  borders: ((R east)))

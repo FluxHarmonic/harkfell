@@ -1,0 +1,23 @@
+;; world/rooms/hollow/x1y3.room
+(room
+  region: hollow
+  at: (1 3)
+  title: "Scree End"
+  intent: "the Hollow's west edge, where scree falls into mist and birches stand far off: the way to Glasswood, not yet"
+  bed: (wind 0.6 water 0.2 hum 0.1)
+  grid:
+  ("#########################"
+   "##############           "
+   "#########                "
+   "#####                    "
+   "###                      "
+   "##                       "
+   "#                        "
+   "#                  | |  |"
+   "#   |     |    ##########"
+   "#   ||||  ###############"
+   "#########################")
+  things: ((reedling flock: 4 zone: reeds))
+  decor: auto)
+;; The land steps down west to the world's edge, under the crag that holds
+;; Moth Hollow. What lies beyond is a view: the birch wood is Glasswood's.

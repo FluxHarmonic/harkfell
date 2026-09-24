@@ -1,0 +1,23 @@
+;; world/rooms/hollow/x3y3.room
+(room
+  region: hollow
+  at: (3 3)
+  title: "West Slope"
+  intent: "rough rock taught where a fall only lands you back in the grass"
+  bed: (wind 0.3 hum 0.3 drone 0.3)
+  grid:
+  ("##########%              "
+   "##########%              "
+   "##########%              "
+   "##########%              "
+   "##########%              "
+   "##########%              "
+   "                 ########"
+   " |  |  | |   ############"
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((reedling flock: 4 zone: reeds))
+  decor: auto)
+;; The fell's east face (column 10) is rough from here to the Tops: jump,
+;; hold it, climb. Under the fell, the way west to the Old Cut.

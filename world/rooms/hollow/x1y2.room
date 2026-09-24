@@ -1,0 +1,23 @@
+;; world/rooms/hollow/x1y2.room
+(room
+  region: hollow
+  at: (1 2)
+  title: "Moth Hollow"
+  intent: "a hollow behind a false wall that a careful eye finds, where the moths sleep"
+  bed: (wind 0.1 hum 0.3 drone 0.8)
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#######         #########"
+   "#####             #######"
+   "####               ######"
+   "###                 #####"
+   "###        |  |          "
+   "###     |||||||||        "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (12 6) count: 6 drawn: 2))
+  decor: auto)
+;; Behind the Heather Shelf's false wall (its column 0, rows 7-8): a chamber
+;; in the fell where the moths sleep. A secret: nothing else leads here.

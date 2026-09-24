@@ -1,0 +1,23 @@
+;; world/rooms/hollow/x7y2.room
+(room
+  region: hollow
+  at: (7 2)
+  title: "Updraft Edge"
+  intent: "seeds rising past the fell's edge higher than any jump: the way to Cloudstair, shown and not yet"
+  bed: (wind 0.9 drone 0.3)
+  grid:
+  ("        ^^^             #"
+   "        ^^^             #"
+   "        ^^^             #"
+   "        ^^^             #"
+   "######  ^^^             #"
+   "######  ^^^             #"
+   "######  ^^^             #"
+   "######  ^^^             #"
+   "######  ^^^             #"
+   "######  ^^^             #"
+   "######  ^^^             #")
+  decor: auto)
+;; The fell's east edge (columns 0-5) and an updraft (columns 8-10) no jump
+;; can ride: the glide is not in the slice. Step off the edge and you fall
+;; to the Rim.

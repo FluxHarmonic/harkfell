@@ -1,0 +1,23 @@
+;; world/rooms/hollow/x6y2.room
+(room
+  region: hollow
+  at: (6 2)
+  title: "Cairn"
+  intent: "the highest stone, alone on the top where the chimney comes out: a place to stand still"
+  bed: (wind 0.8 hum 0.1 drone 0.5)
+  grid:
+  ("                         "
+   "                         "
+   "                    ##   "
+   "                    ##   "
+   "              ###########"
+   "              ###########"
+   "############  ###########"
+   "############  ###########"
+   "          ##  ###########"
+   "          ##  ###########"
+   "          ##  ###########")
+  decor: auto)
+;; The Chimney's cleft (columns 12-13) comes out on the spine at row 5.
+;; The cairn (columns 20-21) stands on the fell's last top; east of it the
+;; fell falls away over the Updraft Edge.

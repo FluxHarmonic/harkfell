@@ -11,7 +11,9 @@
         (harkfell source)
         (harkfell feel)
         (harkfell gates)
-        (harkfell shell))
+        (harkfell shell)
+        (harkfell content)
+        (engine worldmap))
 
 (define SRC (read-world-source "world"))
 (shell-boot!)
@@ -21,11 +23,15 @@
 
 (define (frames n) (let loop ((k 0)) (when (< k n) (shell-frame! (/ 1 60.0)) (loop (+ k 1)))))
 (define (body-col) (exact (floor (/ (car (body-center (world-body (shell-world)) HARKFELL-FEEL)) 16))))
-(define (stone-col) (car (stone-cell (car (world-stones (shell-world))))))
+;; the Old Stone's ring-stone (x10y3, cell (21,8)), found by its place: the
+;; Hollow (A4) has two more
+(define OLD-STONE-CELL (cons (+ 21 (* 25 (- 10 (worldmap-x0 (content-map (shell-content)))))) (+ 8 (* 11 (- 3 (worldmap-y0 (content-map (shell-content))))))))
+(define (the-stone) (find (lambda (s) (equal? (stone-cell s) OLD-STONE-CELL)) (world-stones (shell-world))))
+(define (stone-col) (car (stone-cell (the-stone))))
 
 ;; the stone rings and opens with the body standing three tiles off
 (frames 150)
-(define OPENED (stone-state (car (world-stones (shell-world)))))
+(define OPENED (stone-state (the-stone)))
 ;; then walk right until the body's centre is in the stone's column, and stop
 (shell-key-down! 'right)
 (let loop ((k 0)) (when (and (< k 120) (< (body-col) (stone-col))) (frames 1) (loop (+ k 1))))
@@ -44,4 +50,4 @@
   (test "a clean reload leaves the body where it was, and the stone open"
     (assert-equal '() PS)
     (assert-true (< (abs (- (body-x AFTER) (body-x BEFORE))) 0.01))
-    (assert-equal 'open (stone-state (car (world-stones (shell-world)))))))
+    (assert-equal 'open (stone-state (the-stone)))))

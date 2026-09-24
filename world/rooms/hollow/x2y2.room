@@ -1,0 +1,24 @@
+;; world/rooms/hollow/x2y2.room
+(room
+  region: hollow
+  at: (2 2)
+  title: "Heather Shelf"
+  intent: "a breath on a high shelf of heather, where reedlings feed"
+  bed: (wind 0.7 hum 0.1 drone 0.3)
+  grid:
+  ("#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#              |   |  |  "
+   "+           | |||||||||||"
+   "+  |  |  |  %############"
+   "####  ####  %############"
+   "#           %############")
+  things: ((reedling flock: 6 zone: reeds))
+  decor: auto)
+;; The shelf is the top of the fell; its west face (column 12) is rough, the
+;; climb up from the Old Cut. Two ledges hang over the valley west of it,
+;; and the rock at column 0, rows 7-8, is a false wall into Moth Hollow.

@@ -1,0 +1,29 @@
+;; world/rooms/hollow/x4y3.room
+(room
+  region: hollow
+  at: (4 3)
+  title: "The Hollow"
+  intent: "where you wake: a bowl of turf over a low hum, and a mute stone at its heart"
+  bed: (wind 0.3 water 0.1 hum 1.0 drone 0.7)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "                         "
+   "  #                   #  "
+   " |#|  |           |  |#| "
+   "#####               #####"
+   "#######         #########"
+   "#########       o    o###"
+   "#########################"
+   "#########################")
+  things: ((ring-stone at: (16 8) overtone: 2)
+           (ring-stone at: (21 8) overtone: 3)
+           (lantern-moth at: (11 5) count: 4 drawn: 2))
+  moment: (tune: hollow-answers when: first-visit carrying: 2)
+  decor: auto)
+;; Where the game starts: at the bottom of the bowl, beside the H2 stone
+;; (16,8), a door into the fell. Coming home carrying H2 it rings and sinks;
+;; behind it the H3 stone (21,8), pale green, stays shut: the way down to
+;; the Underhum, directly below, shown and sealed. Two old standing stones
+;; stand on the rims (columns 2 and 22).
