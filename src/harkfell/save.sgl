@@ -1,0 +1,168 @@
+;;; (harkfell save) - Save and continue (A4).
+;;;
+;;; A save is one datum, kept under the store key "save" ((engine store):
+;;; localStorage on the web, a file natively):
+;;;
+;;;   (harkfell-save 1
+;;;     (room REGION X Y)             the room of the soft return's entry: the
+;;;                                   last place you stood on entering a room
+;;;     (cell C R)                    that place, a cell of the room
+;;;     (carry 2 ...)                 the harmonics carried
+;;;     (stones (REGION X Y C R N) ...)   the ring-stones opened
+;;;     (moments KEY ...)             the fixed moments heard (the hush's spent
+;;;                                   rooms), so none plays twice (D20)
+;;;     (played SECONDS))             seconds of play (the play note's clock)
+;;;
+;;; Plain symbols and lists, no keywords: a keyword does not write out as text
+;;; and read back (measured: it prints as #<object>).
+;;;
+;;; Places are a room and a cell of it, never global pixels: the world map's
+;;; origin moves whenever a region is added west or north of the others (the
+;;; Hollow moved it from x 8 to x 2), and a save has to survive that.
+;;;
+;;; Restoring forgives, because a save must never stop a game starting; each
+;;; thing forgiven is a NOTE (the shell prints them):
+;;;   - not a harkfell-save of this version: no save, a new game
+;;;   - its room gone: the world's start; its cell no longer a place to
+;;;     stand: that room's door
+;;;   - a carried harmonic the world does not have: dropped
+;;;   - a stone no longer at that cell with that overtone: dropped
+;;;
+;;; Pure: the shell reads and writes the store.
+
+(define-library (harkfell save)
+  (import (sigil struct)
+          (sigil list)
+          (sigil math)
+          (engine tilemap)
+          (engine body)
+          (engine worldmap)
+          (engine reach)
+          (harkfell feel)
+          (harkfell content)
+          (harkfell check)
+          (harkfell gates))
+
+  (export SAVE-KEY SAVE-VERSION
+          save-datum save-restore
+          restored restored? restored-cell restored-carry restored-stones
+          restored-moments restored-played restored-notes
+          body-room-cell)
+
+  (begin
+    (define SAVE-KEY "save")
+    (define SAVE-VERSION 1)
+
+    ;; What a save gives back: cell a global (c . r) to stand in; stones
+    ;; ((cell . overtone) ...) global, to open; notes: strings, what was
+    ;; forgiven.
+    (define-struct restored
+      (cell default: #f)
+      (carry default: '())
+      (stones default: '())
+      (moments default: '())
+      (played default: 0.0)
+      (notes default: '()))
+
+    ;; A save's field: (NAME . rest) -> rest, or #f.
+    (define (field l name)
+      (let ((e (and (list? l) (assq name (filter pair? l))))) (and e (cdr e))))
+
+    (define (int-list? l n) (and (list? l) (= (length l) n) (every-int? l)))
+    (define (every-int? l) (or (null? l) (and (integer? (car l)) (every-int? (cdr l)))))
+
+    ;; The room a global cell is in, or #f.
+    (define (room-of-cell ct cell)
+      (let ((wm (content-map ct)))
+        (content-room ct
+                      (+ (worldmap-x0 wm) (exact (floor (/ (car cell) ROOM-COLS))))
+                      (+ (worldmap-y0 wm) (exact (floor (/ (cdr cell) ROOM-ROWS)))))))
+
+    ;; A body's cell (global) and the room it is in: (room . local-cell), or #f.
+    (define (body-room-cell ct b)
+      (let* ((c (body-center b HARKFELL-FEEL))
+             (s (worldmap-size (content-map ct)))
+             (cell (cons (exact (floor (/ (car c) s))) (exact (floor (/ (cdr c) s)))))
+             (rm (room-of-cell ct cell)))
+        (and rm (cons rm (global->local ct rm cell)))))
+
+    ;; The save of a world: entry the soft return's entry body; carry the
+    ;; harmonics; stones the world's stones ((harkfell gates)); moments the
+    ;; hush's spent keys; played seconds. #f when the entry is outside the
+    ;; written world (A0's room).
+    (define (save-datum ct entry carry stones moments played)
+      (let ((rc (and ct entry (body-room-cell ct entry))))
+        (and rc
+             (let ((rm (car rc)) (cell (cdr rc)))
+               (list 'harkfell-save SAVE-VERSION
+                     (list 'room (room-region rm) (room-x rm) (room-y rm))
+                     (list 'cell (car cell) (cdr cell))
+                     (cons 'carry (list-sort < carry))
+                     (cons 'stones (filter (lambda (x) x)
+                                      (map (lambda (st)
+                                             (and (stone-open? st)
+                                                  (let ((srm (room-of-cell ct (stone-cell st))))
+                                                    (and srm
+                                                         (let ((l (global->local ct srm (stone-cell st))))
+                                                           (list (room-region srm) (room-x srm) (room-y srm)
+                                                                 (car l) (cdr l) (stone-overtone st)))))))
+                                           stones)))
+                     (cons 'moments moments)
+                     (list 'played played))))))
+
+    ;; A save read back into this content: a restored, or #f for "no save"
+    ;; (nothing there, or not a save of this version).
+    (define (save-restore ct d)
+      (if (not (and (pair? d) (eq? (car d) 'harkfell-save) (pair? (cdr d)) (eqv? (cadr d) SAVE-VERSION)))
+          #f
+          (let* ((fields (cddr d))
+                 (room (field fields 'room))
+                 (cell (field fields 'cell))
+                 (carry (field fields 'carry))
+                 (stones (field fields 'stones))
+                 (moments (field fields 'moments))
+                 (played (let ((p (field fields 'played))) (and (pair? p) (car p))))
+                 (notes '())
+                 (note! (lambda (s) (set! notes (cons s notes))))
+                 (world-harmonics (map car (content-pickup-cells ct)))
+                 (carry (if (list? carry)
+                            (filter (lambda (h)
+                                      (or (and (integer? h) (memv h world-harmonics))
+                                          (begin (note! "a carried harmonic the world does not have was dropped") #f)))
+                                    carry)
+                            '()))
+                 (stone-cells (content-stone-cells ct))
+                 (stones (if (list? stones)
+                             (filter (lambda (x) x)
+                                     (map (lambda (s)
+                                            (let* ((ok (and (list? s) (= (length s) 6) (symbol? (car s))
+                                                            (every-int? (cdr s))))
+                                                   (rm (and ok (content-room ct (cadr s) (caddr s))))
+                                                   (g (and rm (eq? (room-region rm) (car s))
+                                                           (local->global ct rm (list-ref s 3) (list-ref s 4))))
+                                                   (n (and ok (list-ref s 5))))
+                                              (if (and g (member (cons n g) stone-cells))
+                                                  (cons g n)
+                                                  (begin (note! "an opened stone that is no longer there was dropped") #f))))
+                                          stones))
+                             '()))
+                 ;; the tilemap with those stones open, to judge the cell against
+                 (tm (let loop ((ss stones) (tm (worldmap-tiles (content-map ct))))
+                       (if (null? ss) tm (let ((cell (car (car ss)))) (loop (cdr ss) (tilemap-set tm (car cell) (cdr cell) 'air))))))
+                 (rm (and (list? room) (= (length room) 3) (symbol? (car room))
+                          (integer? (cadr room)) (integer? (caddr room))
+                          (let ((r (content-room ct (cadr room) (caddr room))))
+                            (and r (eq? (room-region r) (car room)) r))))
+                 (g (and rm (int-list? cell 2) (local->global ct rm (car cell) (cadr cell))))
+                 (at (cond ((and g (standable? tm (car g) (cdr g))) g)
+                           (rm (note! "the saved place is no longer a place to stand: the room's door")
+                               (room-start-cell ct rm))
+                           (else (note! "the saved room is gone: the world's start")
+                                 (start-cell ct)))))
+            (and at
+                 (restored cell: at
+                           carry: carry
+                           stones: stones
+                           moments: (if (list? moments) (filter string? moments) '())
+                           played: (if (number? played) played 0.0)
+                           notes: (reverse notes))))))))

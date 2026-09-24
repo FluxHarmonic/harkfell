@@ -63,7 +63,7 @@
           (harkfell hush))
 
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
-          sound-ears sound-lines sound-hush sound-bed-levels sound-moment-playing sound-reset!
+          sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
           sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING sound-bed-notes sound-region sound-cue-tunes sound-voice-source HUM-ID
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
@@ -150,6 +150,8 @@
     (define *seed* 20260924)
 
     (define (sound-hush) *hush*)
+    ;; A4 (save and continue): the moments heard and the time played, from a save.
+    (define (sound-restore-hush! spent played) (set! *hush* (hush-restore spent played)))
     (define (sound-region) *region*)
     (define (sound-moment-playing) (and *moment* (car *moment*)))
     (define (sound-ears) *ears*)

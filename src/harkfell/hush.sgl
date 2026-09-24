@@ -36,7 +36,7 @@
           (sigil struct)
           (sigil list))
 
-  (export hush-new hush-tick hush-enter hush-fixed-decision hush-wander-ok? hush-why-wander
+  (export hush-new hush-restore hush-tick hush-enter hush-fixed-decision hush-wander-ok? hush-why-wander
           hush-started hush-ended
           hush? hush-playing hush-played hush-rooms hush-spent hush-last-end
           WANDER-S WANDER-ROOMS FIXED-S)
@@ -59,6 +59,12 @@
       (spent default: '()))
 
     (define (hush-new) (hush))
+
+    ;; A4 (save and continue): a hush for a game continued from a save,
+    ;; with the fixed moments already heard spent and the time played so
+    ;; far. Nothing is playing and no moment has ended in this session.
+    (define (hush-restore spent played)
+      (hush played: played spent: spent))
 
     (define (hush-tick h dt) (hush h played: (+ (hush-played h) dt)))
 

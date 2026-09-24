@@ -120,6 +120,11 @@
   //                        voices sound in the bed (A3's pickups do this).
   //   ?tone=X,Y            the room H2's finding tone sounds from (default
   //                        11,3: a placeholder east of Reedfen's six rooms).
+  //   ?new                 (A4) a new game: the save is not read (it is written
+  //                        over as you play).
+  //   ?frame=off           (A4) straight into the world, no start screen, card
+  //                        or opening. Every door above skips them too, and
+  //                        never writes the save.
   //   ?bench               the phone measurement (A2, (harkfell bench)): a tap
   //                        starts it; about 3.3 minutes; its lines show at the
   //                        top and are sent to the host (bench-report?LINE), so
@@ -175,6 +180,7 @@
     console.log = function () {
       var line = String(arguments[0] || "");
       if (line.indexOf("harkfell: fetch ") === 0) fetchTune(line.slice(16).trim());
+      else if (line === "harkfell: frame play") framePlaying();
       else if (line.indexOf("harkfell: bench ") === 0 || (benchOn && line.indexOf("harkfell: audio ") === 0)) report(line);
       return log.apply(console, arguments);
     };
@@ -249,6 +255,19 @@
       if (params.has("atlas")) setView("atlas");
       else if (params.get("sheet")) setView("sheet:" + params.get("sheet"));
       if (params.has("still")) send("still", "on");
+      // A4: no door asked, so the game begins: the start screen (the
+      // gesture gate the audio needs), the card, the opening, and the save.
+      // The touch controls wait for "harkfell: frame play".
+      var door = room || params.has("atlas") || params.get("sheet") || params.has("test-room") ||
+                 params.has("replay") || params.has("envelope") || params.has("bench") ||
+                 params.get("frame") === "off";
+      if (files.length && !door) {
+        var touchy = (navigator.maxTouchPoints || 0) > 0;
+        var kind = coarse ? "touch" : (touchy ? "both" : "keys");
+        inFrame = true;
+        touchLayer.classList.remove("on");
+        send("begin", kind + (params.has("new") ? " new" : ""));
+      }
       layout();
       if (params.has("replay")) setTimeout(function () { send("replay", ""); }, 50);
       if (params.has("envelope")) setTimeout(function () { send("envelope", ""); }, 50);
@@ -259,6 +278,20 @@
     // click on the canvas enters the room under it (the game maps canvas
     // pixels to rooms).
     var view = "play";
+    // A4: while the frame runs (start screen, card, opening) the touch
+    // controls are hidden, a touch anywhere is the gesture, and the pointer
+    // is handed over for the start screen's moths.
+    var inFrame = false;
+    function framePlaying() {
+      inFrame = false;
+      if (view === "play" && (coarse || params.has("touch"))) touchLayer.classList.add("on");
+    }
+    document.getElementById("stage").addEventListener("pointermove", function (e) {
+      if (!inFrame) return;
+      var r = e.target.getBoundingClientRect();
+      send("pointer", ((e.clientX - r.left) * e.target.width / r.width).toFixed(1) + "," +
+                      ((e.clientY - r.top) * e.target.height / r.height).toFixed(1));
+    });
     function setView(v) {
       view = v;
       send("view", v);

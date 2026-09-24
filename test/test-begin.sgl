@@ -1,0 +1,113 @@
+;;; A game begun from the start, through the shell (A4): the frame runs
+;;; before the world, the save is written as you play, a continue comes back
+;;; to it, and a door neither runs the frame nor touches the save.
+;;;
+;;;   new game     the world does not step until the dawn; once playing, a
+;;;                save is written, in the world's start room
+;;;   continue     a save at the Reed Bridge, carrying H2, with the Old Stone
+;;;                opened, comes back as all three
+;;;   a door       after a goto the save on disk is left as it was, however
+;;;                far the body walks
+;;;
+;;; The store is pointed at a scratch directory, so no real save is touched.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (sigil fs)
+        (sigil time)
+        (engine body)
+        (engine store)
+        (engine worldmap)
+        (harkfell world)
+        (harkfell source)
+        (harkfell content)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell save)
+        (harkfell shell))
+
+(define SRC (read-world-source "world"))
+(define DIR (string-append "/tmp/harkfell-test-begin-" (number->string (current-jiffy))))
+(shell-boot!)
+(set-store-root! DIR)
+(store-remove! SAVE-KEY)
+(shell-load-content! SRC)
+(define CT (shell-content))
+
+(define (frames n) (let loop ((k 0)) (when (< k n) (shell-frame! (/ 1 60.0)) (loop (+ k 1)))))
+(define (body-now) (world-body (shell-world)))
+
+;; --- a new game ---------------------------------------------------------------------
+(define NOTES (shell-begin! #f #f))
+(define B0 (body-now))
+(define TICKS0 (world-ticks (shell-world)))
+(frames 300)                                   ; 5 s: the start screen and the card
+(define PHASE-5S (shell-frame-phase))
+(define STILL-5S (= (world-ticks (shell-world)) TICKS0))
+(frames 900)                                   ; 15 s more: well into play
+(define PHASE-20S (shell-frame-phase))
+(define SAVED (store-read-datum SAVE-KEY))
+
+(test-group "begin: a new game"
+  (test "no save: a new game"
+    (assert-false NOTES))
+  (test "five seconds in, the frame runs and the world has not stepped"
+    (assert-true (memq PHASE-5S (list 'start-out 'card)))
+    (assert-true STILL-5S))
+  (test "twenty seconds in, it plays, and a save is written in the start's room"
+    (assert-equal 'play PHASE-20S)
+    (assert-true (pair? SAVED))
+    (let ((r (save-restore CT SAVED)))
+      (assert-true (restored? r))
+      (assert-equal (start-cell CT) (restored-cell r)))))
+
+;; --- a continue ------------------------------------------------------------------------
+(define (global x y c r) (local->global CT (content-room CT x y) c r))
+(define STONE-G (global 10 3 21 8))
+(define CONT
+  (save-datum CT
+              (cell-body (worldmap-tiles (content-map CT)) HARKFELL-FEEL (car (global 9 3 4 7)) (cdr (global 9 3 4 7)))
+              (list 2)
+              (map (lambda (s) (if (equal? (stone-cell s) STONE-G) (stone s state: 'open) s)) (content-stones CT))
+              (list "reedfen:9,3") 100.0))
+(define NOTES2 (shell-begin! #f CONT))
+;; snapshots here: every top-level form runs before any test does
+(define CELL2 (let ((c (body-center (body-now) HARKFELL-FEEL)))
+                (cons (exact (floor (/ (car c) 16))) (exact (floor (/ (cdr c) 16))))))
+(define CARRY2 (world-carry (shell-world)))
+(define STONE2 (and (find (lambda (s) (and (equal? (stone-cell s) STONE-G) (stone-open? s)))
+                          (world-stones (shell-world)))
+                    #t))
+
+(test-group "begin: a continue"
+  (test "nothing forgiven"
+    (assert-equal '() NOTES2))
+  (test "the body stands in the Reed Bridge, where the save was"
+    (assert-equal (global 9 3 4 7) CELL2))
+  (test "carrying H2, and the Old Stone open"
+    (assert-equal '(2) CARRY2)
+    (assert-true STONE2)))
+
+;; --- a door --------------------------------------------------------------------------------
+(frames 1200)                                  ; into play; the continue's save is written
+(define BEFORE-DOOR (store-get SAVE-KEY))
+(shell-goto! "reedfen:10,4")
+(shell-key-down! 'left)
+(frames 240)                                   ; walk west, into the Drowned Channel
+(shell-key-up! 'left)
+(frames 30)
+(define ROOM-AFTER (shell-room-label))
+(define AFTER-DOOR (store-get SAVE-KEY))
+(define PHASE-DOOR (shell-frame-phase))
+
+(test-group "begin: a door"
+  (test "the door's walk left its room (the premise), and the save is as it was"
+    (assert-false (string=? ROOM-AFTER "reedfen:10,4"))
+    (assert-true (string? BEFORE-DOOR))
+    (assert-equal BEFORE-DOOR AFTER-DOOR))
+  (test "a door runs no frame"
+    (assert-equal 'play PHASE-DOOR)))
+
+(store-remove! SAVE-KEY)

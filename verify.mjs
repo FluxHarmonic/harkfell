@@ -58,7 +58,17 @@
 //              fit still enters the Drowned Channel
 //   sheet      (A1) ?sheet=reedfen: the region's rooms at full scale ("harkfell:
 //              view sheet:reedfen 1216 364")
+//   frame      (A4) a plain boot (?frame=on&new) runs the frame: the start
+//              screen waits for a gesture (no "frame start-out" in 5 s), then a
+//              key goes on, and start-out, card, hold, dawn and play follow in
+//              that order; the played room draws in at least four colour bins
+//   save       (A4) after the frame leg: the save is in localStorage, and a
+//              reload with no ?new continues from it ("harkfell: save continue
+//              ..."); then a door (?room=) walked elsewhere leaves it unchanged
 //   errors     no console error and no exception in any leg
+//
+// Every leg but frame and save boots with &frame=off (open() adds it): the
+// frame is theirs to skip, and a door skips it anyway.
 //
 // A0's control legs (keys, float, fixed, jump, two, timing) run in A0's test
 // room (&test-room): they measure the controls, and their geometry (the
@@ -78,7 +88,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -183,7 +193,10 @@ const evaluate = async (expr) => (await send("Runtime.evaluate", { expression: e
 
 async function open(query) {
   lines = [];
-  await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/?${query}` });
+  // A4: the frame (start screen, card, opening) is the frame and save legs'
+  // business; every other leg skips it
+  const q = query.includes("frame=") ? query : query + "&frame=off";
+  await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/?${q}` });
   await waitFor(() => lines.find((l) => l.startsWith("harkfell: boot")), 60000, "open " + query);
   await sleep(300);
 }
@@ -495,6 +508,58 @@ if (LEGS.includes("timing")) {
   const lag = await evaluate("window.__lag");
   console.log(`note: timing: rAF interval min/median/max ${iv.map((x) => x.toFixed(1)).join("/")} ms; pointerdown handled ${lag.map((x) => x.toFixed(1)).join(",")} ms after its timeStamp`);
   pass("timing", "measured (a note, not an assertion)");
+}
+
+// A canvas's colour bins (the render leg's measure), in the frame the game drew.
+const colourBins = () => evaluate(`new Promise((resolve) => requestAnimationFrame(() => {
+    const c = document.getElementById("stage");
+    const gl = c.getContext("webgl2");
+    const px = new Uint8Array(4 * c.width * c.height);
+    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const seen = new Set();
+    for (let i = 0; i < px.length; i += 4 * 97) seen.add((px[i] >> 4) + "," + (px[i + 1] >> 4) + "," + (px[i + 2] >> 4));
+    resolve(seen.size);
+  }))`);
+
+if (LEGS.includes("frame")) {
+  ran.add("frame");
+  await open("trace&frame=on&new");
+  await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 10000, "frame start");
+  await sleep(5000);
+  const waited = !lines.find((l) => l === "harkfell: frame start-out");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", code: "KeyX" });
+  await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 30000, "frame play");
+  const order = lines.filter((l) => l.startsWith("harkfell: frame ")).map((l) => l.slice(16)).join(" ");
+  await sleep(500);
+  const bins = await colourBins();
+  (waited && order === "start start-out card hold dawn play" && bins >= 4 ? pass : fail)("frame",
+    `waited for the gesture: ${waited}; phases: ${order}; ${bins} colour bins in play`);
+}
+
+if (LEGS.includes("save")) {
+  ran.add("save");
+  if (!LEGS.includes("frame")) {
+    await open("trace&frame=on&new");
+    await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 10000, "save: frame start");
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", code: "KeyX" });
+    await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 30000, "save: frame play");
+  }
+  await sleep(1000);
+  const saved = await evaluate("localStorage.getItem('save')");
+  await open("trace&frame=on");
+  const cont = await waitFor(() => lines.find((l) => l.startsWith("harkfell: save ")), 10000, "save: continue");
+  await open("trace&room=reedfen:10,4");
+  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "save: door");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft" });
+  await sleep(4000);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft" });
+  await sleep(500);
+  const walked = await where();
+  const after = await evaluate("localStorage.getItem('save')");
+  (saved && saved.startsWith("(harkfell-save 1") && cont && cont.startsWith("harkfell: save continue") && after === saved && walked.x < 2 * 400 ? pass : fail)("save",
+    `saved: ${saved ? saved.slice(0, 60) : saved}; reload: ${cont}; after a door and a walk to x ${walked.x}: unchanged ${after === saved}`);
 }
 
 if (LEGS.includes("errors")) {

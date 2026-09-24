@@ -1,0 +1,93 @@
+;;; The frame before the world (A4, (harkfell frame)): the start screen (D32),
+;;; the Flux Harmonic card (D33) and the opening (D15), in order.
+;;;
+;;;   native     the start screen goes on by itself after about 4 s; then the
+;;;              card, the hold, the dawn, play, each once and in order
+;;;   web        the start screen is the audio's gesture gate: it waits for a
+;;;              gesture however long, and goes on at one
+;;;   skipping   a key skips the native start screen and the card, never the
+;;;              opening's dawn
+;;;   the world  steps (and takes input) from the dawn on, never before
+;;;
+;;; The sabotage the web test is for: let the web's start screen time out as
+;;; the native one does, and "it waits a minute" goes red.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (harkfell frame))
+
+(define DT (/ 1 60.0))
+
+;; Step f n times with the given key and gesture flags each step; returns
+;; (f . events), the events in order.
+(define (run f n key? gesture?)
+  (let loop ((f f) (n n) (evs '()))
+    (if (= n 0)
+        (cons f evs)
+        (let* ((f (frame-step f DT key? gesture?))
+               (p (frame-take-events f)))
+          (loop (cdr p) (- n 1) (append evs (car p)))))))
+
+(define (secs s) (exact (round (* s 60))))
+
+(test-group "frame: native"
+  (let* ((p0 (frame-take-events (frame-new #f)))
+         (r (run (cdr p0) (secs 20.0) #f #f))
+         (evs (append (car p0) (cdr r))))
+    (test "every phase once, in order, and it plays"
+      (assert-equal (list 'start 'start-out 'card 'hold 'dawn 'play) evs)
+      (assert-true (frame-playing? (car r)))))
+  (test "the start screen shows about 4 s, then fades"
+    (let ((a (run (frame-new #f) (secs 3.9) #f #f))
+          (b (run (frame-new #f) (secs 4.1) #f #f)))
+      (assert-true (memq (frame-phase (car a)) (list 'start-in 'start)))
+      (assert-equal 'start-out (frame-phase (car b)))))
+  (test "a key goes on at once"
+    (let ((r (run (frame-new #f) 1 #t #t)))
+      (assert-equal 'start-out (frame-phase (car r))))))
+
+(test-group "frame: web"
+  (test "the start screen waits a minute without a gesture (a key alone is not asked for)"
+    (let ((r (run (frame-new #t) (secs 60.0) #f #f)))
+      (assert-equal 'start (frame-phase (car r)))
+      (assert-equal 1.0 (frame-words-alpha (car r)))))
+  (test "a gesture goes on"
+    (let* ((r (run (frame-new #t) (secs 2.0) #f #f))
+           (r2 (run (car r) 1 #f #t)))
+      (assert-equal 'start-out (frame-phase (car r2))))))
+
+(define (to-phase f phase)
+  (let loop ((f f) (k 0))
+    (if (or (eq? (frame-phase f) phase) (> k 5000)) f
+        (loop (cdr (frame-take-events (frame-step f DT #f #f))) (+ k 1)))))
+
+(test-group "frame: skipping"
+  (test "a key skips the card to the hold"
+    (let* ((f (to-phase (frame-new #f) 'card))
+           (r (run f 1 #t #t)))
+      (assert-equal 'hold (frame-phase (car r)))))
+  (test "a key does not skip the dawn"
+    (let* ((f (to-phase (frame-new #f) 'dawn))
+           (r (run f 10 #t #t)))
+      (assert-equal 'dawn (frame-phase (car r))))))
+
+(test-group "frame: the world"
+  (test "it neither shows nor steps before the dawn"
+    (for-each (lambda (ph)
+                (let ((f (to-phase (frame-new #f) ph)))
+                  (assert-false (frame-world-steps? f))
+                  (assert-equal 1.0 (frame-black-alpha f))))
+              (list 'start-in 'start 'start-out 'card 'hold)))
+  (test "it shows and steps from the dawn, the black lifting to nothing at play"
+    (let ((d (to-phase (frame-new #f) 'dawn))
+          (p (to-phase (frame-new #f) 'play)))
+      (assert-true (frame-world-steps? d))
+      (assert-true (> (frame-black-alpha d) 0.9))
+      (assert-true (frame-world-steps? p))
+      (assert-equal 0.0 (frame-black-alpha p))))
+  (test "the mark shows only on the card, and fully in its middle"
+    (let* ((c (to-phase (frame-new #f) 'card))
+           (mid (car (run c (secs 2.0) #f #f))))
+      (assert-equal 1.0 (frame-card-alpha mid))
+      (assert-equal 0.0 (frame-card-alpha (to-phase (frame-new #f) 'hold))))))

@@ -59,9 +59,15 @@
           (harkfell legend)
           (harkfell sound)
           (harkfell ears)
-          (harkfell gates))
+          (harkfell gates)
+          (harkfell save)
+          (harkfell frame)
+          (harkfell front))
 
-  (export shell-boot! shell-frame! shell-present! shell-reset-world!
+  (export shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
+          shell-add-frame-listener! shell-set-save-extras! shell-set-input-kind!
+          shell-save-now! shell-saving?
+          shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
           shell-stick! shell-jump! shell-sector
           shell-set-ms! shell-set-stick-form! shell-stick-form
@@ -113,6 +119,34 @@
     (define *view-h* 0)
     (define *last-fit* #f)         ; the last frame's fit (a tap maps through it)
 
+    ;; A4: the frame before the world ((harkfell frame)), and the save
+    ;; ((harkfell save)). Both belong to a game begun from the start
+    ;; (shell-begin!); a door (?room=, --room, the atlas, the test room) has
+    ;; neither: it is for looking, and it must not overwrite a player's save.
+    (define *frame* #f)              ; #f, or the frame until it plays
+    (define *frame-listeners* '())   ; each is called with every phase entered
+    (define *key-edge* #f)           ; a key went down since the last frame
+    (define *gesture* #f)            ; a key or a touch since the last frame (the web's gesture)
+    (define *pointer* #f)            ; (x . y) in window pixels, for the start screen's moths
+    (define *wall* 0.0)              ; seconds since the frame began: its drawing clock
+    (define *input-kind* 'keys)      ; keys, touch or both: which words the start screen says
+    (define *saving* #f)             ; this game writes its save
+    (define *save-sig* #f)           ; what the last save held (a new one is written on a change)
+    (define *waking* #f)             ; the creature has not been moved yet (D15)
+    ;; The sound's part of a save: a getter giving (moments played), and a
+    ;; setter taking them on a continue ((harkfell audio) wires the sound).
+    (define *save-get* (lambda () (list '() 0.0)))
+    (define *save-set* (lambda (moments played) #f))
+
+    (define (shell-add-frame-listener! f) (set! *frame-listeners* (append *frame-listeners* (list f))))
+    (define (shell-set-save-extras! get set) (set! *save-get* get) (set! *save-set* set))
+    (define (shell-set-input-kind! k) (set! *input-kind* k))
+    (define (shell-gesture!) (set! *gesture* #t))
+    (define (shell-pointer! x y) (set! *pointer* (cons x y)))
+    (define (shell-frame-phase) (if *frame* (frame-phase *frame*) 'play))
+    (define (shell-waking?) *waking*)
+    (define (shell-saving?) *saving*)
+
     (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
 
     ;; A2: more readout lines (the sound's), from whoever sets them
@@ -136,6 +170,7 @@
 
     ;; A0's test room (the replay's and the envelope's room; ?test-room).
     (define (shell-test-room!)
+      (end-game!)
       (set! *world* (world-new (load-test-room))))
 
     ;; R: back to the current room's entry (A0's room: its @).
@@ -209,7 +244,15 @@
              (begin
                (set! *world* (populate (world-at (content-map *content*) (body-in-cell cell)) *world* *carry0*))
                (set! *mode* 'play)
+               (end-game!)
                #t))))
+
+    ;; A door ends a begun game's frame and its saving (A4): a door is for
+    ;; looking, and must not overwrite the player's save.
+    (define (end-game!)
+      (set! *frame* #f)
+      (set! *saving* #f)
+      (set! *waking* #f))
 
     ;; Into the world's start; #f without one.
     (define (shell-goto-start!)
@@ -220,6 +263,57 @@
                (set! *mode* 'play)
                #t))))
 
+    ;; A4: the game begins from the start (no door). web?: the start screen
+    ;; waits for a gesture. d: the save read from the store, or #f (none, or
+    ;; a new game asked for). Enters the save's place (its carry, its opened
+    ;; stones, its moments heard) or the world's start, behind the frame.
+    ;; Returns what the restore forgave (strings), or #f for a new game.
+    (define (shell-begin! web? d)
+      (set! *frame* (frame-new web?))
+      (set! *wall* 0.0)
+      (set! *saving* #t)
+      (set! *save-sig* #f)
+      (set! *waking* #t)
+      (let ((r (and d *content* (save-restore *content* d))))
+        (cond (r
+               (let* ((open (restored-stones r))
+                      (stones (map (lambda (s)
+                                     (if (member (cons (stone-cell s) (stone-overtone s)) open)
+                                         (stone s state: 'open)
+                                         s))
+                                   (content-stones *content*)))
+                      (w (world-at (content-map *content*) (body-in-cell (restored-cell r)))))
+                 (set! *world* (world-populate w stones (content-pickups *content*) (restored-carry r)))
+                 (set! *mode* 'play)
+                 (*save-set* (restored-moments r) (restored-played r))
+                 (restored-notes r)))
+              (else (shell-goto-start!) #f))))
+
+    ;; The save of the world now, or #f outside the written world.
+    (define (current-save)
+      (and *content* *world* (world-gates *world*)
+           (let ((x (*save-get*)))
+             (save-datum *content* (world-entry *world*) (world-carry *world*) (world-stones *world*)
+                         (car x) (cadr x)))))
+
+    ;; Write the save when what it holds has changed: the entry (a room
+    ;; entered), the carry, the stones opened, the moments heard. Not the
+    ;; time played, which changes every frame; it rides along.
+    (define (save-if-changed!)
+      (let* ((e (world-entry *world*))
+             (sig (list (body-x e) (body-y e) (world-carry *world*)
+                        (length (filter stone-open? (world-stones *world*)))
+                        (length (car (*save-get*))))))
+        (unless (equal? sig *save-sig*)
+          (let ((d (current-save)))
+            (when d
+              (store-write-datum! SAVE-KEY d)
+              (set! *save-sig* sig))))))
+
+    ;; Write the save now (a hidden tab, a quit): #t if written.
+    (define (shell-save-now!)
+      (and *saving* (let ((d (current-save))) (and d (store-write-datum! SAVE-KEY d) #t))))
+
     ;; "region:x,y" of the room the body is in, or "test-room".
     (define (shell-room-label)
       (let ((p (and *world* (world-room *world*))))
@@ -227,6 +321,7 @@
 
     ;; mode: 'play, 'atlas, or 'sheet with the region.
     (define (shell-set-mode! mode . region)
+      (unless (eq? mode 'play) (end-game!))
       (set! *mode* mode)
       (set! *sheet-region* (and (pair? region) (car region))))
 
@@ -308,6 +403,8 @@
     ;; --- input ------------------------------------------------------------------
 
     (define (shell-key-down! k)
+      (set! *key-edge* #t)
+      (set! *gesture* #t)
       (unless (memq k *keys*)
         (set! *keys* (cons k *keys*))
         (when (jump-key? k) (set! *press* #t))))
@@ -377,10 +474,25 @@
       (set! *frame-ms* (* 1000.0 dt))
       (set! *clock* (clock-advance *clock* dt))
       (set! *launched* #f)
+      ;; A4: the frame steps in wall time until it plays; each phase entered
+      ;; goes to the listeners (the sound, the page's trace)
+      (when *frame*
+        (unless (frame-playing? *frame*)
+          (set! *frame* (frame-step *frame* dt *key-edge* *gesture*))
+          (set! *wall* (+ *wall* dt)))
+        (let ((p (frame-take-events *frame*)))
+          (set! *frame* (cdr p))
+          (for-each (lambda (ev) (for-each (lambda (f) (f ev)) *frame-listeners*)) (car p))))
+      (set! *key-edge* #f)
+      (set! *gesture* #f)
       (let loop ((i 0))
-        (when (and (< i (clock-steps *clock*)) (eq? *mode* 'play) (not *still*))
+        (when (and (< i (clock-steps *clock*)) (eq? *mode* 'play) (not *still*)
+                   (or (not *frame*) (frame-world-steps? *frame*)))
           (let ((in (tick-intent *keys* *sector* *touch-jump* *press*)))
             (set! *press* #f)
+            ;; the creature wakes on the first input (D15: the first input is yours)
+            (when (and *waking* (or (not (= (intent-h in) 0)) (not (= (intent-v in) 0)) (intent-jump in)))
+              (set! *waking* #f))
             (set! *world* (world-tick *world* in))
             (let ((ev (body-events (world-body *world*))))
               (when (or (memq 'jump ev) (memq 'wall-jump ev))
@@ -390,6 +502,8 @@
         (set! *world* (cdr p))
         (set! *frame-news* (car p))
         (draw-news! (car p) (world-ticks *world*)))
+      (when (and *saving* (or (not *frame*) (frame-world-steps? *frame*)) (world-gates *world*))
+        (save-if-changed!))
       (set! *step-ms* (- (now-ms) *frame-start*))
       (clock-steps *clock*))
 
@@ -473,9 +587,23 @@
     ;; Draw the frame onto a window of win-w x win-h pixels. ticks: what
     ;; shell-frame! ran (for the latency record).
     (define (shell-present! win-w win-h ticks)
-      (if (and *content* (not (eq? *mode* 'play)))
-          (present-overview! win-w win-h)
-          (present-room! win-w win-h ticks)))
+      (cond ((and *frame* (not (frame-world-visible? *frame*))) (present-front! win-w win-h))
+            ((and *content* (not (eq? *mode* 'play))) (present-overview! win-w win-h))
+            (else (present-room! win-w win-h ticks))))
+
+    ;; A4: the start screen, the card, the black between: drawn in window
+    ;; pixels ((harkfell front)), no room target.
+    (define (present-front! win-w win-h)
+      (begin-frame)
+      (set-blend-mode 'normal)
+      (case (frame-phase *frame*)
+        ((start-in start start-out)
+         (front-start! win-w win-h (frame-words-alpha *frame*) *wall*
+                       (and *pointer* (car *pointer*)) (and *pointer* (cdr *pointer*))
+                       (frame-web? *frame*) *input-kind*))
+        ((card) (front-card! win-w win-h (frame-card-alpha *frame*) *wall*))
+        (else (front-black! win-w win-h 1.0)))
+      (end-frame))
 
     ;; The sheet or the atlas: one target the size of the overview, fitted
     ;; to the window (at a whole scale when one fits).
@@ -526,6 +654,9 @@
                 (with-render-target *sharp-rt*
                   (draw-render-target *room-rt* 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
                 (draw-render-target *sharp-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f)))))
+        ;; A4: the dawn, the world coming in from black (D15)
+        (when (and *frame* (> (frame-black-alpha *frame*) 0.0))
+          (front-black! win-w win-h (frame-black-alpha *frame*)))
         (when *ms*
           (draw-readout (append (list (string-append "frame " (tenths *frame-ms*)
                                                      " step " (tenths *step-ms*)

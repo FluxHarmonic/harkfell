@@ -1,0 +1,107 @@
+;;; Save and continue (A4, (harkfell save)): what a save holds comes back.
+;;;
+;;;   round trip   on the real world: a place, the carry, an opened stone, the
+;;;                moments heard and the time played all come back as they went
+;;;   the origin   a save made before a region was added west of the others
+;;;                (the world map's origin moved) comes back in the same room
+;;;                at the same cell: places are rooms and cells, not pixels
+;;;   forgiving    a room that is gone, a cell that is now rock, a stone or a
+;;;                harmonic the world no longer has, another version, junk:
+;;;                each is forgiven and said, and junk is no save at all
+;;;
+;;; The sabotage the origin test is for: keep the place as a global cell and
+;;; it comes back 25 columns off.
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine tilemap)
+        (engine worldmap)
+        (engine body)
+        (engine reach)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell save))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+
+(define (body-at-cell ct x y c r)
+  (let* ((rm (content-room ct x y))
+         (g (local->global ct rm c r)))
+    (cell-body (worldmap-tiles (content-map ct)) HARKFELL-FEEL (car g) (cdr g))))
+
+(define (global ct x y c r) (local->global ct (content-room ct x y) c r))
+
+;; The world's stones with the one at room (x, y) cell (c, r) open.
+(define (stones-with-open ct x y c r)
+  (let ((g (global ct x y c r)))
+    (map (lambda (s) (if (equal? (stone-cell s) g) (stone s state: 'open) s))
+         (content-stones ct))))
+
+(define SAVED
+  (save-datum CT (body-at-cell CT 9 3 4 7) '(2) (stones-with-open CT 10 3 21 8)
+              (list "reedfen:9,3") 612.5))
+(define BACK (save-restore CT SAVED))
+
+(test-group "save: the round trip"
+  (test "a save is made, and reads back"
+    (assert-true (pair? SAVED))
+    (assert-true (restored? BACK)))
+  (test "the place is the room and cell it was"
+    (assert-equal (global CT 9 3 4 7) (restored-cell BACK)))
+  (test "the carry, the opened stone, the moments and the time come back"
+    (assert-equal '(2) (restored-carry BACK))
+    (assert-equal (list (cons (global CT 10 3 21 8) 2)) (restored-stones BACK))
+    (assert-equal (list "reedfen:9,3") (restored-moments BACK))
+    (assert-equal 612.5 (restored-played BACK)))
+  (test "nothing was forgiven"
+    (assert-equal '() (restored-notes BACK))))
+
+;; --- the origin moves: a region added west ------------------------------------------
+;; The border fixture has testfen at (0 0) and testhollow at (1 0). Without
+;; testfen's files the map starts at x 1; with them, at x 0.
+(define FULL (read-world-source "test/fixtures/worlds/border"))
+(define EAST-ONLY (filter (lambda (e) (not (string-contains? (car e) "testfen/"))) FULL))
+(define CT-E (load-content EAST-ONLY))
+(define CT-F (load-content FULL))
+
+(test-group "save: the world's origin moves"
+  (test "the two worlds' origins differ (the premise)"
+    (assert-equal 1 (worldmap-x0 (content-map CT-E)))
+    (assert-equal 0 (worldmap-x0 (content-map CT-F))))
+  (test "a save made east-only comes back in the same room and cell in the full world"
+    (let* ((d (save-datum CT-E (body-at-cell CT-E 1 0 5 9) '() '() '() 0.0))
+           (r (save-restore CT-F d)))
+      (assert-equal (global CT-F 1 0 5 9) (restored-cell r))
+      (assert-equal '() (restored-notes r)))))
+
+;; --- forgiving -------------------------------------------------------------------------
+
+;; The save with its field NAME's value replaced (a field is (NAME . value)).
+(define (with-field d name v)
+  (map (lambda (e) (if (and (pair? e) (eq? (car e) (string->symbol name))) (cons (car e) v) e)) d))
+
+(test-group "save: forgiving"
+  (test "junk, another version and nothing are no save"
+    (assert-false (save-restore CT #f))
+    (assert-false (save-restore CT (list 'harkfell-save 99)))
+    (assert-false (save-restore CT (list 'something 1 2 3))))
+  (test "a room that is gone: the world's start, said"
+    (let ((r (save-restore CT (with-field SAVED "room" (list 'reedfen 99 99)))))
+      (assert-equal (start-cell CT) (restored-cell r))
+      (assert-true (pair? (restored-notes r)))))
+  (test "a cell that is now rock: the room's door, said"
+    (let ((r (save-restore CT (with-field SAVED "cell" (list 4 9)))))
+      (assert-equal (room-start-cell CT (content-room CT 9 3)) (restored-cell r))
+      (assert-true (pair? (restored-notes r)))))
+  (test "a stone that is not there, and a harmonic the world lacks: dropped, said"
+    (let ((r (save-restore CT (with-field (with-field SAVED "stones" (list (list 'reedfen 9 3 4 7 2)))
+                                          "carry" (list 2 5)))))
+      (assert-equal '() (restored-stones r))
+      (assert-equal '(2) (restored-carry r))
+      (assert-equal 2 (length (restored-notes r))))))

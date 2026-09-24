@@ -1,0 +1,94 @@
+;;; (harkfell front) - How the frame looks ((harkfell frame)): the start
+;;; screen's words and moths (D32) and the Flux Harmonic card (D33).
+;;;
+;;; PLACEHOLDER, by the content track, until the look track's own: the words
+;;; in the 3x5 readout font (D34's IM Fell is the look track's), the moths as
+;;; small warm dots, the mark as three rising bars. The frame's timing and
+;;; order are (harkfell frame)'s and do not change when this module does.
+;;; Everything is drawn in WINDOW pixels, at the screen's own resolution
+;;; (D34: words sit on the pixel view like ink, never scaled up from it).
+;;;
+;;;   (front-start! win-w win-h alpha t px py)   the start screen; px py the
+;;;                                              pointer (window px) or #f
+;;;   (front-card! win-w win-h alpha t)          the card
+;;;   (front-black! win-w win-h alpha)           black over everything
+
+(define-library (harkfell front)
+  (import (sigil math)
+          (sigil list)
+          (sigil graphics)
+          (engine font))
+
+  (export front-start! front-card! front-black! START-LINES)
+
+  (begin
+    ;; D32's words. The 3x5 font has no comma or capitals; IM Fell will.
+    ;; Web and touch: "Press any key, or touch, to step in." (the second line
+    ;; drops "or touch" on desktop and "any key" on a touch-only device, D32).
+    (define START-LINES
+      (list "harkfell is a game of listening."
+            "headphones bring it closest."))
+
+    ;; kind: keys (a keyboard), touch (touch only), both (the page cannot
+    ;; tell, or has both).
+    (define (step-line web? kind)
+      (cond ((not web?) "press any key to step in.")
+            ((eq? kind 'touch) "touch to step in.")
+            ((eq? kind 'both) "press any key or touch to step in.")
+            (else "press any key to step in.")))
+
+    (define (front-black! w h a)
+      (when (> a 0.0)
+        (set-color 0.0 0.0 0.0 (min 1.0 a))
+        (draw-filled-rect 0 0 w h)))
+
+    ;; Five moths drifting on slow circles, drawn a little toward the pointer.
+    (define (moth-at i t w h px py)
+      (let* ((cx (* w (+ 0.2 (* 0.15 i))))
+             (cy (* h (+ 0.45 (* 0.08 (sin (+ i (* 0.3 t)))))))
+             (r (* (min w h) 0.06))
+             (x (+ cx (* r (cos (+ (* 0.7 t) (* 1.9 i))))))
+             (y (+ cy (* r 0.6 (sin (+ (* 0.9 t) (* 1.3 i))))))
+             (pull 0.12))
+        (if (and px py)
+            (cons (+ x (* pull (- px x))) (+ y (* pull (- py y))))
+            (cons x y))))
+
+    (define (front-start! w h a t px py . opts)
+      (let* ((web? (and (pair? opts) (car opts)))
+             (kind (if (and (pair? opts) (pair? (cdr opts))) (cadr opts) 'keys))
+             (scale (max 2 (exact (floor (/ (min w (* 2 h)) 220)))))
+             (lines (append START-LINES (list "" (step-line web? kind))))
+             (line-h (* scale 9))
+             (top (- (/ h 2) (/ (* line-h (length lines)) 2))))
+        (set-color 0.0 0.0 0.0 1.0)
+        (draw-filled-rect 0 0 w h)
+        (let loop ((i 0))
+          (when (< i 5)
+            (let* ((p (moth-at i t w h px py))
+                   (glow (* a (+ 0.55 (* 0.25 (sin (+ (* 2.1 t) i)))))))
+              (set-color 0.91 0.66 0.30 (* 0.25 glow))
+              (draw-filled-rect (- (car p) (* 2 scale)) (- (cdr p) (* 2 scale)) (* 4 scale) (* 4 scale))
+              (set-color 0.98 0.86 0.60 glow)
+              (draw-filled-rect (- (car p) scale) (- (cdr p) scale) (* 2 scale) (* 2 scale)))
+            (loop (+ i 1))))
+        (set-color 0.93 0.90 0.82 a)
+        (let loop ((ls lines) (y top))
+          (unless (null? ls)
+            (let ((tw (text-width-mini (car ls) scale)))
+              (draw-text-mini (car ls) (exact (floor (/ (- w tw) 2))) (exact (floor y)) scale))
+            (loop (cdr ls) (+ y line-h))))))
+
+    ;; The mark: three bars, the harmonic series' 1 2 3, in the dawn's gold.
+    (define (front-card! w h a t)
+      (set-color 0.0 0.0 0.0 1.0)
+      (draw-filled-rect 0 0 w h)
+      (when (> a 0.0)
+        (let* ((u (max 2 (exact (floor (/ (min w h) 60)))))
+               (cx (/ w 2)) (cy (/ h 2)))
+          (set-color 0.91 0.72 0.42 a)
+          (let loop ((i 1))
+            (when (<= i 3)
+              (let ((bh (* u 3 i)))
+                (draw-filled-rect (+ cx (* u (- (* 3 i) 7))) (- (+ cy (* u 5)) bh) (* u 2) bh))
+              (loop (+ i 1)))))))))

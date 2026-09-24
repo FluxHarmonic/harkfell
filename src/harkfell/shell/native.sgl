@@ -14,6 +14,15 @@
 ;;;   harkfell --world DIR      another world directory (a fixture's)
 ;;;   harkfell --test-room      A0's grey test room
 ;;;   harkfell --ms             with the frame readout
+;;;   harkfell --new            (A4) a new game: the save is not read (it is
+;;;                             written over as you play)
+;;;   harkfell --no-frame       (A4) straight into the world: no start screen,
+;;;                             card or opening (a door skips them anyway)
+;;;
+;;; (A4) Played from the start (no --room), the game runs the frame first
+;;; ((harkfell frame): the start screen for about 4 s, the Flux Harmonic
+;;; card, the opening) and continues from the save if there is one; it
+;;; writes the save as you go, and once more on Escape.
 ;;;   harkfell --room-check [REGION:X,Y ...]   no window: the content gates
 ;;;                             ((harkfell cli))
 ;;;   harkfell --reach-fixtures no window: the reach checker's own fixtures
@@ -51,7 +60,10 @@
           (harkfell source)
           (harkfell cli)
           (harkfell fixtures)
-          (harkfell audio))
+          (harkfell audio)
+          (harkfell save)
+          (harkfell check)
+          (engine store))
 
   (export native-main)
 
@@ -130,7 +142,7 @@
           (let* ((dt (wait-frame)))
             (poll-keys!)
             (when (key-pressed? 'r) (shell-reset-world!))
-            (when (key-pressed? 'escape) (request-quit))
+            (when (key-pressed? 'escape) (shell-save-now!) (request-quit))
             ;; nothing a reload meets may take the frame down: an error is
             ;; reported and the game plays on with the last good world
             (when (and (shell-content) (= (modulo n RELOAD-EVERY) 0))
@@ -166,8 +178,23 @@
                                       (else (shell-goto! key)))))
                      (say "harkfell: room " key) #t)
                     (key (say "harkfell: no room " key (if (arg-value args "--at") (string-append " or no open cell " (arg-value args "--at")) "")) #f)
-                    ((shell-goto-start!) (say "harkfell: start " (shell-room-label)) #t)
-                    (else (say "harkfell: the world has no start to enter") #f))))))
+                    ((member "--no-frame" args)
+                     (if (shell-goto-start!)
+                         (begin (say "harkfell: start " (shell-room-label)) #t)
+                         (begin (say "harkfell: the world has no start to enter") #f)))
+                    ((not (start-cell (shell-content)))
+                     (say "harkfell: the world has no start to enter") #f)
+                    (else
+                     ;; A4: the frame, then the save's place or the start
+                     (let* ((fresh (member "--new" args))
+                            (d (and (not fresh) (store-read-datum SAVE-KEY)))
+                            (notes (shell-begin! #f d)))
+                       (cond ((not d) (say "harkfell: save " (if fresh "new-game" "none")))
+                             ((not notes) (say "harkfell: save unreadable, a new game"))
+                             (else (say "harkfell: save continue " (shell-room-label))
+                                   (for-each (lambda (n) (say "harkfell: save forgave: " n)) notes)))
+                       (say "harkfell: start " (shell-room-label))
+                       #t)))))))
 
     (define (native-main . _args)
       (let ((args (cdr (command-line))))
@@ -179,6 +206,7 @@
               ((member "--envelope" args) (print-envelope!) 0)
               (else
                (shell-boot!)
+               (shell-add-frame-listener! (lambda (ev) (say "harkfell: frame " (symbol->string ev))))
                (shell-set-ms! (and (member "--ms" args) #t))
                ;; A2: the sound; --bench runs the phone measurement natively
                (audio-boot! (lambda parts (say (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts)))))

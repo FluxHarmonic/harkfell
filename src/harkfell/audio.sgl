@@ -26,6 +26,7 @@
           (harkfell tunes)
           (harkfell sound)
           (harkfell gates)
+          (harkfell hush)
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
@@ -41,6 +42,14 @@
       (set! *say* say)
       (mixer-open!)
       (shell-set-extra-lines! audio-lines)
+      ;; A4: a save keeps the moments heard and the time played, and a
+      ;; continue gives them back ((harkfell save))
+      (shell-set-save-extras! (lambda () (let ((h (sound-hush))) (list (hush-spent h) (hush-played h))))
+                              sound-restore-hush!)
+      ;; A4: the frame's phases (start, start-out, card, hold, dawn, play).
+      ;; The sound track's to fill: the card's tune on card, the wind rising
+      ;; on hold. Until then the bed simply begins at the hold (world-place).
+      (shell-add-frame-listener! (lambda (ev) #f))
       (*say* "audio" (number->string (mixer-rate)) (symbol->string (mixer-state))))
 
     (define (audio-gesture!) (mixer-resume!))
@@ -121,7 +130,9 @@
     (define (world-place-a2 w ct)
       (let* ((p (and w (world-room w)))
              (rm (and p (placed-data p))))
-        (and rm ct
+        ;; A4: before the world (the start screen and the card) there is no
+        ;; place: the bed begins at the frame's hold, as the wind rises
+        (and rm ct (memq (shell-frame-phase) (list 'hold 'dawn 'play))
              (let* ((reg (region-of ct (room-region rm)))
                     (b (world-body w))
                     (wm (world-map w))

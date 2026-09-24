@@ -39,6 +39,18 @@
 ;;;   ("tone", "X,Y")        ?tone=: the room H2's finding tone sounds from
 ;;;   ("tune-chunk", TEXT)   part of a tune's text, then
 ;;;   ("tune-done", NAME)    the text is complete (the answer to a fetch line)
+;;;   ("begin", "KIND[ new]")  (A4) the game begins from the start: the frame
+;;;                          (start screen, card, opening) and the save. KIND
+;;;                          keys, touch or both: which words the start screen
+;;;                          says. "new" ignores the save (?new). The page sends
+;;;                          it only when no door (?room=, ?atlas, ...) is asked
+;;;   ("pointer", "X,Y")     (A4) the pointer in canvas pixels, for the start
+;;;                          screen's moths
+;;;
+;;; (A4) Every phase of the frame prints "harkfell: frame PHASE" (always):
+;;; start, start-out, card, hold, dawn, play. The page shows the touch
+;;; controls on "frame play". "harkfell: save ..." says what a continue
+;;; restored or forgave.
 ;;;
 ;;; Trace lines (with ?trace, on the console):
 ;;;   harkfell: boot stick FORM          the stick form in force
@@ -74,7 +86,9 @@
           (harkfell envelope)
           (harkfell feel)
           (harkfell tunes)
-          (harkfell audio))
+          (harkfell audio)
+          (harkfell save)
+          (engine store))
 
   (export web-main web-dispatch)
 
@@ -139,6 +153,7 @@
       (set-viewport #f)
       (set-letterbox-color 0.0 0.0 0.0)
       (shell-boot!)
+      (shell-add-frame-listener! (lambda (ev) (say "frame" (symbol->string ev))))
       ;; A2: the sound. A tune the wasm lacks is asked of the page
       ;; ("harkfell: fetch NAME"; it answers with tune-chunk and tune-done).
       (tunes-set-want! (lambda (name) (say "fetch" name)))
@@ -194,6 +209,8 @@
             ((string=? type "visibility")
              (set! *last-ms* #f)
              (shell-keys-clear!)
+             ;; a hidden tab may never come back: keep the save current
+             (when (string=? payload "hidden") (shell-save-now!))
              0)
             ;; the arm's probes: where the body is, and the latency lines
             ;;   harkfell: at X Y MODE
@@ -250,7 +267,23 @@
                (if r 1 0)))
             ((string=? type "test-room") (shell-test-room!) 0)
             ;; A2
-            ((string=? type "gesture") (audio-gesture!) 0)
+            ((string=? type "gesture") (audio-gesture!) (shell-gesture!) 0)
+            ;; A4: the game begins (no door): the frame, then the save's place or the start
+            ((string=? type "begin")
+             (let* ((parts (string-split payload " "))
+                    (kind (cond ((member "touch" parts) 'touch) ((member "both" parts) 'both) (else 'keys)))
+                    (fresh (member "new" parts))
+                    (d (and (not fresh) (store-read-datum SAVE-KEY)))
+                    (notes (begin (shell-set-input-kind! kind) (shell-begin! #t d))))
+               (cond ((not d) (say "save" (if fresh "new-game" "none")))
+                     ((not notes) (say "save" "unreadable, a new game"))
+                     (else (say "save" "continue" (shell-room-label))
+                           (for-each (lambda (n) (say "save" "forgave:" n)) notes)))
+               1))
+            ((string=? type "pointer")
+             (let ((f (fields payload)))
+               (when (and (= (length f) 2) (car f) (cadr f)) (shell-pointer! (car f) (cadr f))))
+             0)
             ((string=? type "bench") (audio-bench!) 0)
             ((string=? type "carry") (audio-carry! payload) 0)
             ((string=? type "tone") (audio-tone-room! payload) 0)

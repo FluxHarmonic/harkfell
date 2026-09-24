@@ -1,0 +1,121 @@
+;;; (harkfell frame) - Before the world: the start screen (D32), the Flux
+;;; Harmonic card (D33) and the opening (D15), once per launch, in order.
+;;;
+;;;   start-in   black; the words and the moths fade in (FADE-S)
+;;;   start      they stay. On the web this is the gesture gate the audio
+;;;              needs: it waits for a key or a touch. Natively it goes on by
+;;;              itself after START-S (about 4 s, D32), or on any key
+;;;   start-out  the words and the moths fade to black (FADE-S)
+;;;   card       black; the Flux Harmonic mark fades in and out over CARD-S,
+;;;              over the card's tune (the fundamental, its overtones blooming
+;;;              in one by one). Any key skips to the hold
+;;;   hold       black; the fundamental hangs as the wind rises (HOLD-S)
+;;;   dawn       the Hollow fades in from black (DAWN-S). The world steps from
+;;;              here on and input is the player's: nothing moves the creature
+;;;              until they do (D15, "the first input is yours")
+;;;   play       the world, and nothing more from this module
+;;;
+;;; A continue (a save to restore) runs the same frame; the dawn is then the
+;;; saved place fading in. A door (?room=, --room, ?atlas, ?sheet=, the test
+;;; room) skips all of it: those are for looking, not for playing.
+;;;
+;;; Every change of phase is an EVENT the shell hands to its listener (the
+;;; sound: the card's tune, the wind, the bed): start, card, hold, dawn, play.
+;;;
+;;; Pure: (frame-step f dt key? gesture?) -> a new frame. Timing is in seconds
+;;; of wall time, not ticks: the frame is not the world.
+
+(define-library (harkfell frame)
+  (import (sigil struct)
+          (sigil math))
+
+  (export FADE-S START-S CARD-S HOLD-S DAWN-S
+          frame frame? frame-new frame-step frame-phase frame-t frame-events
+          frame-web? frame-playing? frame-world-visible? frame-world-steps?
+          frame-words-alpha frame-card-alpha frame-black-alpha frame-take-events)
+
+  (begin
+    (define FADE-S 1.0)
+    (define START-S 4.0)        ; D32: "about 4 s" on desktop, counted from the fade-in's start
+    (define CARD-S 4.0)         ; D33: "about 4 s"
+    (define CARD-IN-S 1.2)      ; the mark fades in over this, and out over the last CARD-OUT-S
+    (define CARD-OUT-S 1.2)
+    (define HOLD-S 1.5)
+    (define DAWN-S 3.0)
+
+    ;; phase: a symbol above. t: seconds in the phase. web?: the start waits
+    ;; for a gesture. events: phases entered, not yet taken by the shell.
+    (define-struct frame
+      (phase default: 'start-in)
+      (t default: 0.0)
+      (web? default: #f)
+      (events default: '()))
+
+    (define (frame-new web?) (frame phase: 'start-in t: 0.0 web?: web? events: (list 'start)))
+
+    (define (enter f phase)
+      (frame f phase: phase t: 0.0 events: (append (frame-events f) (list (event-of phase)))))
+
+    (define (event-of phase)
+      (case phase
+        ((start-out) 'start-out)
+        (else phase)))
+
+    (define (frame-take-events f) (cons (frame-events f) (frame f events: '())))
+
+    ;; One step: dt seconds; key? a key went down this step (any key);
+    ;; gesture? a key or a touch (the web's gesture). A step never skips more
+    ;; than one phase, so every event is seen.
+    (define (frame-step f dt key? gesture?)
+      (let* ((t (+ (frame-t f) dt))
+             (f (frame f t: t)))
+        (case (frame-phase f)
+          ((start-in)
+           (cond ((and (frame-web? f) gesture?) (enter f 'start-out))
+                 ((and (not (frame-web? f)) key?) (enter f 'start-out))
+                 ;; the same screen, fully in: no event
+                 ((>= t FADE-S) (frame f phase: 'start t: (- t FADE-S)))
+                 (else f)))
+          ((start)
+           (cond ((frame-web? f) (if gesture? (enter f 'start-out) f))
+                 ((or key? (>= (+ t FADE-S) START-S)) (enter f 'start-out))
+                 (else f)))
+          ((start-out) (if (>= t FADE-S) (enter f 'card) f))
+          ((card) (if (or key? (>= t CARD-S)) (enter f 'hold) f))
+          ((hold) (if (>= t HOLD-S) (enter f 'dawn) f))
+          ((dawn) (if (>= t DAWN-S) (enter f 'play) f))
+          (else f))))
+
+    (define (frame-playing? f) (eq? (frame-phase f) 'play))
+
+    ;; The world is drawn (under the dawn's black) from the dawn on.
+    (define (frame-world-visible? f) (memq (frame-phase f) (list 'dawn 'play)))
+
+    ;; The world steps (and takes input) from the dawn on.
+    (define (frame-world-steps? f) (and (frame-world-visible? f) #t))
+
+    (define (clamp01 x) (max 0.0 (min 1.0 x)))
+
+    ;; How much of the start screen's words and moths show, 0..1.
+    (define (frame-words-alpha f)
+      (let ((t (frame-t f)))
+        (case (frame-phase f)
+          ((start-in) (clamp01 (/ t FADE-S)))
+          ((start) 1.0)
+          ((start-out) (clamp01 (- 1.0 (/ t FADE-S))))
+          (else 0.0))))
+
+    ;; How much of the mark shows, 0..1: in over CARD-IN-S, out over the last
+    ;; CARD-OUT-S of CARD-S.
+    (define (frame-card-alpha f)
+      (if (eq? (frame-phase f) 'card)
+          (let ((t (frame-t f)))
+            (clamp01 (min (/ t CARD-IN-S) (/ (- CARD-S t) CARD-OUT-S))))
+          0.0))
+
+    ;; The black over the world while it comes in, 1..0 across the dawn.
+    (define (frame-black-alpha f)
+      (case (frame-phase f)
+        ((dawn) (clamp01 (- 1.0 (/ (frame-t f) DAWN-S))))
+        ((play) 0.0)
+        (else 1.0)))))
