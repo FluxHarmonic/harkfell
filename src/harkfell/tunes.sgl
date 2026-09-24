@@ -28,7 +28,7 @@
           (motif tune))
 
   (export tune-text tune-parsed tunes-provide! tunes-chunk! tunes-done!
-          tunes-set-want! tunes-parse-ms tune-path tune-exists?)
+          tunes-set-want! tunes-parse-ms tune-path tune-exists? tunes-forget!)
 
   (begin
     (define *texts* '())        ; ((name . text) ...)
@@ -46,6 +46,14 @@
     (define (tune-exists? name) (file-exists? (tune-path name)))
 
     (define (tunes-set-want! proc) (set! *want* proc))
+
+    ;; Forget a tune: its text, its parse, and that it was asked for (tests
+    ;; that stand in for the web page's late fetch start from nothing).
+    (define (tunes-forget! name)
+      (let ((other (lambda (e) (not (string=? (car e) name)))))
+        (set! *texts* (filter other *texts*))
+        (set! *parsed* (filter other *parsed*))
+        (set! *wanted* (filter (lambda (n) (not (string=? n name))) *wanted*))))
 
     (define (tunes-provide! name text)
       (set! *texts* (cons (cons name text) (filter (lambda (e) (not (string=? (car e) name))) *texts*)))

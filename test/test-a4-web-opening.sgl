@@ -15,6 +15,10 @@
         (harkfell tunes)
         (harkfell sound))
 
+;; Run after other files in one process (a one-call suite), the director and
+;; the loader may hold an opening and its text: start from nothing.
+(sound-reset!)
+(tunes-forget! "opening")
 (define WANTED '())
 (tunes-set-want! (lambda (name) (set! WANTED (cons name WANTED))))
 (define SAID '())
