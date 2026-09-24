@@ -41,11 +41,14 @@
           (engine worldmap)
           (harkfell world)
           (harkfell legend)
-          (harkfell content))
+          (harkfell content)
+          (harkfell gates)
+          (harkfell creatures)
+          (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-room-at draw-play draw-overview
-          overview-size overview-room-at)
+          overview-size overview-room-at draw-news!)
 
   (begin
     (define VIEW-W 400)
@@ -316,17 +319,64 @@
       (draw-room-front rm)
       (pop-transform))
 
-    ;; Play: the current room, the body in it, the dim.
+    ;; A3: harmonics just taken, flashing: ((n x y tick) ...) in map pixels.
+    (define *flashes* '())
+    (define FLASH-TICKS 60)
+    (define (draw-news! news tick)
+      (for-each (lambda (n)
+                  (when (eq? (car n) 'pickup)
+                    (set! *flashes* (cons (list (cadr n) (caddr n) (cadddr n) tick) *flashes*))))
+                news)
+      (set! *flashes* (filter (lambda (f) (< (- tick (cadddr f)) FLASH-TICKS)) *flashes*)))
+
+    (define (in-room? x y) (and (< -16 x (+ VIEW-W 16)) (< -16 y (+ VIEW-H 16))))
+
+    ;; Play: the current room (A3: its ring-stones as they stand, sinking or
+    ;; open; its creatures; the harmonic still lying there), the body in it,
+    ;; the dim. Order, back to front: sky, back layer, stones (so the floor
+    ;; covers one that sinks), solids, creatures, the body, water, what shows
+    ;; above water (a hidden frog's eyes), the harmonic, the moths and their
+    ;; light, a flash.
     (define (draw-play w)
       (let* ((p (world-room w))
              (rm (and p (placed-data p))))
         (if (not rm)
             (draw-world w)
             (let* ((o (world-origin w))
-                   (b (world-body w)))
-              (draw-room-back rm)
-              (draw-body-at b (- (body-x b) (car o)) (- (body-y b) (cdr o)) (role 'fur-1) (role 'fur-2))
+                   (ox (car o)) (oy (cdr o))
+                   (b (world-body w))
+                   (t (world-ticks w))
+                   (tm (world-tiles w))
+                   (cs (let ((c (world-critters w))) (if c (critters-list c) '())))
+                   (kind? (lambda (k) (lambda (c) (eq? (critter-kind c) k))))
+                   (eyes? (lambda (c) (eq? (critter-frame c) 'eyes))))
+              (sky!)
+              (each-tile rm back-mat? back-tile!)
+              (for-each (lambda (st)
+                          (let* ((cell (stone-cell st)) (s (tilemap-size tm))
+                                 (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
+                            (when (in-room? x y) (draw-stone st x y t (world-carry w) role))))
+                        (world-stones w))
+              (each-tile rm (lambda (m) (and (solid-mat? m) (not (eq? m 'stone)))) solid-tile!)
+              (for-each (lambda (c) (unless (eyes? c) (draw-critter c ox oy t role)))
+                        (filter (lambda (c) (not ((kind? 'moth) c))) cs))
+              (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) (role 'fur-1) (role 'fur-2))
               (draw-room-front rm)
+              (for-each (lambda (c) (draw-critter c ox oy t role)) (filter eyes? cs))
+              (for-each (lambda (st)
+                          (let* ((cell (stone-cell st)) (s (tilemap-size tm))
+                                 (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
+                            (when (in-room? x y) (draw-stone-light st x y t role))))
+                        (world-stones w))
+              (for-each (lambda (pk)
+                          (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
+                            (when (in-room? x y) (draw-pickup (pickup-overtone pk) x y t role))))
+                        (world-pickups w))
+              (let ((moths (filter (kind? 'moth) cs)))
+                (for-each (lambda (c) (draw-critter-glow c ox oy t role)) moths)
+                (for-each (lambda (c) (draw-critter c ox oy t role)) moths))
+              (for-each (lambda (f) (draw-flash (car f) (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f)) role))
+                        *flashes*)
               (draw-dim w)))))
 
     ;; --- the overviews: the region sheet and the atlas ----------------------------------

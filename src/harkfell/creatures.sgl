@@ -1,0 +1,522 @@
+;;; (harkfell creatures) - The room's life (harkfell-design section 6; phase
+;;; A3): reedlings, bellfrogs and lantern moths. They are not enemies: they
+;;; have routines, they react to you, to your stillness and to what you
+;;; carry, and they call. Nothing here can hurt you or block you.
+;;;
+;;; The creatures of the room you are in are made when you enter it, from its
+;;; things:, seeded by the room's coordinate (the same every time), and step
+;;; at the world's 60 Hz tick with the body. Positions are in the world map's
+;;; pixels, like the body's; a creature's (x, y) is its FEET (a moth's is its
+;;; middle).
+;;;
+;;; REEDLINGS (flock). (reedling flock: N zone: reeds) perches N small birds
+;;; on the reed tips of the room ((reedling at: (C R)) on that cell).
+;;;   perched  they bob and peck and turn; now and then one chirps
+;;;   alarmed  you come within ALARM px MOVING: the flock lifts off together
+;;;            (each a few ticks apart), with a flurry of wings, and circles
+;;;            high in the room
+;;;   landing  once you are far, or have stood still a while, they come
+;;;            down: onto the perches NEAREST you (but not on top of you) if
+;;;            you are still, anywhere else if you are not. Stillness is how
+;;;            you get close to them.
+;;;   H2       carrying H2 (the flock's region's harmonic, section 6), stand
+;;;            still near a perched flock and one of them sings back a phrase
+;;;            on D (song-h2), once per stillness, at most every SONG-GAP s.
+;;;
+;;; BELLFROGS (hop). (bellfrog at: (C R)) sits on that standable cell.
+;;;   sitting  it blinks, turns to face you when you are near, and croaks on
+;;;            its own clock: its throat swells as the croak sounds
+;;;   fleeing  you come within FLEE px moving: it hops away from you (to a
+;;;            standable cell up to 4 tiles off, or into water, where it hides
+;;;            with only its eyes above the surface)
+;;;   return   you are far, or still: it hops home again
+;;;   H2       carrying H2 it croaks in D (croak-h2), the harmonic's key
+;;;
+;;; LANTERN MOTHS (follow). (lantern-moth at: (C R) count: N drawn: H) is N
+;;; moths around that cell.
+;;;   idle     they wander around it, glowing faintly, and tink now and then
+;;;   drawn    carrying H they come to you (when you are within DRAW-R of
+;;;            them) and orbit at a distance, glowing in H's colour, tinking
+;;;            in H's partials; stand still and they settle closer and slower
+;;;
+;;; The step returns news for the sound layer:
+;;;   (call KIND x y)   KIND: chirp-a chirp-b flurry song-h2 croak-a croak-b
+;;;                     croak-h2 plop moth-a moth-b moth-h2 (a cue each)
+;;;
+;;; Pure, apart from nothing: the RNG is a state carried in the struct.
+
+(define-library (harkfell creatures)
+  (import (sigil struct)
+          (sigil list)
+          (sigil math)
+          (engine tilemap)
+          (harkfell content)
+          (harkfell legend))
+
+  (export critters critters? critters-list critters-news critters-new critters-step
+          critter critter? critter-kind critter-x critter-y critter-state critter-t
+          critter-facing critter-frame critter-glow critter-drawn critter-anim critter-home critter-vx critter-vy
+          ALARM FLEE DRAW-R SONG-GAP)
+
+  (begin
+    (define TILE 16)
+    (define ALARM 60.0)         ; px: a moving body this close lifts the flock
+    (define FLEE 44.0)          ; px: a moving body this close makes a frog hop
+    (define DRAW-R 150.0)       ; px: moths come to you from this far
+    (define STILL-CALM 45)      ; ticks: standing still this long, you are calm
+    (define SONG-STILL 80)      ; ticks still before a reedling sings back
+    (define SONG-GAP 720)       ; ticks between songs (12 s)
+    (define HOME-FAR 90.0)      ; px: a frog goes home once you are this far
+
+    ;; kind: reedling | bellfrog | moth. state: per kind (below). t: ticks in
+    ;; the state. home: (x . y). tx ty: a target. anim: a free-running frame
+    ;; clock offset. glow: 0..1 (moths). drawn: a moth's harmonic. rng: its
+    ;; own random state. extra: the kind's scratch (a flock's id, a timer).
+    (define-struct critter
+      (kind default: #f)
+      (x default: 0.0) (y default: 0.0)
+      (vx default: 0.0) (vy default: 0.0)
+      (state default: 'idle)
+      (t default: 0)
+      (home default: #f)
+      (tx default: 0.0) (ty default: 0.0)
+      (facing default: 1)
+      (frame default: 'sit)
+      (anim default: 0)
+      (glow default: 0.0)
+      (drawn default: #f)
+      (rng default: 1)
+      (timer default: 0)
+      (flock default: #f)
+      (hop default: #f))          ; a hop: #(x0 y0 x1 y1 dur height into-water?)
+
+    ;; list: the critters. perches: ((flock-id (x . y) ...) ...). stand: the
+    ;; room's standable feet points; water: its water-surface points. clock:
+    ;; ticks since made. song: tick of the last song. sung: this stillness
+    ;; already had its song. news: what this step said.
+    (define-struct critters
+      (list default: '())
+      (perches default: '())
+      (stand default: '())
+      (water default: '())
+      (clock default: 0)
+      (song default: -100000)
+      (sung default: #f)
+      (lifted default: '())       ; flock ids lifted this approach (one flurry each)
+      (news default: '()))
+
+    ;; --- random ----------------------------------------------------------------------
+    ;; MINSTD (only modulo is bound here). (rand c) -> (value . critter).
+    (define (next-rng s) (modulo (* s 48271) 2147483647))
+    (define (rand c)
+      (let ((s (next-rng (critter-rng c))))
+        (cons (/ s 2147483647.0) (critter c rng: s))))
+    (define (seed-of x y i) (+ 1 (modulo (+ (* 7919 (+ x 97)) (* 104729 (+ y 31)) (* 613 (+ i 1))) 2147483646)))
+    ;; A seed's first few values, for making things
+    (define (seed-rands seed n)
+      (let loop ((s seed) (k n) (acc '()))
+        (if (= k 0) (reverse acc)
+            (let ((s2 (next-rng s))) (loop s2 (- k 1) (cons (/ s2 2147483647.0) acc))))))
+
+    ;; --- making a room's creatures -------------------------------------------------------
+    ;; rm: the room (content). ox oy: its top-left in the world map's pixels.
+    (define (critters-new rm ox oy)
+      (let* ((grid (room-grid rm))
+             (ch (lambda (c r) (room-char rm c r)))
+             (kind (lambda (c r) (char-kind (ch c r))))
+             (feet (lambda (c r) (cons (+ ox (* TILE c) (/ TILE 2.0)) (+ oy (* TILE (+ r 1))))))
+             (cells (apply append (map (lambda (r) (map (lambda (c) (cons c r)) (iota ROOM-COLS))) (iota ROOM-ROWS))))
+             ;; reed tips: a reed cell with no reed above it; a bird's feet on its top
+             (tips (filter (lambda (cr) (and (char=? (ch (car cr) (cdr cr)) #\|)
+                                             (not (char=? (ch (car cr) (- (cdr cr) 1)) #\|))
+                                             (> (cdr cr) 0)))
+                           cells))
+             (stand (filter (lambda (cr) (grid-standable? grid (car cr) (cdr cr))) cells))
+             (water (filter (lambda (cr) (and (eq? (kind (car cr) (cdr cr)) 'water)
+                                              (not (eq? (kind (car cr) (- (cdr cr) 1)) 'water))))
+                            cells))
+             (things (room-things rm))
+             (rx (room-x rm)) (ry (room-y rm)))
+        (let loop ((ts things) (i 0) (acc '()) (perches '()))
+          (if (null? ts)
+              (critters list: (reverse acc)
+                        perches: perches
+                        stand: (map (lambda (cr) (feet (car cr) (cdr cr))) stand)
+                        water: (map (lambda (cr) (cons (+ ox (* TILE (car cr)) (/ TILE 2.0)) (+ oy (* TILE (cdr cr)) 3.0))) water))
+              (let* ((t (car ts))
+                     (k (and (pair? t) (car t)))
+                     (at (thing-at t))
+                     (seed (seed-of rx ry i)))
+                (cond
+                  ((eq? k 'reedling)
+                   (let* ((n (or (thing-kw t "flock") (thing-kw t "count") 1))
+                          (pts (if at
+                                   (list (cons (+ ox (* TILE (car at)) (/ TILE 2.0)) (+ oy (* TILE (cdr at)) 2.0)))
+                                   (map (lambda (cr) (cons (+ ox (* TILE (car cr)) (/ TILE 2.0)) (+ oy (* TILE (cdr cr)) 2.0))) tips)))
+                          (pts (if (null? pts) (list (cons (+ ox 200.0) (+ oy 120.0))) pts))
+                          (rs (seed-rands seed (+ 1 (* 3 n))))
+                          ;; one tip each (spread over the zone), from a seeded start
+                          (start (exact (floor (* (list-ref rs (* 3 n)) (length pts)))))
+                          (step (max 1 (exact (floor (/ (length pts) (max 1 n))))))
+                          (birds (map (lambda (j)
+                                        (let* ((r0 (list-ref rs (* 3 j)))
+                                               (p (list-ref pts (modulo (+ start (* j step) (if (> n (length pts)) j 0)) (length pts))))
+                                               (dx (* 2.0 (- (list-ref rs (+ 1 (* 3 j))) 0.5))))
+                                          (critter kind: 'reedling x: (+ (car p) dx) y: (cdr p)
+                                                   home: (cons (+ (car p) dx) (cdr p)) state: 'perched
+                                                   facing: (if (< (list-ref rs (+ 2 (* 3 j))) 0.5) -1 1)
+                                                   anim: (exact (floor (* 60 (list-ref rs (+ 2 (* 3 j))))))
+                                                   rng: (+ seed (* 31 (+ j 1)))
+                                                   timer: (+ 60 (exact (floor (* 240 r0))))
+                                                   flock: i)))
+                                      (iota n))))
+                     (loop (cdr ts) (+ i 1) (append (reverse birds) acc)
+                           (cons (cons i (map (lambda (p) p) pts)) perches))))
+                  ((and (eq? k 'bellfrog) at)
+                   (let ((f (feet (car at) (cdr at))))
+                     (loop (cdr ts) (+ i 1)
+                           (cons (critter kind: 'bellfrog x: (car f) y: (cdr f) home: f state: 'sit
+                                          facing: (if (< (car at) 12) 1 -1) rng: seed
+                                          timer: (+ 90 (modulo seed 300)))
+                                 acc)
+                           perches)))
+                  ((and (eq? k 'lantern-moth) at)
+                   (let* ((n (or (thing-kw t "count") 3))
+                          (h (cons (+ ox (* TILE (car at)) (/ TILE 2.0)) (+ oy (* TILE (cdr at)) (/ TILE 2.0))))
+                          (rs (seed-rands seed (* 2 n)))
+                          (moths (map (lambda (j)
+                                        (let ((a (* 6.2831853 (list-ref rs (* 2 j)))))
+                                          (critter kind: 'moth
+                                                   x: (+ (car h) (* 14.0 (cos a))) y: (+ (cdr h) (* 8.0 (sin a)))
+                                                   home: h state: 'idle drawn: (thing-kw t "drawn")
+                                                   anim: (exact (floor (* 997 (list-ref rs (+ 1 (* 2 j))))))
+                                                   rng: (+ seed (* 17 (+ j 1)))
+                                                   timer: (+ 120 (exact (floor (* 600 (list-ref rs (+ 1 (* 2 j))))))))))
+                                      (iota n))))
+                     (loop (cdr ts) (+ i 1) (append (reverse moths) acc) perches)))
+                  (else (loop (cdr ts) (+ i 1) acc perches))))))))
+
+    ;; --- the step -------------------------------------------------------------------------
+    ;; bx by: the body's centre. still: ticks it has stood at rest. carry:
+    ;; the harmonics carried. playing: #f while the screen is dark.
+    ;; speed: the body's speed, px/tick (MOVING and faster alarms them)
+    (define MOVING 0.3)
+    (define (critters-step cs bx by still carry playing . speed)
+      (let* ((clock (+ (critters-clock cs) 1))
+             (news '())
+             (say! (lambda (kind x y) (set! news (cons (list 'call kind x y) news))))
+             (calm (>= still STILL-CALM))
+             (moving (and (pair? speed) (> (car speed) MOVING)))
+             (ctx (vector bx by still carry calm playing clock moving))
+             ;; which flocks lift this tick: a moving body within ALARM of any perched bird
+             (alarm-flocks
+               (if (or (not moving) (not playing))
+                   '()
+                   (let loop ((l (critters-list cs)) (acc '()))
+                     (cond ((null? l) acc)
+                           ((and (eq? (critter-kind (car l)) 'reedling)
+                                 (memq (critter-state (car l)) (list 'perched 'landing))
+                                 (< (dist (critter-x (car l)) (critter-y (car l)) bx by) ALARM)
+                                 (not (memv (critter-flock (car l)) acc)))
+                            (loop (cdr l) (cons (critter-flock (car l)) acc)))
+                           (else (loop (cdr l) acc))))))
+             (lifted (filter (lambda (f) (memv f alarm-flocks)) (critters-lifted cs)))
+             (_ (for-each (lambda (f)
+                            (unless (memv f (critters-lifted cs))
+                              (let ((b (find (lambda (c) (eqv? (critter-flock c) f)) (critters-list cs))))
+                                (when b (say! 'flurry (critter-x b) (critter-y b))))))
+                          alarm-flocks))
+             ;; the reedlings' song: carrying H2, still long enough, a perched bird near
+             (singer (and (memv 2 carry) playing
+                          (>= still SONG-STILL)
+                          (not (critters-sung cs))
+                          (>= (- clock (critters-song cs)) SONG-GAP)
+                          (let loop ((l (critters-list cs)) (best #f))
+                            (cond ((null? l) best)
+                                  ((and (eq? (critter-kind (car l)) 'reedling) (eq? (critter-state (car l)) 'perched)
+                                        (< (dist (critter-x (car l)) (critter-y (car l)) bx by) 140.0)
+                                        (or (not best) (< (dist (critter-x (car l)) (critter-y (car l)) bx by)
+                                                          (dist (critter-x best) (critter-y best) bx by))))
+                                   (loop (cdr l) (car l)))
+                                  (else (loop (cdr l) best))))))
+             (_ (when singer (say! 'song-h2 (critter-x singer) (critter-y singer))))
+             (lst (map (lambda (c)
+                         (case (critter-kind c)
+                           ((reedling) (reedling-step c cs ctx (memv (critter-flock c) alarm-flocks) (eq? c singer) say!))
+                           ((bellfrog) (frog-step c cs ctx say!))
+                           ((moth) (moth-step c cs ctx say!))
+                           (else c)))
+                       (critters-list cs))))
+        (critters cs
+                  list: lst
+                  clock: clock
+                  song: (if singer clock (critters-song cs))
+                  sung: (cond (singer #t) ((< still SONG-STILL) #f) (else (critters-sung cs)))
+                  lifted: (append alarm-flocks (filter (lambda (f) (not (memv f alarm-flocks))) lifted))
+                  news: (reverse news))))
+
+    (define (dist x1 y1 x2 y2)
+      (let ((dx (- x1 x2)) (dy (- y1 y2))) (sqrt (+ (* dx dx) (* dy dy)))))
+
+    (define (ctx-bx x) (vector-ref x 0))
+    (define (ctx-by x) (vector-ref x 1))
+    (define (ctx-still x) (vector-ref x 2))
+    (define (ctx-carry x) (vector-ref x 3))
+    (define (ctx-calm x) (vector-ref x 4))
+    (define (ctx-playing x) (vector-ref x 5))
+    (define (ctx-clock x) (vector-ref x 6))
+    (define (ctx-moving x) (vector-ref x 7))
+
+    (define (clamp lo hi v) (max lo (min hi v)))
+
+    ;; Steer (vx, vy) toward (tx, ty) at most `speed` px/tick, easing by k.
+    (define (steer c tx ty speed k)
+      (let* ((dx (- tx (critter-x c))) (dy (- ty (critter-y c)))
+             (d (max 0.001 (sqrt (+ (* dx dx) (* dy dy)))))
+             (s (min speed (* 0.08 d)))
+             (vx (+ (critter-vx c) (* k (- (* s (/ dx d)) (critter-vx c)))))
+             (vy (+ (critter-vy c) (* k (- (* s (/ dy d)) (critter-vy c))))))
+        (critter c vx: vx vy: vy x: (+ (critter-x c) vx) y: (+ (critter-y c) vy))))
+
+    ;; --- reedlings ---------------------------------------------------------------------------
+    ;; states: perched (on its perch), flying (circling high), landing (to a perch)
+    (define (flock-perches cs f)
+      (let ((e (assv f (critters-perches cs)))) (if e (cdr e) '())))
+
+    (define (reedling-step c cs ctx alarmed? singing? say!)
+      (let* ((c (critter c t: (+ (critter-t c) 1) anim: (+ (critter-anim c) 1)))
+             (bx (ctx-bx ctx)) (by (ctx-by ctx)))
+        (case (critter-state c)
+          ((perched)
+           (cond
+             (alarmed?
+              ;; lift off, a few ticks apart, away from you
+              (let* ((r (rand c)) (c (cdr r)) (away (if (> (critter-x c) bx) 1.0 -1.0)))
+                (critter c state: 'lifting t: 0 timer: (exact (floor (* 10 (car r))))
+                         vx: (* away (+ 0.6 (car r))) vy: -0.2 facing: (if (> away 0) 1 -1))))
+             (singing? (critter c frame: 'sing timer: 70 t: 0))
+             (else
+              (let* ((timer (- (critter-timer c) 1))
+                     (c (critter c timer: timer)))
+                (cond
+                  ;; the song's pose held
+                  ((and (eq? (critter-frame c) 'sing) (> timer 0)) c)
+                  ((> timer 0)
+                   (critter c frame: (if (eq? (critter-frame c) 'sing) 'perch (critter-frame c))))
+                  (else
+                   ;; the next idle act: a peck, a turn, a chirp, a hop along
+                   (let* ((r (rand c)) (c (cdr r)) (v (car r))
+                          (r2 (rand c)) (c (cdr r2)) (next (+ 50 (exact (floor (* 200 (car r2)))))))
+                     (cond ((< v 0.30) (critter c frame: 'peck timer: 14))
+                           ((< v 0.52) (critter c facing: (- (critter-facing c)) frame: 'perch timer: next))
+                           ((< v 0.70)
+                            (say! (if (< (car r2) 0.5) 'chirp-a 'chirp-b) (critter-x c) (critter-y c))
+                            (critter c frame: 'sing timer: 18))
+                           (else (critter c frame: 'perch timer: next))))))))))
+          ((lifting)
+           (if (> (critter-timer c) 0)
+               (critter c timer: (- (critter-timer c) 1))
+               (let ((r (rand c)))
+                 (critter (cdr r) state: 'flying t: 0 vy: -2.4 frame: 'fly
+                          timer: (+ 200 (exact (floor (* 160 (car r)))))))))
+          ((flying)
+           ;; circle high over the room, each on its own orbit, away from you
+           (let* ((home (critter-home c))
+                  (cx (+ (car home) (if (> (car home) bx) 40.0 -40.0)))
+                  (cy (- (cdr home) 70.0))
+                  (a (+ (* 0.035 (critter-t c)) (* 0.37 (critter-anim c))))
+                  (tx (+ cx (* 46.0 (cos a))))
+                  (ty (+ cy (* 16.0 (sin (* 1.3 a)))))
+                  (ty (max (+ 6.0 (* 176.0 (floor (/ (cdr home) 176.0)))) ty))
+                  (c (steer c tx ty 1.7 0.12))
+                  (timer (- (critter-timer c) 1))
+                  (far (> (dist (car home) (cdr home) bx by) 110.0))
+                  (c (critter c timer: timer facing: (if (> (critter-vx c) 0.05) 1 (if (< (critter-vx c) -0.05) -1 (critter-facing c))))))
+             (if (and (<= timer 0) (or far (ctx-calm ctx)))
+                 (let ((p (landing-perch c cs ctx)))
+                   (critter c state: 'landing t: 0 tx: (car p) ty: (cdr p)))
+                 c)))
+          ((landing)
+           (let* ((c (steer c (critter-tx c) (critter-ty c) 1.4 0.14))
+                  (d (dist (critter-x c) (critter-y c) (critter-tx c) (critter-ty c))))
+             (if (< d 1.2)
+                 (let ((r (rand c)))
+                   (critter (cdr r) state: 'perched x: (critter-tx c) y: (critter-ty c) vx: 0.0 vy: 0.0
+                            home: (cons (critter-tx c) (critter-ty c)) frame: 'perch
+                            facing: (if (> bx (critter-tx c)) 1 -1)
+                            timer: (+ 40 (exact (floor (* 120 (car r)))))))
+                 (critter c facing: (if (> (critter-vx c) 0.0) 1 -1)
+                          frame: (if (> (critter-vy c) 0.3) 'glide 'fly)))))
+          (else c))))
+
+    ;; Where a bird lands: still, the perch of its flock nearest you but at
+    ;; least two tiles off; moving, the one furthest from you. Birds spread
+    ;; over a perch by their own offset.
+    (define (landing-perch c cs ctx)
+      (let* ((ps (flock-perches cs (critter-flock c)))
+             (bx (ctx-bx ctx)) (by (ctx-by ctx))
+             (ps (if (null? ps) (list (critter-home c)) ps))
+             (score (lambda (p) (dist (car p) (cdr p) bx by)))
+             (ok (filter (lambda (p) (> (score p) 32.0)) ps))
+             (ok (if (null? ok) ps ok))
+             (sorted (list-sort (lambda (a b) (< (score a) (score b))) ok))
+             (pick (if (ctx-calm ctx) sorted (reverse sorted)))
+             ;; spread the flock over the best few perches
+             (k (modulo (critter-anim c) (min 3 (length pick))))
+             (p (list-ref pick k))
+             (dx (* 3.0 (- (modulo (critter-anim c) 5) 2))))
+        (cons (+ (car p) dx) (cdr p))))
+
+    ;; --- bellfrogs -----------------------------------------------------------------------------
+    ;; states: sit, croak (throat swollen), crouch (before a hop), hop, hidden
+    ;; (in water, eyes only)
+    (define HOP-MAX 64.0)
+
+    (define (frog-step c cs ctx say!)
+      (let* ((c (critter c t: (+ (critter-t c) 1) anim: (+ (critter-anim c) 1)))
+             (bx (ctx-bx ctx)) (by (ctx-by ctx))
+             (d (dist (critter-x c) (- (critter-y c) 3.0) bx by))
+             (moving (ctx-moving ctx))
+             (home (critter-home c))
+             (at-home (< (dist (critter-x c) (critter-y c) (car home) (cdr home)) 2.0)))
+        (case (critter-state c)
+          ((sit croak)
+           (cond
+             ((and (< d FLEE) moving (ctx-playing ctx))
+              (let ((dest (flee-spot c cs bx)))
+                (critter c state: 'crouch t: 0 tx: (car dest) ty: (cadr dest)
+                         hop: (cddr dest) facing: (if (> (car dest) (critter-x c)) 1 -1) frame: 'crouch)))
+             ((and (not at-home) (or (> d HOME-FAR) (and (ctx-calm ctx) (> d 36.0))) (> (critter-t c) 90))
+              (let ((dest (toward-home c cs)))
+                (critter c state: 'crouch t: 0 tx: (car dest) ty: (cadr dest) hop: (cddr dest)
+                         facing: (if (> (car dest) (critter-x c)) 1 -1) frame: 'crouch)))
+             ((eq? (critter-state c) 'croak)
+              (if (> (critter-t c) 26) (critter c state: 'sit t: 0 frame: 'sit) (critter c frame: 'croak)))
+             (else
+              (let* ((timer (- (critter-timer c) 1))
+                     (face (if (< d 110.0) (if (> bx (critter-x c)) 1 -1) (critter-facing c))))
+                (if (<= timer 0)
+                    (let* ((r (rand c)) (c (cdr r)))
+                      (say! (if (memv 2 (ctx-carry ctx)) 'croak-h2 (if (< (car r) 0.5) 'croak-a 'croak-b))
+                            (critter-x c) (critter-y c))
+                      (critter c state: 'croak t: 0 frame: 'croak facing: face
+                               timer: (+ 300 (exact (floor (* 540 (car r)))))))
+                    (critter c timer: timer facing: face
+                             frame: (if (< (modulo (+ (critter-anim c) (* 7 (critter-rng c))) 220) 6) 'blink 'sit)))))))
+          ((crouch)
+           (if (>= (critter-t c) 6)
+               (critter c state: 'hop t: 0 frame: 'leap
+                        hop: (vector (critter-x c) (critter-y c) (critter-tx c) (critter-ty c)
+                                     (+ 20 (exact (floor (/ (abs (- (critter-tx c) (critter-x c))) 3.0))))
+                                     (+ 10.0 (* 0.2 (abs (- (critter-tx c) (critter-x c)))))
+                                     (critter-hop c)))
+               c))
+          ((hop)
+           (let* ((h (critter-hop c))
+                  (x0 (vector-ref h 0)) (y0 (vector-ref h 1)) (x1 (vector-ref h 2)) (y1 (vector-ref h 3))
+                  (dur (vector-ref h 4)) (ht (vector-ref h 5)) (wet (vector-ref h 6))
+                  (u (min 1.0 (/ (* 1.0 (critter-t c)) dur))))
+             (if (>= u 1.0)
+                 (if wet
+                     (begin (say! 'plop x1 y1)
+                            (critter c state: 'hidden t: 0 x: x1 y: y1 frame: 'eyes))
+                     (critter c state: 'sit t: 0 x: x1 y: y1 frame: 'sit timer: (+ 120 (modulo (critter-anim c) 200))))
+                 (critter c x: (+ x0 (* u (- x1 x0)))
+                          y: (- (+ y0 (* u (- y1 y0))) (* 4.0 ht u (- 1.0 u)))
+                          frame: (if (< u 0.5) 'leap 'fall)))))
+          ((hidden)
+           ;; under the surface until you are far or still, then out and home
+           (if (and (> (critter-t c) 120) (or (> d HOME-FAR) (ctx-calm ctx)))
+               (let ((dest (toward-home c cs)))
+                 (critter c state: 'crouch t: 0 tx: (car dest) ty: (cadr dest) hop: (cddr dest)
+                          facing: (if (> (car dest) (critter-x c)) 1 -1) frame: 'eyes))
+               (critter c frame: 'eyes)))
+          (else c))))
+
+    ;; A hop away from bx: (x y . into-water?). The standable spot or water
+    ;; surface within HOP-MAX on the far side from you, furthest from you;
+    ;; if none, a hop straight up where it sits (a startle).
+    (define (flee-spot c cs bx)
+      (let* ((x (critter-x c)) (y (critter-y c))
+             (away (if (> x bx) 1.0 -1.0))
+             (cand (append
+                     (map (lambda (p) (list (car p) (cdr p) #f)) (critters-stand cs))
+                     (map (lambda (p) (list (car p) (cdr p) #t)) (critters-water cs))))
+             (ok (filter (lambda (p)
+                           (let ((dx (- (car p) x)) (dy (- (cadr p) y)))
+                             (and (> (* dx away) 12.0) (< (abs dx) HOP-MAX) (< (abs dy) 36.0))))
+                         cand)))
+        (if (null? ok)
+            (cons x (cons y #f))
+            (let ((best (let loop ((l (cdr ok)) (b (car ok)))
+                          (if (null? l) b
+                              (loop (cdr l) (if (> (abs (- (car (car l)) bx)) (abs (- (car b) bx))) (car l) b))))))
+              (cons (car best) (cons (cadr best) (caddr best)))))))
+
+    ;; A hop toward home, at most HOP-MAX, landing on a standable spot.
+    (define (toward-home c cs)
+      (let* ((x (critter-x c)) (y (critter-y c))
+             (home (critter-home c))
+             (d (dist x y (car home) (cdr home))))
+        (if (<= d HOP-MAX)
+            (cons (car home) (cons (cdr home) #f))
+            (let* ((dir (if (> (car home) x) 1.0 -1.0))
+                   (ok (filter (lambda (p) (let ((dx (- (car p) x)))
+                                             (and (> (* dx dir) 8.0) (< (abs dx) HOP-MAX) (< (abs (- (cdr p) y)) 40.0))))
+                               (critters-stand cs))))
+              (if (null? ok)
+                  (cons (car home) (cons (cdr home) #f))
+                  (let ((best (let loop ((l (cdr ok)) (b (car ok)))
+                                (if (null? l) b
+                                    (loop (cdr l) (if (< (dist (car (car l)) (cdr (car l)) (car home) (cdr home))
+                                                         (dist (car b) (cdr b) (car home) (cdr home)))
+                                                      (car l) b))))))
+                    (cons (car best) (cons (cdr best) #f))))))))
+
+    ;; A drawn moth chimes in its harmonic's partials: moth-hN.
+    (define (moth-cue c)
+      (string->symbol (string-append "moth-h" (number->string (critter-drawn c)))))
+
+    ;; --- lantern moths ------------------------------------------------------------------------
+    (define (moth-step c cs ctx say!)
+      (let* ((c (critter c t: (+ (critter-t c) 1) anim: (+ (critter-anim c) 1)))
+             (bx (ctx-bx ctx)) (by (ctx-by ctx))
+             (home (critter-home c))
+             (drawn (and (critter-drawn c) (memv (critter-drawn c) (ctx-carry ctx)) (ctx-playing ctx)
+                         (< (min (dist (critter-x c) (critter-y c) bx by)
+                                 (dist (car home) (cdr home) bx by))
+                            DRAW-R)))
+             (k (critter-anim c))
+             (ph (* 0.61 (modulo (critter-rng c) 1000)))
+             (was (critter-state c)))
+        (if drawn
+            ;; orbit you: wider while you move, close and slow while you stand
+            (let* ((calm (ctx-calm ctx))
+                   (rad (if calm (+ 19.0 (* 4.0 (sin (+ ph (* 0.013 k))))) (+ 27.0 (* 6.0 (sin (+ ph (* 0.021 k)))))))
+                   (w (if calm 0.012 0.024))
+                   (a (+ ph (* w k)))
+                   (tx (+ bx (* rad (cos a))))
+                   (ty (+ by -4.0 (* 0.6 rad (sin a)) (* 2.0 (sin (* 0.09 k)))))
+                   (c (steer c tx ty (if calm 0.7 1.1) 0.06))
+                   (c (critter c state: 'drawn glow: (min 1.0 (+ (critter-glow c) 0.02))
+                               facing: (if (> (critter-vx c) 0) 1 -1)))
+                   (timer (- (critter-timer c) 1)))
+              (cond ((not (eq? was 'drawn))
+                     (say! (moth-cue c) (critter-x c) (critter-y c))
+                     (critter c timer: (+ 200 (modulo (* 37 k) 400))))
+                    ((<= timer 0)
+                     (say! (moth-cue c) (critter-x c) (critter-y c))
+                     (critter c timer: (+ 300 (modulo (* 53 k) 500))))
+                    (else (critter c timer: timer))))
+            ;; idle: a slow wander around home, faint
+            (let* ((tx (+ (car home) (* 16.0 (sin (+ ph (* 0.017 k)))) (* 5.0 (sin (* 0.051 k)))))
+                   (ty (+ (cdr home) (* 9.0 (sin (+ (* 1.7 ph) (* 0.023 k)))) (* 3.0 (sin (* 0.07 k)))))
+                   (c (steer c tx ty 0.6 0.05))
+                   (c (critter c state: 'idle glow: (max 0.25 (- (critter-glow c) 0.01))
+                               facing: (if (> (critter-vx c) 0) 1 -1)))
+                   (timer (- (critter-timer c) 1)))
+              (if (<= timer 0)
+                  (begin
+                    (say! (if (even? (modulo k 7)) 'moth-a 'moth-b) (critter-x c) (critter-y c))
+                    (critter c timer: (+ 600 (modulo (* 71 k) 900))))
+                  (critter c timer: timer))))))))

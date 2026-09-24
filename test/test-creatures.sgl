@@ -1,0 +1,136 @@
+;;; A3's creatures ((harkfell creatures)) in the real rooms, stepped by the
+;;; real world tick: each behaviour the design names, with the case that
+;;; must NOT happen beside it (a reaction test that cannot fail proves
+;;; nothing).
+;;;
+;;;   reedlings  a moving body near a perched flock lifts it (one flurry);
+;;;              a still body as near does not; carrying H2 and standing
+;;;              still near them, one sings back (song-h2), and not
+;;;              without H2
+;;;   bellfrogs  a moving body near one makes it hop away; it comes home
+;;;              when you stand still; carrying H2 its croak is croak-h2,
+;;;              and never without
+;;;   moths      carrying their harmonic they come to you; without it they
+;;;              stay by their home
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine tilemap)
+        (engine worldmap)
+        (engine body)
+        (engine reach)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell creatures))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+
+(define (world-standing x y c r carry)
+  (let* ((rm (content-room CT x y))
+         (g (local->global CT rm c r))
+         (w (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g)))))
+    (world-populate w (content-stones CT) (content-pickups CT) carry)))
+
+;; Tick with (script t) giving the intent of tick t; -> (world . news)
+(define (run w script n)
+  (let loop ((w w) (t 0) (news '()))
+    (if (= t n)
+        (cons w news)
+        (let* ((w (world-tick w (script t)))
+               (p (world-take-news w)))
+          (loop (cdr p) (+ t 1) (append news (car p)))))))
+
+(define STILL (lambda (t) NOTHING))
+(define (walk h) (lambda (t) (intent h: h v: 0 jump: #f press: #f)))
+(define (calls news kind) (filter (lambda (n) (and (eq? (car n) 'call) (eq? (cadr n) kind))) news))
+(define (of-kind w k) (filter (lambda (c) (eq? (critter-kind c) k)) (critters-list (world-critters w))))
+(define (states w k) (map critter-state (of-kind w k)))
+(define (body-c w) (body-center (world-body w) HARKFELL-FEEL))
+(define (dist a b) (let ((dx (- (car a) (car b))) (dy (- (cdr a) (cdr b)))) (sqrt (+ (* dx dx) (* dy dy)))))
+
+(test-group "creatures: made from the room's things"
+  (test "Reed Bridge: five reedlings perched, two bellfrogs sitting"
+    (let ((w (world-standing 9 3 12 5 '())))
+      (assert-equal 5 (length (of-kind w 'reedling)))
+      (assert-true (every (lambda (s) (eq? s 'perched)) (states w 'reedling)))
+      (assert-equal 2 (length (of-kind w 'bellfrog)))))
+  (test "Behind the Stone: five moths drawn to 2"
+    (let ((w (world-standing 11 3 8 8 '(2))))
+      (assert-equal 5 (length (of-kind w 'moth)))
+      (assert-true (every (lambda (c) (eqv? 2 (critter-drawn c))) (of-kind w 'moth))))))
+
+;; Reed Bridge: the reedlings perch in the east bank's reeds (cols 17-22,
+;; seeded) and a bellfrog sits at (19 7). The body starts on the bridge
+;; (14 5) and walks east off it onto the bank, into them.
+(define WALK (run (world-standing 9 3 14 5 '()) (walk 1) 60))
+;; Standing still among them on the bank, as long.
+(define STAND (run (world-standing 9 3 18 7 '()) STILL 200))
+
+(test-group "creatures: reedlings"
+  (test "walking into them: the flock lifts, with one flurry"
+    (assert-true (pair? (filter (lambda (s) (memq s (list 'lifting 'flying))) (states (car WALK) 'reedling))))
+    (assert-equal 1 (length (calls (cdr WALK) 'flurry))))
+  (test "standing as near and still: they stay perched (no flurry)"
+    ;; the premise: a bird is within ALARM of the still body (else the case is empty)
+    (assert-true (find (lambda (c) (< (dist (cons (critter-x c) (critter-y c)) (body-c (car STAND))) ALARM))
+                       (of-kind (car STAND) 'reedling)))
+    (assert-equal 0 (length (calls (cdr STAND) 'flurry))))
+  (test "carrying H2, standing still near them: one sings back"
+    (let ((r (run (world-standing 9 3 18 7 '(2)) STILL 300)))
+      (assert-equal 1 (length (calls (cdr r) 'song-h2)))))
+  (test "without H2, standing as long: no song"
+    (assert-equal 0 (length (calls (cdr STAND) 'song-h2))))
+  (test "after the flurry, standing still, they come back down to perches"
+    (let ((r (run (car WALK) STILL 1500)))
+      (assert-true (every (lambda (s) (eq? s 'perched)) (states (car r) 'reedling))))))
+
+;; The east frog (home at column 19)
+(define (frog-at-5 w)
+  (car (filter (lambda (c) (> (car (critter-home c)) (+ (car (worldmap-origin (world-map w) (world-room w))) 200))) (of-kind w 'bellfrog))))
+
+(test-group "creatures: bellfrogs"
+  (test "standing still beside the east frog: it stays home"
+    (let ((f (frog-at-5 (car STAND))))
+      (assert-true (< (dist (cons (critter-x f) (critter-y f)) (critter-home f)) 2.0))))
+  (test "walking at the east frog: it hops away from its home"
+    (let* ((f0 (frog-at-5 (car (run (world-standing 9 3 14 5 '()) STILL 1))))
+           (f1 (frog-at-5 (car WALK))))
+      (assert-true (memq (critter-state f1) (list 'crouch 'hop 'hidden 'sit)))
+      (assert-true (> (abs (- (critter-x f1) (critter-x f0))) 8.0))
+      ;; and AWAY: the body came from the west, so the frog went east
+      (assert-true (> (critter-x f1) (critter-x f0)))))
+  (test "then standing still: it comes home"
+    (let* ((r (run (car WALK) STILL 1500))
+           (f (frog-at-5 (car r))))
+      (assert-true (< (dist (cons (critter-x f) (critter-y f)) (critter-home f)) 2.0))))
+  (test "carrying H2 its croaks are croak-h2; without, never"
+    (let ((with (run (world-standing 9 3 12 5 '(2)) STILL 1400))
+          (without (run (world-standing 9 3 12 5 '()) STILL 1400)))
+      (assert-true (pair? (calls (cdr with) 'croak-h2)))
+      (assert-equal 0 (+ (length (calls (cdr with) 'croak-a)) (length (calls (cdr with) 'croak-b))))
+      (assert-equal 0 (length (calls (cdr without) 'croak-h2)))
+      (assert-true (pair? (append (calls (cdr without) 'croak-a) (calls (cdr without) 'croak-b)))))))
+
+;; Behind the Stone: the moths' home is (14 5); the body stands at (6 8),
+;; about 8 tiles off.
+(define (moth-spread w)
+  (let ((c (body-c w)))
+    (apply max (map (lambda (m) (dist (cons (critter-x m) (critter-y m)) c)) (of-kind w 'moth)))))
+(define (moth-home-spread w)
+  (apply max (map (lambda (m) (dist (cons (critter-x m) (critter-y m)) (critter-home m))) (of-kind w 'moth))))
+
+(test-group "creatures: lantern moths"
+  (test "carrying H2: within 10 s every moth is within 40 px of you, and they chimed"
+    (let ((r (run (world-standing 11 3 6 8 '(2)) STILL 600)))
+      (assert-true (< (moth-spread (car r)) 40.0))
+      (assert-true (pair? (calls (cdr r) 'moth-h2)))))
+  (test "carrying nothing: they stay within 30 px of home, far from you"
+    (let ((r (run (world-standing 11 3 6 8 '()) STILL 600)))
+      (assert-true (< (moth-home-spread (car r)) 30.0))
+      (assert-true (> (moth-spread (car r)) 80.0)))))

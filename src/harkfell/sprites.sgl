@@ -1,0 +1,342 @@
+;;; (harkfell sprites) - A3's living things drawn: the creatures, the
+;;; ring-stones and the harmonics you find, in placeholder art from the
+;;; region's palette roles (A4 brings the real, text-authored sheets; these
+;;; are already text: each frame is rows of characters, one pixel each).
+;;;
+;;; A frame is drawn facing right with its bottom row ending at the feet
+;;; (x, y) and its columns centred on x; facing left mirrors it. Each
+;;; character names a palette role through the sprite's key ('.' is
+;;; nothing). Pixels are drawn as horizontal runs.
+;;;
+;;;   (draw-critter c ox oy t role)       one creature, in room pixels (ox oy:
+;;;                                       the room's origin in map pixels)
+;;;   (draw-critter-glow c ox oy t role)  a moth's light (additive)
+;;;   (draw-stone st x y t carry role)    a ring-stone in its cell's top-left
+;;;   (draw-pickup n x y t role)          an unfound harmonic at a cell's centre
+;;;   (draw-flash n x y age role)         a harmonic just taken (age in ticks)
+;;;   (harmonic-role n)                   the palette role of a harmonic's colour
+
+(define-library (harkfell sprites)
+  (import (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (harkfell gates)
+          (harkfell creatures))
+
+  (export draw-critter draw-critter-glow draw-stone draw-stone-light draw-pickup draw-flash harmonic-role
+          FRAMES)
+
+  (begin
+    (define (harmonic-role n)
+      (case n ((2) 'h2) ((3) 'h3) ((4) 'h4) ((5) 'h5) ((7) 'h7) (else 'h2)))
+
+    (define (paint! rgb a) (set-color (car rgb) (cadr rgb) (caddr rgb) a))
+
+    ;; Light is drawn with ordinary alpha in its own colour, not additive:
+    ;; over the placeholder's pale sky additive light goes white and the
+    ;; harmonic's colour is lost (seen in the first shots).
+    ;; A disc of radius r at (cx, cy) in whole pixels, one rect per row: the
+    ;; light stays on the pixel grid, and it blends (measured: the native
+    ;; draw-filled-circle drew these opaque, ignoring the colour's alpha,
+    ;; where rects blend).
+    (define (disc! cx cy r)
+      (let* ((x0 (floor-int cx)) (y0 (floor-int cy)) (ri (floor-int r)))
+        (let loop ((dy (- ri)))
+          (when (<= dy ri)
+            (let ((w (floor-int (sqrt (max 0.0 (- (* r r) (* dy dy)))))))
+              (draw-filled-rect (- x0 w) (+ y0 dy) (+ 1 (* 2 w)) 1))
+            (loop (+ dy 1))))))
+
+    (define-syntax with-glow
+      (syntax-rules () ((_ body ...) (begin body ...))))
+    (define (floor-int x) (exact (floor x)))
+
+    ;; rows: the frame; key: ((char . role-or-rgb) ...); role: role -> rgb
+    (define (sprite! rows key x y face role alpha)
+      (let* ((h (length rows))
+             (w (apply max (map string-length rows)))
+             (x0 (- (floor-int x) (quotient* w 2)))
+             (y0 (- (floor-int y) h)))
+        (let loop ((rs rows) (r 0))
+          (unless (null? rs)
+            (let* ((row (car rs)) (n (string-length row)))
+              (let run ((c 0))
+                (when (< c n)
+                  (let ((ch (string-ref row c)))
+                    (if (char=? ch #\.)
+                        (run (+ c 1))
+                        (let ((end (let more ((e (+ c 1)))
+                                     (if (and (< e n) (char=? (string-ref row e) ch)) (more (+ e 1)) e))))
+                          (let ((k (assv ch key)))
+                            (when k
+                              (paint! (if (symbol? (cdr k)) (role (cdr k)) (cdr k)) alpha)
+                              (if (> face 0)
+                                  (draw-filled-rect (+ x0 c) (+ y0 r) (- end c) 1)
+                                  (draw-filled-rect (+ x0 (- w end)) (+ y0 r) (- end c) 1))))
+                          (run end)))))))
+            (loop (cdr rs) (+ r 1))))))
+
+    (define (quotient* a b) (exact (floor (/ a b))))
+
+    ;; --- the frames ------------------------------------------------------------------------
+    (define REEDLING-KEY
+      (list (cons #\h 'mud-2) (cons #\b 'mud-2) (cons #\w 'mud-1) (cons #\c 'reed-3)
+            (cons #\e 'fur-2) (cons #\k 'ember) (cons #\l 'fur-2)))
+
+    (define REEDLING
+      (list
+        (cons 'perch (list "....hh."
+                           "...hhek"
+                           "wbbbbb."
+                           ".wbcc.."
+                           "...l.l."))
+        (cons 'peck (list "......."
+                          "w......"
+                          "wbbbbh."
+                          ".bccbek"
+                          "...l.l."))
+        (cons 'sing (list ".....k."
+                          "....hk."
+                          "....he."
+                          "wbbbbb."
+                          ".wbcc.."
+                          "...l.l."))
+        (cons 'fly (list "..w...."
+                         "..ww..."
+                         "wbbbbek"
+                         "..bcc.."))
+        (cons 'fly2 (list "wbbbbek"
+                          "..wcc.."
+                          "...w..."))
+        (cons 'glide (list "wwbbbek"
+                           "..bcc.."))))
+
+    (define FROG-KEY
+      (list (cons #\g 'reed-1) (cons #\d 'mud-1) (cons #\t 'sky-3) (cons #\p 'fur-2)
+            (cons #\f 'reed-2) (cons #\s 'reed-2)))
+
+    (define FROG
+      (list
+        (cons 'sit (list "....sp.."
+                         "..ggggg."
+                         ".gdgggtt"
+                         "ggggttt."
+                         ".f..ff.."))
+        (cons 'blink (list "....ss.."
+                           "..ggggg."
+                           ".gdgggtt"
+                           "ggggttt."
+                           ".f..ff.."))
+        (cons 'croak (list "....sp..."
+                           "..ggggg.."
+                           ".gdggtttt"
+                           "ggggttttt"
+                           ".f..fttt."))
+        (cons 'crouch (list "....ss.."
+                            "..gggpg."
+                            "gdgggggg"
+                            "fgtttff."))
+        (cons 'leap (list "....sp."
+                          "..gggg."
+                          ".gdgt.."
+                          "gg....."
+                          "f......"))
+        (cons 'fall (list "...ssp.."
+                          ".gdgggg."
+                          "ggttt..."
+                          ".f...f.."))
+        (cons 'eyes (list "..ss"
+                          "gpgg"))))
+
+    (define MOTH-KEY (list (cons #\w 'wing) (cons #\b 'fur-1)))
+
+    (define MOTH
+      (list
+        (cons 'up (list "w...w"
+                        ".wbw."
+                        "..b.."))
+        (cons 'down (list "....."
+                          "wwbww"
+                          "..b.."))))
+
+    (define FRAMES (list (cons 'reedling REEDLING) (cons 'bellfrog FROG) (cons 'moth MOTH)))
+
+    (define (frame-of table name) (let ((e (assq name table))) (if e (cdr e) (cdr (car table)))))
+
+    (define (mix a b k) (map (lambda (x y) (+ x (* k (- y x)))) a b))
+
+    ;; --- creatures ---------------------------------------------------------------------------
+    (define (draw-critter c ox oy t role)
+      (let ((x (- (critter-x c) ox)) (y (- (critter-y c) oy)) (face (critter-facing c)))
+        (case (critter-kind c)
+          ((reedling)
+           (let* ((f (critter-frame c))
+                  (name (cond ((eq? f 'fly) (if (< (modulo (+ t (critter-anim c)) 8) 4) 'fly 'fly2))
+                              ((memq f (list 'perch 'peck 'sing 'glide)) f)
+                              (else 'perch)))
+                  ;; a perched bird breathes: up a pixel now and then
+                  (bob (if (and (eq? name 'perch) (< (modulo (+ t (* 3 (critter-anim c))) 90) 8)) -1 0)))
+             (sprite! (frame-of REEDLING name) REEDLING-KEY x (+ y bob) face role 1.0)))
+          ((bellfrog)
+           (let* ((f (critter-frame c))
+                  ;; the throat pulses while it sits
+                  (name (if (memq f (list 'sit 'blink 'croak 'crouch 'leap 'fall 'eyes)) f 'sit)))
+             (sprite! (frame-of FROG name) FROG-KEY x y face role 1.0)))
+          ((moth)
+           (let* ((drawn (eq? (critter-state c) 'drawn))
+                  (wing (if drawn
+                            (mix (role 'sky-3) (role (harmonic-role (or (critter-drawn c) 2))) 0.7)
+                            (role 'sky-3)))
+                  (name (if (< (modulo (+ t (critter-anim c)) 6) 3) 'up 'down)))
+             (sprite! (frame-of MOTH name) (list (cons #\w wing) (cons #\b 'fur-1))
+                      x (+ y 2) face role 1.0)))
+          (else #f))))
+
+    ;; A moth's light: a soft disc, pulsing, in its harmonic's colour when
+    ;; drawn, a faint warm white when idle. Additive.
+    (define (draw-critter-glow c ox oy t role)
+      (when (eq? (critter-kind c) 'moth)
+        (let* ((x (- (critter-x c) ox)) (y (- (critter-y c) oy))
+               (g (critter-glow c))
+               (pulse (+ 0.85 (* 0.15 (sin (* 0.11 (+ t (critter-anim c)))))))
+               (rgb (if (eq? (critter-state c) 'drawn)
+                        (role (harmonic-role (or (critter-drawn c) 2)))
+                        (mix (role 'fur-1) (role 'h2) 0.3))))
+          (paint! rgb (* 0.2 g pulse)) (disc! x y (+ 4.0 (* 2.0 g)))
+          (paint! rgb (* 0.45 g pulse)) (disc! x y 2.5))))
+
+    ;; --- ring-stones ----------------------------------------------------------------------------
+    ;; x y: the cell's top-left. The stone stands in its cell, rounded, with
+    ;; its harmonic's glyph cut in its face (a ring and a notch per step above
+    ;; the fundamental). Shut: the glyph faint. Near miss: it shivers, the
+    ;; glyph flickering in the colour of what you carry. Ringing: the glyph
+    ;; burns and the stone glows. Sinking: it goes down into the floor (the
+    ;; floor, drawn after, covers it). Open: its top lies flush with the
+    ;; floor, the glyph glowing faintly, and it glows again each time it rings.
+    (define (glyph! x y n rgb a)
+      (paint! rgb a)
+      (draw-filled-rect (+ x 6) (+ y 4) 4 1)
+      (draw-filled-rect (+ x 6) (+ y 9) 4 1)
+      (draw-filled-rect (+ x 5) (+ y 5) 1 4)
+      (draw-filled-rect (+ x 10) (+ y 5) 1 4)
+      (let loop ((k 0))
+        (when (< k (- n 1))
+          (draw-filled-rect (+ x 7 (* 2 k)) (+ y 11) 1 2)
+          (loop (+ k 1)))))
+
+    (define (stone-body! x y role)
+      (paint! (role 'stone-2) 1.0)
+      (draw-filled-rect (+ x 2) y 12 16)
+      (draw-filled-rect (+ x 1) (+ y 1) 14 15)
+      (paint! (map (lambda (v) (* v 0.78)) (role 'stone-2)) 1.0)
+      (draw-filled-rect (+ x 12) (+ y 2) 2 14)
+      (draw-filled-rect (+ x 2) (+ y 14) 12 2)
+      (paint! (map (lambda (v) (min 1.0 (* v 1.12))) (role 'stone-2)) 1.0)
+      (draw-filled-rect (+ x 3) (+ y 1) 8 1))
+
+    (define (draw-stone st x y t carry role)
+      (let* ((n (stone-overtone st))
+             (key (role (harmonic-role n)))
+             (state (stone-state st))
+             (sink (stone-sink st)))
+        (case state
+          ((open)
+           ;; its top flush with the floor, below the passage
+           (let ((ring (max 0.0 (- 1.0 (/ (stone-t st) 150.0)))))
+             (paint! (role 'stone-2) 1.0)
+             (draw-filled-rect (+ x 1) (+ y 14) 14 2)
+             (paint! key (+ 0.5 (* 0.5 ring)))
+             (draw-filled-rect (+ x 6) (+ y 14) 4 1)
+             #f))
+          (else
+           (let* ((shiver (stone-shiver st))
+                  (jx (if (and (> shiver 0) (odd? (quotient* shiver 2))) (if (odd? (quotient* shiver 4)) 1 -1) 0))
+                  (ringing (memq state (list 'ringing 'sinking)))
+                  (jx (if (and ringing (< (stone-t st) 30) (eq? state 'ringing)) (if (odd? (quotient* t 2)) 1 0) jx))
+                  (sy (+ y (floor-int (* 16.0 sink))))
+                  (sx (+ x jx)))
+             (stone-body! sx sy role)
+             (cond
+               (ringing
+                (let ((a (if (eq? state 'ringing) (min 1.0 (/ (stone-t st) 12.0)) 1.0)))
+                  (glyph! sx sy n key a)))
+               ((> shiver 0)
+                ;; the wrong colour flickers in the glyph: the harmonic you carry
+                (let ((wrong (if (pair? carry) (role (harmonic-role (car carry))) key)))
+                  (glyph! sx sy n (if (odd? (quotient* shiver 3)) wrong key) 0.8)))
+               (else
+                ;; mute: the glyph faint, breathing very slowly
+                (glyph! sx sy n key (+ 0.55 (* 0.1 (sin (* 0.02 t))))))))))))
+
+    ;; A stone's light, drawn in FRONT of the rock (the wall over the passage
+    ;; and the floor would hide it): while it rings and sinks, and each time
+    ;; an open stone rings again (150 ticks). Rings of its colour go out
+    ;; from it like the sound.
+    (define (draw-stone-light st x y t role)
+      (let* ((key (role (harmonic-role (stone-overtone st))))
+             (state (stone-state st))
+             (a (case state
+                  ((ringing) (min 1.0 (/ (stone-t st) 12.0)))
+                  ((sinking) (- 1.0 (* 0.5 (stone-sink st))))
+                  ((open) (max 0.0 (- 1.0 (/ (stone-t st) 150.0))))
+                  (else 0.0)))
+             (cy (if (eq? state 'open) (+ y 14) (+ y 7 (floor-int (* 16.0 (stone-sink st))))))
+             (p (+ 0.8 (* 0.2 (sin (* 0.3 t))))))
+        (when (> a 0.0)
+          (paint! key (* 0.16 a p)) (disc! (+ x 8) cy 16.0)
+          (paint! key (* 0.24 a p)) (disc! (+ x 8) cy 9.0)
+          ;; two rings going out, 40 ticks apart
+          (let loop ((k 0))
+            (when (< k 2)
+              (let* ((u (/ (modulo (+ t (* 20 k)) 40) 40.0))
+                     (r (+ 6.0 (* 22.0 u))))
+                (paint! key (* 0.5 a (- 1.0 u)))
+                (let dots ((j 0))
+                  (when (< j 16)
+                    (let ((ang (* j 0.3927)))
+                      (draw-filled-rect (floor-int (+ x 8 (* r (cos ang)))) (floor-int (+ cy (* r (sin ang)))) 1 1))
+                    (dots (+ j 1)))))
+              (loop (+ k 1)))))))
+
+    ;; --- the harmonics --------------------------------------------------------------------------
+    ;; An unfound harmonic at (x, y), a cell's centre: a small bright mote
+    ;; in its colour, bobbing, with a soft light and a few specks rising.
+    (define (draw-pickup n x y t role)
+      (let* ((rgb (role (harmonic-role n)))
+             (by (+ y (* 2.0 (sin (* 0.05 t)))))
+             (p (+ 0.8 (* 0.2 (sin (* 0.09 t))))))
+        (with-glow
+          (begin
+            (paint! rgb (* 0.2 p)) (disc! x by 9.0)
+            (paint! rgb (* 0.3 p)) (disc! x by 5.0)
+            ;; specks rising
+            (let loop ((k 0))
+              (when (< k 3)
+                (let* ((u (/ (modulo (+ t (* 37 k)) 110) 110.0))
+                       (sx (+ x (* 5.0 (sin (+ (* 2.1 k) (* 6.28 u))))))
+                       (sy (- by (* 18.0 u))))
+                  (paint! rgb (* 0.6 (- 1.0 u)))
+                  (draw-filled-rect (floor-int sx) (floor-int sy) 1 1))
+                (loop (+ k 1))))))
+        (paint! rgb 1.0)
+        (draw-filled-rect (- (floor-int x) 1) (- (floor-int by) 2) 3 5)
+        (draw-filled-rect (- (floor-int x) 2) (- (floor-int by) 1) 5 3)
+        (paint! (mix rgb (list 1.0 1.0 1.0) 0.6) 1.0)
+        (draw-filled-rect (floor-int x) (- (floor-int by) 1) 1 2)))
+
+    ;; A harmonic just taken: a ring of its colour opening out, and its light
+    ;; fading, over FLASH ticks.
+    (define (draw-flash n x y age role)
+      (let* ((u (/ age 60.0)) (rgb (role (harmonic-role n))))
+        (when (< u 1.0)
+          (with-glow
+            (begin
+              (paint! rgb (* 0.3 (- 1.0 u))) (disc! x y (+ 4.0 (* 40.0 u)))
+              (paint! rgb (* 0.4 (- 1.0 u))) (disc! x y (* 8.0 (- 1.0 u)))))
+          (paint! (mix rgb (list 1.0 1.0 1.0) 0.5) (- 1.0 u))
+          (let loop ((k 0))
+            (when (< k 8)
+              (let ((a (* k 0.785)))
+                (draw-filled-rect (floor-int (+ x (* 30.0 u (cos a)))) (floor-int (+ y (* 30.0 u (sin a)))) 1 1))
+              (loop (+ k 1)))))))))
