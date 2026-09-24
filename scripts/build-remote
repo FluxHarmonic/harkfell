@@ -186,4 +186,9 @@ if [ -d "$STAGE/fetched" ]; then
   done
   say "runner logs in $LOGS"
 fi
+# a cycle that "succeeded" but filed no tree is not a build of $SHA
+if [ "$FETCH" = 1 ] && [ "$rc" = 0 ] && [ ! -f "$DEST/index.html" ]; then
+  say "SETUP-FAILED: the cycle ended 0 but no tree was filed at $DEST"
+  exit 125
+fi
 exit $rc

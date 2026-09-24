@@ -40,13 +40,21 @@ async function serveWasm(context, withBody) {
   if (!/^[0-9a-f]{16}\/harkfell\.wasm$/.test(tail)) {
     return new Response("not found\n", { status: 404 });
   }
-  const object = await env.WASM.get(`play/w/${tail}`, { onlyIf: request.headers });
-  if (!object) return new Response("not found\n", { status: 404 });
-  if (!("body" in object)) {
-    // a conditional request the object satisfies: metadata, no body
-    return new Response(null, { status: 304, headers: headersFor(object) });
+  const key = `play/w/${tail}`;
+  if (!withBody) {
+    const meta = await env.WASM.head(key);
+    return meta ? new Response(null, { headers: headersFor(meta) }) : new Response(null, { status: 404 });
   }
-  return new Response(withBody ? object.body : null, { headers: headersFor(object) });
+  // Only the cache-validation preconditions are passed to R2, so an object
+  // returned without a body always means "not modified" (304). If-Match and
+  // If-Unmodified-Since are ignored: the object at a content-addressed key
+  // never changes, so they can only hold.
+  const cond = new Headers();
+  for (const h of ["if-none-match", "if-modified-since"]) if (request.headers.has(h)) cond.set(h, request.headers.get(h));
+  const object = await env.WASM.get(key, { onlyIf: cond });
+  if (!object) return new Response("not found\n", { status: 404 });
+  if (!("body" in object)) return new Response(null, { status: 304, headers: headersFor(object) });
+  return new Response(object.body, { headers: headersFor(object) });
 }
 
 export const onRequestGet = (context) => serveWasm(context, true);

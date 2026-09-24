@@ -31,7 +31,23 @@ set -eu
 cd "$(dirname "$0")/.." || exit 1
 DIR="${1:-}"
 [ -n "$DIR" ] || { echo "stage-web: give the directory to stage into"; exit 1; }
-case "$DIR" in /|.|..|site|site/|functions|functions/) echo "stage-web: refusing to stage into '$DIR'"; exit 1 ;; esac
+DIR="${DIR%/}"
+# DIR is emptied, so it must be somewhere disposable: under build/ in this
+# checkout, or outside the checkout altogether (a scratch directory). Anything
+# else in the repo (src/, site/, the root) is a refusal.
+REPO="$(pwd -P)"
+ABS="$(realpath -m "$DIR")"
+case "$ABS/" in
+  "$REPO/build/"?*) ;;
+  "$REPO/"*) echo "stage-web: refusing to stage into '$DIR' ($ABS): inside the checkout but not under build/"; exit 1 ;;
+  /|/tmp/|"$HOME/") echo "stage-web: refusing to stage into '$ABS'"; exit 1 ;;
+esac
+# Pages RUNS or CONSUMES these rather than serving them, and nothing here
+# checks them: a _worker.js replaces the Functions, _routes.json and
+# _redirects change what answers where
+for f in _worker.js _routes.json _redirects functions; do
+  [ -e "site/$f" ] && { echo "stage-web: site/$f exists; Pages would run or consume it, not serve it, and no gate covers it"; exit 1; }
+done
 WEB="${HARKFELL_WEB_DIR:-build/web}"
 CAP=26214400   # Cloudflare Pages' per-file limit, 25 MiB
 

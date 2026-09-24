@@ -2,11 +2,11 @@
 # Publish harkfell.com to Cloudflare Pages (project harkfell): exactly the tree
 # verify-site.mjs verified, or nothing.
 #
-#   scripts/publish-web DIR "<one line>"              production (branch master)
-#   scripts/publish-web DIR "<one line>" --preview    a preview deployment
-#                                                     (branch preview: a
-#                                                     <hash>.harkfell.pages.dev
-#                                                     URL, never harkfell.com)
+#   scripts/publish-web DIR "<one line>"              preview, checked live, then
+#                                                     production (branch master)
+#   scripts/publish-web DIR "<one line>" --preview    the preview only (branch
+#                                                     preview: a pages.dev URL,
+#                                                     public but never harkfell.com)
 #   scripts/publish-web DIR --dry-run                 every check, nothing leaves
 #
 # THE RULE: PUBLISH EXACTLY THE TREE THE GATE RAN. The publish path is
@@ -16,19 +16,25 @@
 #   scripts/publish-web DIR "<line>"
 # and this script refuses unless, NOW:
 #   - DIR still hashes, file for file, to DIR.manifest (scripts/tree-manifest,
-#     which also covers functions/ and wrangler.jsonc as they are on disk);
-#   - DIR.verified names that manifest's sha256 and the sha256 of the
-#     verify-site.mjs in this checkout (a gate edited after it ran is not the
-#     gate that ran);
-#   - the game in DIR was built at HEAD (the manifest's web-stamp) and staged
-#     at HEAD, and the working tree has no tracked changes, so the deploy's
-#     commit tag describes what ships.
-# Then it copies DIR to a temporary tree, checks the copy against the
-# manifest too, uploads the wasm to R2 at the path the page names (and reads
-# it back, comparing hashes), removes it from the copy, and deploys the copy.
-# What Pages receives plus what R2 holds is the verified tree, byte for byte.
+#     which also covers functions/ and wrangler.jsonc, and refuses symlinks);
+#   - DIR.verified names that manifest's sha256, and each gate file it names
+#     (verify-site.mjs, scripts/serve-site.mjs, scripts/tree-manifest) still
+#     hashes to what it was when the verify run STARTED; the run was at HEAD on
+#     a clean checkout;
+#   - the game in DIR was built at HEAD and staged at HEAD, and the working
+#     tree has no tracked changes, so the deploy's commit tag describes it.
 #
-# Afterwards it runs scripts/verify-live.mjs against the deployment's URL.
+# Then everything wrangler will read is COPIED into a deploy directory that
+# this script owns (the tree, functions/, and the config as wrangler.json, so
+# no wrangler.json or .wrangler/deploy redirect in any parent directory can
+# win: wrangler looks for wrangler.json up the tree before wrangler.jsonc), the
+# copies are checked against the manifest, the wasm is moved out to R2
+# (uploaded with --remote, read back, compared), the copies are checked AGAIN
+# right before the deploy, and wrangler runs from that directory.
+#
+# Without --preview, the same deploy directory goes first to the preview
+# branch and scripts/verify-live.mjs checks its pages.dev URL; production is
+# deployed only if that is green, and then checked the same way.
 #
 # Needs: wrangler on PATH and logged in (or CLOUDFLARE_API_TOKEN with the
 # scopes scripts/cloudflare-setup names), and the project and bucket that
@@ -36,44 +42,55 @@
 # settings.
 set -eu
 cd "$(dirname "$0")/.." || exit 1
-say() { echo "publish-web: $*"; }
+say() { echo "publish-web: $*" >&2; }   # stderr: deploy() returns its URL on stdout
 
-DIR=""; MESSAGE=""; DRY=0; BRANCH=master
+DIR=""; MESSAGE=""; DRY=0; ONLY_PREVIEW=0
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY=1 ;;
-    --preview) BRANCH=preview ;;
+    --preview) ONLY_PREVIEW=1 ;;
     -*) say "unknown flag $a"; exit 2 ;;
     *) if [ -z "$DIR" ]; then DIR="$a"; elif [ -z "$MESSAGE" ]; then MESSAGE="$a"; else say "too many arguments"; exit 2; fi ;;
   esac
 done
-PROJECT="${HARKFELL_PAGES_PROJECT:-harkfell}"
-BUCKET="${HARKFELL_WASM_BUCKET:-harkfell-wasm}"
 [ -n "$DIR" ] || { say "give the staged directory"; exit 2; }
 DIR="${DIR%/}"
 [ -n "$MESSAGE" ] || [ "$DRY" = 1 ] || { say "give the deploy a one-line message"; exit 2; }
 for f in "$DIR/index.html" "$DIR.manifest" "$DIR.verified"; do
   [ -f "$f" ] || { say "REFUSED: $f missing (stage-web, then verify-site.mjs, first)"; exit 1; }
 done
+PROJECT="$(sed -n 's/^ *"name": "\([^"]*\)".*/\1/p' wrangler.jsonc | head -1)"
+BUCKET="$(sed -n 's/.*"bucket_name": "\([^"]*\)".*/\1/p' wrangler.jsonc | head -1)"
+[ -n "$PROJECT" ] && [ -n "$BUCKET" ] || { say "cannot read the project name and bucket from wrangler.jsonc"; exit 1; }
 
-# 1. the tree is the one that was verified
+# 1. the tree, the Function and the config are the ones that were verified
 WANT="$(grep -v '^#' "$DIR.manifest")"
-GOT="$(scripts/tree-manifest "$DIR")"
-if [ "$WANT" != "$GOT" ]; then
-  say "REFUSED: $DIR (or functions/, wrangler.jsonc) no longer matches $DIR.manifest; restage and reverify. Differences:"
-  printf '%s\n' "$WANT" > "${TMPDIR:-/tmp}/harkfell-want.$$"; printf '%s\n' "$GOT" > "${TMPDIR:-/tmp}/harkfell-got.$$"
-  diff "${TMPDIR:-/tmp}/harkfell-want.$$" "${TMPDIR:-/tmp}/harkfell-got.$$" | grep '^[<>]' | head -10 | sed 's/^/  /'
-  rm -f "${TMPDIR:-/tmp}/harkfell-want.$$" "${TMPDIR:-/tmp}/harkfell-got.$$"
-  exit 1
-fi
+same_as_manifest() {   # tree-dir root-dir label
+  got="$(scripts/tree-manifest "$1" "$2")" || { say "REFUSED: tree-manifest refused $3"; exit 1; }
+  if [ "$WANT" != "$got" ]; then
+    say "REFUSED: $3 no longer matches $DIR.manifest; restage and reverify. Differences:"
+    printf '%s\n' "$WANT" > "${TMPDIR:-/tmp}/harkfell-want.$$"; printf '%s\n' "$got" > "${TMPDIR:-/tmp}/harkfell-got.$$"
+    diff "${TMPDIR:-/tmp}/harkfell-want.$$" "${TMPDIR:-/tmp}/harkfell-got.$$" | grep '^[<>]' | head -10 | sed 's/^/  /'
+    rm -f "${TMPDIR:-/tmp}/harkfell-want.$$" "${TMPDIR:-/tmp}/harkfell-got.$$"
+    exit 1
+  fi
+}
+same_as_manifest "$DIR" . "$DIR (with functions/ and wrangler.jsonc)"
 MSHA="$(sha256sum "$DIR.manifest" | cut -d' ' -f1)"
 grep -qx "manifest-sha256 $MSHA" "$DIR.verified" || { say "REFUSED: $DIR.verified is not for this manifest ($(echo "$MSHA" | cut -c1-16)); rerun verify-site.mjs"; exit 1; }
-VSHA="$(sha256sum verify-site.mjs | cut -d' ' -f1)"
-grep -qx "verify-site-sha256 $VSHA" "$DIR.verified" || { say "REFUSED: verify-site.mjs changed since it verified $DIR; rerun it"; exit 1; }
-say "$DIR matches its manifest ($(echo "$MSHA" | cut -c1-16)) and was verified by this verify-site.mjs ($(sed -n 's/^at //p' "$DIR.verified"))"
+NGATE=0
+while read -r kw h g; do
+  [ "$kw" = gate ] || continue
+  NGATE=$((NGATE+1))
+  [ -f "$g" ] && [ "$(sha256sum "$g" | cut -d' ' -f1)" = "$h" ] || { say "REFUSED: $g is not the file that verified $DIR; rerun verify-site.mjs"; exit 1; }
+done < "$DIR.verified"
+[ "$NGATE" -ge 3 ] || { say "REFUSED: $DIR.verified names $NGATE gate files, not the 3 this pipeline has; rerun verify-site.mjs"; exit 1; }
+HEAD_FULL="$(git rev-parse HEAD)"; HEAD12="$(git rev-parse --short=12 HEAD)"
+grep -qx "gate-head $HEAD_FULL" "$DIR.verified" || { say "REFUSED: $DIR was verified at another commit ($(sed -n 's/^gate-head //p' "$DIR.verified" | cut -c1-12)); rerun verify-site.mjs at HEAD"; exit 1; }
+grep -qx "gate-clean yes" "$DIR.verified" || { say "REFUSED: $DIR was verified from a checkout with tracked changes"; exit 1; }
+say "$DIR matches its manifest ($(echo "$MSHA" | cut -c1-16)); verified at HEAD on a clean checkout by the gate files on disk ($(sed -n 's/^at //p' "$DIR.verified"))"
 
 # 2. the tree says which commit it is, and that commit is HEAD
-HEAD_FULL="$(git rev-parse HEAD)"; HEAD12="$(git rev-parse --short=12 HEAD)"
 STAMP="$(sed -n 's/^# web-stamp //p' "$DIR.manifest")"
 STAGED_AT="$(sed -n 's/^# head //p' "$DIR.manifest")"
 [ "$STAMP" = "$HEAD12" ] || { say "REFUSED: the game in $DIR was built at $STAMP; HEAD is $HEAD12. Build HEAD (scripts/build-remote), restage, reverify"; exit 1; }
@@ -81,28 +98,53 @@ STAGED_AT="$(sed -n 's/^# head //p' "$DIR.manifest")"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { say "REFUSED: the working tree has tracked changes; the deploy's commit tag would not describe it"; exit 1; }
 say "built and staged at HEAD $HEAD12; working tree clean"
 
-# 3. a copy, checked, with the wasm moved out
+# 3. the deploy directory: copies of everything wrangler reads, checked
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/harkfell-publish-XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/tree"
-cp -a "$DIR/." "$WORK/tree/"
-[ "$(scripts/tree-manifest "$WORK/tree")" = "$WANT" ] || { say "REFUSED: the working copy of $DIR does not match the manifest"; exit 1; }
-WASMS="$(cd "$WORK/tree" && find . -name '*.wasm' | sed 's|^\./||')"
-[ "$(printf '%s\n' "$WASMS" | grep -c .)" = 1 ] || { say "REFUSED: want exactly one wasm in the tree, found: $WASMS"; exit 1; }
-KEY="$WASMS"                                    # play/w/<sha16>/harkfell.wasm
+D="$WORK/deploy"
+mkdir -p "$D/tree"
+cp -a "$DIR/." "$D/tree/"
+cp -a functions "$D/functions"
+cp wrangler.jsonc "$D/wrangler.jsonc"
+same_as_manifest "$D/tree" "$D" "the deploy directory's copy"
+# wrangler's own config file, derived from the checked copy: comments dropped,
+# the output directory pointed at the copy, nothing else changed (checked)
+node -e '
+  const fs = require("fs");
+  const src = fs.readFileSync(process.argv[1], "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const cfg = JSON.parse(src);
+  const out = { ...cfg, pages_build_output_dir: "tree" };
+  const keys = (o) => Object.keys(o).sort().join(",");
+  if (keys(out) !== keys(cfg)) throw new Error("config keys changed");
+  fs.writeFileSync(process.argv[2], JSON.stringify(out, null, 2) + "\n");
+' "$D/wrangler.jsonc" "$D/wrangler.json"
+# nothing above the deploy directory may redirect wrangler's config lookup
+p="$WORK"
+while :; do
+  [ ! -e "$p/wrangler.json" ] && [ ! -e "$p/wrangler.toml" ] && [ ! -e "$p/.wrangler/deploy/config.json" ] \
+    || { say "REFUSED: $p holds a wrangler config or deploy redirect that could be read instead of the checked one"; exit 1; }
+  [ "$p" = / ] && break
+  p="$(dirname "$p")"
+done
+[ ! -e "$D/.wrangler" ] || { say "REFUSED: a .wrangler directory appeared in the deploy directory"; exit 1; }
+
+KEY="$(cd "$D/tree" && find . -name '*.wasm' | sed 's|^\./||')"
+[ "$(printf '%s\n' "$KEY" | grep -c .)" = 1 ] || { say "REFUSED: want exactly one wasm in the tree, found: $KEY"; exit 1; }
 SHA16="$(echo "$KEY" | sed -n 's|^play/w/\([0-9a-f]\{16\}\)/harkfell\.wasm$|\1|p')"
 [ -n "$SHA16" ] || { say "REFUSED: the wasm is at $KEY, not play/w/<sha16>/harkfell.wasm"; exit 1; }
-[ "$(sha256sum "$WORK/tree/$KEY" | cut -c1-16)" = "$SHA16" ] || { say "REFUSED: $KEY does not hash to its name"; exit 1; }
-cp "$WORK/tree/$KEY" "$WORK/harkfell.wasm"
-rm -rf "$WORK/tree/play/w"
-[ -z "$(cd "$WORK/tree" && find . -name '*.wasm')" ] || { say "REFUSED: wasm left in the deploy copy"; exit 1; }
-BIG="$(cd "$WORK/tree" && find . -type f -size +26214400c)"
+cp "$D/tree/$KEY" "$WORK/harkfell.wasm"
+[ "$(sha256sum "$WORK/harkfell.wasm" | cut -c1-16)" = "$SHA16" ] || { say "REFUSED: $KEY does not hash to its name"; exit 1; }
+rm -rf "$D/tree/play/w"
+BIG="$(cd "$D/tree" && find . -type f -size +26214400c)"
 [ -z "$BIG" ] || { say "REFUSED: over Pages' 25 MiB cap: $BIG"; exit 1; }
-NFILES="$(find "$WORK/tree" -type f | wc -l)"
+NFILES="$(find "$D/tree" -type f | wc -l)"
+# the manifest without the wasm: what the deploy directory must hash to from
+# here on (the wasm's own line is checked against R2 below)
+WANT_NOWASM="$(printf '%s\n' "$WANT" | grep -v "  $KEY\$")"
 
 if [ "$DRY" = 1 ]; then
   say "dry run: would put $KEY ($(stat -c%s "$WORK/harkfell.wasm") bytes) in R2 bucket $BUCKET (--remote), read it back and compare"
-  say "dry run: would deploy $NFILES files ($(du -sh "$WORK/tree" | cut -f1)) plus functions/ to Pages project $PROJECT, branch $BRANCH, commit $HEAD12"
+  say "dry run: would deploy $NFILES files ($(du -sh "$D/tree" | cut -f1)) plus functions/ from $D to Pages project $PROJECT: branch preview, verify-live on its URL$([ "$ONLY_PREVIEW" = 1 ] || echo ", then branch master and verify-live again")"
   say "dry run: nothing left the box"
   exit 0
 fi
@@ -110,27 +152,44 @@ fi
 command -v wrangler > /dev/null || { say "wrangler not on PATH"; exit 1; }
 # 4. the wasm to R2. --remote on every call: wrangler 4's r2 object commands
 # talk to a LOCAL simulator by default, and a publish that wrote there would
-# report success and serve nothing (Crash's wasm-to-r2 found this).
-if wrangler r2 object get "$BUCKET/$KEY" --remote --file "$WORK/back.wasm" > /dev/null 2>&1; then
+# report success and serve nothing (Crash's wasm-to-r2 found this). An absent
+# key makes `get` exit non-zero; so does an auth or network failure, which
+# then fails the put loudly. The read-back compare gates both branches.
+if (cd "$D" && wrangler r2 object get "$BUCKET/$KEY" --remote --file "$WORK/back.wasm") > "$WORK/r2.log" 2>&1; then
   say "$KEY is already in $BUCKET"
 else
-  wrangler r2 object put "$BUCKET/$KEY" --remote --file "$WORK/harkfell.wasm" --content-type application/wasm > /dev/null
-  wrangler r2 object get "$BUCKET/$KEY" --remote --file "$WORK/back.wasm" > /dev/null
+  (cd "$D" && wrangler r2 object put "$BUCKET/$KEY" --remote --file "$WORK/harkfell.wasm" --content-type application/wasm) > "$WORK/r2.log" 2>&1 \
+    || { cat "$WORK/r2.log"; say "the R2 upload failed; nothing deployed"; exit 1; }
+  (cd "$D" && wrangler r2 object get "$BUCKET/$KEY" --remote --file "$WORK/back.wasm") >> "$WORK/r2.log" 2>&1 \
+    || { cat "$WORK/r2.log"; say "the R2 read-back failed; nothing deployed"; exit 1; }
   say "put $KEY ($(stat -c%s "$WORK/harkfell.wasm") bytes)"
 fi
 cmp -s "$WORK/harkfell.wasm" "$WORK/back.wasm" || { say "REFUSED: the object at $BUCKET/$KEY is not the verified wasm; nothing deployed"; exit 1; }
 say "R2 holds the verified wasm at $KEY (read back, identical)"
+rm -rf "$D/.wrangler"   # wrangler's local state from the r2 calls, never deployed
 
-# 5. the rest to Pages. functions/ and wrangler.jsonc come from this
-# directory, which step 1 checked against the manifest.
-set +e
-wrangler pages deploy "$WORK/tree" --project-name "$PROJECT" --branch "$BRANCH" \
-  --commit-hash "$HEAD_FULL" --commit-message "$MESSAGE" > "$WORK/deploy.log" 2>&1
-drc=$?
-set -e
-cat "$WORK/deploy.log"
-[ "$drc" = 0 ] || { say "wrangler pages deploy failed (rc=$drc)"; exit 1; }
-URL="$(grep -o 'https://[a-z0-9.-]*\.pages\.dev' "$WORK/deploy.log" | tail -1)"
-[ -n "$URL" ] || { say "the deploy printed no pages.dev URL; check it by hand: node scripts/verify-live.mjs <url> $DIR"; exit 1; }
-say "deployed to $URL; checking it against $DIR.manifest"
+deploy() {   # branch -> prints the deployment URL on the last line
+  got="$(scripts/tree-manifest "$D/tree" "$D")" || { say "REFUSED: tree-manifest refused the deploy directory"; exit 1; }
+  [ "$got" = "$WANT_NOWASM" ] || { say "REFUSED: the deploy directory changed after it was checked; nothing deployed to $1"; exit 1; }
+  set +e
+  (cd "$D" && wrangler pages deploy tree --project-name "$PROJECT" --branch "$1" \
+     --commit-hash "$HEAD_FULL" --commit-message "$MESSAGE") > "$WORK/deploy-$1.log" 2>&1
+  drc=$?
+  set -e
+  cat "$WORK/deploy-$1.log" >&2
+  [ "$drc" = 0 ] || { say "wrangler pages deploy to $1 failed (rc=$drc)"; exit 1; }
+  url="$(grep -o 'https://[a-z0-9.-]*\.pages\.dev' "$WORK/deploy-$1.log" | tail -1)"
+  [ -n "$url" ] || { say "the deploy to $1 printed no pages.dev URL; check it by hand: node scripts/verify-live.mjs <url> $DIR"; exit 1; }
+  echo "$url"
+}
+
+# 5. preview first, checked live
+URL="$(deploy preview)"
+say "preview deployed to $URL; checking it against $DIR.manifest"
+node scripts/verify-live.mjs "$URL" "$DIR" || { say "the preview FAILED verify-live; production NOT deployed"; exit 1; }
+if [ "$ONLY_PREVIEW" = 1 ]; then say "preview only: $URL (verify-live green)"; exit 0; fi
+
+# 6. production, the same directory, checked live again
+URL="$(deploy master)"
+say "production deployed to $URL; checking it against $DIR.manifest"
 node scripts/verify-live.mjs "$URL" "$DIR"

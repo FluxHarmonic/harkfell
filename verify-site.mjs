@@ -15,7 +15,8 @@
 //             and that file hashes to sha16; it is the only wasm; nothing else
 //             is over Pages' 25 MiB cap; _headers isolates /play/* and not /;
 //             the fonts ship with OFL.txt; 404.html exists; no em dash in the
-//             landing's or the 404's text (customer copy)
+//             landing's or the 404's text (customer copy); every region the
+//             landing names (data-regions) is in the staged game's world
 //   landing   / in Chrome: the title, the three IM Fell faces loaded (not a
 //             fallback), every image decoded, the Play link resolving to
 //             /play/, the licence and source links, NOT cross-origin
@@ -30,13 +31,14 @@
 //             wasm, the game says "harkfell: world N files, 0 problems", the
 //             canvas holds drawn pixels, and every request the page made was
 //             2xx (a file the stage left out shows up here)
-//   missing   a missing page, a wasm hash nobody published and /_headers all
-//             answer 404 (with the site's 404 page), never a 200 index.html
+//   missing   a missing page, a missing file under /play/ and a wasm hash
+//             nobody published all answer 404 (with the site's 404 page), never a 200 index.html
 //   console   no console error and no exception over the run
 //
 // Any FAIL exits 1; SETUP-FAILED or a timeout exits 2. On ALL PASS it writes
-// DIR.verified: the manifest's sha256 and this arm's own, which is what
-// scripts/publish-web requires. Any other outcome deletes DIR.verified.
+// DIR.verified: the manifest's sha256, the sha256 of each gate file as it
+// was when the run started, HEAD and the tree's cleanliness then, which is
+// what scripts/publish-web requires. Any other outcome deletes DIR.verified.
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -67,6 +69,15 @@ process.on("unhandledRejection", (err) => { console.log("EXCEPTION: " + (err && 
 
 // Whatever happens next, an old stamp must not outlive this run.
 fs.rmSync(VERIFIED, { force: true });
+// The gate's identity, taken NOW, before anything runs: every file whose
+// behaviour decides the verdict (this arm, the Pages emulation it serves
+// through, the manifest it checks against), HEAD, and whether the checkout had
+// tracked changes. publish-web compares each with the disk at publish time; a
+// gate edited, run, and restored is not the gate on disk.
+const GATE_FILES = ["verify-site.mjs", "scripts/serve-site.mjs", "scripts/tree-manifest"];
+const gate = GATE_FILES.map((g) => [g, sha256(fs.readFileSync(g))]);
+const gateHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const gateClean = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() === "";
 for (const f of ["index.html", "play/index.html", "_headers"]) {
   if (!fs.existsSync(path.join(DIR, f))) { console.log(`SETUP-FAILED: ${DIR}/${f} missing (scripts/stage-web builds the tree)`); process.exit(2); }
 }
@@ -122,9 +133,16 @@ let SHA16 = null;
     const visible = text(f).replace(/<(script|style)[\s\S]*?<\/\1>/g, "").replace(/<[^>]+>/g, " ");
     if (/—|&mdash;|&#8212;/.test(visible) || /—/.test(text(f))) detail.push(`${f} has an em dash`);
   }
+  // The landing says which regions the game has (data-regions on its
+  // .early paragraph, and the carousel shows them); the staged game must bake
+  // every one of them into its world, or the page makes a false claim.
+  const claim = (text("index.html").match(/data-regions="([^"]+)"/) || [])[1];
+  const baked = [...page.matchAll(/"world\/regions\/([a-z0-9-]+)\.map"/g)].map((m) => m[1]);
+  if (!claim) detail.push("index.html names no data-regions (the claim this leg checks)");
+  else for (const r of claim.split(/\s+/)) if (!baked.includes(r)) detail.push(`the landing claims the region "${r}", and the staged game's world has only: ${[...new Set(baked)].join(", ") || "none"}`);
   for (const bad of ["play/bin", "play/native", "play/_headers", "play/harkfell.wasm", "play/assets/refs"]) if (fs.existsSync(path.join(DIR, bad))) detail.push(`${bad} is staged`);
   if (detail.length) fail("tree", detail.join("; "));
-  else pass("tree", `${all.length} files; wasm ${SHA16} (${fs.statSync(path.join(DIR, "play/w", SHA16, "harkfell.wasm")).size} bytes) is the only one and hashes to its name; /play/* isolated, / not; OFL.txt, 404.html; no em dash`);
+  else pass("tree", `${all.length} files; wasm ${SHA16} (${fs.statSync(path.join(DIR, "play/w", SHA16, "harkfell.wasm")).size} bytes) is the only one and hashes to its name; /play/* isolated, / not; OFL.txt, 404.html; no em dash; the regions the landing names (${claim}) are all in the game's world`);
 }
 
 // ---- the browser -----------------------------------------------------------------
@@ -232,6 +250,7 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
   })()`);
   if (facts.title !== "Harkfell") detail.push(`title "${facts.title}"`);
   if (facts.h1 !== "Harkfell") detail.push(`h1 "${facts.h1}"`);
+  if (!/^"?IM Fell English SC"?/.test(facts.h1font || "")) detail.push(`the h1 is set in ${facts.h1font}`);
   for (const want of ["IM Fell English/normal/loaded", "IM Fell English/italic/loaded", "IM Fell English SC/normal/loaded"]) {
     if (!facts.faces.includes(want)) detail.push(`font ${want.split("/").slice(0, 2).join(" ")} not loaded (${facts.faces.join(", ")})`);
   }
@@ -371,7 +390,9 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
 // ---- missing --------------------------------------------------------------------
 {
   const detail = [];
-  const probes = ["/no-such-page/", "/play/no-such-file.js", `/play/w/${"0".repeat(16)}/harkfell.wasm`, "/play/harkfell.wasm", "/_headers"];
+  // (/_headers is not probed here: serve-site.mjs answers it 404 by fiat, so
+  // the probe could not fail; verify-live.mjs asks real Pages.)
+  const probes = ["/no-such-page/", "/play/no-such-file.js", `/play/w/${"0".repeat(16)}/harkfell.wasm`, "/play/harkfell.wasm"];
   const got = [];
   for (const p of probes) {
     const r = await fetch(origin + p);
@@ -392,10 +413,11 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
 
 console.log(`RESULT: ${results.length - failed} passed, ${failed} failed`);
 if (failed === 0) {
-  const self = sha256(fs.readFileSync(new URL(import.meta.url)));
   fs.writeFileSync(VERIFIED, [
     `manifest-sha256 ${sha256(manifestText)}`,
-    `verify-site-sha256 ${self}`,
+    ...gate.map(([g, h]) => `gate ${h} ${g}`),
+    `gate-head ${gateHead}`,
+    `gate-clean ${gateClean ? "yes" : "no"}`,
     `legs ${results.map((r) => r.split(" ")[1]).join(" ")}`,
     `at ${new Date().toISOString()}`,
     "",

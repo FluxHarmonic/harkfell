@@ -13,17 +13,23 @@
 #   scripts/cloudflare-setup --domain    attach harkfell.com and www.harkfell.com
 #                                        to the project, and create their proxied
 #                                        CNAMEs to harkfell.pages.dev where no
-#                                        record exists. THIS IS THE STEP THAT
-#                                        MAKES THE SITE PUBLIC: run it after the
-#                                        first production publish has been
-#                                        checked on its pages.dev URL
+#                                        record exists. This puts the site on
+#                                        harkfell.com. (A publish already makes
+#                                        it public at its pages.dev URL, preview
+#                                        deployments included; this adds the
+#                                        name.) It refuses before the first
+#                                        production deployment exists
 #
 # Environment (for every mode):
 #   CLOUDFLARE_API_TOKEN   a token with the scopes below
 #   CLOUDFLARE_ACCOUNT_ID  the account id (wrangler whoami prints it)
 #
 # TOKEN SCOPES (see topics/cloudflare-r2-token-scopes). Two tokens, so the one
-# that is kept for publishing cannot touch DNS or any other bucket:
+# kept for publishing cannot touch DNS, create buckets, or write objects in any
+# other bucket directly. It is not a hard wall: Pages Edit is account-wide, so
+# a deploy whose wrangler config bound another bucket would give that Function
+# access to it. publish-web only deploys the wrangler.jsonc its gate verified,
+# which binds harkfell-wasm alone.
 #
 #   SETUP token (for this script; delete it or let it expire afterwards)
 #     Account  Cloudflare Pages            Edit    create the project, attach domains
@@ -54,7 +60,7 @@ PROJECT="${HARKFELL_PAGES_PROJECT:-harkfell}"
 BUCKET="${HARKFELL_WASM_BUCKET:-harkfell-wasm}"
 ZONE_NAME=harkfell.com
 DOMAINS="harkfell.com www.harkfell.com"
-TARGET="$PROJECT.pages.dev"
+TARGET=""   # the project's pages.dev name, read from the project (Pages adds a suffix when the plain name is taken)
 MODE=report
 case "${1:-}" in
   "") ;;
@@ -77,7 +83,7 @@ api() {
     out="$(curl -sS -X "$1" "$API$2" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
   fi
   if [ "$(printf '%s' "$out" | jq -r '.success')" != true ]; then
-    say "API $1 $2 refused: $(printf '%s' "$out" | jq -c '.errors')"
+    say "API $1 $2 refused: $(printf '%s' "$out" | jq -c '.errors')" >&2   # stderr: callers capture stdout
     exit 1
   fi
   printf '%s' "$out"
@@ -89,6 +95,7 @@ say "account $CLOUDFLARE_ACCOUNT_ID, project $PROJECT, bucket $BUCKET, mode $MOD
 PROJ_JSON="$(curl -sS "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
 if [ "$(printf '%s' "$PROJ_JSON" | jq -r '.success')" = true ]; then
   HAVE_PROJECT=1
+  TARGET="$(printf '%s' "$PROJ_JSON" | jq -r '.result.subdomain')"
   say "Pages project $PROJECT exists: production branch $(printf '%s' "$PROJ_JSON" | jq -r '.result.production_branch'), domains $(printf '%s' "$PROJ_JSON" | jq -r '.result.domains | join(" ")')"
 else
   HAVE_PROJECT=0
@@ -130,12 +137,15 @@ fi
 
 # --domain
 [ "$HAVE_PROJECT" = 1 ] || { say "REFUSED: the project does not exist; --create first"; exit 1; }
+case "$TARGET" in *.pages.dev) ;; *) say "REFUSED: cannot read the project's pages.dev name ('$TARGET')"; exit 1 ;; esac
 DEPLOYS="$(api GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?env=production" | jq '.result | length')"
 [ "$DEPLOYS" -gt 0 ] || { say "REFUSED: $PROJECT has no production deployment yet; publish and check it on $TARGET first"; exit 1; }
 for d in $DOMAINS; do
-  existing="$(api GET "/zones/$ZONE_ID/dns_records?name=$d" | jq -r '.result[] | "\(.type) \(.content)"')"
+  # only the records that decide where the name points; MX, TXT (SPF, DKIM)
+  # and the rest are left alone and never counted as a conflict
+  existing="$(api GET "/zones/$ZONE_ID/dns_records?name=$d" | jq -r '.result[] | select(.type == "A" or .type == "AAAA" or .type == "CNAME") | "\(.type) \(.content)"')"
   if [ -n "$existing" ] && [ "$existing" != "CNAME $TARGET" ]; then
-    say "REFUSED: $d already has records ($existing); not replacing them. Remove them by hand if they are stale, then rerun"
+    say "REFUSED: $d already points somewhere ($existing); not replacing it. Only its A/AAAA/CNAME records matter here; check what they serve before removing them"
     exit 1
   fi
 done
@@ -146,7 +156,7 @@ for d in $DOMAINS; do
     api POST "/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains" "{\"name\":\"$d\"}" > /dev/null
     say "attached $d to $PROJECT"
   fi
-  if [ -z "$(api GET "/zones/$ZONE_ID/dns_records?name=$d" | jq -r '.result[]? | .id')" ]; then
+  if [ -z "$(api GET "/zones/$ZONE_ID/dns_records?name=$d" | jq -r '.result[]? | select(.type == "A" or .type == "AAAA" or .type == "CNAME") | .id')" ]; then
     api POST "/zones/$ZONE_ID/dns_records" "{\"type\":\"CNAME\",\"name\":\"$d\",\"content\":\"$TARGET\",\"proxied\":true,\"comment\":\"harkfell.com on Pages (scripts/cloudflare-setup)\"}" > /dev/null
     say "created CNAME $d -> $TARGET (proxied)"
   fi

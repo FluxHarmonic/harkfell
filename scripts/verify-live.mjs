@@ -109,15 +109,21 @@ else {
 {
   const probes = ["/no-such-page/", "/play/no-such-file.js", `/play/w/${"0".repeat(16)}/harkfell.wasm`, "/play/harkfell.wasm", "/_headers"];
   const got = [];
-  let pages = 0;
+  // Every probe but the wasm path must answer with the site's own 404 page,
+  // byte for byte; the wasm path is the Function's, which answers its own 404.
+  const notPage = [];
   for (const p of probes) {
     const r = await get(base + p);
     const buf = Buffer.from(await r.arrayBuffer());
     got.push(`${p} ${r.status}`);
-    if (r.status === 404 && notFoundSha && sha256(buf) === notFoundSha) pages++;
+    const allowed502 = WDEV && p === "/_headers" && r.status === 502;
+    if (!p.startsWith("/play/w/") && !allowed502 && !(r.status === 404 && notFoundSha && sha256(buf) === notFoundSha)) notPage.push(p);
   }
+  const pages = probes.length - 1 - notPage.length - (WDEV && got.includes("/_headers 502") ? 1 : 0);
   const bad = got.filter((g) => !/ 404$/.test(g) && !(WDEV && g === "/_headers 502"));
-  if (bad.length) fail("missing", `not 404: ${bad.join(", ")}`);
+  if (!notFoundSha) fail("missing", "the manifest lists no 404.html");
+  else if (bad.length) fail("missing", `not 404: ${bad.join(", ")}`);
+  else if (notPage.length) fail("missing", `404, but not the site's 404 page: ${notPage.join(", ")}`);
   else pass("missing", `${got.join(", ")}${WDEV && got.includes("/_headers 502") ? " (/_headers 502: wrangler's local asset server, allowed under --wrangler-dev)" : ""}; ${pages} of ${probes.length} with the staged 404.html byte for byte (the Function answers its own 404 for a wasm path)`);
 }
 
