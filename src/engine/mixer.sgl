@@ -1,0 +1,437 @@
+;;; (engine mixer) - Live sources and one-shot cues, through streaming sinks.
+;;;
+;;; Written for the shared engine (ruling D6: no game names here), after
+;;; Crash The Stack's (crash audio) at master e737d21 and Harkfell's S0
+;;; sketchbook (sketchbook web): the same (sigil audio sink) door on both
+;;; targets, a sink of its own per source, and the source's gain as the
+;;; sink's volume, applied at output time so a fade is heard at once rather
+;;; than a sink's depth later.
+;;;
+;;; A SOURCE is a pull procedure (lambda (out byte-offset n) -> #t | #f)
+;;; that writes n stereo f32 frames (a motif player's player-pull!, say);
+;;; #f ends it. Its gain is the product of named FACTORS, each a linear ramp
+;;; on the mixer's clock, so independent reasons to change a level (a duck,
+;;; a crossfade, a fade-out) never overwrite each other. Its sink opens when
+;;; it is started (an open sink with nothing pushed counts starved frames)
+;;; and closes once it has ended and played out.
+;;;
+;;; CUES are mono float buffers played once with a gain and a pan, mixed
+;;; into one shallow sink of their own (the cue path of Crash's audio
+;;; ticket, option B: a cue's latency is the cue sink's depth, not the
+;;; sources').
+;;;
+;;;   (mixer-open! rate-hint)        open the context and the cue sink; #t when sound is possible
+;;;   (mixer-open-headless! rate tap)   no sinks: sources pulled to the clock, blocks to the tap
+;;;   (mixer-resume!)                from a user gesture (the web's autoplay policy)
+;;;   (mixer-rate) (mixer-open?) (mixer-state)
+;;;   (mixer-add! id pull start?)    a source (replacing one of that id); answers it
+;;;   (mixer-find id) (mixer-sources) (mixer-remove! id)
+;;;   (source-start! src) (source-live? src) (source-ended? src) (source-started? src)
+;;;   (source-factor! src name to secs now)   ramp one factor from where it is to `to`
+;;;   (source-factor src name now)   one factor's value; 1.0 when it was never set
+;;;   (source-gain src now)          the product, 0..1
+;;;   (source-on-end! src proc)      (proc t): t is when the end is HEARD (the sink's
+;;;                                  depth after the pull that ended it)
+;;;   (mixer-at! t thunk)            run thunk once the clock reaches t
+;;;   (mixer-pump! now)              every frame: events, gains, top-ups, closes
+;;;   (mixer-cue! buf gain pan)      buf: (make-cue floats frames); pan -1..1
+;;;   (mixer-stats) (mixer-stats-reset!)   the measurements (below)
+;;;
+;;; The measurements, for the phone budget (harkfell-design section 5, A2):
+;;;   pull     every source pull timed: ms per 1024 frames, per source id
+;;;   pump     the wall ms of each mixer-pump! call (what a frame pays)
+;;;   dry      starved output frames while a source was live ("sounding")
+;;;            and after it ended ("tail"); the cue sink's starved frames
+;;;            while a cue sounded, and while none did ("idle": inaudible)
+
+(define-library (engine mixer)
+  (import (sigil core)
+          (sigil math)
+          (sigil struct)
+          (sigil list)
+          (sigil time)
+          (sigil audio sink))
+
+  (export mixer-open! mixer-open-headless! mixer-resume! mixer-rate mixer-open? mixer-state
+          mixer-add! mixer-find mixer-remove! mixer-rename! mixer-sources
+          source? source-id source-live? source-ended? source-started?
+          source-start! source-factor! source-factor source-gain source-on-end!
+          mixer-at! mixer-pump! mixer-now
+          make-cue cue? cue-frames cue-ref mixer-cue! mixer-cue-count
+          mixer-stats mixer-stats-reset! stats-ref
+          median-of percentile-of
+          DEPTH-S CUE-DEPTH-S SOURCE-BUFFER)
+
+  (begin
+    (define DEPTH-S 0.35)          ; a source kept this far ahead of the output (Crash's SOURCE-DEPTH at 48 kHz)
+    (define SOURCE-BUFFER 32768)   ; its ring
+    (define PUSH-MAX 4096)         ; frames per pull at most
+    (define PUSH-RAMP 2048)        ; a fresh or dry sink fills in smaller pulls
+    (define CUE-DEPTH-S 0.12)      ; the cue sink's depth: a cue's latency
+    (define CUE-BUFFER 16384)
+    (define KEEP 900)              ; samples kept per measurement (a ring)
+
+    (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
+
+    ;; --- state ---------------------------------------------------------------------
+    (define *ctx* #f)
+    (define *rate* 44100)
+    (define *sources* '())         ; in the order added
+    (define *events* '())          ; ((t . thunk) ...) sorted by t
+    (define *now* 0.0)
+    (define *buf* (make-bytevector (* 8 PUSH-MAX) 0))
+    (define *cue-stream* #f)
+    (define *cue-out* (make-bytevector (* 8 PUSH-MAX) 0))
+    (define *voices* '())          ; (vector cue pos gain-l gain-r)
+
+    (define (mixer-open?) (and *ctx* #t))
+    (define (mixer-rate) *rate*)
+    (define (mixer-now) *now*)
+    (define (mixer-state)
+      (if *ctx* (guard (e (#t 'unknown)) (audio-context-state *ctx*)) 'none))
+
+    ;; #t when sound is possible. Safe to call again (a no-op once open).
+    (define (mixer-open!)
+      (unless *ctx*
+        (set! *ctx* (guard (e (#t #f)) (audio-context-open)))
+        (when *ctx*
+          (set! *rate* (audio-context-sample-rate *ctx*))
+          (set! *cue-stream* (guard (e (#t #f)) (open-audio-stream channels: 2 buffer-frames: CUE-BUFFER)))))
+      (mixer-open?))
+
+    (define (mixer-resume!)
+      (when (and *ctx* (not (eq? (mixer-state) 'running)))
+        (guard (e (#t #f)) (audio-context-resume *ctx*))))
+
+    ;; --- sources ----------------------------------------------------------------------
+    (define-struct source
+      (id mutable: #t)
+      (pull)
+      (started mutable: #t)
+      (ended mutable: #t)
+      (factors mutable: #t)        ; ((name . #(from to t0 dur)) ...)
+      (on-end mutable: #t)
+      (stream mutable: #t)
+      (dry-base mutable: #t)       ; the stream's starved frames when it ended
+      (t-start mutable: #t)        ; headless: the clock when it started
+      (rendered mutable: #t))      ; headless: frames pulled
+
+    (define (source-live? s) (and (source-started s) (not (source-ended s))))
+    (define (source-ended? s) (source-ended s))
+    (define (source-started? s) (source-started s))
+    (define (source-start! s) (set-source-started! s #t))
+    (define (source-on-end! s proc) (set-source-on-end! s proc))
+
+    (define (ramp-value r now)
+      (let ((from (vector-ref r 0)) (to (vector-ref r 1)) (t0 (vector-ref r 2)) (dur (vector-ref r 3)))
+        (cond ((<= now t0) from)
+              ((or (<= dur 0.0) (>= now (+ t0 dur))) to)
+              (else (+ from (* (- to from) (/ (- now t0) dur)))))))
+
+    (define (source-factor s name now)
+      (let ((e (assq name (source-factors s))))
+        (if e (ramp-value (cdr e) now) 1.0)))
+
+    (define (source-factor! s name to secs now)
+      (let ((from (source-factor s name now)))
+        (set-source-factors! s (cons (cons name (vector from (inexact to) now (inexact secs)))
+                                     (filter (lambda (e) (not (eq? (car e) name))) (source-factors s))))))
+
+    (define (source-gain s now)
+      (let loop ((fs (source-factors s)) (g 1.0))
+        (if (null? fs)
+            (max 0.0 (min 1.0 g))
+            (loop (cdr fs) (* g (ramp-value (cdr (car fs)) now))))))
+
+    (define (mixer-sources) *sources*)
+
+    (define (mixer-find id)
+      (let loop ((ss *sources*))
+        (cond ((null? ss) #f)
+              ((equal? (source-id (car ss)) id) (car ss))
+              (else (loop (cdr ss))))))
+
+    (define (close-stream! s)
+      (when (source-stream s)
+        (let ((st (source-stream s)))
+          (count-tail! s)
+          (guard (e (#t #f)) (close-audio-stream! st))
+          (set-source-stream! s #f))))
+
+    (define (mixer-remove! id)
+      (let ((s (mixer-find id)))
+        (when s
+          (unless (source-ended s) (count-sounding! s))
+          (close-stream! s)
+          (set! *sources* (filter (lambda (x) (not (eq? x s))) *sources*)))))
+
+    ;; A source of that id replaces the one before it (whose sink closes).
+    (define (mixer-add! id pull start?)
+      (mixer-remove! id)
+      (let ((s (source id: id pull: pull started: start? ended: #f factors: '()
+                       on-end: #f stream: #f dry-base: #f t-start: #f rendered: 0)))
+        (set! *sources* (append *sources* (list s)))
+        s))
+
+    ;; A source keeps its sink, its factors and its place under a new id (a bed
+    ;; crossfading out makes room for the next under the old one; review M1:
+    ;; a fresh source for it dropped its duck and cut its sink's 0.35 s).
+    (define (mixer-rename! id new-id)
+      (mixer-remove! new-id)
+      (let ((s (mixer-find id)))
+        (when s (set-source-id! s new-id))
+        s))
+
+    (define (mixer-at! t thunk)
+      (let insert ((es *events*) (before '()))
+        (if (or (null? es) (> (car (car es)) t))
+            (set! *events* (append (reverse before) (list (cons t thunk)) es))
+            (insert (cdr es) (cons (car es) before)))))
+
+    (define (run-events! now)
+      (let loop ()
+        (let ((es *events*))
+          (when (and (pair? es) (<= (car (car es)) now))
+            (set! *events* (cdr es))
+            ((cdr (car es)))
+            (loop)))))
+
+    ;; --- measurements --------------------------------------------------------------------
+    ;; A ring of the last KEEP samples: #(vector count)
+    (define (ring-new) (vector (make-vector KEEP 0.0) 0))
+    (define (ring-add! r x)
+      (vector-set! (vector-ref r 0) (modulo (vector-ref r 1) KEEP) (inexact x))
+      (vector-set! r 1 (+ (vector-ref r 1) 1)))
+    (define (ring-list r)
+      (let ((n (min KEEP (vector-ref r 1))) (v (vector-ref r 0)))
+        (let loop ((i 0) (acc '()))
+          (if (>= i n) acc (loop (+ i 1) (cons (vector-ref v i) acc))))))
+
+    (define *pulls* '())           ; ((id . ring of ms per 1024 frames) ...)
+    (define *pump* (ring-new))     ; wall ms per mixer-pump!
+    (define *dry-sounding* 0)
+    (define *dry-tail* 0)
+    (define *cue-dry-sounding* 0)
+    (define *cue-dry-idle* 0)
+    (define *cue-under-last* 0)
+
+    (define (pull-ring id)
+      (let ((e (assoc id *pulls*)))
+        (if e (cdr e) (let ((r (ring-new))) (set! *pulls* (cons (cons id r) *pulls*)) r))))
+
+    (define (count-sounding! s)
+      (when (and (source-stream s) (not (source-dry-base s)))
+        (let ((u (guard (e (#t 0)) (audio-stream-underruns (source-stream s)))))
+          (set! *dry-sounding* (+ *dry-sounding* u))
+          (set-source-dry-base! s u))))
+
+    (define (count-tail! s)
+      (when (source-stream s)
+        (let ((u (guard (e (#t 0)) (audio-stream-underruns (source-stream s)))))
+          (if (source-dry-base s)
+              (set! *dry-tail* (+ *dry-tail* (- u (source-dry-base s))))
+              (set! *dry-sounding* (+ *dry-sounding* u))))))
+
+    (define (live-dry)
+      (let loop ((ss *sources*) (n 0))
+        (if (null? ss)
+            n
+            (let ((s (car ss)))
+              (loop (cdr ss)
+                    (if (and (source-stream s) (not (source-dry-base s)))
+                        (+ n (guard (e (#t 0)) (audio-stream-underruns (source-stream s))))
+                        n))))))
+
+    (define (mixer-stats-reset!)
+      (set! *pulls* '())
+      (set! *pump* (ring-new))
+      (set! *dry-sounding* (- (live-dry)))   ; live sinks' counts so far are the last window's
+      (set! *dry-tail* 0)
+      (set! *cue-dry-sounding* 0)
+      (set! *cue-dry-idle* 0))
+
+    (define (median-of l) (percentile-of l 0.5))
+    (define (percentile-of l p)
+      (if (null? l)
+          0.0
+          (let* ((v (list->vector (list-sort < l)))
+                 (i (min (- (vector-length v) 1) (exact (floor (* p (vector-length v)))))))
+            (vector-ref v i))))
+
+    ;; An alist of the measurements since the last reset:
+    ;;   (frame-ms . M)       the median pull cost of every source live now, summed, as
+    ;;                        ms per 60 fps frame of audio (ms per 1024 x rate / 61440)
+    ;;   (sources . ((id median p95 n) ...))   per source, ms per 60 fps frame
+    ;;   (pump . (p50 p95 max n))             wall ms of mixer-pump!
+    ;;   (dry-sounding . N) (dry-tail . N) (cue-dry-sounding . N) (cue-dry-idle . N)
+    (define (mixer-stats)
+      (let* ((k (/ *rate* 61440.0))
+             (per (map (lambda (e)
+                         (let ((l (ring-list (cdr e))))
+                           (list (car e) (* k (median-of l)) (* k (percentile-of l 0.95)) (length l))))
+                       *pulls*))
+             (live-ids (map source-id (filter source-live? *sources*)))
+             (pump (ring-list *pump*)))
+        (list (cons 'frame-ms (apply + (map cadr (filter (lambda (p) (member (car p) live-ids)) per))))
+              (cons 'sources per)
+              (cons 'pump (list (median-of pump) (percentile-of pump 0.95)
+                                (if (null? pump) 0.0 (apply max pump)) (length pump)))
+              (cons 'dry-sounding (+ *dry-sounding* (live-dry)))
+              (cons 'dry-tail *dry-tail*)
+              (cons 'cue-dry-sounding *cue-dry-sounding*)
+              (cons 'cue-dry-idle *cue-dry-idle*))))
+
+    (define (stats-ref st key) (let ((e (assq key st))) (and e (cdr e))))
+
+    ;; --- the pump ---------------------------------------------------------------------------
+    (define (clamp01 x) (max 0.0 (min 1.0 x)))
+
+    (define (stream-for! s)
+      (or (source-stream s)
+          (and *ctx*
+               (let ((st (guard (e (#t #f)) (open-audio-stream channels: 2 buffer-frames: SOURCE-BUFFER))))
+                 (set-source-stream! s st)
+                 st))))
+
+    (define (depth-frames) (exact (round (* DEPTH-S *rate*))))
+
+    ;; Headless (tests, a box without a device): no sinks; every live source is
+    ;; pulled to keep up with the clock (now x rate frames since it started),
+    ;; each block handed to the tap, (tap id buf n gain), with the source's
+    ;; gain at the block's time. Its end is heard at once (no sink holds it).
+    (define *headless* #f)
+    (define *tap* #f)
+    (define (mixer-open-headless! rate tap)
+      (set! *ctx* #f)
+      (set! *cue-stream* #f)
+      (set! *rate* rate)
+      (set! *headless* #t)
+      (set! *tap* tap)
+      (set! *sources* '())
+      (set! *events* '())
+      (set! *voices* '())
+      (set! *now* 0.0)
+      (mixer-stats-reset!))
+
+    (define (pump-headless! s now)
+      (unless (source-t-start s) (set-source-t-start! s now))
+      (let loop ()
+        (let* ((due (exact (round (* (- now (source-t-start s)) *rate*))))
+               (n (min PUSH-MAX (- due (source-rendered s)))))
+          (when (and (> n 0) (source-live? s))
+            (let* ((t (+ (source-t-start s) (/ (source-rendered s) (* 1.0 *rate*))))
+                   (t0 (now-ms))
+                   (more ((source-pull s) *buf* 0 n)))
+              (ring-add! (pull-ring (source-id s)) (* (- (now-ms) t0) (/ 1024.0 n)))
+              (set-source-rendered! s (+ (source-rendered s) n))
+              (if more
+                  (begin
+                    (when *tap* (*tap* (source-id s) *buf* n (source-gain s t)))
+                    (loop))
+                  (begin
+                    (set-source-ended! s #t)
+                    (let ((f (source-on-end s)))
+                      (when f (mixer-at! now (lambda () (f now))))))))))))
+
+    (define (pump-source! s now)
+      (cond
+        ((and *headless* (source-live? s)) (pump-headless! s now))
+        ((source-live? s)
+         (let ((st (stream-for! s)))
+           (if (not st)
+               #f
+               (begin
+                 (set-audio-stream-volume! st (source-gain s now))
+                 (let* ((depth (audio-stream-depth st))
+                        (n (min (if (< depth PUSH-RAMP) PUSH-RAMP PUSH-MAX)
+                                (audio-stream-room st)
+                                (- (depth-frames) depth))))
+                   (when (> n 0)
+                     (let* ((t0 (now-ms))
+                            (more ((source-pull s) *buf* 0 n))
+                            (ms (- (now-ms) t0)))
+                       (ring-add! (pull-ring (source-id s)) (* ms (/ 1024.0 n)))
+                       ;; the block that ended it is the end of its release tail: pushed too
+                       (push-audio-samples st *buf* n)
+                       (if more
+                           #t
+                           (begin
+                             (count-sounding! s)
+                             (set-source-ended! s #t)
+                             (let ((f (source-on-end s))
+                                   (heard (+ now (/ depth (* 1.0 *rate*)))))
+                               (when f (mixer-at! heard (lambda () (f heard))))))))))))))
+        ((source-ended? s)
+         (let ((st (source-stream s)))
+           (when st
+             (set-audio-stream-volume! st (source-gain s now))
+             (when (<= (audio-stream-depth st) 0)
+               (close-stream! s)))))
+        (else #f)))
+
+    (define (mixer-pump! now)
+      (let ((t0 (now-ms)))
+        (set! *now* now)
+        (run-events! now)
+        (for-each (lambda (s) (pump-source! s now)) *sources*)
+        ;; ended sources whose sinks have closed leave
+        (set! *sources* (filter (lambda (s) (not (and (source-ended s) (not (source-stream s))))) *sources*))
+        (pump-cues!)
+        (ring-add! *pump* (- (now-ms) t0))))
+
+    ;; --- cues ---------------------------------------------------------------------------------
+    ;; A cue: mono f32 samples (a bytevector) and its frame count, at the mixer's rate.
+    (define-struct cue (floats) (frames))
+    (define (make-cue floats frames) (cue floats: floats frames: frames))
+    (define (cue-ref c i) (bytevector-ieee-single-ref (cue-floats c) (* 4 i) 'little))
+
+    (define (mixer-cue-count) (length *voices*))
+
+    ;; pan -1 (left) .. 1 (right), equal-power
+    (define (mixer-cue! c gain pan)
+      (when (and *cue-stream* c)
+        (let* ((p (max -1.0 (min 1.0 pan)))
+               (a (* 0.25 3.14159265 (+ p 1.0))))
+          (set! *voices* (cons (vector c 0 (* gain (cos a) 1.41421356) (* gain (sin a) 1.41421356)) *voices*)))))
+
+    (define ZERO (make-bytevector (* 8 PUSH-MAX) 0))
+
+    (define (pump-cues!)
+      (when *cue-stream*
+        (let* ((u (guard (e (#t 0)) (audio-stream-underruns *cue-stream*)))
+               (du (- u *cue-under-last*)))
+          (set! *cue-under-last* u)
+          (if (null? *voices*)
+              (set! *cue-dry-idle* (+ *cue-dry-idle* du))
+              (set! *cue-dry-sounding* (+ *cue-dry-sounding* du))))
+        (let* ((depth (audio-stream-depth *cue-stream*))
+               (n (min PUSH-MAX (audio-stream-room *cue-stream*)
+                       (- (exact (round (* CUE-DEPTH-S *rate*))) depth))))
+          (when (> n 0)
+            (bytevector-copy! *cue-out* 0 ZERO 0 (* 8 n))
+            (set! *voices*
+                  (let loop ((vs *voices*) (kept '()))
+                    (if (null? vs)
+                        kept
+                        (let* ((v (car vs))
+                               (c (vector-ref v 0))
+                               (at (vector-ref v 1))
+                               (gl (vector-ref v 2))
+                               (gr (vector-ref v 3))
+                               (take (min n (- (cue-frames c) at))))
+                          (let add ((i 0))
+                            (when (< i take)
+                              (let* ((x (cue-ref c (+ at i)))
+                                     (o (* 8 i)))
+                                (bytevector-ieee-single-set! *cue-out* o
+                                  (clamp-1 (+ (bytevector-ieee-single-ref *cue-out* o 'little) (* gl x))) 'little)
+                                (bytevector-ieee-single-set! *cue-out* (+ o 4)
+                                  (clamp-1 (+ (bytevector-ieee-single-ref *cue-out* (+ o 4) 'little) (* gr x))) 'little))
+                              (add (+ i 1))))
+                          (loop (cdr vs)
+                                (if (>= (+ at take) (cue-frames c))
+                                    kept
+                                    (cons (vector c (+ at take) gl gr) kept)))))))
+            (push-audio-samples *cue-stream* *cue-out* n)))))
+
+    (define (clamp-1 x) (max -1.0 (min 1.0 x)))))

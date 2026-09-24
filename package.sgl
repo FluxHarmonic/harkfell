@@ -149,7 +149,13 @@
     ;; shell, and localStorage for (engine store).
     (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.5" configs: '(web))
     (from-git url: sigil-repo package: "sigil-wasm-gles3" version: ">=0.22.5" configs: '(web))
-    (from-git url: sigil-repo package: "sigil-browser" version: ">=0.22.5" configs: '(web)))
+    (from-git url: sigil-repo package: "sigil-browser" version: ">=0.22.5" configs: '(web))
+    ;; A2, the sound: the tune model and the live player (0.7.0 has the bed
+    ;; nodes and kinds), and the sink (sokol natively, the WebAudio bridge on
+    ;; the web).
+    (from-git url: "codeberg:sigil/motif" version: "^0.7.0")
+    (from-git url: "codeberg:sigil/sigil-audio" version: "^0.12.2")
+    (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.5" configs: '(web)))
 
   dev-dependencies: (list
     (from-git url: sigil-repo package: "sigil-test" version: ">=0.22.5")
@@ -160,7 +166,16 @@
       name: 'build
       description: "Compile the game (and, on the web config, link the browser app)"
       steps: (list
+        ;; the web config: sigil-audio's native-init stub (src/c/wasm-audio-stub.c)
+        (lambda (ctx)
+          (if (memq (target-os ctx) '(wasm wasi))
+              ((create-static-library name: "harkfell")
+               ((compile-c-sources sources: (list "src/c/wasm-audio-stub.c")
+                                   flags: (with-sigil-c-flags '("-std=c99"))) ctx))
+              ctx))
         (compile-sigil-modules sources: "src/**/*.sgl")
+        ;; assets/ (the tunes) beside the page
+        (link-assets)
         (lambda (ctx)
           (if (memq (target-os ctx) '(wasm wasi))
               (stamp-web-version
