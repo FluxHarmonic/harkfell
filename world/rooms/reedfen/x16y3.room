@@ -1,0 +1,24 @@
+;; world/rooms/reedfen/x16y3.room
+(room
+  region: reedfen
+  at: (16 3)
+  title: "The Heron's Water"
+  intent: "the widest water, too wide to cross above: the way on is down through it"
+  bed: (wind 0.5 water 1.0 reeds 0.2)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "               ##########"
+   "               ##########"
+   "               ##########"
+   "  |            ##########"
+   " |||       |   ##########"
+   "####~~~~~~~##~~##########"
+   "####~~~~~~~##~~##########"
+   "####~~~~~~~##~~##########")
+  decor: auto)
+;; Deep water under a sheer bank too high to leap onto. A hummock stands in
+;; it (columns 11-12): swim to it and rest. East of it the water goes down,
+;; into a swim to the Mound's Roots. The top of the bank belongs to the Far
+;; Mound.

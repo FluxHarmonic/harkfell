@@ -6,7 +6,7 @@
 ;;;   - carrying something else (H3), it shivers once (the near miss) and
 ;;;     stays shut;
 ;;;   - the harmonic the WORLD'S PICKUP gives, taken by touching it in the
-;;;     Drowned Channel, opens the stone within its radius: it rings, sinks,
+;;;     Far Mound, opens the stone within its radius: it rings, sinks,
 ;;;     its cell is air, and the body walks through into Behind the Stone.
 ;;;
 ;;; The last is the chain the brief's first sabotage breaks: key the stone to
@@ -63,9 +63,9 @@
   (test "one ring-stone, in the Old Stone, keyed to 2"
     (assert-equal 1 (length (content-stones CT)))
     (assert-equal 2 (stone-overtone (car (content-stones CT)))))
-  (test "one pickup, in the Drowned Channel"
+  (test "one pickup, on the Far Mound (A4 moved it there from the Drowned Channel)"
     (assert-equal 1 (length (content-pickups CT)))
-    (assert-equal (local->global CT (content-room CT 9 4) 18 7) (pickup-cell (car (content-pickups CT))))))
+    (assert-equal (local->global CT (content-room CT 17 3) 22 3) (pickup-cell (car (content-pickups CT))))))
 
 ;; Standing three tiles west of the stone, then pushing east into it.
 (define SHUT (ticks (world-standing 10 3 18 8 '()) RIGHT 240 '()))
@@ -83,8 +83,8 @@
     (assert-true (kind-solid? (stone-cell-kind (car MISS))))
     (assert-equal '(10 3) (room-at (car MISS)))))
 
-;; The pickup, by touch: standing on it in the Drowned Channel.
-(define TAKEN (ticks (world-standing 9 4 18 7 '()) NOTHING 2 '()))
+;; The pickup, by touch: standing on it on the Far Mound.
+(define TAKEN (ticks (world-standing 17 3 22 3 '()) NOTHING 2 '()))
 (define GIVEN (world-carry (car TAKEN)))
 ;; Then, with what it gave, at the stone.
 (define AT-STONE (ticks (world-standing 10 3 18 8 '() (car TAKEN)) NOTHING 150 '()))
@@ -92,7 +92,8 @@
 
 (test-group "gates: the harmonic found opens the stone"
   (test "touching the pickup takes it: the carry is its harmonic, the pickup is gone"
-    (assert-equal '(pickup) (kinds (cdr TAKEN)))
+    ;; the gate news alone: the Far Mound's moths chime (call) the moment H2 is carried
+    (assert-equal '(pickup) (filter (lambda (k) (not (eq? k 'call))) (kinds (cdr TAKEN))))
     (assert-equal 1 (length GIVEN))
     (assert-equal '() (world-pickups (car TAKEN))))
   (test "at the stone with it: it rings, sinks, then opens, within 150 ticks"

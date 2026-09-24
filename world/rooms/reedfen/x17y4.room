@@ -1,0 +1,22 @@
+;; world/rooms/reedfen/x17y4.room
+(room
+  region: reedfen
+  at: (17 4)
+  title: "The Mound's Roots"
+  intent: "the last climb, through roots, up to the far mound"
+  bed: (water 0.5 drone 0.4)
+  grid:
+  ("###########%   %#########"
+   "###########%   %#########"
+   "#######    %   %   ######"
+   "#####      %   %     ####"
+   "###                    ##"
+   "#~~~~~~~#################"
+   "~~~~~~~~#################"
+   "~~~~~~~~#################"
+   "~~~~~~~##################"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The swim comes up in the pool on the left. The shaft at columns 12-14 is
+;; walled with roots all the way up to the Far Mound.

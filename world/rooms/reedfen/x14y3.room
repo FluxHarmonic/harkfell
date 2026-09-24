@@ -1,0 +1,25 @@
+;; world/rooms/reedfen/x14y3.room
+(room
+  region: reedfen
+  at: (14 3)
+  title: "Stepping Stones"
+  intent: "tussocks across brackish water: short hops, and one that needs a run"
+  bed: (wind 0.6 water 0.5 reeds 0.3)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "  |                  |   "
+   " |||      |         |||  "
+   "####xx##x####xxx#########"
+   "####xx##x####xxx#########"
+   "#########################")
+  things: ((bellfrog at: (7 7))
+           (bellfrog at: (10 7)))
+  decor: auto)
+;; Brackish water between tussocks: a two-tile hop, a one-tile hop, then
+;; three tiles from the long tussock, which needs its run. A fall is a soft
+;; return to where you came in.

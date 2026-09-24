@@ -1,29 +1,37 @@
 ;;; world/regions/reedfen.map - Reedfen's rooms, laid out, with one intent
 ;;; each (harkfell-design section 8). Written before the rooms.
 ;;;
-;;; A1 writes the region's western block: six rooms, three wide and two
-;;; deep, at x 8 to 10 and y 3 to 4. The surface (y 3) runs east from the rim
-;;; where the Hollow will join; the under-fen (y 4) is reached by falling
-;;; and left by climbing. A - or | in the layout joins two rooms: their shared
-;;; edge is open (the gates check it); no mark means a closed edge.
+;;; A1 wrote the western block (A to F), A3 added G, and A4 grew the region
+;;; east to its far end (H to Z; topics/harkfell-a4-region-maps in the
+;;; notes). A - or | in the layout joins two rooms: their shared edge is
+;;; open (the gates check it); no mark means a closed edge.
 ;;;
-;;;   A Fen Edge    - B Reed Bridge - C Old Stone
-;;;   |                               |
-;;;   D Root Hollow - E Drowned Channel - F Climb Back
+;;;   x8   x9   x10  x11  x12  x13  x14  x15  x16  x17
+;;;   A -  B -  C -  G    H -  I -  J -  K -  X -  Y     y3  the surface
+;;;   |         |         |              |    |    |
+;;;   D -  E -  F -  L -  M -  N -  O -  P    Q -  Z     y4  the under-fen
+;;;                            |    |
+;;;                            W -  V                    y5  the drowned
 ;;;
-;;; A3 adds G Behind the Stone (x11y3), east of the Old Stone through its
-;;; ring-stone (keyed to H2, which waits in the Drowned Channel).
+;;; The surface cannot pass the Old Stone's wall (G, behind it, opens only
+;;; to H2), so the way east goes under it: down C's hole to F, over F's
+;;; shelf into L, and up the Root Stair (M) into the sky again at H. The far
+;;; fen runs east to the Heron's Water (X), too wide to cross above; its
+;;; water goes down into Q, a swim east to Z, whose roots climb to the Far
+;;; Mound (Y) and H2. Under the surface a second way runs east through the
+;;; roots (M to P, and up the Seep to the Cattails), with a loop down to the
+;;; Drowned Bell (N, W, V, O). Home is either way back.
 ;;;
-;;; The loop: A to B to C, down the hole in C to F, west through E (a swim)
-;;; to D, and up the shaft from D to A; or the other way round. Breaths: B
-;;; and D (two of six).
+;;; Breaths: B, D, G, H, K, O, V (seven of twenty-two).
 (map
   region: reedfen
   origin: (8 3)
   layout:
-  ("A-B-C-G"
-   "|   |  "
-   "D-E-F  ")
+  ("A-B-C-G H-I-J-K-X-Y"
+   "|   |   |     | | |"
+   "D-E-F-L-M-N-O-P Q-Z"
+   "          | |      "
+   "          W-V      ")
   rooms:
   ((A "Fen Edge" "you step off the Hollow's rim and the land opens into reeds and sky")
    (B "Reed Bridge" "the first open water; a breath after the Hollow's climbs")
@@ -31,4 +39,19 @@
    (D "Root Hollow" "a breath under the reeds: low, dark and still, found by falling")
    (E "Drowned Channel" "too wide to jump: the first swim, bank to bank")
    (F "Climb Back" "rough rock taught where a fall costs nothing, then the climb home to the stone")
-   (G "Behind the Stone" "the first place a harmonic opens: a sheltered hollow where moths come to what you carry")))
+   (G "Behind the Stone" "the first place a harmonic opens: a sheltered hollow where moths come to what you carry")
+   (H "Stone's Shadow" "back under the sky behind the Old Stone's wall: a breath, and the fen opens east")
+   (I "Frog Choir" "a round pool ringed by bellfrogs: the choir's room")
+   (J "Stepping Stones" "tussocks across brackish water: short hops, and one that needs a run")
+   (K "Cattails" "tall reeds gone to seed, the down drifting on the wind: a breath")
+   (X "The Heron's Water" "the widest water, too wide to cross above: the way on is down through it")
+   (Y "The Far Mound" "the fen's far end under the whole sky, and the note you followed, lying on the mound")
+   (L "Under the Stone" "the low way east beneath the Old Stone's wall, found over the Climb Back's shelf")
+   (M "Root Stair" "roots to climb from the dark back up into the sky")
+   (N "Dripping Roots" "a low cave of roots under the frog pool, where its water drips through: the way down to the steps")
+   (O "Root Hall" "a long low hall of roots where moths drift: a breath in the dark")
+   (P "The Seep" "wet rough rock beside a falling trickle: the climb up to the cattails")
+   (Q "Under the Heron's Water" "a long swim beneath the widest water to the far bank")
+   (Z "The Mound's Roots" "the last climb, through roots, up to the far mound")
+   (W "Drowned Steps" "old steps going down into still water: the way to the bell")
+   (V "The Drowned Bell" "a bell the old people sank, hanging in deep water: swim down and listen")))

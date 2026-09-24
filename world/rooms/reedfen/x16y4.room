@@ -1,0 +1,23 @@
+;; world/rooms/reedfen/x16y4.room
+(room
+  region: reedfen
+  at: (16 4)
+  title: "Under the Heron's Water"
+  intent: "a long swim beneath the widest water to the far bank"
+  bed: (water 1.0)
+  grid:
+  ("####~~~~~~~##~~##########"
+   "#####~~~~~~##~~##########"
+   "######~~~~~~~~~##    ####"
+   "#######~~~~~~~~#      ###"
+   "########~~~~~~~#      ###"
+   "#########~~~~~~~~~~######"
+   "###########~~~~~~~~~~~~~~"
+   "#############~~~~~~~~~~~~"
+   "###############~~~~~~~~~~"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; All water, down from the Heron's Water and east to the Mound's Roots,
+;; with an air pocket halfway (columns 16-21): a ledge to stand on and
+;; breathe the quiet before the rest of the swim.

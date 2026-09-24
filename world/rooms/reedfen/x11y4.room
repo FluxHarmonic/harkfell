@@ -1,0 +1,23 @@
+;; world/rooms/reedfen/x11y4.room
+(room
+  region: reedfen
+  at: (11 4)
+  title: "Under the Stone"
+  intent: "the low way east beneath the Old Stone's wall, found over the Climb Back's shelf"
+  bed: (wind 0.1 water 0.3)
+  grid:
+  ("#########################"
+   "#########################"
+   "#####    #######    #####"
+   "   ##      ###      #####"
+   "                    #####"
+   "#######                ##"
+   "##########               "
+   "############             "
+   "############   |    |    "
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The Climb Back's shelf runs on into this room at row 4, under the rock
+;; that carries Behind the Stone overhead. The floor steps down east in
+;; three short drops to the Root Stair; each is a step back up.

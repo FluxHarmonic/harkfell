@@ -56,11 +56,17 @@ And the rules the gates enforce, so nobody has to remember them:
 
 **Harm.** Brackish water (`x`): touch it and you are back where you entered the room.
 
-**Gives.** H2, found at the region's far end, and the cattail down (the glide) after it. In A3's block, H2 lies on the Drowned Channel's east bank (x9y4), and the Old Stone's ring-stone (x10y3), keyed to H2, is the door to Behind the Stone (x11y3).
+**Gives.** H2, found at the region's far end: the Far Mound (x17y3), where A4 moved it from A3's Drowned Channel (for David's ruling, topics/harkfell-a4-region-maps). The Old Stone's ring-stone (x10y3), keyed to H2, is the door to Behind the Stone (x11y3). The cattail down (the glide) is shown in the Cattails and is not in the validation slice.
 
 ### The first block (A1)
 
 Six rooms at x 8 to 10, y 3 to 4: the surface row runs east from the rim where the Hollow will join; the under-fen row is reached by the hole in the Fen Edge and left by the rough shaft beside it, or by the climb from the Climb Back into the Old Stone. See `regions/reedfen.map` for the intents.
+
+### The far fen (A4)
+
+Fifteen rooms east of the first block, to twenty-two. The surface cannot pass the Old Stone's wall (it hangs from the sky, and Behind the Stone opens only to H2), so the way east goes under it: down the Old Stone's hole, over the Climb Back's shelf, through Under the Stone, and up the Root Stair into the sky behind the wall. The far fen runs east from there: the Frog Choir's pool, the Stepping Stones over brackish water, the Cattails, and the Heron's Water, too wide to cross above; its water goes down into a swim east, which comes up in the Mound's Roots, and they climb to the Far Mound at the world's east edge. Under the surface a second way runs east through the roots, with a loop down to the Drowned Bell. Home is either way.
+
+Three rows: the surface (y 3) is sky and reeds, the under-fen (y 4) is roots and still water, the drowned rooms (y 5) are the old people's steps and the bell they sank. The bounds are x 8 to 17, y 3 to 5.
 
 ## Rulings
 

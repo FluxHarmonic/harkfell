@@ -1,0 +1,23 @@
+;; world/rooms/reedfen/x12y3.room
+(room
+  region: reedfen
+  at: (12 3)
+  title: "Stone's Shadow"
+  intent: "back under the sky behind the Old Stone's wall: a breath, and the fen opens east"
+  bed: (wind 0.6 reeds 0.5 drone 0.3)
+  grid:
+  ("###                      "
+   "###                      "
+   "##                       "
+   "##                       "
+   "#                        "
+   "#                        "
+   "#         |      |  |    "
+   "#     |  |||  | ||| || | "
+   "##%   %##################"
+   "##%   %##################"
+   "##%   %##################")
+  things: ((reedling flock: 5 zone: reeds))
+  decor: auto)
+;; The Old Stone's wall leans in from the west and hides the stone. The
+;; Root Stair comes up through the hole at columns 3-5.

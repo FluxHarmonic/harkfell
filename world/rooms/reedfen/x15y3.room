@@ -1,0 +1,23 @@
+;; world/rooms/reedfen/x15y3.room
+(room
+  region: reedfen
+  at: (15 3)
+  title: "Cattails"
+  intent: "tall reeds gone to seed, the down drifting on the wind: a breath"
+  bed: (wind 0.7 reeds 0.8 drone 0.2)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "                         "
+   "   |    |     |        | "
+   "  ||   ||  |  ||   |   ||"
+   " |||  |||| || |||  || |||"
+   "|||| ||||| ||||||  || |||"
+   "#################%   %###"
+   "#################%   %###"
+   "#################%   %###")
+  things: ((reedling flock: 7 zone: reeds))
+  decor: auto)
+;; The tallest reeds in the fen. The hole at columns 18-20 drops to the
+;; Seep; its root walls are the way back up.

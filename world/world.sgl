@@ -45,7 +45,7 @@
 
 (region reedfen
   name: "Reedfen"
-  bounds: ((8 3) (15 7))
+  bounds: ((8 3) (17 5))
   overtone: 2
   bed: "reedfen-bed"
   bed-channels: (wind water reeds drone)
@@ -55,7 +55,7 @@
   hazard: brackish
   tiles: reedfen
   roster: (reedling bellfrog lantern-moth fen-vole pike heron-shape)
-  moments: (first-open-water frog-choir drowned-bell)
+  moments: (first-open-water frog-choir seed-wind drowned-bell)
   wander: (reeds-a reeds-b rain-on-reeds)
   gives: ((overtone 2) (ability down)))
 

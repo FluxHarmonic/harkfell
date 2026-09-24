@@ -1,0 +1,26 @@
+;; world/rooms/reedfen/x13y3.room
+(room
+  region: reedfen
+  at: (13 3)
+  title: "Frog Choir"
+  intent: "a round pool ringed by bellfrogs: the choir's room"
+  bed: (wind 0.4 water 0.7 reeds 0.4)
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "  |  ||                | "
+   " ||||||    |      | |||  "
+   "########~~~###~~~########"
+   "########~~~###~~~########"
+   "#########################")
+  things: ((bellfrog at: (5 7))
+           (bellfrog at: (7 7))
+           (bellfrog at: (12 7))
+           (bellfrog at: (18 7)))
+  decor: auto)
+;; Two three-tile reaches of pool water either side of a stone in the
+;; middle: jump them at a run, or fall in and swim; nothing here harms.

@@ -1,0 +1,22 @@
+;; world/rooms/reedfen/x15y4.room
+(room
+  region: reedfen
+  at: (15 4)
+  title: "The Seep"
+  intent: "wet rough rock beside a falling trickle: the climb up to the cattails"
+  bed: (water 0.5 reeds 0.1)
+  grid:
+  ("#################%   %###"
+   "#################%   %###"
+   "#################%   %###"
+   "#########        %   %###"
+   "#######          %   %###"
+   "######           %   %###"
+   "                        #"
+   "     |       |          #"
+   "    |||     |||    |    #"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The shaft at columns 18-20 is walled with wet rough rock: jump, hold,
+;; climb, and come out among the cattails.

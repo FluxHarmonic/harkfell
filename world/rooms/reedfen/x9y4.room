@@ -17,10 +17,9 @@
    "    ####~~~~~~~~####     "
    "  ||####~~~~~~~~####||   "
    "#########################")
-  things: ((pike at: (11 9))
-           (harmonic at: (18 7) overtone: 2))
+  things: ((pike at: (11 9)))
   decor: auto)
 ;; Eight tiles of still water between two banks; a jump reaches three.
 ;; Swim, and leap out when your head is above the surface.
-;; A3: H2 waits on the east bank. From the start you hear it below and to
-;; the right; from here the Climb Back leads up to the Old Stone's door.
+;; A3 put H2 on the east bank; A4 moved it to the Far Mound (x17y3), the
+;; fen's far end, as the design has it.

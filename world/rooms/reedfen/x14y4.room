@@ -1,0 +1,24 @@
+;; world/rooms/reedfen/x14y4.room
+(room
+  region: reedfen
+  at: (14 4)
+  title: "Root Hall"
+  intent: "a long low hall of roots where moths drift: a breath in the dark"
+  bed: (water 0.4 drone 0.5)
+  grid:
+  ("#########################"
+   "#########################"
+   "#######      #######  ###"
+   "####             ###    #"
+   "###                     #"
+   "                        #"
+   "                         "
+   "    |    |       |   |   "
+   "   |||  |||     ||| |||  "
+   "##########~~~~###########"
+   "##########~~~~###########")
+  things: ((lantern-moth at: (6 5) count: 4 drawn: 2)
+           (lantern-moth at: (19 5) count: 3 drawn: 2))
+  decor: auto)
+;; The pool in the floor (columns 10-13) is deep: it goes down to the
+;; Drowned Bell.

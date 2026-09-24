@@ -1,0 +1,23 @@
+;; world/rooms/reedfen/x13y5.room
+(room
+  region: reedfen
+  at: (13 5)
+  title: "Drowned Steps"
+  intent: "old steps going down into still water: the way to the bell"
+  bed: (water 0.8 drone 0.4)
+  grid:
+  ("#####%   %###############"
+   "#####%   %###############"
+   "#####%   %#######    ####"
+   "#####%   %###         ###"
+   "###                  ####"
+   "###########          ####"
+   "##############~~~~~~~~~~~"
+   "#################~~~~~~~~"
+   "###################~~~~~~"
+   "#####################~~~~"
+   "#########################")
+  decor: auto)
+;; Cut steps: two dry, then three under the water, which goes on east to
+;; the bell. The shaft (columns 6-8) is the way back up to the Dripping
+;; Roots.

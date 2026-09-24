@@ -1,0 +1,24 @@
+;; world/rooms/reedfen/x12y4.room
+(room
+  region: reedfen
+  at: (12 4)
+  title: "Root Stair"
+  intent: "roots to climb from the dark back up into the sky"
+  bed: (wind 0.2 water 0.3)
+  grid:
+  ("##%   %##################"
+   "##%   %##################"
+   "##%   %#####   ##########"
+   "##%   %###       ########"
+   "##%   %##          ######"
+   "##%   %##             ###"
+   "  %   %                ##"
+   "  %                      "
+   "      |   ||    |   |    "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (14 5) count: 3 drawn: 2))
+  decor: auto)
+;; The shaft (columns 3-5) is walled with roots on both sides: jump, hold
+;; either wall and climb, up through the hole into the Stone's Shadow.
+;; East, the roots go on under the fen.

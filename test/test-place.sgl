@@ -56,11 +56,12 @@
       (assert-true (every (lambda (x) (< 0 x 400)) (place-frogs pl))))))
 
 ;; Listening, end to end on the real world: the director given the adapter's
-;; place, standing still for 3 s. H2's tone is where the world's pickup lies
-;; (A3): the Drowned Channel (9 4), cell (18 7). From the Climb Back (10 4)
-;; it is west, next door; from the Fen Edge (8 3) it is east and below, about
-;; two rooms off. The tone must sound in both, louder in the Climb Back, and
-;; the ears must lean west in one and east in the other.
+;; place, standing still for 3 s. H2's tone is where the world's pickup lies:
+;; the Far Mound (17 3), cell (22 3), since A4 (A3 had it in the Drowned
+;; Channel). From the Heron's Water (16 3) it is east, next door; from the
+;; Cattails (15 3), east and two rooms off; from the Mound's Roots (17 4),
+;; above. The tone must sound in all three, fainter in the Cattails than next
+;; door, and the ears must lean east, east, and up.
 (define (listen-in x y)
   (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
   (sound-reset!)
@@ -76,16 +77,20 @@
     (let ((s (sound-voice-source TONE-ID)))
       (list (sound-ears) (and s (source-gain s 3.0))))))
 
-(define CLIMB-BACK (listen-in 10 4))
-(define FEN-EDGE (listen-in 8 3))
+(define NEXT-DOOR (listen-in 16 3))
+(define TWO-OFF (listen-in 15 3))
+(define BELOW (listen-in 17 4))
 
 (test-group "place: listening on the real world"
-  (test "in the Climb Back, still: the ears lean west and the tone sounds"
-    (assert-equal 'left (car CLIMB-BACK))
-    (assert-true (> (cadr CLIMB-BACK) 0.2)))
-  (test "in the Fen Edge, further: the ears lean east, fainter, but there"
-    (assert-equal 'right (car FEN-EDGE))
-    (assert-true (< 0.0 (cadr FEN-EDGE) (cadr CLIMB-BACK)))))
+  (test "in the Heron's Water, still: the ears lean east and the tone sounds"
+    (assert-equal 'right (car NEXT-DOOR))
+    (assert-true (> (cadr NEXT-DOOR) 0.2)))
+  (test "in the Cattails, further: the ears lean east, fainter, but there"
+    (assert-equal 'right (car TWO-OFF))
+    (assert-true (< 0.0 (cadr TWO-OFF) (cadr NEXT-DOOR))))
+  (test "in the Mound's Roots, below it: the ears point up"
+    (assert-equal 'up (car BELOW))
+    (assert-true (> (cadr BELOW) 0.0))))
 
 ;; The ears' flick (David, 2026-09-24): down and back twice in the first
 ;; 0.36 s after they rise (0.09 s steps), again every 4 s, and up otherwise.

@@ -1,0 +1,22 @@
+;; world/rooms/reedfen/x13y4.room
+(room
+  region: reedfen
+  at: (13 4)
+  title: "Dripping Roots"
+  intent: "a low cave of roots under the frog pool, where its water drips through: the way down to the steps"
+  bed: (water 0.6)
+  grid:
+  ("#########################"
+   "#########################"
+   "#######  ####   #########"
+   "#####      #       ######"
+   "####                  ###"
+   "###                      "
+   "###                      "
+   "      |         |        "
+   "     |||       |||       "
+   "#####%   %###############"
+   "#####%   %###############")
+  decor: auto)
+;; The hole at columns 6-8 drops to the Drowned Steps; its walls are roots,
+;; the way back up. East, the Root Hall.

@@ -1,0 +1,22 @@
+;; world/rooms/reedfen/x14y5.room
+(room
+  region: reedfen
+  at: (14 5)
+  title: "The Drowned Bell"
+  intent: "a bell the old people sank, hanging in deep water: swim down and listen"
+  bed: (water 0.6 drone 0.8)
+  grid:
+  ("##########~~~~###########"
+   "#####~~~~~~~~~~~##~~~####"
+   "###~~~~~~~~~~~~####~~~###"
+   "##~~~~~~~~~~~~######~~~##"
+   "##~~~~~~~~~~~~######~~~##"
+   "#~~~~~~~~~~~~########~~~#"
+   "~~~~~~~~~~~~~~~~~~~~~~~~#"
+   "~~~~~~~~~~~~~~~~~~~~~~~~#"
+   "~~~~~~~~~~~~~~~~~~~~~~~##"
+   "~~~~~~~~~~~~~~~~~~~~~~###"
+   "#########################")
+  decor: auto)
+;; The bell hangs from the roof on its stem (columns 16-17), its mouth
+;; open at row 6. Up through the Root Hall's pool, or west to the steps.
