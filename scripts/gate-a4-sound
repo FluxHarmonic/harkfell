@@ -1,0 +1,249 @@
+#!/bin/sh
+# A4's sound gate (harkfell-design section 10, A4; the brief's acceptance):
+# every tune renders byte-identically twice and passes the speaker check, and
+# the director's new behaviour holds, green and red.
+#
+#   scripts/gate-a4-sound              the green arm
+#   scripts/gate-a4-sound --sabotage   the green arm, then the named sabotages, each must go RED
+#
+# THE TUNES (the population is assets/tunes, counted; the tool is the
+# sketchbook's, built with `cd sketchbook && sigil build --config release`,
+# and must answer `probe` for the 0.7.0 bed kinds, or SETUP-FAILED):
+#   twice    each .cts rendered to WAV in two separate processes; the two
+#            files byte-identical. Control: two different tunes hash apart.
+#   speaker  every channel of every tune (beds, drone, moments, the opening,
+#            the cues) rendered alone keeps at least 0.25 of its energy above
+#            300 Hz (design D10: a phone speaker loses at most 6 dB of it).
+#            S0 left the moments out; A4 holds them to it too.
+# THE DIRECTOR: test/test-a4-sound.sgl (wandering moments, the carrying: and
+# still: conditions, the border fallback, the opening and its handoff, the
+# save's flags) and test/test-tunes.sgl.
+#
+# The sabotages. speaker-sine: a moment's low line as a pure sine, in a copy
+# under /tmp (the tree is not touched): the speaker check must fail on that
+# channel. The rest are planted in a COMMITTED file, checked to have landed by
+# hash and grep, run, restored with git checkout, and the restore checked
+# against the pre-plant hash; a leg is RED only with a non-zero exit AND the
+# named test failing, and the named test must pass unplanted first:
+#   wander-no-hush    a wandering moment drawn whatever the hush says
+#   wander-tagless    a wandering moment drawn in any room
+#   wander-repeats    a wandering moment is never spent
+#   carrying-ignored  carrying: never checked
+#   still-ignored     still: never waited for
+#   through-is-cross  the border crossfades (A2's) whatever the mode
+#   opening-loops     the mark region kept after a skip (motif loops it)
+#   opening-hard-jump the skip as player-jump! (every voice gated off)
+#   held-ignored      the director enters the world while held
+#
+# Exit: 0 all as expected, 1 a check or a leg went the wrong way, 2 SETUP-FAILED.
+# Scratch goes under /tmp; nothing is written in the tree but the plants.
+set -u
+cd "$(dirname "$0")/.." || exit 2
+TMP="$(mktemp -d /tmp/harkfell-gate-a4-sound-XXXXXX)"
+PLANTED=""
+trap 'if [ -n "$PLANTED" ]; then git checkout HEAD -- "$PLANTED"; echo "interrupted: restored $PLANTED"; fi; rm -rf "$TMP"' EXIT
+trap 'exit 130' INT TERM
+FAIL=0
+TOOL=sketchbook/build/release/bin/sketchbook
+JOBS=${JOBS:-4}
+
+hash() { sha256sum "$1" | cut -c1-16; }
+setup_failed() { echo "SETUP-FAILED: $*"; echo "GATE-A4-SOUND SETUP-FAILED"; exit 2; }
+
+# --- the tool ---------------------------------------------------------------------------
+[ -x "$TOOL" ] || setup_failed "no tool at $TOOL (cd sketchbook && sigil build --config release)"
+echo "tool $TOOL ($(stat -c %y "$TOOL")), its motif $(readlink -f sketchbook/.sigil/deps/motif | sed 's|.*/||')"
+"$TOOL" probe || setup_failed "the tool's motif lacks the 0.7.0 bed kinds"
+# the tool must render with the motif the GAME locks, or its renders say
+# nothing about what the game plays
+game_motif=$(awk '/name: "motif"/{f=1} f&&/sha:/{gsub(/["()]/,"",$2); print $2; exit}' sigil.lock)
+tool_motif=$(awk '/name: "motif"/{f=1} f&&/sha:/{gsub(/["()]/,"",$2); print $2; exit}' sketchbook/sigil.lock)
+[ -n "$game_motif" ] && [ "$game_motif" = "$tool_motif" ] || setup_failed "the tool locks motif ${tool_motif:-none}, the game ${game_motif:-none}"
+case "$(readlink -f sketchbook/.sigil/deps/motif)" in *"$game_motif"*) ;; *) setup_failed "the tool's motif link is not the game's motif $game_motif";; esac
+echo "motif: the tool and the game both lock $game_motif"
+
+# --- the tunes: twice ------------------------------------------------------------------
+tunes() {
+  ls assets/tunes/*.cts > "$TMP/population"
+  POP=$(wc -l < "$TMP/population")
+  [ "$POP" -gt 1 ] || setup_failed "fewer than two tunes in assets/tunes"
+  echo "tunes: population $POP"
+  export TOOL TMP
+  xargs -P "$JOBS" -I{} sh -c '
+    f=$1; n=$(basename "$f" .cts)
+    for pass in a b; do
+      if "$TOOL" render-tune "$f" "$TMP/$n.$pass.wav" > "$TMP/$n.$pass.log" 2>&1 && [ -s "$TMP/$n.$pass.wav" ]; then
+        sha256sum "$TMP/$n.$pass.wav" | cut -d" " -f1 > "$TMP/$n.$pass.sha"; rm -f "$TMP/$n.$pass.wav"
+      else echo FAILED > "$TMP/$n.$pass.sha"; fi
+    done' _ {} < "$TMP/population"
+  same=0; bad=0
+  while read -r f; do
+    n=$(basename "$f" .cts); a=$(cat "$TMP/$n.a.sha" 2>/dev/null || echo MISSING); b=$(cat "$TMP/$n.b.sha" 2>/dev/null || echo MISSING)
+    if [ "$a" = FAILED ] || [ "$a" = MISSING ] || [ "$b" = FAILED ] || [ "$b" = MISSING ]; then
+      bad=$((bad + 1)); echo "FAILED  $n: $(tail -1 "$TMP/$n.a.log" 2>/dev/null)"
+    elif [ "$a" = "$b" ]; then same=$((same + 1))
+    else bad=$((bad + 1)); echo "DIFFER  $n $(echo $a | cut -c1-16) vs $(echo $b | cut -c1-16)"; fi
+  done < "$TMP/population"
+  first=$(sed -n 1p "$TMP/population" | xargs basename -s .cts); second=$(sed -n 2p "$TMP/population" | xargs basename -s .cts)
+  [ "$(cat "$TMP/$first.a.sha")" != "$(cat "$TMP/$second.a.sha")" ] || setup_failed "control: $first and $second hash the same"
+  echo "tunes: control: $first and $second hash apart"
+  echo "tunes: twice: $same of $POP byte-identical, $bad not"
+  [ "$same" -eq "$POP" ] && [ "$bad" -eq 0 ] || FAIL=1
+
+  # --- the tunes: speaker ----------------------------------------------------------------
+  xargs -P "$JOBS" -I{} sh -c 'n=$(basename "$1" .cts); if "$TOOL" speaker "$1" --seconds 30 > "$TMP/$n.spk" 2>&1; then echo 0 > "$TMP/$n.spkrc"; else echo 1 > "$TMP/$n.spkrc"; fi' _ {} < "$TMP/population"
+  done_n=0; rcbad=0
+  while read -r f; do
+    n=$(basename "$f" .cts)
+    [ -f "$TMP/$n.spkrc" ] && done_n=$((done_n + 1))
+    [ "$(cat "$TMP/$n.spkrc" 2>/dev/null)" = 0 ] || { rcbad=$((rcbad + 1)); grep '^FAIL' "$TMP/$n.spk"; }
+  done < "$TMP/population"
+  voices=$(cat "$TMP"/*.spk | grep -c '^pass ' || true)
+  fails=$(cat "$TMP"/*.spk | grep -c '^FAIL' || true)
+  low=$(cat "$TMP"/*.spk | grep '^pass ' | sed 's/.*: \([0-9.]*\) above.*/\1/' | sort -g | head -1)
+  echo "tunes: speaker: $done_n of $POP files checked, $voices voices pass (lowest share $low), $fails fail"
+  [ "$done_n" -eq "$POP" ] && [ "$fails" -eq 0 ] && [ "$rcbad" -eq 0 ] && [ "$voices" -gt 0 ] || FAIL=1
+}
+
+# --- the director ------------------------------------------------------------------------
+green() {
+  out="$TMP/$(basename "$1").out"
+  scripts/dev sigil test "$1" > "$out" 2>&1
+  rc=$?
+  line="$(grep -a 'Tests:' "$out" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"
+  passed="$(echo "$line" | sed -n 's/.*Tests: *\([0-9][0-9]*\) passed.*/\1/p')"
+  total="$(echo "$line" | sed -n 's/.*(\([0-9][0-9]*\) total).*/\1/p')"
+  if [ "$rc" -eq 0 ] && [ "${passed:-x}" = "$2" ] && [ "${total:-y}" = "$2" ]; then
+    echo "GREEN $1: $passed of $total passed"
+  else
+    echo "NOT GREEN $1: rc=$rc, '$line' (want $2 of $2)"; sed 's/\x1b\[[0-9;]*m//g' "$out" | grep -a '✗' | head -5
+    FAIL=1
+  fi
+}
+
+passes() {
+  sed 's/\x1b\[[0-9;]*m//g' "$TMP/$(basename "$1").out" | grep -a '✓' | grep -qF "$2" \
+    || setup_failed "'$2' does not pass unplanted; a sabotage leg on it would prove nothing"
+}
+
+# plant NAME FILE OLD NEW TESTFILE TESTNAME
+plant() {
+  name=$1 file=$2 old=$3 new=$4 tf=$5 tn=$6
+  git diff --quiet HEAD -- "$file" || setup_failed "$name: $file differs from HEAD (commit before planting)"
+  before="$(hash "$file")"
+  OLD="$old" NEW="$new" node -e '
+    const fs=require("fs"); const f=process.argv[1]; const s=fs.readFileSync(f,"utf8");
+    const n=s.split(process.env.OLD).length-1;
+    if(n!==1){console.error("anchor found "+n+" times");process.exit(3)}
+    fs.writeFileSync(f, s.replace(process.env.OLD, process.env.NEW));' "$file"
+  prc=$?
+  PLANTED="$file"
+  after="$(hash "$file")"
+  if [ "$prc" -ne 0 ] || [ "$before" = "$after" ] || ! grep -qF "$new" "$file"; then
+    git checkout HEAD -- "$file"; PLANTED=""
+    setup_failed "$name: the plant did not land (rc $prc, hash $before -> $after)"
+  fi
+  changed="$(git diff --numstat HEAD -- "$file" | awk '{print $1+$2}')"
+  echo "planted $name in $file ($before -> $after, $changed lines changed)"
+  out="$TMP/$name.out"
+  scripts/dev sigil test "$tf" > "$out" 2>&1
+  rc=$?
+  clean="$(sed 's/\x1b\[[0-9;]*m//g' "$out")"
+  git checkout HEAD -- "$file"
+  PLANTED=""
+  restored="$(hash "$file")"
+  [ "$restored" = "$before" ] || setup_failed "$name: restore gave $restored, not $before"
+  if [ "$rc" -ne 0 ] && echo "$clean" | grep -a '✗' | grep -qF "$tn"; then
+    echo "RED $name (as it must be): rc=$rc; failing: $tn"
+  else
+    echo "NOT RED $name: rc=$rc; the sabotage was not caught by '$tn'"
+    echo "$clean" | grep -a 'Tests:' | tail -1
+    FAIL=1
+  fi
+  echo "restored $file ($restored)"
+}
+
+A4T=test/test-a4-sound.sgl
+green_all() {
+  tunes
+  green "$A4T" 33
+  green test/test-tunes.sgl 5
+}
+
+if [ "${1:-}" != "--sabotage" ]; then
+  green_all
+  if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND GREEN"; else echo "GATE-A4-SOUND RED"; fi
+  exit $FAIL
+fi
+
+green_all
+[ "$FAIL" -eq 0 ] || setup_failed "the green arm is not green; no sabotage leg can be scored"
+
+# speaker-sine: a copy of stones-remember with its low line (instrument 4, on
+# channel 6) as a pure sine
+src=assets/tunes/stones-remember.cts; copy="$TMP/speaker-sine.cts"
+awk '/\(instrument id: 4 name: "low line" patch: \(drone-saw [^)]*\)/ { sub(/patch: \(drone-saw [^)]*\)/, "patch: (simple-sine osc-amp: 0.4 attack: 0.8 release: 2.5)") } { print }' "$src" > "$copy"
+[ "$(diff "$src" "$copy" | grep -c '^>')" -eq 1 ] && grep -q 'simple-sine' "$copy" || setup_failed "speaker-sine: the plant did not land in the copy"
+out=$("$TOOL" speaker "$copy" --seconds 30) && src_rc=0 || src_rc=$?
+if [ "$src_rc" -ne 0 ] && echo "$out" | grep -q "^FAIL .* ch6: .* of its energy above 300 Hz"; then
+  echo "RED speaker-sine (as it must be): $(echo "$out" | grep '^FAIL' | head -1)"
+else
+  echo "NOT RED speaker-sine: rc=$src_rc"; echo "$out" | tail -2; FAIL=1
+fi
+
+S=src/harkfell/sound.sgl
+passes "$A4T" "none is drawn while the hush's four minutes have not passed"
+passes "$A4T" "a room whose sound does not fit the tag draws none"
+passes "$A4T" "once a playthrough: the hush allows again, and nothing is drawn"
+passes "$A4T" "carrying: 2, not carried: the moment does not play"
+passes "$A4T" "still: 6, ten seconds moving in the room: it does not play"
+passes "$A4T" "'through: two beds pull together for at most the overlap"
+passes "$A4T" "and the tune ends after a skip"
+passes "$A4T" "the fundamental holds across the skip"
+passes "$A4T" "while held, the world has not begun: no bed"
+
+plant wander-no-hush "$S" \
+  "      (when (hush-wander-ok? *hush*)
+        (let ((cands" \
+  "      (when #t
+        (let ((cands" \
+  "$A4T" "none is drawn while the hush's four minutes have not passed"
+plant wander-tagless "$S" \
+  "      (let ((e (assoc name WANDER-TAGS)))
+        (or (not e)" \
+  "      (let ((e (assoc name WANDER-TAGS)))
+        (or #t" \
+  "$A4T" "a room whose sound does not fit the tag draws none"
+plant wander-repeats src/harkfell/hush.sgl \
+  "            wander-spent: (if (and (not key) name (not (member name (hush-wander-spent h))))" \
+  "            wander-spent: (if #f" \
+  "$A4T" "once a playthrough: the hush allows again, and nothing is drawn"
+plant carrying-ignored "$S" \
+  "        (and n (not (memv n *carry*)) 'carrying)))" \
+  "        (and #f n 'carrying)))" \
+  "$A4T" "carrying: 2, not carried: the moment does not play"
+plant still-ignored "$S" \
+  "                  ((and (eq? d 'play) (place-moment-still pl))
+                   (set! *still-wait*" \
+  "                  ((and #f (place-moment-still pl))
+                   (set! *still-wait*" \
+  "$A4T" "still: 6, ten seconds moving in the room: it does not play"
+plant through-is-cross "$S" \
+  "             (through? (and old-src (eq? *border-mode* 'through)))" \
+  "             (through? #f)" \
+  "$A4T" "'through: two beds pull together for at most the overlap"
+plant opening-loops "$S" \
+  "        (player-set-region! *opening* #f #f)" \
+  "        #f" \
+  "$A4T" "and the tune ends after a skip"
+plant opening-hard-jump "$S" \
+  "        (when (player-jump-to-mark! *opening* 'world)" \
+  "        (when (begin (player-jump! *opening* 1 0) #t)" \
+  "$A4T" "the fundamental holds across the skip"
+plant held-ignored "$S" \
+  "      (let ((pl (and (not *held*) pl0)))" \
+  "      (let ((pl pl0))" \
+  "$A4T" "while held, the world has not begun: no bed"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all ten RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+exit $FAIL

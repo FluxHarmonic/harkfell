@@ -1,0 +1,350 @@
+;;; A4's sound (harkfell-design section 5 and section 10, A4): what the
+;;; director gained, through the real director and, where the claim is about
+;;; sound, the real motif players in the mixer's headless mode.
+;;;   1  wandering moments: drawn only once the hush allows, only in a room
+;;;      whose sound fits the moment's tag, never in a room whose own fixed
+;;;      moment is still to come, and once a playthrough
+;;;   2  the moment conditions: carrying: (unmet, the moment is silent and
+;;;      stays armed) and still: (it plays only after standing still that long)
+;;;   3  the border fallback: 'through lets two beds pull together for at
+;;;      most THROUGH-OVERLAP-S; 'cross (A2's) for BORDER-S, the control that
+;;;      shows the count can see an overlap
+;;;   4  the opening: a skip lands on the world mark within half a second,
+;;;      the low note does not break across it, and the tune then ends
+;;;      (motif confines a mark jump to its region, which would loop it)
+;;;   5  the save's flags round-trip
+;;; Named sabotages in scripts/gate-a4-sound turn each group red.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine mixer)
+        (harkfell hush)
+        (harkfell sound))
+
+(define RATE 32000)
+(define SAID '())
+(define (say . parts) (set! SAID (cons parts SAID)))
+(define (said? . parts) (and (member parts SAID) #t))
+
+;; A room of Reedfen. No bed where the check is about the director's
+;; decisions (bed-tune #f: nothing is synthesised but the moments).
+(define (fen key levels . opts)
+  (let ((kw (lambda (k d) (let ((e (memq k opts))) (if e (cadr e) d)))))
+    (place key: key region: 'reedfen bed-tune: (kw 'bed #f) groups: '(wind water reeds drone)
+           levels: levels moment: (kw 'moment #f) moment-carrying: (kw 'carrying #f)
+           moment-still: (kw 'still-s #f) wander: '("seed-wind") tones: '() carry: (kw 'carry '())
+           still: (kw 'still #f) px: 100.0 py: 100.0 rx: 9 ry: 3)))
+
+(define WET '((wind . 0.3) (water . 0.8) (reeds . 0.4)))
+(define DRY '((wind . 0.6) (water . 0.2) (reeds . 0.5)))
+
+;; Frames of dt from t0 to t1 in the place (plan t); the mixer pumped when pump?.
+(define (frames! t0 t1 dt plan pump?)
+  (let loop ((t t0))
+    (when (< t t1)
+      (sound-frame! t dt (plan t))
+      (when pump? (mixer-pump! t))
+      (loop (+ t dt))))
+  t1)
+
+;; The director is booted once (its say, and the cues rendered once, in the
+;; first frames of group 1); each group starts from a reset.
+(sound-boot! (quote ()) say)
+(define (fresh!)
+  (mixer-open-headless! RATE #f)
+  (sound-reset!)
+  (set! SAID '())
+  (sound-set-rng! 20260924))
+
+;; --- 1. wandering moments ---------------------------------------------------------------
+(fresh!)
+(sound-preopen! "seed-wind")
+(sound-preopen! "frog-choir")
+;; the first 100 s: seven wet rooms, the hush's time half not yet met. The
+;; draw is read ONE FRAME after each entry: a draw is cleared when its
+;; moment starts or when the start finds the hush closed, so a read 14 s
+;; later sees #f whatever was drawn (the gate's wander-no-hush leg caught
+;; exactly that: a vacuous first version of this test).
+(define EARLY-PLAYED #f)
+(define EARLY-DUE
+  (let loop ((i 0) (t 0.0) (dues '()))
+    (if (= i 7)
+        dues
+        (let* ((room (lambda (x) (fen (list 'early i) WET)))
+               (t1 (frames! t (+ t 1.0) 1.0 room #t))
+               (due (sound-wander-due))
+               (t2 (let inner ((x t1))
+                     (if (>= x (+ t 14.0))
+                         x
+                         (begin (frames! x (+ x 1.0) 1.0 room #t)
+                                (when (sound-moment-playing) (set! EARLY-PLAYED #t))
+                                (inner (+ x 1.0)))))))
+          (loop (+ i 1) t2 (cons due dues))))))
+;; to 245 s in one more room (8 rooms entered, over 240 s)
+(frames! 98.0 245.0 1.0 (lambda (x) (fen 'waiting WET)) #t)
+(define HUSH-OK (hush-wander-ok? (sound-hush)))
+;; a dry room: the tag (water) does not fit
+(frames! 245.0 246.0 0.5 (lambda (x) (fen 'dry DRY)) #t)
+(define DRY-DUE (sound-wander-due))
+;; a wet room whose own fixed moment is still to come (it waits for 60 s of stillness)
+(frames! 246.0 247.0 0.5 (lambda (x) (fen 'armed WET 'moment "frog-choir" 'still-s 60)) #t)
+(define ARMED-DUE (sound-wander-due))
+;; a wet room: drawn, and it starts 3 to 8 s later
+(frames! 247.0 248.0 0.5 (lambda (x) (fen 'wet WET)) #t)
+(define WET-DUE (sound-wander-due))
+(frames! 248.0 256.5 0.1 (lambda (x) (fen 'wet WET)) #t)
+(define WANDER-PLAYING (sound-moment-playing))
+(define WANDER-SPENT (hush-wander-spent? (sound-hush) "seed-wind"))
+;; it rings out (14 s and the tail), then the hush runs out again: 260 s, 8 rooms
+(frames! 256.5 280.0 0.5 (lambda (x) (fen 'wet WET)) #t)
+(define WANDER-ENDED (not (sound-moment-playing)))
+(frames! 280.0 540.0 5.0 (lambda (x) (fen (list 'late (exact (floor (/ x 30.0)))) DRY)) #f)
+(define HUSH-OK-AGAIN (hush-wander-ok? (sound-hush)))
+;; opened again, as a new session (a save continued) opens every wandering
+;; moment: only the spent flag may stop it now (the gate's wander-repeats leg
+;; showed a played moment's player leaving the pre-opened list hid the rule)
+(sound-preopen! "seed-wind")
+(frames! 540.0 541.0 0.5 (lambda (x) (fen 'wet-again WET)) #f)
+(define AGAIN-DUE (sound-wander-due))
+
+(test-group "a4 sound: 1, wandering moments"
+  (test "none is drawn while the hush's four minutes have not passed (seven rooms entered)"
+    (assert-equal 7 (length EARLY-DUE))
+    (assert-true (every (lambda (d) (not d)) EARLY-DUE))
+    (assert-false EARLY-PLAYED))
+  (test "the hush allows one at 245 s and 8 rooms (the edge that makes the blocks mean something)"
+    (assert-true HUSH-OK))
+  (test "a room whose sound does not fit the tag draws none"
+    (assert-false DRY-DUE))
+  (test "a room whose own fixed moment is still to come draws none"
+    (assert-false ARMED-DUE))
+  (test "a room that fits draws it, due 3 to 8 s after the entry"
+    (assert-true (pair? WET-DUE))
+    (assert-equal "seed-wind" (car WET-DUE))
+    (assert-true (<= 250.0 (caddr WET-DUE) 255.0)))
+  (test "and it plays"
+    (assert-equal "seed-wind" WANDER-PLAYING)
+    (assert-true WANDER-SPENT))
+  (test "it ends (the hush counts from its end)"
+    (assert-true WANDER-ENDED))
+  (test "once a playthrough: the hush allows again, and nothing is drawn"
+    (assert-true HUSH-OK-AGAIN)
+    (assert-false AGAIN-DUE)))
+
+;; --- 2. the conditions -------------------------------------------------------------------
+(fresh!)
+(sound-preopen! "hollow-answers")
+(define (home carry) (fen 'home '((wind . 0.4)) 'moment "hollow-answers" 'carrying 2 'carry carry))
+(frames! 0.0 2.0 0.5 (lambda (x) (home '())) #f)
+(define UNMET-PLAYING (sound-moment-playing))
+(define UNMET-DECISION (hush-fixed-decision (sound-hush) 'home))
+(define UNMET-SAID (said? "sound" "room" "moment" "hollow-answers" "carrying"))
+(frames! 2.0 4.0 0.5 (lambda (x) (fen 'away '((wind . 0.4)) 'carry '(2))) #f)
+(frames! 4.0 5.0 0.5 (lambda (x) (home '(2))) #f)
+(define MET-PLAYING (sound-moment-playing))
+
+(fresh!)
+(sound-preopen! "frog-choir")
+(define (choir still) (fen 'choir WET 'moment "frog-choir" 'still-s 6 'still still))
+(frames! 0.0 10.0 0.1 (lambda (x) (choir #f)) #f)
+(define MOVING-PLAYING (sound-moment-playing))
+(frames! 10.0 15.5 0.1 (lambda (x) (choir #t)) #f)
+(define STILL-5-PLAYING (sound-moment-playing))
+(frames! 15.5 16.5 0.1 (lambda (x) (choir #t)) #f)
+(define STILL-6-PLAYING (sound-moment-playing))
+
+(test-group "a4 sound: 2, the moment conditions"
+  (test "carrying: 2, not carried: the moment does not play"
+    (assert-false UNMET-PLAYING)
+    (assert-true UNMET-SAID))
+  (test "and it stays armed"
+    (assert-equal 'play UNMET-DECISION))
+  (test "carried, on the next visit: it plays"
+    (assert-equal "hollow-answers" MET-PLAYING))
+  (test "still: 6, ten seconds moving in the room: it does not play"
+    (assert-false MOVING-PLAYING))
+  (test "five and a half seconds still: not yet"
+    (assert-false STILL-5-PLAYING))
+  (test "six: it plays"
+    (assert-equal "frog-choir" STILL-6-PLAYING)))
+
+;; --- 3. the border ------------------------------------------------------------------------
+;; Reedfen's bed, then at 3 s a room of the Hollow; count the beds pulling
+;; together each frame (a source live: started and not ended).
+(define (border-run mode)
+  (fresh!)
+  (sound-set-border-mode! mode)
+  (let ((fen-room (place key: 'fen region: 'reedfen bed-tune: "reedfen-bed" groups: '(wind water reeds drone)
+                         levels: '((wind . 0.5) (water . 0.5) (reeds . 0.4)) tones: '() carry: '() px: 0.0 py: 0.0))
+        (hollow-room (place key: 'hollow region: 'hollow bed-tune: "hollow-bed" groups: '(wind water hum drone)
+                            levels: '((wind . 0.5) (water . 0.2) (hum . 0.4)) tones: '() carry: '() px: 400.0 py: 0.0))
+        (dt (/ 1.0 30.0)))
+    (let loop ((t 0.0) (both 0.0) (max-live 0) (first-new #f) (low 1.0))
+      (if (>= t 9.0)
+          (let ((r (list both max-live first-new (length (filter (lambda (s) (source-live? s)) (mixer-sources))) low)))
+            (sound-set-border-mode! 'through)
+            r)
+          (begin
+            (sound-frame! t dt (if (< t 3.0) fen-room hollow-room))
+            (mixer-pump! t)
+            (let* ((live (filter (lambda (s) (and (source-live? s) (string-prefix? "bed" (source-id s)))) (mixer-sources)))
+                   (n (length live))
+                   (new-live (and (>= t 3.0) (find (lambda (s) (string=? (source-id s) BED-ID)) live))))
+              (loop (+ t dt) (if (>= n 2) (+ both dt) both) (max max-live n)
+                    (or first-new (and new-live t))
+                    ;; the beds' summed power (their noise is independent), from
+                    ;; the first second: the bed as a whole never falls far
+                    (if (>= t 1.5)
+                        (min low (apply + (map (lambda (s) (let ((g (source-gain s t))) (* g g))) live)))
+                        low))))))))
+
+(define (string-prefix? p s) (and (>= (string-length s) (string-length p)) (string=? (substring s 0 (string-length p)) p)))
+
+(define THROUGH (border-run 'through))
+(define CROSS (border-run 'cross))
+
+(test-group "a4 sound: 3, the border fallback"
+  (test "'through: two beds pull together for at most the overlap (and a frame)"
+    (display "  through: two beds for ") (display (car THROUGH)) (display " s, the new bed live from ") (display (caddr THROUGH)) (newline)
+    (assert-true (<= (car THROUGH) (+ THROUGH-OVERLAP-S (/ 1.0 15.0)))))
+  (test "and they do overlap a little: the bed is never cut to nothing"
+    (assert-true (> (car THROUGH) 0.1)))
+  (test "the new bed is not pulled until the old one is nearly silent"
+    (assert-true (>= (caddr THROUGH) (+ 3.0 (- THROUGH-OUT-S THROUGH-OVERLAP-S) (- (/ 1.0 30.0))))))
+  (test "one bed afterwards"
+    (assert-equal 1 (cadddr THROUGH)))
+  (test "the bed dips no more than 7 dB across the border (it never drops out)"
+    (let ((db (* 10.0 (/ (log (max 1.0e-9 (list-ref THROUGH 4))) (log 10.0)))))
+      (display "  through: the deepest dip ") (display db) (display " dB") (newline)
+      (assert-true (> db -7.0))))
+  (test "'cross (A2's, the control): two beds for the whole BORDER-S"
+    (display "  cross: two beds for ") (display (car CROSS)) (display " s") (newline)
+    (assert-true (>= (car CROSS) (- BORDER-S (/ 1.0 15.0))))))
+
+;; --- 4. the opening ------------------------------------------------------------------------
+;; The opening's own output, 50 ms blocks, as RMS in dBFS by time.
+(define *blocks* '())
+(define *acc* 0.0)
+(define *n* 0)
+(define BLOCK (exact (round (* 0.05 RATE))))
+;; and the fundamental alone: a Goertzel filter at D2 (73.42 Hz) per block,
+;; as power in dB. Nothing else in the opening has energy there (the wind is
+;; high-passed at 240 Hz, the overtones are multiples of 146.8 Hz).
+(define *lows* '())
+(define GW (* 2.0 (cos (/ (* 2.0 3.141592653589793 73.42) RATE))))
+(define *s1* 0.0)
+(define *s2* 0.0)
+(define (opening-tap id buf n gain)
+  (when (string=? id OPENING-ID)
+    (let loop ((i 0))
+      (when (< i n)
+        (let ((l (bytevector-ieee-single-ref buf (* 8 i) 'little))
+              (r (bytevector-ieee-single-ref buf (+ 4 (* 8 i)) 'little)))
+          (set! *acc* (+ *acc* (* gain gain 0.5 (+ (* l l) (* r r)))))
+          (let ((s (+ (* gain 0.5 (+ l r)) (* GW *s1*) (- *s2*))))
+            (set! *s2* *s1*)
+            (set! *s1* s))
+          (set! *n* (+ *n* 1))
+          (when (= *n* BLOCK)
+            (set! *blocks* (cons (* 10.0 (/ (log (max 1.0e-20 (/ *acc* BLOCK))) (log 10.0))) *blocks*))
+            (set! *lows* (cons (* 10.0 (/ (log (max 1.0e-20 (- (+ (* *s1* *s1*) (* *s2* *s2*)) (* GW *s1* *s2*)))) (log 10.0))) *lows*))
+            (set! *acc* 0.0) (set! *s1* 0.0) (set! *s2* 0.0)
+            (set! *n* 0)))
+        (loop (+ i 1))))))
+
+;; runs the opening from 0 to `until`; skip at `skip-at` (or #f). Answers
+;; (states-by-time end-state landed-at).
+(define (opening-run skip-at until)
+  (mixer-open-headless! RATE opening-tap)
+  (sound-reset!)
+  (set! *blocks* '()) (set! *lows* '()) (set! *acc* 0.0) (set! *n* 0) (set! *s1* 0.0) (set! *s2* 0.0)
+  (let ((dt (/ 1.0 60.0)))
+    (sound-frame! 0.0 0.0 #f)
+    (sound-opening-start!)
+    (let loop ((t 0.0) (landed #f) (skipped #f))
+      (if (>= t until)
+          (list (sound-opening-state) landed)
+          (begin
+            (when (and skip-at (not skipped) (>= t skip-at)) (sound-opening-skip!))
+            (sound-frame! t dt #f)
+            (mixer-pump! t)
+            (loop (+ t dt)
+                  (or landed (and (eq? (sound-opening-state) 'world) t))
+                  (or skipped (and skip-at (>= t skip-at)))))))))
+
+(define (blocks-between lo hi . which)
+  (let ((v (list->vector (reverse (if (pair? which) (car which) *blocks*)))))
+    (let loop ((i (exact (floor (/ lo 0.05)))) (acc '()))
+      (if (or (>= i (vector-length v)) (>= (* i 0.05) hi)) acc (loop (+ i 1) (cons (vector-ref v i) acc))))))
+
+(define SKIPPED (opening-run 1.2 26.0))
+(define SKIP-QUIETEST (apply min (blocks-between 0.6 7.0)))
+(define (mean-db l) (let ((p (map (lambda (d) (expt 10.0 (/ d 10.0))) l))) (* 10.0 (/ (log (/ (apply + p) (length p))) (log 10.0)))))
+(define SKIP-LOW (mean-db (blocks-between 3.0 5.0 *lows*)))
+(define PLAYED (opening-run #f 26.0))
+(define PLAYED-QUIETEST (apply min (blocks-between 0.6 7.0)))
+(define PLAYED-LOW (mean-db (blocks-between 3.0 5.0 *lows*)))
+
+(test-group "a4 sound: 4, the opening"
+  (test "a skip at 1.2 s lands on the world mark within half a second"
+    (display "  skipped: world from ") (display (cadr SKIPPED)) (newline)
+    (assert-true (number? (cadr SKIPPED)))
+    (assert-true (<= 1.2 (cadr SKIPPED) 1.7)))
+  (test "the low note does not break across the skip (no 50 ms block under -40 dBFS, 0.6 s to 7 s)"
+    (display "  quietest block: ") (display SKIP-QUIETEST) (display " dBFS") (newline)
+    (assert-true (> SKIP-QUIETEST -40.0)))
+  (test "the fundamental holds across the skip: at D2, 3 s to 5 s, within 1.5 dB of the unskipped run"
+    (display "  D2 3-5 s: skipped ") (display SKIP-LOW) (display " dB, unskipped ") (display PLAYED-LOW) (newline)
+    (assert-true (< (abs (- SKIP-LOW PLAYED-LOW)) 1.5)))
+  (test "and the tune ends after a skip (not looping its world section)"
+    (assert-false (car SKIPPED)))
+  (test "unskipped: the card becomes the world after its 4 s"
+    (assert-true (<= 3.9 (cadr PLAYED) 4.5))
+    (assert-true (> PLAYED-QUIETEST -40.0)))
+  (test "and it ends"
+    (assert-false (car PLAYED))))
+
+;; The handoff: the world begins 6 s into the opening; the opening fades
+;; out over OPENING-HANDOFF-S while the Hollow's bed fades in over the same.
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+(sound-frame! 0.0 0.0 #f)
+(sound-opening-start!)
+(define HOLLOW (place key: 'start region: 'hollow bed-tune: "hollow-bed" groups: '(wind water hum drone)
+                      levels: '((wind . 0.4) (hum . 0.5)) tones: '() carry: '() px: 0.0 py: 0.0))
+(sound-hold! #t)
+(frames! 0.0 6.0 (/ 1.0 30.0) (lambda (t) HOLLOW) #t)
+(define HELD-BED (mixer-find BED-ID))
+(sound-hold! #f)
+(frames! 6.0 7.5 (/ 1.0 30.0) (lambda (t) HOLLOW) #t)
+(define HANDOFF-STATE (sound-opening-state))
+(define BED-FADE-MID (source-factor (mixer-find BED-ID) 'fade 7.5))
+(frames! 7.5 9.2 (/ 1.0 30.0) (lambda (t) HOLLOW) #t)
+(define AFTER-STATE (sound-opening-state))
+
+(test-group "a4 sound: 4, the handoff to the world"
+  (test "while held, the world has not begun: no bed"
+    (assert-false HELD-BED))
+  (test "released: the opening hands off"
+    (assert-equal 'handoff HANDOFF-STATE))
+  (test "the bed fades in over OPENING-HANDOFF-S (half way at 1.5 s)"
+    (display "  the bed's fade at 1.5 s: ") (display BED-FADE-MID) (newline)
+    (assert-true (< 0.4 BED-FADE-MID 0.6)))
+  (test "and the opening is gone once it has"
+    (assert-false AFTER-STATE)))
+
+;; --- 5. the save's flags --------------------------------------------------------------------
+(fresh!)
+(sound-restore-flags! '(("reedfen:9,3") ("seed-wind")))
+(define RESTORED (sound-flags))
+
+(test-group "a4 sound: 5, the save's flags"
+  (test "a fixed room and a wandering moment, restored, are spent"
+    (assert-equal 'spent (hush-fixed-decision (sound-hush) "reedfen:9,3"))
+    (assert-true (hush-wander-spent? (sound-hush) "seed-wind")))
+  (test "and read back the same"
+    (assert-equal '(("reedfen:9,3") ("seed-wind")) RESTORED))
+  (test "a malformed value leaves the hush as it was"
+    (sound-restore-flags! 'garbage)
+    (assert-equal '(("reedfen:9,3") ("seed-wind")) (sound-flags))))
