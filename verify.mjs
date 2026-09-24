@@ -46,7 +46,9 @@
 //              the world's start (reedfen:8,3)
 //   door       (A1) ?room=reedfen:10,4 boots into that room ("harkfell: room
 //              reedfen:10,4") with the body inside the room's slot; a room that
-//              does not exist answers "harkfell: no-room"
+//              does not exist answers "harkfell: no-room"; &at=4,7 stands the
+//              body in cell (4,7) of the Reed Bridge, and &at=4,9 (rock) is
+//              refused
 //   atlas      (A1) ?atlas shows every room at quarter scale ("harkfell: view
 //              atlas 308 94"); a click on the Drowned Channel's picture enters
 //              it ("harkfell: room reedfen:9,4") and play resumes
@@ -253,7 +255,15 @@ if (LEGS.includes("door")) {
   await open("trace&room=reedfen:40,40");
   await sleep(500);
   const none = lines.find((l) => l.startsWith("harkfell: no-room"));
-  (r === "harkfell: room reedfen:10,4" && inside && none === "harkfell: no-room reedfen:40,40" ? pass : fail)("door", `${r}; body at ${at.x},${at.y} inside the room's slot: ${inside}; ${none}`);
+  // &at: cell (4,7) of reedfen:9,3 (the second room across, the first down)
+  await open("trace&room=reedfen:9,3&at=4,7");
+  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door at");
+  const a2 = await where();
+  const inCell = Math.floor((a2.x + 4) / 16) === 25 + 4 && Math.floor((a2.y + 7) / 16) === 7;
+  await open("trace&room=reedfen:9,3&at=4,9");
+  await sleep(500);
+  const rock = lines.find((l) => l.startsWith("harkfell: no-room"));
+  (r === "harkfell: room reedfen:10,4" && inside && none === "harkfell: no-room reedfen:40,40" && inCell && rock === "harkfell: no-room reedfen:9,3@4,9" ? pass : fail)("door", `${r}; body at ${at.x},${at.y} inside the room's slot: ${inside}; ${none}; &at=4,7 body at ${a2.x},${a2.y} in cell (4,7): ${inCell}; &at=4,9 (rock): ${rock}`);
 }
 
 // A click at canvas pixel (cx, cy) as a real mouse event (the page maps it).

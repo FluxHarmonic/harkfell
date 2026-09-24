@@ -55,7 +55,8 @@
           (engine worldmap)
           (engine roomfile)
           (harkfell content)
-          (harkfell check))
+          (harkfell check)
+          (harkfell legend))
 
   (export shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
@@ -150,10 +151,20 @@
       (cell-body (worldmap-tiles (content-map *content*)) HARKFELL-FEEL (car cell) (cdr cell)))
 
     ;; Into the room at "region:x,y" (at its door cell); #f if there is none.
-    (define (shell-goto! key)
+    ;; at: optionally (c . r), a cell of that room to stand in instead of its
+    ;; door (?room=...&at=C,R, --at C,R: any entrance, for testing). A cell in
+    ;; rock or a hazard, or outside the grid, is refused (#f).
+    (define (shell-goto! key . at)
       (let* ((k (and *content* (parse-room-key key)))
              (rm (and k (content-room *content* (cadr k) (caddr k))))
-             (cell (and rm (eq? (room-region rm) (car k)) (room-start-cell *content* rm))))
+             (at (and (pair? at) (car at)))
+             (cell (and rm (eq? (room-region rm) (car k))
+                        (if at
+                            (and (< -1 (car at) ROOM-COLS) (< -1 (cdr at) ROOM-ROWS)
+                                 (let ((ch (room-char rm (car at) (cdr at))))
+                                   (not (memq (char-kind ch) (list 'solid 'climbable 'ledge 'hazard))))
+                                 (local->global *content* rm (car at) (cdr at)))
+                            (room-start-cell *content* rm)))))
         (and cell
              (begin
                (set! *world* (world-at (content-map *content*) (body-in-cell cell)))

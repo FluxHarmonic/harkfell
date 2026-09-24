@@ -15,6 +15,14 @@ These are the six rules proposed in the design (section 8). None is ruled yet; e
 5. Every hazard is visible before it can touch you.
 6. A new traversal idea is introduced in a room where failing costs nothing.
 
+**Grid characters mean physics roles, not looks** (David agreed, 2026-09-24; D-number to come). The alphabet stays small and shared by every region, and each region draws a character its own way:
+- `|` is back-layer scenery the body walks through: Reedfen draws reeds, Glasswood will draw birch trunks, the Pipes hanging stone.
+- `#`, `%`, `=`, `~`, `x`, `^` and `+` work the same way: the region's tiles decide how each looks.
+- Anything that behaves differently (falling icicles, moths, a stone that opens) goes in the room's `things:` with a position, as the ring-stone does, not in a new character.
+- A region adds a character only for something with physics of its own: expect one or two per region at most.
+
+**Drop-through** (down and jump on a `=`) is wanted, but waits for the first room that needs a descent through ledges (David, 2026-09-24).
+
 And the rules the gates enforce, so nobody has to remember them:
 
 - **Every standable cell is reachable from the world's start, and the start is reachable from it.** The reach checker proves both with the game's own physics (`scripts/room-check`). A cell you mean to leave out of reach (a ledge seen and never stood on) is declared in the room's `unreached:` list, and the checker then insists it really is unreached.
@@ -26,7 +34,7 @@ And the rules the gates enforce, so nobody has to remember them:
 ## Authoring notes (what the checker taught while writing Reedfen's first six)
 
 - The envelope, in tiles: a held jump rises 3.25 tiles; a gap of 2 is easy from standing, 3 needs a run and a take-off at the lip, 4 never. A ledge of 3 is reached with a held jump, 4 never.
-- **A ceiling over a take-off tile kills the jump.** A tile directly above a standing cell leaves 2 px of headroom: no jump from there at all. Keep the last tile before a gap open above.
+- **A ceiling over a take-off tile kills a standing jump.** A tile directly above a standing cell leaves 2 px of headroom, so a jump from rest there rises 2 px. A running jump pressed at the lip still clears it: on the take-off tick the body moves out from under a one-tile ceiling before it rises (the checker's `--path` shows it). To close a gap with a ceiling, the ceiling must cover the lip and the gap's first column too.
 - A jump needs about 4.2 tiles of headroom (3.25 up plus the body). Under two rows of sky, a jump is cut at once.
 - Rough rock (`%`) is held and climbed; smooth rock (`#`) is not. A single smooth wall cannot be climbed by kicking off it. Two smooth walls two tiles apart make a chimney, climbed by kicking between them. Four tiles apart they do not.
 - A rough column reaching the floor blocks a walk along that floor; stop it a few rows up and the body jumps to grab it.

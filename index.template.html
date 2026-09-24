@@ -82,6 +82,8 @@
   //   ?trace               the harkfell: console lines.
   //   ?replay, ?envelope   print the replay trace / the envelope (the gates).
   //   ?room=REGION:X,Y     start in that room, at its door (A1).
+  //   &at=C,R              ... standing in cell (C, R) of it instead (testing
+  //                        an entrance: column, row from the top-left, 0-based).
   //   ?atlas               every room at quarter scale on the world grid; a
   //                        tap enters the room under it.
   //   ?sheet=REGION        the region's rooms at full scale in one picture (the
@@ -150,7 +152,7 @@
       if (files.length) send("world-done", "");
       if (params.has("test-room")) send("test-room", "");
       var room = params.get("room");
-      if (room) send("goto", room);
+      if (room) send("goto", params.get("at") ? room + "@" + params.get("at") : room);
       if (params.has("atlas")) setView("atlas");
       else if (params.get("sheet")) setView("sheet:" + params.get("sheet"));
       if (params.has("still")) send("still", "on");

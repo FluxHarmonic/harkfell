@@ -10,6 +10,7 @@
 ;;;                             to jump, R back to the room's entry, Escape to
 ;;;                             quit)
 ;;;   harkfell --room REGION:X,Y   play from that room's door
+;;;   harkfell --room REGION:X,Y --at C,R   ... standing in cell (C, R) of it
 ;;;   harkfell --world DIR      another world directory (a fixture's)
 ;;;   harkfell --test-room      A0's grey test room
 ;;;   harkfell --ms             with the frame readout
@@ -38,6 +39,7 @@
 (define-library (harkfell shell native)
   (import (sigil io)
           (sigil list)
+          (sigil string)
           (sigil fs)
           (sigil process)
           (sigil desktop)
@@ -149,8 +151,14 @@
                   (key (arg-value args "--room")))
               (for-each (lambda (p) (say "harkfell: " p)) ps)
               (set! *mtimes* (source-mtimes dir))
-              (cond ((and key (shell-goto! key)) (say "harkfell: room " key) #t)
-                    (key (say "harkfell: no room " key) #f)
+              (cond ((and key (let* ((a (arg-value args "--at"))
+                                     (cr (and a (map string->number (string-split a ","))))
+                                     (at (and cr (= (length cr) 2) (car cr) (cadr cr) (cons (car cr) (cadr cr)))))
+                                (cond ((and a (not at)) #f)
+                                      (at (shell-goto! key at))
+                                      (else (shell-goto! key)))))
+                     (say "harkfell: room " key) #t)
+                    (key (say "harkfell: no room " key (if (arg-value args "--at") (string-append " or no open cell " (arg-value args "--at")) "")) #f)
                     ((shell-goto-start!) (say "harkfell: start " (shell-room-label)) #t)
                     (else (say "harkfell: the world has no start to enter") #f))))))
 

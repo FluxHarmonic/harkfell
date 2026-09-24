@@ -26,7 +26,8 @@
 ;;;                          at build time (A1)
 ;;;   ("world-done", "")     every file handed over: load the world and enter
 ;;;                          its start (answers 1 if it loaded clean)
-;;;   ("goto", "REGION:X,Y") ?room=: enter that room at its door (1 if it exists)
+;;;   ("goto", "REGION:X,Y[@C,R]") ?room= (and &at=C,R): enter that room at its
+;;;                          door, or standing in cell (C, R) (1 if it can)
 ;;;   ("view", "atlas"|"sheet:REGION"|"play")  ?atlas, ?sheet=
 ;;;   ("still", "on")        ?still: no ticks (a screenshot's room holds still)
 ;;;   ("tap", "X,Y")         a click or tap in canvas pixels (the atlas and the
@@ -202,7 +203,13 @@
                (shell-goto-start!)
                (if (null? ps) 1 0)))
             ((string=? type "goto")
-             (if (shell-goto! payload)
+             (if (let* ((parts (string-split payload "@"))
+                        (at (and (= (length parts) 2)
+                                 (let ((cr (map string->number (string-split (cadr parts) ","))))
+                                   (and (= (length cr) 2) (car cr) (cadr cr) (cons (car cr) (cadr cr)))))))
+                   (if (and (= (length parts) 2) (not at))
+                       #f
+                       (if at (shell-goto! (car parts) at) (shell-goto! (car parts)))))
                  (begin (set! *room* (shell-room-label)) (say "room" *room*) 1)
                  (begin (say "no-room" payload) 0)))
             ((string=? type "view")
