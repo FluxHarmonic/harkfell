@@ -105,8 +105,9 @@
     ;; dawn   the Hollow fades in: the world is released, the bed opens, and the
     ;;        opening hands over to it over OPENING-HANDOFF-S (3 s, the dawn's length)
     ;; A door into a room skips the frame, so none of this happens there.
+    ;; Not while the bench measures: the opening would play into its figures.
     (define (frame-event! ev)
-      (case ev
+      (case (if (or (bench-running?) (bench-done?)) #f ev)
         ((card) (sound-hold! #t) (sound-opening-start!))
         ((hold) (sound-opening-skip!))
         ((dawn play) (sound-hold! #f))
