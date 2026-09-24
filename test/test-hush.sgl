@@ -1,0 +1,84 @@
+;;; The hush and the first-visit flags (harkfell-design section 10, A2's
+;;; gates 1 to 3), on (harkfell hush) alone. Each gate has a named sabotage
+;;; in scripts/gate-sound that must turn it red:
+;;;   gate 1  the moment plays once on the first visit the hush allows and
+;;;           not on the next          sabotage: skip the first-visit flag
+;;;   gate 2  a fixed moment blocked by the hush stays armed and plays on
+;;;           the following visit
+;;;   gate 3  the hush blocks a wandering moment on EACH of its two
+;;;           conditions separately and allows it once both are met
+;;;                                    sabotage: drop the rooms-entered half
+;;; Every "blocked" below is paired with an "allowed" at the edge, so an
+;;; answer that is always the same cannot pass.
+
+(import (sigil test)
+        (sigil list)
+        (harkfell hush))
+
+;; Play for secs, entering no room.
+(define (wait h secs) (hush-tick h secs))
+
+;; Enter n rooms (distinct keys that are never fixed-moment rooms).
+(define (walk h n)
+  (let loop ((h h) (i 0))
+    (if (= i n) h (loop (hush-enter h (list 'corridor i)) (+ i 1)))))
+
+;; A moment played through: started in `key` (#f: wandering), `secs` long.
+(define (play h name key secs)
+  (hush-ended (wait (hush-started h name key) secs)))
+
+(define B '(reedfen 9 3))
+(define C '(reedfen 10 3))
+
+(test-group "hush: gate 1, first visit"
+  (test "the first visit plays (nothing has played yet, even a minute in)"
+    (let ((h (hush-enter (wait (hush-new) 60.0) B)))
+      (assert-equal 'play (hush-fixed-decision h B))))
+  (test "the next visit, long after the hush has passed, does not"
+    (let* ((h (hush-enter (hush-new) B))
+           (h (play h 'first-open-water B 25.0))
+           (h (walk (wait h 600.0) 10))       ; ten minutes and ten rooms: every hush is over
+           (h (hush-enter h B)))
+      (assert-equal 'spent (hush-fixed-decision h B))
+      ;; the control: a different fixed room at the same moment would play
+      (assert-equal 'play (hush-fixed-decision h C)))))
+
+(test-group "hush: gate 2, blocked stays armed"
+  (test "a fixed moment inside the 90 s after another is blocked, not spent"
+    (let* ((h (play (hush-enter (hush-new) B) 'first-open-water B 25.0))
+           (h (hush-enter (wait h 30.0) C)))
+      (assert-equal 'blocked (hush-fixed-decision h C))
+      (assert-false (member C (hush-spent h)))))
+  (test "and plays on the following visit once the hush allows"
+    (let* ((h (play (hush-enter (hush-new) B) 'first-open-water B 25.0))
+           (h (hush-enter (wait h 30.0) C))       ; blocked, as above
+           (h (hush-enter (wait h 70.0) C)))      ; 100 s after the end
+      (assert-equal 'play (hush-fixed-decision h C))))
+  (test "the edge: 89 s after the end is blocked, 90 s plays"
+    (let* ((h (play (hush-new) 'm B 20.0)))
+      (assert-equal 'blocked (hush-fixed-decision (wait h 89.0) C))
+      (assert-equal 'play (hush-fixed-decision (wait h 90.0) C))))
+  (test "no fixed moment starts while one plays"
+    (let ((h (hush-started (hush-new) 'm B)))
+      (assert-equal 'blocked (hush-fixed-decision (wait h 500.0) C)))))
+
+(test-group "hush: gate 3, a wandering moment needs BOTH conditions"
+  (test "4 minutes played but only 5 rooms entered: blocked"
+    (let ((h (walk (wait (play (hush-new) 'm B 20.0) 240.0) 5)))
+      (assert-false (hush-wander-ok? h))
+      (assert-equal 'rooms (hush-why-wander h))))
+  (test "6 rooms entered but under 4 minutes: blocked"
+    (let ((h (walk (wait (play (hush-new) 'm B 20.0) 239.0) 6)))
+      (assert-false (hush-wander-ok? h))
+      (assert-equal 'time (hush-why-wander h))))
+  (test "both met: allowed"
+    (let ((h (walk (wait (play (hush-new) 'm B 20.0) 240.0) 6)))
+      (assert-true (hush-wander-ok? h))))
+  (test "the window counts from the END of the last moment, not its start"
+    (let* ((h (hush-started (hush-new) 'm #f))
+           (h (walk (wait h 300.0) 8))            ; all of it while the moment plays
+           (h (hush-ended h)))
+      (assert-equal 'time+rooms (hush-why-wander h))))
+  (test "the start of play counts as an end for wandering moments"
+    (assert-false (hush-wander-ok? (walk (wait (hush-new) 239.0) 6)))
+    (assert-true (hush-wander-ok? (walk (wait (hush-new) 240.0) 6)))))

@@ -1,0 +1,101 @@
+;;; (harkfell hush) - How rare the music moments are: the hush timer and the
+;;; first-visit flags (harkfell-design section 5, "The hush: how rare").
+;;;
+;;; Pure: a HUSH value and functions that answer a new one. The director
+;;; ((harkfell sound)) asks it what to do on a room entry and every frame,
+;;; and tells it when a moment starts and when it ends.
+;;;
+;;; The rules, as the design gives them:
+;;;   - after any moment ends, no WANDERING moment for at least WANDER-S
+;;;     seconds of play AND WANDER-ROOMS rooms entered (both, each counted
+;;;     from that end);
+;;;   - FIXED moments wait at least FIXED-S seconds after the last one ends;
+;;;     a fixed moment blocked by the hush stays armed for the next visit
+;;;     instead of firing late, and is spent only when it plays
+;;;     ("first-visit" means the first visit the hush allows);
+;;;   - no moment starts while another is playing.
+;;; Two choices of mine the design leaves open, stated so they can be argued:
+;;;   - the start of play counts as an end for WANDERING moments (none in the
+;;;     first four minutes and six rooms) but not for fixed ones, so the
+;;;     first fixed moment you walk into plays even a minute into the game;
+;;;   - the flags last for the session: A2 has no save (A4's), so a reload
+;;;     arms every fixed moment again.
+;;;
+;;;   (hush-new)
+;;;   (hush-tick h dt)                    dt seconds of play
+;;;   (hush-enter h key)                  a room entered (key: any equal?-comparable room name)
+;;;   (hush-fixed-decision h key)         for a room with a fixed moment: 'play | 'blocked | 'spent
+;;;   (hush-wander-ok? h)                 may a wandering moment start now?
+;;;   (hush-started h name key)           a moment started (key: its room for a fixed one, #f for wandering)
+;;;   (hush-ended h)                      the playing moment ended (heard, or faded out)
+;;;   (hush-playing h) (hush-played h) (hush-rooms h) (hush-spent h)
+;;;   (hush-why-wander h)                 'ok | 'playing | 'time | 'rooms | 'time+rooms (for the readout)
+
+(define-library (harkfell hush)
+  (import (sigil core)
+          (sigil struct)
+          (sigil list))
+
+  (export hush-new hush-tick hush-enter hush-fixed-decision hush-wander-ok? hush-why-wander
+          hush-started hush-ended
+          hush? hush-playing hush-played hush-rooms hush-spent hush-last-end
+          WANDER-S WANDER-ROOMS FIXED-S)
+
+  (begin
+    (define WANDER-S 240.0)
+    (define WANDER-ROOMS 6)
+    (define FIXED-S 90.0)
+
+    ;; played: seconds of play. rooms: rooms entered. last-end: (played .
+    ;; rooms) when the last moment ended, #f before any has. playing: the
+    ;; moment's name, or #f. playing-key: its room when fixed. spent: the
+    ;; room keys whose fixed moment has played.
+    (define-struct hush
+      (played default: 0.0)
+      (rooms default: 0)
+      (last-end default: #f)
+      (playing default: #f)
+      (playing-key default: #f)
+      (spent default: '()))
+
+    (define (hush-new) (hush))
+
+    (define (hush-tick h dt) (hush h played: (+ (hush-played h) dt)))
+
+    (define (hush-enter h key) (hush h rooms: (+ (hush-rooms h) 1)))
+
+    (define (hush-fixed-decision h key)
+      (cond ((member key (hush-spent h)) 'spent)
+            ((hush-playing h) 'blocked)
+            ((and (hush-last-end h)
+                  (< (- (hush-played h) (car (hush-last-end h))) FIXED-S))
+             'blocked)
+            (else 'play)))
+
+    ;; The wandering window counts from the last end, or from the start of play.
+    (define (since-end h)
+      (let ((e (or (hush-last-end h) (cons 0.0 0))))
+        (cons (- (hush-played h) (car e)) (- (hush-rooms h) (cdr e)))))
+
+    (define (hush-why-wander h)
+      (if (hush-playing h)
+          'playing
+          (let* ((s (since-end h))
+                 (time-short (< (car s) WANDER-S))
+                 (rooms-short (< (cdr s) WANDER-ROOMS)))
+            (cond ((and time-short rooms-short) 'time+rooms)
+                  (time-short 'time)
+                  (rooms-short 'rooms)
+                  (else 'ok)))))
+
+    (define (hush-wander-ok? h) (eq? (hush-why-wander h) 'ok))
+
+    (define (hush-started h name key)
+      (hush h playing: name playing-key: key
+            spent: (if (and key (not (member key (hush-spent h))))
+                       (cons key (hush-spent h))
+                       (hush-spent h))))
+
+    (define (hush-ended h)
+      (hush h playing: #f playing-key: #f
+            last-end: (cons (hush-played h) (hush-rooms h))))))
