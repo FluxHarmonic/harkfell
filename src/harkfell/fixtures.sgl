@@ -48,6 +48,8 @@
 ;;;    Sabotage: the search ignoring the changed cells reuses what the stone
 ;;;    touched, and the edges differ.
 ;;;
+;;; --reuse-only runs the reuse check alone (its sabotage leg's quick form).
+;;;
 ;;; --explore also prints, per fixture, what the search accepts with the
 ;;; replay switched off: a diagnostic for choosing fixtures, never a gate.
 ;;;
@@ -270,8 +272,14 @@
       (let* ((m (member "--fixtures" args))
              (dir (if (and m (pair? (cdr m))) (cadr m) "test/fixtures/reach"))
              (explore? (and (member "--explore" args) #t)))
-        (if (not (directory? dir))
-            (begin (say "SETUP-FAILED reach-fixtures: no " dir) 2)
+        (cond
+          ((member "--reuse-only" args)
+           (if (car (run-reuse))
+               (begin (say "PASS reach-fixtures --reuse-only") 0)
+               (begin (say "FAIL reach-fixtures --reuse-only") 1)))
+          ((not (directory? dir))
+            (begin (say "SETUP-FAILED reach-fixtures: no " dir) 2))
+          (else
             (let* ((files (list-sort string<? (filter (lambda (n) (ends-with? n ".fixture")) (directory-list dir))))
                    (reads (map (lambda (n) (read-fixture (string-append dir "/" n))) files))
                    (bad (apply append (map cdr reads))))
@@ -287,4 +295,4 @@
                            (begin (say "PASS reach-fixtures: " (number->string (length results)) " checks") 0)
                            (begin (say "FAIL reach-fixtures: " (number->string fails) " of "
                                        (number->string (length results)))
-                                  1)))))))))))
+                                  1))))))))))))
