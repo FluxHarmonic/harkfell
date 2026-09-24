@@ -63,7 +63,7 @@
     (define (audio-carry! s) (shell-set-carry! (numbers s)) (sound-set-carry! (numbers s)))
 
     ;; ?sound=a,b / --sound a,b (A4): the sound's listening doors.
-    ;;   border:cross | border:through   the region-border fallback (default through)
+    ;;   border:cross | border:through   the region-border mode (default cross: measured on David's phone)
     ;;   bench:a4       the slice's phone measurement ((harkfell bench), A4's phases)
     ;;   moment:NAME    the moment NAME plays over the bed MOMENT-DOOR-S after the
     ;;                  bed has opened and the tune's text is in, whatever the hush

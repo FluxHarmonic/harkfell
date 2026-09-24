@@ -105,8 +105,8 @@
     (set! ROOMS-BEFORE (hush-rooms (sound-hush)))
     (sound-set-carry! '(2)))
   REED-BRIDGE)
-;; A4: the border mode is 'through, so the two beds overlap only in the last
-;; THROUGH-OVERLAP-S of the old one's THROUGH-OUT-S fade: 6.7 s to 7.0 s here.
+;; A4: 6.85 s is inside the overlap in either border mode ('cross, the default:
+;; 6.0 s to 10.0 s; 'through: 6.7 s to 7.0 s).
 (run carry-plan 6.85)
 (define BEDS (filter (lambda (s) (let ((id (source-id s))) (and (>= (string-length id) 3) (string=? (substring id 0 3) "bed"))))
                      (mixer-sources)))

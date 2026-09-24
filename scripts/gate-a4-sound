@@ -45,6 +45,7 @@
 #   opening-clock     the opening's text wait timed from a clock no frame has set
 #   steps-unlocked    a step on every change of the run cycle's frame
 #   moment-loud       movement at full level during a moment
+#   default-through   the border's default back to 'through (the phone ruled 'cross)
 # UNDER THE WORLD: every movement cue, in play (its loudest 400 ms times its
 # gain in (harkfell sound)'s SPOTS), is quieter than the quietest bed
 # (-33 LUFS), and a step quieter than -40. A cue that names no gain fails.
@@ -198,7 +199,7 @@ plant() {
 A4T=test/test-a4-sound.sgl
 green_all() {
   tunes
-  green "$A4T" 53
+  green "$A4T" 54
   green test/test-a4-web-opening.sgl 3
   under_world
   green test/test-tunes.sgl 5
@@ -243,6 +244,7 @@ passes "$A4T" "and plays after it, once the hush allows and you stand still"
 passes test/test-a4-web-opening.sgl "a second without it: still waiting"
 passes "$A4T" "running on the fen: a step where each foot comes down"
 passes "$A4T" "during a moment the movement is quieter"
+passes "$A4T" "the default is the 4 s crossfade"
 
 plant wander-no-hush "$S" \
   "      (when (hush-wander-ok? *hush*)
@@ -323,5 +325,10 @@ plant moment-loud "$S" \
   "    (define MOVE-IN-MOMENT 1.0)" \
   "$A4T" "during a moment the movement is quieter"
 
-if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all eighteen RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+plant default-through "$S" \
+  "    (define BORDER-DEFAULT 'cross)" \
+  "    (define BORDER-DEFAULT 'through)" \
+  "$A4T" "the default is the 4 s crossfade"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all nineteen RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
 exit $FAIL

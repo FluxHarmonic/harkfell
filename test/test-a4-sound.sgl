@@ -24,6 +24,8 @@
         (only (harkfell audio) frame-event! save-extras restore-extras!))
 
 (define RATE 32000)
+;; before any group sets a mode
+(define START-MODE (sound-border-mode))
 (define SAID '())
 (define (say . parts) (set! SAID (cons parts SAID)))
 (define (said? . parts) (and (member parts SAID) #t))
@@ -184,7 +186,7 @@
     (let loop ((t 0.0) (both 0.0) (max-live 0) (first-new #f) (low 1.0))
       (if (>= t 9.0)
           (let ((r (list both max-live first-new (length (filter (lambda (s) (source-live? s)) (mixer-sources))) low)))
-            (sound-set-border-mode! 'through)
+            (sound-set-border-mode! BORDER-DEFAULT)
             r)
           (begin
             (sound-frame! t dt (if (< t 3.0) fen-room hollow-room))
@@ -206,6 +208,8 @@
 (define CROSS (border-run 'cross))
 
 (test-group "a4 sound: 3, the border fallback"
+  (test "the default is the 4 s crossfade (David's phone, 2026-09-25: no hitches, worst pump 12 ms against 19)"
+    (assert-equal 'cross START-MODE))
   (test "'through: two beds pull together for at most the overlap (and a frame)"
     (display "  through: two beds for ") (display (car THROUGH)) (display " s, the new bed live from ") (display (caddr THROUGH)) (newline)
     (assert-true (<= (car THROUGH) (+ THROUGH-OVERLAP-S (/ 1.0 15.0)))))
@@ -382,7 +386,7 @@
         (dt (/ 1.0 30.0)))
     (let loop ((t 0.0) (next-w 0.1) (max-live 0))
       (if (>= t until)
-          (begin (sound-set-border-mode! 'through)
+          (begin (sound-set-border-mode! BORDER-DEFAULT)
                  (list (list->vector (reverse *bw*)) max-live))
           (let* ((n-cross (length (filter (lambda (c) (>= t c)) crossings)))
                  (pl (if (even? n-cross) fen-room hollow-room)))

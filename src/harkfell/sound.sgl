@@ -73,7 +73,7 @@
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
           place-moves place-mode place-vx place-bx place-foot sound-moved spot-gain
-          THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S
+          THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S BORDER-DEFAULT
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
           DRONE-CHANNELS DEFAULT-LEVELS BED-ID MOMENT-ID TONE-ID)
@@ -230,20 +230,30 @@
     ;; --- A4: the border, and what a save keeps ---------------------------------------
     ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
     ;; moment for BORDER-S) at 5.2 ms a frame on David's phone, over the 4 ms
-    ;; budget. 'through (the default): the old bed fades to THROUGH-MID
+    ;; budget. 'through: the old bed fades to THROUGH-MID
     ;; (-3 dB) while it plays alone, then the new one starts and the two cross
     ;; over THROUGH-OVERLAP-S (the old to nothing, the new to THROUGH-MID),
     ;; and the new one comes up to full over the rest of THROUGH-IN-S. Two beds
     ;; pull together for THROUGH-OVERLAP-S instead of BORDER-S, and the bed
     ;; dips about 6 dB for that moment rather than to silence. 'cross: A2's
-    ;; four-second crossfade (?sound=border:cross, to compare by ear). Both
-    ;; a region border and a change of what is carried reopen the bed, so
-    ;; both take the mode.
+    ;; four-second crossfade. Both a region border and a change of what is
+    ;; carried reopen the bed, so both take the mode.
+    ;;
+    ;; THE DEFAULT IS 'cross, by measurement (the leader's and David's ruling,
+    ;; 2026-09-25). On David's phone (Android 10, 32000 Hz, ?bench with
+    ;; sound=bench:a4, a border every 5 s with a moment playing, the slice's
+    ;; beds carrying H2): 'cross ran with no dry frames, no frame over 33 ms and
+    ;; a worst pump of 12 ms; 'through with no dry frames but 3 frames over
+    ;; 33 ms and a worst pump of 19 ms. The slice's beds are light enough for
+    ;; the crossfade, and it sounds better (no dip). 'through stays for heavier
+    ;; late-game beds (A2's two full 8-voice beds: 5.2 ms a frame), selectable
+    ;; with (sound-set-border-mode! 'through) or ?sound=border:through.
     (define THROUGH-OUT-S 1.0)
     (define THROUGH-IN-S 2.0)
     (define THROUGH-OVERLAP-S 0.3)
     (define THROUGH-MID 0.7)       ; -3 dB: where the two beds cross
-    (define *border-mode* 'through)
+    (define BORDER-DEFAULT 'cross)
+    (define *border-mode* BORDER-DEFAULT)
     (define (sound-set-border-mode! m) (when (memq m '(through cross)) (set! *border-mode* m)))
 
     ;; A listening door (?sound=moment:NAME): the moment starts now over the

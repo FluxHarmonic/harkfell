@@ -50,7 +50,7 @@
           (motif tune player)
           (engine mixer)
           (harkfell tunes)
-          (only (harkfell sound) strip-uncarried place sound-frame! sound-reset! sound-set-border-mode! sound-set-carry!))
+          (only (harkfell sound) strip-uncarried place sound-frame! sound-reset! sound-set-border-mode! sound-set-carry! BORDER-DEFAULT))
 
   (export bench-start! bench-frame! bench-running? bench-done? bench-set-phases!)
 
@@ -264,7 +264,7 @@
       (for-each (lambda (e) (player-close! (cdr e))) *players*)
       (set! *players* '())
       (sound-reset!)
-      (sound-set-border-mode! 'through))
+      (sound-set-border-mode! BORDER-DEFAULT))
 
     (define A4-STEPS
       (list (cons 0.0 (lambda () (mixer-stats-reset!) (start-bed-carrying! "hollow" A4-HOLLOW '(2))))
