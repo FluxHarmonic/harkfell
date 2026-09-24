@@ -1,0 +1,27 @@
+(tune version: 1 name: "opening" tempo: 120 speed: 3 channels: 6 meter: (2 2)
+  (bus reverb: zitarev size: 0.85 damp: 0.5 mix: 0.25)
+  (instruments
+    (instrument id: 1 name: "the fundamental" patch: (drone-saw level: 0.3 bright: 14 detune: 3 excite: 0.5 excite-freq: 350 excite-drive: 4 breath-lo: 1 attack: 0.35 release: 6 seed: 1) volume: 30 gain: 2 send: 0.4)
+    (instrument id: 2 name: "H2 D3" patch: (drone-saw level: 0.3 bright: 14 excite: 0.5 excite-freq: 500 breath-lo: 1 attack: 0.45 release: 0.9 seed: 2) volume: 30 gain: 2 send: 0.4)
+    (instrument id: 3 name: "H3 A3" patch: (drone-saw level: 0.3 bright: 12 excite: 0.4 excite-freq: 600 cents: 1.955 breath-lo: 1 attack: 0.45 release: 0.9 seed: 3) volume: 28 gain: 2 send: 0.4)
+    (instrument id: 4 name: "H4 D4" patch: (drone-saw level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 breath-lo: 1 attack: 0.45 release: 0.9 seed: 4) volume: 14 gain: 2 send: 0.4)
+    (instrument id: 5 name: "H5 F#4" patch: (drone-saw level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 cents: -13.686 breath-lo: 1 attack: 0.45 release: 0.9 seed: 5) volume: 16 gain: 2 send: 0.4)
+    (instrument id: 6 name: "the wind rising" patch: (noise-bed color: pink level: 1.0 centre: 520 width: 1.3 wander: 0.35 rate: 0.05 gust: 0.4 gust-rate: 0.08 hp: 240 lp: 2600 excite: 0.15 excite-freq: 1800 attack: 3.5 release: 3 seed: 41) volume: 36 gain: 2 send: 0.2))
+  (patterns
+    (pattern id: 0 rows: 64
+      (row 0 (1 "D-2" 1 30 "000"))
+      (row 8 (2 "D-3" 2 30 "000"))
+      (row 16 (3 "A-3" 3 28 "000"))
+      (row 24 (4 "D-4" 4 14 "000"))
+      (row 32 (5 "F#4" 5 16 "000"))
+      (row 44 (5 "===" 0 0 "000"))
+      (row 46 (4 "===" 0 0 "000"))
+      (row 48 (3 "===" 0 0 "000"))
+      (row 50 (2 "===" 0 0 "000")))
+    (pattern id: 1 rows: 256
+      (row 0 (2 "===" 0 0 "000") (3 "===" 0 0 "000") (4 "===" 0 0 "000") (5 "===" 0 0 "000") (6 "D-4" 6 36 "000"))
+      (row 56 (1 "===" 0 0 "000"))
+      (row 252 (6 "===" 0 0 "000"))))
+  (order 0 1)
+  (marks calm: 0 world: 1)
+  (history ("claude" "2026-09-24" "A4: the Flux Harmonic card (D33) and the opening (D15) as one tune. calm: the fundamental, D2, and its overtones 2, 3, 4 and 5 blooming in one by one and fading back, 4 s. world: the fundamental holds over black while the wind rises, then fades out. A skip jumps to world at the next bar (a quarter second), so the low note never breaks.")))
