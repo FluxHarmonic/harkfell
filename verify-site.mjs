@@ -20,6 +20,11 @@
 //             fallback), every image decoded, the Play link resolving to
 //             /play/, the licence and source links, NOT cross-origin
 //             isolated; every request 2xx
+//   carousel  the hero changes picture by itself, a click on a dot shows that
+//             picture, one shows at a time, and under prefers-reduced-motion
+//             nothing changes by itself
+//   contrast  the Play button's text against its background, plain and with
+//             :hover, :focus-visible and :active forced: at least 4.5:1
 //   play      a click on Play: /play/ loads, IS cross-origin isolated, the
 //             wasm comes from /play/w/<sha16>/harkfell.wasm as application/
 //             wasm, the game says "harkfell: world N files, 0 problems", the
@@ -52,6 +57,13 @@ const CDP = parseInt(opt("--cdp", "9807"), 10);
 const SHOT_DIR = opt("--shot-dir", null);
 const CAP = 26214400;
 const sha256 = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
+// Any crash is exit 2 with its stack, from the first line on: an uncaught
+// throw exits 1 by default, which reads as a verdict (a sabotage leg once
+// scored a crash on a missing 404.html as "red"). Replaced by shutdown()
+// once Chrome is up.
+let bail = (code) => process.exit(code);
+process.on("uncaughtException", (err) => { console.log("EXCEPTION: " + (err && err.stack || err)); bail(2); });
+process.on("unhandledRejection", (err) => { console.log("EXCEPTION: " + (err && err.stack || err)); bail(2); });
 
 // Whatever happens next, an old stamp must not outlive this run.
 fs.rmSync(VERIFIED, { force: true });
@@ -106,7 +118,7 @@ let SHA16 = null;
   if (/^\/\*/m.test(h)) detail.push("_headers has a /* rule (the landing would be isolated too)");
   if (!fs.existsSync(path.join(DIR, "fonts/OFL.txt"))) detail.push("fonts/OFL.txt missing (IM Fell ships with its licence)");
   if (!fs.existsSync(path.join(DIR, "404.html"))) detail.push("404.html missing (Pages would answer a missing path with the landing, 200)");
-  for (const f of ["index.html", "404.html"]) {
+  for (const f of ["index.html", "404.html"].filter((f) => fs.existsSync(path.join(DIR, f)))) {
     const visible = text(f).replace(/<(script|style)[\s\S]*?<\/\1>/g, "").replace(/<[^>]+>/g, " ");
     if (/—|&mdash;|&#8212;/.test(visible) || /—/.test(text(f))) detail.push(`${f} has an em dash`);
   }
@@ -141,8 +153,7 @@ function shutdown(code) {
 process.on("exit", () => { killChromeGroup("SIGKILL"); try { fs.rmSync(udd, { recursive: true, force: true }); } catch { /* scratch */ } });
 process.on("SIGINT", () => shutdown(130));
 process.on("SIGTERM", () => shutdown(143));
-process.on("uncaughtException", (err) => { console.log("EXCEPTION: " + (err && err.stack || err)); shutdown(2); });
-process.on("unhandledRejection", (err) => { console.log("EXCEPTION: " + (err && err.stack || err)); shutdown(2); });
+bail = shutdown;
 // the whole run is bounded; a hang says what it had and exits 2
 setTimeout(() => { console.log(`TIMED-OUT: after 180 s; results so far: ${results.join(", ") || "none"}; ${requests.length} requests served`); shutdown(2); }, 180000).unref();
 
@@ -225,7 +236,7 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
     if (!facts.faces.includes(want)) detail.push(`font ${want.split("/").slice(0, 2).join(" ")} not loaded (${facts.faces.join(", ")})`);
   }
   const badImgs = facts.imgs.filter((i) => !i[1]);
-  if (facts.imgs.length < 4) detail.push(`${facts.imgs.length} images (want the three shots and the mark)`);
+  if (facts.imgs.length < 6) detail.push(`${facts.imgs.length} images (want the carousel's five and the mark)`);
   if (badImgs.length) detail.push(`images not decoded: ${badImgs.map((i) => i[0]).join(", ")}`);
   if (facts.play !== `${origin}/play/`) detail.push(`the Play link resolves to ${facts.play}`);
   for (const want of ["https://github.com/FluxHarmonic/harkfell", "https://creativecommons.org/licenses/by/4.0/", `${origin}/fonts/OFL.txt`]) {
@@ -239,6 +250,75 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
   await shot("landing.png");
   if (detail.length) fail("landing", detail.join("; "));
   else pass("landing", `title and h1 Harkfell; ${facts.faces.length} faces loaded (IM Fell roman, italic, SC); ${facts.imgs.length} images decoded (${facts.imgs.map((i) => i[2]).join(" ")}); Play -> /play/; source and licence links; not isolated; ${netSince(mark).length} requests, all 2xx`);
+}
+
+// ---- carousel -------------------------------------------------------------------
+// The hero crossfades by itself, a dot picks a picture, one picture shows at
+// a time, and a reader who asked for reduced motion gets no automatic change.
+{
+  const detail = [];
+  const state = () => evalJS(`(() => { const c = document.querySelector(".carousel"); if (!c) return null;
+    const imgs = [...c.querySelectorAll(".frames img")];
+    return { live: c.classList.contains("live"), n: imgs.length,
+             shown: imgs.map((i, k) => i.classList.contains("shown") ? k : -1).filter((k) => k >= 0),
+             visible: imgs.map((i, k) => getComputedStyle(i).opacity === "1" ? k : -1).filter((k) => k >= 0),
+             current: [...c.querySelectorAll(".dots button")].map((b, k) => b.getAttribute("aria-current") === "true" ? k : -1).filter((k) => k >= 0),
+             alts: imgs.every((i) => (i.getAttribute("alt") || "").length > 10),
+             every: Number(c.getAttribute("data-interval")) }; })()`);
+  const s0 = await state();
+  if (!s0) detail.push("no .carousel on the landing");
+  else {
+    if (!s0.live) detail.push("the carousel's script did not run (no .live)");
+    if (s0.n < 3) detail.push(`${s0.n} pictures in the carousel`);
+    if (s0.shown.join() !== "0" || s0.current.join() !== "0") detail.push(`at load: shown ${s0.shown}, dot ${s0.current} (want 0, 0)`);
+    if (!s0.alts) detail.push("a carousel picture without a real alt text");
+    const moved = await waitFor(async () => { const s = await state(); return s.shown.length === 1 && s.shown[0] !== 0 ? s : null; }, s0.every + 3000);
+    if (!moved) detail.push(`no automatic change within ${s0.every + 3000} ms`);
+    // a real click on the fourth dot
+    const xy = await evalJS(`(() => { const b = document.querySelectorAll(".carousel .dots button")[3]; b.scrollIntoView({block: "center"}); const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: xy[0], y: xy[1], button: "left", clickCount: 1 });
+    await sleep(1800);   // past the 1.4 s fade
+    const s1 = await state();
+    if (s1.shown.join() !== "3" || s1.current.join() !== "3" || s1.visible.join() !== "3") detail.push(`after a click on dot 4: shown ${s1.shown}, dot ${s1.current}, opaque ${s1.visible} (want 3)`);
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+    // reduced motion: reload under the media feature; nothing moves
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await send("Page.navigate", { url: `${origin}/` });
+    await waitFor(() => evalJS("document.readyState === 'complete'"), 10000);
+    await sleep(s0.every + 2000);
+    const s2 = await state();
+    if (s2.shown.join() !== "0") detail.push(`under prefers-reduced-motion the picture changed to ${s2.shown}`);
+    await send("Emulation.setEmulatedMedia", { features: [] });
+    if (!detail.length) pass("carousel", `${s0.n} pictures, one shown; moved to ${moved.shown[0]} on its own within ${s0.every + 3000} ms; dot 4 shows picture 4; still under reduced motion for ${s0.every + 2000} ms`);
+  }
+  if (detail.length) fail("carousel", detail.join("; "));
+}
+
+// ---- contrast -------------------------------------------------------------------
+// The Play button's text against its background, in each state, forced through
+// DevTools (the site-wide a:hover once turned it cream on cream).
+{
+  const detail = [];
+  await send("DOM.enable"); await send("CSS.enable");
+  const { root } = await send("DOM.getDocument", { depth: 1 });
+  const { nodeId } = await send("DOM.querySelector", { nodeId: root.nodeId, selector: ".play a" });
+  const got = [];
+  for (const st of [[], ["hover"], ["focus", "focus-visible"], ["active", "hover"]]) {
+    await send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: st });
+    const c = await evalJS(`(() => {
+      const a = document.querySelector(".play a"), cs = getComputedStyle(a);
+      const rgb = (s) => s.match(/[\\d.]+/g).slice(0, 3).map(Number);
+      const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const L1 = lum(rgb(cs.color)), L2 = lum(rgb(cs.backgroundColor));
+      return { color: cs.color, bg: cs.backgroundColor, ratio: (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05) };
+    })()`);
+    const name = st.length ? st.join("+") : "plain";
+    got.push(`${name} ${c.ratio.toFixed(1)}`);
+    if (!(c.ratio >= 4.5)) detail.push(`${name}: text ${c.color} on ${c.bg} is ${c.ratio.toFixed(2)}:1 (want 4.5)`);
+  }
+  await send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [] });
+  if (detail.length) fail("contrast", detail.join("; "));
+  else pass("contrast", `Play's text against its background: ${got.join(", ")} (:1, want >= 4.5)`);
 }
 
 // ---- play -----------------------------------------------------------------------

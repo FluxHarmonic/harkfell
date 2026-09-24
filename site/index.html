@@ -23,8 +23,27 @@
       <p class="tagline">A quiet little platformer about listening.</p>
     </header>
 
-    <img class="shot" src="/shots/hollow-tarn.png" width="400" height="176"
-         alt="A small white long-eared creature beside a still tarn in the Hollow at dawn, with mossy stone steps behind it.">
+    <div class="carousel" data-interval="6000">
+      <div class="frames">
+        <img class="shot shown" src="/shots/hollow-tarn.png" width="400" height="176"
+             alt="A small white long-eared creature beside a still tarn in the Hollow at dawn, with mossy stone steps behind it.">
+        <img class="shot" src="/shots/reedfen-bridge.png" width="400" height="176" aria-hidden="true"
+             alt="Reedfen: the creature on a wooden bridge over open water, with reeds and small birds on either bank.">
+        <img class="shot" src="/shots/reedfen-reeds.png" width="400" height="176" aria-hidden="true"
+             alt="Reedfen: tall reeds with small birds perched on them, under a wide grey-blue sky.">
+        <img class="shot" src="/shots/hollow-tor.png" width="400" height="176" aria-hidden="true"
+             alt="The Hollow at dawn: the creature at the foot of a stepped limestone tor.">
+        <img class="shot" src="/shots/under-the-fen.png" width="400" height="176" aria-hidden="true"
+             alt="A dark cave under the fen, with a pool of still water and reeds growing in the gloom.">
+      </div>
+      <div class="dots" role="group" aria-label="Pictures of Harkfell">
+        <button type="button" aria-label="The Hollow tarn" aria-current="true"></button>
+        <button type="button" aria-label="The bridge in Reedfen"></button>
+        <button type="button" aria-label="Reeds in Reedfen"></button>
+        <button type="button" aria-label="The tor in the Hollow"></button>
+        <button type="button" aria-label="Under the fen"></button>
+      </div>
+    </div>
 
     <div class="pitch">
       <p>The stones on the fells used to ring, and now only the wind does. Wander, climb, and stand still long enough to hear where the missing notes went.</p>
@@ -38,22 +57,48 @@
       <span class="how">Free, in your browser, with a keyboard or a touch screen.</span>
     </div>
 
-    <div class="rooms">
-      <img class="shot" src="/shots/reedfen-bridge.png" width="400" height="176"
-           alt="Reedfen: the creature on a wooden bridge over open water, with reeds and small birds on either bank.">
-      <img class="shot" src="/shots/under-the-fen.png" width="400" height="176"
-           alt="A dark cave under the fen, with a pool of still water and reeds growing in the gloom.">
-    </div>
-
     <p class="early">This is an early slice of Harkfell: the Hollow and Reedfen, the first two regions of the world. Everything you hear is synthesized live while you play, so no two walks through it sound quite the same.</p>
   </main>
 
   <footer>
     <a class="mark" href="https://fluxharmonic.com/"><img src="/mark.png" width="380" height="188" alt="Flux Harmonic"></a>
     <p>Made by David Wilson at Flux Harmonic. Written in <a href="https://usesigil.org/">Sigil</a>.</p>
-    <p>The source is on <a href="https://github.com/FluxHarmonic/harkfell">GitHub</a> and <a href="https://git.usesigil.org/fluxharmonic/harkfell">Sigil Forge</a>.</p>
+    <p>The source is on <a href="https://github.com/FluxHarmonic/harkfell">GitHub</a> and <a href="https://code.usesigil.org/harkfell/">Sigil Forge</a>.</p>
     <p>The code is licensed <a href="https://github.com/FluxHarmonic/harkfell/blob/master/LICENSE">GPL-3.0-or-later</a>; the art and music are <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. The Flux Harmonic mark is not covered by either.</p>
     <p>Set in IM Fell by Igino Marini, under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.</p>
   </footer>
+  <script>
+    // The hero: one picture at a time, crossfading every data-interval ms.
+    // The dots pick one; the pointer over the pictures pauses them; a
+    // reader who asked for reduced motion gets no automatic change at all.
+    // Without this script the first picture simply stays.
+    (function () {
+      var c = document.querySelector(".carousel");
+      if (!c) return;
+      var imgs = c.querySelectorAll(".frames img");
+      var dots = c.querySelectorAll(".dots button");
+      var every = Number(c.getAttribute("data-interval")) || 6000;
+      var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var at = 0, timer = null;
+      function show(n) {
+        at = (n + imgs.length) % imgs.length;
+        for (var k = 0; k < imgs.length; k++) {
+          imgs[k].classList.toggle("shown", k === at);
+          if (k === at) imgs[k].removeAttribute("aria-hidden"); else imgs[k].setAttribute("aria-hidden", "true");
+          if (dots[k]) { if (k === at) dots[k].setAttribute("aria-current", "true"); else dots[k].removeAttribute("aria-current"); }
+        }
+      }
+      function start() { if (!still && !timer && !document.hidden) timer = setInterval(function () { show(at + 1); }, every); }
+      function stop() { clearInterval(timer); timer = null; }
+      for (var k = 0; k < dots.length; k++) (function (k) {
+        dots[k].addEventListener("click", function () { stop(); show(k); start(); });
+      })(k);
+      c.querySelector(".frames").addEventListener("mouseenter", stop);
+      c.querySelector(".frames").addEventListener("mouseleave", start);
+      document.addEventListener("visibilitychange", function () { document.hidden ? stop() : start(); });
+      c.classList.add("live");
+      start();
+    })();
+  </script>
 </body>
 </html>

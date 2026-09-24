@@ -12,7 +12,10 @@
   // the default for a bare `wrangler pages deploy`, which nothing here runs.
   "name": "harkfell",
   "pages_build_output_dir": "build/site",
-  "compatibility_date": "2026-09-24",
+  // 2026-07-14 is the newest date the workerd that ships with this box's
+  // wrangler (4.112.0) supports; a later date makes `wrangler pages dev`
+  // refuse to start, and that is the only local run of the Function.
+  "compatibility_date": "2026-07-14",
   "r2_buckets": [
     {
       "binding": "WASM",
