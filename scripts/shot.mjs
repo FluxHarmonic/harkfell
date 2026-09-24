@@ -2,7 +2,7 @@
 // the game draws (one texel per view pixel, times --scale).
 //
 //   node scripts/shot.mjs BUILD OUT.png --query "room=reedfen:9,3&still"
-//                         [--scale N] [--port N] [--cdp N] [--world DIR | --baked]
+//                         [--scale N] [--port N] [--cdp N] [--world DIR | --baked] [--wait MS]
 //
 // The rooms drawn are the working tree's world/ (or --world DIR), handed to
 // the page before it loads, so an edited room shows without rebuilding the
@@ -30,7 +30,7 @@ import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
-const VALUED = ["--query", "--scale", "--port", "--cdp", "--world"];
+const VALUED = ["--query", "--scale", "--port", "--cdp", "--world", "--wait"];
 const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && VALUED.includes(args[i - 1])));
 const ROOT = path.resolve(positional[0] || "build/web");
 const OUT = positional[1] || "/tmp/harkfell-shot.png";
@@ -145,7 +145,9 @@ if (noRoom) { console.log("SETUP-FAILED: " + noRoom); shutdown(2); await new Pro
 const view = await waitLine(/^harkfell: view \S+ (\d+) (\d+)$/, 1500);
 const [w, h] = view ? [parseInt(view[1], 10), parseInt(view[2], 10)] : [400, 176];
 await send("Emulation.setDeviceMetricsOverride", { width: w * SCALE, height: h * SCALE, deviceScaleFactor: 1, mobile: false });
-await sleep(1200);
+// --wait MS: how long the page runs before the shot (A3: creatures move,
+// a stone rings; with &still nothing changes after the first frames)
+await sleep(parseInt(opt("--wait", "1200"), 10));
 const data = await evalJS(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
   const c = document.getElementById("stage"); resolve([c.width, c.height, c.toDataURL("image/png")]);
 })))`);

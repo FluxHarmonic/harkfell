@@ -1,0 +1,220 @@
+#!/bin/sh
+# A3's gates (harkfell-design section 10, A3), green and red.
+#
+#   scripts/gate-a3               the green arm
+#   scripts/gate-a3 --sabotage    the green arm, then each named sabotage, each must go RED
+#   scripts/gate-a3 --no-reach    skip the two reach runs (about 5 minutes each)
+#
+# The gates:
+#   stone     without H2 the Old Stone's ring-stone stays shut (its cell rock,
+#             the body kept out); carrying H3 it shivers once and stays shut;
+#             the harmonic the world's pickup gives, taken by touch, opens it
+#             within its radius and the body walks through (test/test-gates.sgl)
+#   regions   carrying H2 puts channel 4's notes in EVERY region's bed, and in
+#             none before (test/test-regions.sgl, a two-region fixture world)
+#   reach     the reach checker agrees: Behind the Stone (reedfen:11,3) is
+#             reached only carrying H2, every one of its standing cells, and
+#             the world passes (scripts/room-check)
+#   creatures reedlings, bellfrogs and moths react as section 6 says, each
+#             beside the case that must not happen (test/test-creatures.sgl)
+#   place     the finding tone is where the world's pickup lies; a mute stone
+#             hums, and keeps humming after a quick leave and return (test/test-place.sgl)
+#   reload    a live reload while standing in an opened stone keeps the body
+#             there (test/test-reload-stone.sgl, through the shell)
+#
+# The sabotages (planted in a COMMITTED file, checked to have landed by hash
+# and grep, run, restored with git checkout, the restore checked against the
+# pre-plant hash; a leg is RED only with a non-zero exit AND the named test
+# (or the named reach line) failing, and only if that test passed unplanted):
+#   stone-h3        the stone keyed to H3 while the pickup gives H2 (the
+#                   brief's first) -> the stone test red AND reach red
+#   one-region      the bed carries H2 only in the region where it was
+#                   picked up (the brief's second) -> the every-region test red
+#   restless        reedlings flee a body that stands still -> red
+#   deaf-moths      moths ignore the harmonic they are drawn to -> red
+#   song-without    reedlings sing back without H2 -> red
+#   frog-always-h2  bellfrogs croak in D whatever you carry -> red
+#   key-near        a shut stone rings only on a fresh approach (the review's
+#                   finding 6) -> the key-arriving-while-near test red
+#   reload-teleport the reload looks for rock before the opened stones are
+#                   open (the review's finding 5) -> the reload test red
+#   cue-never       a gate cue not rendered yet is never played (the web
+#                   probe's silent pickup through a door) -> the late-cue test red
+#   hum-race        one mixer id per voice (the review's finding 2: a fade's
+#                   pending remove deletes the reopened hum) -> the hum test red
+#
+# Exit: 0 all as expected, 1 a gate or a leg went the wrong way, 2 SETUP-FAILED.
+set -u
+cd "$(dirname "$0")/.." || exit 2
+TMP="$(mktemp -d /tmp/harkfell-gate-a3-XXXXXX)"
+PLANTED=""
+trap 'if [ -n "$PLANTED" ]; then git checkout HEAD -- "$PLANTED"; echo "interrupted: restored $PLANTED"; fi; rm -rf "$TMP"' EXIT
+trap 'exit 130' INT TERM
+FAIL=0
+REACH=1
+[ "${1:-}" = "--no-reach" ] || [ "${2:-}" = "--no-reach" ] && REACH=0
+
+hash() { sha256sum "$1" | cut -c1-16; }
+clean() { sed 's/\x1b\[[0-9;]*m//g' "$1"; }
+
+# green FILE WANT: rc 0 and exactly WANT of WANT passed
+green() {
+  out="$TMP/$(basename "$1").out"
+  scripts/dev sigil test "$1" > "$out" 2>&1
+  rc=$?
+  line="$(clean "$out" | grep -a 'Tests:' | tail -1)"
+  passed="$(echo "$line" | sed -n 's/.*Tests: *\([0-9][0-9]*\) passed.*/\1/p')"
+  total="$(echo "$line" | sed -n 's/.*(\([0-9][0-9]*\) total).*/\1/p')"
+  if [ "$rc" -eq 0 ] && [ "${passed:-x}" = "$2" ] && [ "${total:-y}" = "$2" ]; then
+    echo "GREEN $1: $passed of $total passed"
+  else
+    echo "NOT GREEN $1: rc=$rc, '$line' (want $2 of $2)"; clean "$out" | grep -a '✗' | head -5
+    FAIL=1
+  fi
+}
+
+# The reach arm: room-check passes, and Behind the Stone's report says every
+# standing cell is gated (reached only carrying H2) and none unreachable.
+reach_ok() {
+  out="$1"
+  grep -q '^PASS room-check' "$out" \
+    && grep -A18 '^reedfen:11,3 ' "$out" | grep -q 'standable 24, unreachable 0, traps 0, gated 24' \
+    && grep -A18 '^reedfen:11,3 ' "$out" | grep -q 'GATED (reached only carrying): (0,8) carrying H2'
+}
+
+reach() {
+  out="$TMP/reach-green.out"
+  scripts/room-check > "$out" 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ] && reach_ok "$out"; then
+    echo "GREEN reach: PASS, reedfen:11,3 gated 24 of 24 carrying H2"
+    grep -a '^reach:\|^       carrying' "$out"
+  else
+    echo "NOT GREEN reach: rc=$rc"; grep -a 'FAIL\|SETUP\|TIMED\|reedfen:11,3' "$out" | head -8
+    FAIL=1
+  fi
+}
+
+green_all() {
+  green test/test-gates.sgl 12
+  green test/test-regions.sgl 8
+  green test/test-creatures.sgl 13
+  green test/test-place.sgl 11
+  green test/test-reload-stone.sgl 2
+  [ "$REACH" -eq 1 ] && reach
+}
+
+passes() {
+  clean "$TMP/$(basename "$1").out" | grep -a '✓' | grep -qF "$2" \
+    || { echo "SETUP-FAILED: '$2' does not pass unplanted; a sabotage leg on it would prove nothing"; exit 2; }
+}
+
+# plant NAME FILE OLD NEW TESTFILE TESTNAME [reach]
+plant() {
+  name=$1 file=$2 old=$3 new=$4 tf=$5 tn=$6 withreach=${7:-}
+  if ! git diff --quiet HEAD -- "$file"; then echo "SETUP-FAILED $name: $file differs from HEAD (commit before planting)"; exit 2; fi
+  before="$(hash "$file")"
+  OLD="$old" NEW="$new" node -e '
+    const fs=require("fs"); const f=process.argv[1]; const s=fs.readFileSync(f,"utf8");
+    const n=s.split(process.env.OLD).length-1;
+    if(n!==1){console.error("anchor found "+n+" times");process.exit(3)}
+    fs.writeFileSync(f, s.replace(process.env.OLD, process.env.NEW));' "$file"
+  prc=$?
+  PLANTED="$file"
+  after="$(hash "$file")"
+  if [ "$prc" -ne 0 ] || [ "$before" = "$after" ] || ! grep -qF "$new" "$file"; then
+    echo "SETUP-FAILED $name: the plant did not land (rc $prc, hash $before -> $after)"
+    git checkout HEAD -- "$file"; exit 2
+  fi
+  changed="$(git diff --numstat HEAD -- "$file" | awk '{print $1+$2}')"
+  echo "planted $name in $file ($before -> $after, $changed lines changed)"
+  out="$TMP/$name.out"
+  scripts/dev sigil test "$tf" > "$out" 2>&1
+  rc=$?
+  rout="$TMP/$name.reach.out"
+  if [ -n "$withreach" ] && [ "$REACH" -eq 1 ]; then scripts/room-check > "$rout" 2>&1; rrc=$?; fi
+  git checkout HEAD -- "$file"
+  PLANTED=""
+  restored="$(hash "$file")"
+  if [ "$restored" != "$before" ]; then echo "SETUP-FAILED $name: restore gave $restored, not $before"; exit 2; fi
+  if [ "$rc" -ne 0 ] && clean "$out" | grep -a '✗' | grep -qF "$tn"; then
+    echo "RED $name (as it must be): rc=$rc; failing: $tn"
+  else
+    echo "NOT RED $name: rc=$rc; the sabotage was not caught by '$tn'"
+    clean "$out" | grep -a 'Tests:' | tail -1
+    FAIL=1
+  fi
+  if [ -n "$withreach" ] && [ "$REACH" -eq 1 ]; then
+    if [ "$rrc" -eq 1 ] && ! reach_ok "$rout" && grep -q 'reedfen:11,3: cells .* are not reachable from the start' "$rout"; then
+      echo "RED $name reach (as it must be): rc=$rrc; $(grep -a 'reedfen:11,3: cells' "$rout" | cut -c1-120)..."
+    else
+      echo "NOT RED $name reach: rc=$rrc"; grep -a 'PASS\|FAIL\|SETUP\|TIMED' "$rout" | head -3
+      FAIL=1
+    fi
+  fi
+  echo "restored $file ($restored)"
+}
+
+if [ "${1:-}" = "--sabotage" ]; then
+  green_all
+  [ "$FAIL" -eq 0 ] || { echo "SETUP-FAILED: the green arm is not green; no sabotage leg can be scored"; exit 2; }
+  passes test/test-gates.sgl "at the stone with it: it rings, sinks, then opens, within 150 ticks"
+  passes test/test-regions.sgl "testhollow's bed, another region: channel 4 sounds too"
+  passes test/test-creatures.sgl "standing as near and still: they stay perched (no flurry)"
+  passes test/test-creatures.sgl "carrying H2: within 10 s every moth is within 40 px of you, and they chimed"
+  passes test/test-creatures.sgl "without H2, standing as long: no song"
+  passes test/test-creatures.sgl "carrying H2 its croaks are croak-h2; without, never"
+  passes test/test-gates.sgl "then carrying it, without moving: it rings, sinks and opens"
+  passes test/test-place.sgl "out of range for one frame and straight back: it still hums 3 s later"
+  passes test/test-reload-stone.sgl "a clean reload leaves the body where it was, and the stone open"
+  passes test/test-regions.sgl "it was not ready, so it waited, and then it played"
+  plant stone-h3 world/rooms/reedfen/x10y3.room \
+    "(ring-stone at: (21 8) overtone: 2)" \
+    "(ring-stone at: (21 8) overtone: 3)" \
+    test/test-gates.sgl "at the stone with it: it rings, sinks, then opens, within 150 ticks" reach
+  plant one-region src/harkfell/sound.sgl \
+    "    (define (bed-carry region) *carry*)" \
+    "    (define *carry-region* #f)
+    (define (bed-carry region)
+      (when (and (pair? *carry*) (not *carry-region*)) (set! *carry-region* region))
+      (if (eq? region *carry-region*) *carry* '()))" \
+    test/test-regions.sgl "testhollow's bed, another region: channel 4 sounds too"
+  plant restless src/harkfell/creatures.sgl \
+    "               (if (or (not moving) (not playing))" \
+    "               (if (not playing)" \
+    test/test-creatures.sgl "standing as near and still: they stay perched (no flurry)"
+  plant deaf-moths src/harkfell/creatures.sgl \
+    "             (drawn (and (critter-drawn c) (memv (critter-drawn c) (ctx-carry ctx)) (ctx-playing ctx)" \
+    "             (drawn (and #f (critter-drawn c) (memv (critter-drawn c) (ctx-carry ctx)) (ctx-playing ctx)" \
+    test/test-creatures.sgl "carrying H2: within 10 s every moth is within 40 px of you, and they chimed"
+  plant song-without src/harkfell/creatures.sgl \
+    "             (singer (and (memv 2 carry) playing" \
+    "             (singer (and playing" \
+    test/test-creatures.sgl "without H2, standing as long: no song"
+  plant frog-always-h2 src/harkfell/creatures.sgl \
+    "                      (say! (if (memv 2 (ctx-carry ctx)) 'croak-h2 (if (< (car r) 0.5) 'croak-a 'croak-b))" \
+    "                      (say! 'croak-h2" \
+    test/test-creatures.sgl "carrying H2 its croaks are croak-h2; without, never"
+  plant key-near src/harkfell/gates.sgl \
+    "           (cond ((and keyed playing (<= d RADIUS)) (item 'ring) (stone s state: 'ringing t: 0 shiver: 0 near: #t))" \
+    "           (cond ((and arrive keyed) (item 'ring) (stone s state: 'ringing t: 0 shiver: 0))" \
+    test/test-gates.sgl "then carrying it, without moving: it rings, sinks and opens"
+  plant hum-race src/harkfell/sound.sgl \
+    "          (let* ((sid (string-append id \"#\" (number->string *voice-n*)))" \
+    "          (let* ((sid id)" \
+    test/test-place.sgl "out of range for one frame and straight back: it still hums 3 s later"
+  plant reload-teleport src/harkfell/shell.sgl \
+    "                         (wm (worldmap wm tiles: (open-stone-tiles (worldmap-tiles wm) (kept-stones *world*)))))" \
+    "                         (wm wm))" \
+    test/test-reload-stone.sgl "a clean reload leaves the body where it was, and the stone open"
+  plant cue-never src/harkfell/sound.sgl \
+    "                      (cond ((assq (car p) *cues*)" \
+    "                      (cond (#f" \
+    test/test-regions.sgl "it was not ready, so it waited, and then it played"
+  if [ "$FAIL" -eq 0 ]; then echo "GATE-A3 SABOTAGE: all RED"; else echo "GATE-A3 SABOTAGE: a leg was not caught"; fi
+  exit $FAIL
+fi
+
+green_all
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A3 GREEN"; else echo "GATE-A3 RED"; fi
+exit $FAIL
