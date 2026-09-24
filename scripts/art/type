@@ -53,7 +53,26 @@ item step-keys  IMFeENit28P 9.5 0 "Press any key to step in."
 item step-touch IMFeENit28P 9.5 0 "Touch to step in."
 item presents   IMFeENsc28P 7.5 34 "presents"
 [ "$n" -eq 48 ] || { echo "type: made $n images, want 48"; exit 1; }
+# The wordmark's halo (D35's reveal over the sky; David: "we need something
+# to offset it from the background"): the name's own shape, widened by K
+# px and blurred by 1.3 K, at 90% in the palette's darkest blue (hol-tarn),
+# padded so the blur is not clipped and centred where the name is. It is
+# drawn under the name and dissolves with it: ink soaking into the sky, not
+# a box.
+TARN="$(awk '$0 ~ /^ *\(hol-tarn "#/ { l = $0; sub(/^[^"]*"#/, "", l); print substr(l, 1, 6); exit }' world/world.sgl)"
+[ -n "$TARN" ] || { echo "type: no hol-tarn in world/world.sgl"; exit 1; }
+for k in 1 2 3 4 5 6 7 8; do
+  pad=$((4 * k)); wide=$k; blur=$(awk -v k="$k" 'BEGIN { printf "%.1f", 1.3 * k }')
+  convert "$out_dir/wordmark@$k.png" -alpha extract -bordercolor black -border "$pad" \
+    -morphology Dilate "Disk:$wide" -blur "0x$blur" -evaluate multiply 0.9 "PNG:$out_dir/halo-mask.png"
+  convert "$out_dir/halo-mask.png" -fill "#$TARN" -colorize 100 "$out_dir/halo-mask.png" -alpha off -compose CopyOpacity -composite \
+    +set date:create +set date:modify -define png:exclude-chunks=date,time,tIME,tEXt,zTXt "PNG32:$out_dir/wordmark-halo@$k.png"
+  [ -s "$out_dir/wordmark-halo@$k.png" ] || { echo "type: wordmark-halo@$k.png was not made"; exit 1; }
+  n=$((n + 1))
+done
+rm -f "$out_dir/halo-mask.png"
+[ "$n" -eq 56 ] || { echo "type: made $n images, want 56"; exit 1; }
 # all made: only now do they replace the old ones (a failure part way leaves
 # the old set whole, not a mix)
 cp "$out_dir"/*.png assets/type/
-echo "type: $n images -> assets/type/"
+echo "type: $n images (the wordmark's halo among them) -> assets/type/"

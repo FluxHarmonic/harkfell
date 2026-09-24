@@ -306,5 +306,8 @@
     (define (draw-reveal! w h alpha t)
       (when (> alpha 0.0)
         (set-blend-mode (quote normal))
+        ;; the halo under the name (the palette's darkest blue, soft, pre-rendered
+        ;; with it), then the name: ink on the sky, dissolving together
+        (draw-image! (fit-of w h) "assets/type/wordmark-halo" 200 REVEAL-Y (list 1.0 1.0 1.0) alpha #t)
         (draw-image! (fit-of w h) "assets/type/wordmark" 200 REVEAL-Y
                      (vector-ref (rgb) (slot-of (quote fur-1))) alpha #t)))))
