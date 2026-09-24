@@ -41,7 +41,7 @@
     ;; (ticks h v jump) segments. The opening is a route through the whole
     ;; room and back, found by driving it with reactive policies
     ;; (tools/find-route.sgl) and baked here as the intents they gave, so
-    ;; the script is fixed input, not a controller: 1015 ticks that walk into
+    ;; the script is fixed input, not a controller: 994 ticks that walk into
     ;; the first pit (a soft return), climb the chimney by wall kicks, drop
     ;; off the shelf, jump the 3-tile gap from a run, swim the pool and leap
     ;; out, jump the 3-tile ledge, climb the post, drop into the well, climb
@@ -50,14 +50,14 @@
     ;; the 3-tile gap with no run-up that falls in (the second soft return).
     ;; The pseudo-random segments after it wander from the entry.
     (define OPENING
-      (list (list 60 1 0 #f) (list 40 0 0 #f) (list 1 -1 0 #t) (list 8 -1 0 #f)
-            (list 1 -1 0 #t) (list 18 1 0 #f) (list 1 1 0 #t) (list 2 -1 0 #f)
-            (list 13 1 0 #f) (list 6 -1 0 #f) (list 1 -1 0 #t) (list 92 1 0 #f)
-            (list 40 1 0 #t) (list 32 1 0 #f) (list 30 0 1 #f) (list 46 1 -1 #f)
-            (list 37 1 -1 #t) (list 1 1 0 #f) (list 26 1 0 #t) (list 37 1 -1 #f)
-            (list 32 1 0 #f) (list 115 1 -1 #f) (list 41 -1 0 #f) (list 92 -1 -1 #f)
-            (list 59 -1 0 #f) (list 20 0 1 #f) (list 57 -1 -1 #f) (list 31 -1 -1 #t)
-            (list 1 -1 0 #f) (list 75 -1 0 #t)))
+      (list (list 60 1 0 #f) (list 40 0 0 #f) (list 1 -1 0 #t) (list 7 -1 0 #f)
+            (list 1 -1 0 #t) (list 16 1 0 #f) (list 1 1 0 #t) (list 2 -1 0 #f)
+            (list 12 1 0 #f) (list 4 -1 0 #f) (list 1 -1 0 #t) (list 83 1 0 #f)
+            (list 37 1 0 #t) (list 29 1 0 #f) (list 30 0 1 #f) (list 43 1 -1 #f)
+            (list 35 1 -1 #t) (list 1 1 0 #f) (list 25 1 0 #t) (list 33 1 -1 #f)
+            (list 32 1 0 #f) (list 111 1 -1 #f) (list 34 -1 0 #f) (list 89 -1 -1 #f)
+            (list 57 -1 0 #f) (list 20 0 1 #f) (list 55 -1 -1 #f) (list 35 -1 -1 #t)
+            (list 1 -1 0 #f) (list 99 -1 0 #t)))
 
     (define (segments-from seed total)
       (let loop ((s (lcg-next seed)) (left total) (acc '()))

@@ -8,9 +8,9 @@
 ;;; does not. test/test-envelope.sgl measures it on the real physics; the
 ;;; numbers below are where tuning starts, in the design's own terms:
 ;;;
-;;;   one speed (D24)    4.5 tiles/s = 72 px/s = 1.2 px/tick, reached in
+;;;   one speed (D24)    4.95 tiles/s = 79.2 px/s = 1.32 px/tick, reached in
 ;;;                      ACCEL-TICKS
-;;;   held jump          3.25 tiles (52 px) at the apex, TIME-TO-APEX 0.36 s
+;;;   held jump          3.25 tiles (52 px) at the apex, TIME-TO-APEX 0.333 s
 ;;;   tap                about 1.25 tiles
 ;;;   falling            1.6x the rising gravity
 ;;;   coyote, buffer     6 ticks each
@@ -19,6 +19,14 @@
 ;;; discrete step (engine body) takes (velocity first, then position):
 ;;; n ticks of rise cover n*v0 - g*n(n+1)/2, so v0 = g*T and
 ;;; g = 2H / (T(T-1)) put the apex at H after T ticks.
+;;;
+;;; 2026-09-24 (A2, David: walking "a little faster"): the speed went 4.5 ->
+;;; 4.95 tiles/s (+10%) and the apex 21.6 -> 20 ticks (0.36 -> 0.333 s, the
+;;; same height), measured against the envelope on the real physics. Speed
+;;; alone cleared the 4-tile gap moving; a snappier fall (fall-mul 1.8)
+;;; instead of the shorter rise held the envelope at +10% but not at +13%
+;;; (4-tile moving and 3-tile standing both cleared), while the shorter rise
+;;; still holds it at +16%, so the rise was trimmed.
 
 (define-library (harkfell feel)
   (import (engine body))
@@ -28,13 +36,13 @@
 
   (begin
     (define TILE 16)
-    (define RUN-TILES-PER-S 4.5)
+    (define RUN-TILES-PER-S 4.95)
     ;; Ticks from rest to the one speed. Long enough that a standing start
     ;; loses the width a 3-tile gap needs (the envelope's second clause);
     ;; 15 ticks is 0.25 s.
     (define ACCEL-TICKS 15)
     (define HELD-HEIGHT 52.0)            ; 3.25 tiles
-    (define APEX-TICKS 21.6)             ; 0.36 s
+    (define APEX-TICKS 20.0)             ; 0.333 s
 
     (define RUN (/ (* RUN-TILES-PER-S TILE) 60.0))
     (define GRAVITY (/ (* 2.0 HELD-HEIGHT) (* APEX-TICKS (- APEX-TICKS 1.0))))
