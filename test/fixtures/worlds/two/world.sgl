@@ -20,8 +20,8 @@
 (region testhollow
   name: "Test hollow"
   bounds: ((2 0) (2 0))
-  bed: "bed-hollow"
-  bed-channels: (wind water texture drone)
+  bed: "hollow-bed"
+  bed-channels: (wind water hum drone)
   palette: (sky-1 stone-1 stone-2)
   roster: (frog)
   moments: ())

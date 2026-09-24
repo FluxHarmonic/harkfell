@@ -30,7 +30,8 @@
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
-          audio-carry! audio-tone-room! audio-lines world-place room-moment-name)
+          audio-carry! audio-tone-room! audio-lines world-place room-moment-name
+          audio-sound-door!)
 
   (begin
     (define *say* (lambda parts #f))
@@ -63,6 +64,51 @@
     ;; for A0's room, which has no world of gates)
     (define (audio-carry! s) (shell-set-carry! (numbers s)) (sound-set-carry! (numbers s)))
 
+    ;; ?sound=a,b / --sound a,b (A4): the sound's listening doors.
+    ;;   border:cross | border:through   the region-border fallback (default through)
+    ;;   opening        the opening (D33, D15) plays once the audio runs (the web's
+    ;;                  first tap), the world held until OPENING-WORLD-S after its
+    ;;                  world mark: a stand-in for content's frame sequence, to hear it
+    ;;   bench:a4       the slice's phone measurement ((harkfell bench), A4's phases)
+    ;;   moment:NAME    the moment NAME plays over the bed MOMENT-DOOR-S after the
+    ;;                  bed has opened, whatever the hush says (to hear a moment
+    ;;                  whose room is not written yet)
+    (define OPENING-WORLD-S 6.0)
+    (define MOMENT-DOOR-S 4.0)
+    (define *moment-door* #f)      ; #f | (name) | (name . t)
+    (define *opening-door* #f)     ; #f | armed | playing | (world . t) | done
+    (define (audio-sound-door! s)
+      (for-each (lambda (item)
+                  (cond ((string=? item "border:cross") (sound-set-border-mode! 'cross))
+                        ((string=? item "border:through") (sound-set-border-mode! 'through))
+                        ((string=? item "opening") (set! *opening-door* 'armed) (sound-hold! #t))
+                        ((string=? item "bench:a4") (bench-set-phases! 'a4))
+                        ((and (> (string-length item) 7) (string=? (substring item 0 7) "moment:"))
+                         (set! *moment-door* (list (substring item 7 (string-length item)))))
+                        (else (*say* "audio" "unknown-door" item))))
+                (string-split s ",")))
+
+    (define (opening-door-frame! now)
+      (let ((d *opening-door*))
+        (cond ((and (eq? d 'armed) (eq? (mixer-state) 'running))
+               (sound-opening-start!)
+               (set! *opening-door* 'playing))
+              ((and (eq? d 'playing) (memq (sound-opening-state) '(world)))
+               (set! *opening-door* (cons 'world now)))
+              ((and (pair? d) (>= now (+ (cdr d) OPENING-WORLD-S)))
+               (sound-hold! #f)
+               (set! *opening-door* 'done))
+              (else #f))))
+
+    (define (moment-door-frame! now)
+      (let ((d *moment-door*))
+        (cond ((not d) #f)
+              ((and (null? (cdr d)) (sound-region)) (set! *moment-door* (cons (car d) now)))
+              ((and (number? (cdr d)) (>= now (+ (cdr d) MOMENT-DOOR-S)))
+               (sound-audition! (car d))
+               (set! *moment-door* #f))
+              (else #f))))
+
     ;; ?tone= (A2's placeholder door): the finding tones are placed from the
     ;; world's pickups now; this moves A2's placeholder only, which sounds
     ;; only where the world has no gates.
@@ -82,6 +128,20 @@
       (let* ((m (room-moment rm))
              (t (and (list? m) (kw-ref m "tune"))))
         (and (symbol? t) (symbol->string t))))
+
+    ;; A4: the moment's conditions, moment: (tune: T when: first-visit
+    ;; carrying: 2 still: 6); each a number, or #f.
+    (define (room-moment-number rm key)
+      (let* ((m (room-moment rm))
+             (v (and (list? m) (kw-ref m key))))
+        (and (number? v) (> v 0) v)))
+
+    ;; A region's wandering moments (its wander: list) as tune names.
+    (define (region-wander reg)
+      (let ((w (and reg (region-field reg 'wander))))
+        (if (list? w)
+            (filter-map (lambda (x) (cond ((symbol? x) (symbol->string x)) ((string? x) x) (else #f))) w)
+            '())))
 
     (define (region-of ct sym)
       (find (lambda (r) (eq? (region-name r) sym)) (content-regions ct)))
@@ -148,6 +208,9 @@
                            groups: (or (region-field reg 'bed-channels) '())
                            levels: (plist->alist (room-bed rm))
                            moment: (room-moment-name rm)
+                           moment-carrying: (room-moment-number rm "carrying")
+                           moment-still: (room-moment-number rm "still")
+                           wander: (region-wander reg)
                            frogs: frogs
                            ;; ABSOLUTE world pixels: the map's pixels start at its
                            ;; westmost and northmost room (x0 y0), not at room (0 0)
@@ -165,16 +228,21 @@
         (if (null? l) (reverse acc)
             (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
 
+    ;; The fixed moments the rooms name and every region's wandering ones,
+    ;; opened ahead.
     (define (audio-world! ct)
       (when ct
-        (let ((ms (filter-map (lambda (p) (room-moment-name (placed-data p))) (content-rooms ct))))
-          (sound-boot! ms *say*))))
+        (let ((ms (filter-map (lambda (p) (room-moment-name (placed-data p))) (content-rooms ct)))
+              (ws (apply append (map region-wander (content-regions ct)))))
+          (sound-boot! (append ms ws) *say*))))
 
     (define (audio-frame! frame-ms work-ms)
       (let ((now (audio-now)))
         (if (or (bench-running?) (bench-done?))
             (begin (shell-take-news!) (when (bench-running?) (bench-frame! now frame-ms work-ms)))
             (let ((dt (if *last* (min 0.25 (- now *last*)) 0.0)))
+              (opening-door-frame! now)
+              (moment-door-frame! now)
               (sound-frame! now dt (world-place (shell-world) (shell-content) (shell-take-news!)))))
         (set! *last* now)
         (mixer-pump! now)))

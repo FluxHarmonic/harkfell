@@ -129,6 +129,12 @@
   //                        starts it; about 3.3 minutes; its lines show at the
   //                        top and are sent to the host (bench-report?LINE), so
   //                        the numbers need no transcribing.
+  //   ?sound=a,b           A4, the sound's listening doors: border:cross (A2's
+  //                        4 s crossfade at a region border; the default is
+  //                        border:through), opening (the Flux Harmonic card and
+  //                        the opening play at the first tap), bench:a4 (with
+  //                        ?bench: the slice's phases), moment:NAME (that
+  //                        moment plays over the bed 4 s after it opens).
   //
   // The guard follows Crash The Stack's page guard (master e737d21) in
   // spirit, much reduced: a FATAL line, a trap out of a dispatch or a lost
@@ -249,6 +255,7 @@
       if (files.length) send("world-done", "");
       if (params.get("carry")) send("carry", params.get("carry"));
       if (params.get("tone")) send("tone", params.get("tone"));
+      if (params.get("sound")) send("sound", params.get("sound"));
       if (params.has("test-room")) send("test-room", "");
       var room = params.get("room");
       if (room) send("goto", params.get("at") ? room + "@" + params.get("at") : room);

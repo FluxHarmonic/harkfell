@@ -7,23 +7,24 @@
 ;;; game's room runs underneath as it would in play; nothing is asked of the
 ;;; player but to leave the phone on the page.
 ;;;
-;;; The other tunes are S0's (copied into assets/tunes): bed-reedfen (8 channels:
-;;; wind, water, reeds and the drone H2 H3 H4 H5 H7, EVERY channel unmuted:
-;;; the heaviest a bed gets, the end of the game with H7), moment-reedfen,
-;;; and bed-hollow as the second region's bed.
+;;; The other tunes (A4: the game's own, which replaced S0's copies in assets/tunes;
+;;; A2's phone figures were taken with the copies): reedfen-bed opened whole
+;;; (8 channels: wind, water, reeds and the drone H2 H3 H4 H5 H7, EVERY channel
+;;; sounding: the heaviest a bed gets, the end of the game with H7),
+;;; first-open-water, and hollow-bed as the second region's bed.
 ;;;
 ;;; The run, in 30 s phases, each measured over its last 25 s (from 5 s in):
 ;;;   a2bed      A2's own bed as it ships (reedfen-bed: wind, water, reeds; the
 ;;;              drone's H2 and H3 notes dropped since nothing is carried)
 ;;;   a2moment   the same, plus the fixed moment (first-open-water, looped)
 ;;;              and the duck on the bed's source gain
-;;;   bed        S0's full Reedfen bed, all 8 channels sounding (the heaviest
+;;;   bed        Reedfen's bed whole, all 8 channels sounding (the heaviest
 ;;;              a bed gets: the end of the game, with H7)
 ;;;   moment     the full bed plus the moment
 ;;;   border     the full bed, the moment and a second region's bed
-;;;              (bed-hollow), the beds at half each: three players
+;;;              (hollow-bed), the beds at half each: three players
 ;;;   opens      the full bed alone; every 3 s a parse and open (then a close)
-;;;              of the moment, then of bed-hollow, three times each: one
+;;;              of the moment, then of hollow-bed, three times each: one
 ;;;              open line each, with the frame's work and the dry frames of
 ;;;              the next 2.5 s
 ;;; About 2.9 minutes in all. A2's two phases also run the finding tone
@@ -49,17 +50,17 @@
           (motif tune player)
           (engine mixer)
           (harkfell tunes)
-          (only (harkfell sound) strip-uncarried))
+          (only (harkfell sound) strip-uncarried place sound-frame! sound-reset! sound-set-border-mode! sound-set-carry!))
 
-  (export bench-start! bench-frame! bench-running? bench-done?)
+  (export bench-start! bench-frame! bench-running? bench-done? bench-set-phases!)
 
   (begin
     (define A2-BED "reedfen-bed")
     (define A2-MOMENT "first-open-water")
     (define TONE "tone-h2")
-    (define BED-A "bed-reedfen")
-    (define BED-B "bed-hollow")
-    (define MOMENT "moment-reedfen")
+    (define BED-A "reedfen-bed")
+    (define BED-B "hollow-bed")
+    (define MOMENT "first-open-water")
     (define BUDGET-MS 4.0)
 
     (define *on* #f)
@@ -84,9 +85,12 @@
       (set! *on* #t)
       (set! *say* say)
       ;; ask for the texts now (on the web the page fetches them)
-      (for-each tune-text (list A2-BED A2-MOMENT TONE BED-A BED-B MOMENT)))
+      (for-each tune-text (if (eq? *phases* (quote a4)) (a4-names) (list A2-BED A2-MOMENT TONE BED-A BED-B MOMENT))))
 
-    (define (ready?) (and (tune-text A2-BED) (tune-text A2-MOMENT) (tune-text TONE) (tune-text BED-A) (tune-text BED-B) (tune-text MOMENT)))
+    (define (ready?)
+      (if (eq? *phases* (quote a4))
+          (and (tune-text A4-HOLLOW) (tune-text A4-FEN) (tune-text A4-MOMENT) (tune-text TONE))
+          (and (tune-text A2-BED) (tune-text A2-MOMENT) (tune-text TONE) (tune-text BED-A) (tune-text BED-B) (tune-text MOMENT))))
 
     ;; parse + open, timed separately. Answers (player parse-ms open-ms).
     (define (open-timed name loop?)
@@ -194,6 +198,97 @@
         (*say* "bench" "open" A2-BED "parse" (r1 (- t1 t0)) "open" (r1 (- t2 t1)) "live")
         (mixer-add! "a2" (lambda (out off k) (player-pull! p out off k)) #t)))
 
+
+    ;; --- A4: the slice's phases (?sound=bench:a4) ------------------------------------------
+    ;; The slice as it ships, on the director's own code for the borders:
+    ;;   a4bed      the Hollow's bed carrying H2: wind, water, the hum, H2 (the
+    ;;              heaviest slice bed: every other drone note is dropped)
+    ;;   a4moment   + a moment (stones-remember, looped), the bed ducked
+    ;;   a4tones    the Hollow's bed carrying nothing, H2's finding tone and a
+    ;;              stone's hum (two looping voices), and the moment: the slice's
+    ;;              worst case away from a border
+    ;;   a4through  the director walked across a region border (Reedfen and the
+    ;;              Hollow, H2 carried) every BORDER-EVERY s, border mode
+    ;;              'through, with the moment sounding: pump p95 and max are the
+    ;;              frames that paid for the overlap
+    ;;   a4cross    the same with A2's 4 s crossfade, to compare
+    (define A4-HOLLOW "hollow-bed")
+    (define A4-FEN "reedfen-bed")
+    (define A4-MOMENT "stones-remember")
+    (define BORDER-EVERY 5.0)
+    (define *phases* 'a2)
+    (define (bench-set-phases! p) (set! *phases* p))
+    (define (a4-names) (list A4-HOLLOW A4-FEN A4-MOMENT TONE))
+    (define (steps) (if (eq? *phases* (quote a4)) A4-STEPS STEPS))
+
+    (define (start-bed-carrying! id name carry)
+      (let* ((t (strip-uncarried (read-tune-string (tune-text name)) carry))
+             (p (open-tune-player t (mixer-rate) loop: #t)))
+        (set! *players* (cons (cons id p) *players*))
+        (*say* "bench" "open" name "carrying" (string-join (map number->string carry) ",") "live")
+        (mixer-add! id (lambda (out off k) (player-pull! p out off k)) #t)))
+
+    ;; The border walk: the director itself, told the player is in a room of
+    ;; one region, then of the other, every BORDER-EVERY s.
+    (define *border* #f)          ; #(mode next-switch side last-now)
+    (define (border-place side)
+      (if (eq? side 'hollow)
+          (place key: "bench:hollow" region: 'hollow bed-tune: A4-HOLLOW groups: '(wind water hum drone)
+                 levels: '((wind . 0.5) (water . 0.2) (hum . 0.4) (drone . 0.8)) tones: '() carry: '(2)
+                 px: 0.0 py: 0.0 rx: 0 ry: 0)
+          (place key: "bench:fen" region: 'reedfen bed-tune: A4-FEN groups: '(wind water reeds drone)
+                 levels: '((wind . 0.5) (water . 0.6) (reeds . 0.4) (drone . 0.5)) tones: '() carry: '(2)
+                 px: 4000.0 py: 0.0 rx: 10 ry: 0)))
+
+    (define (border-start! mode)
+      (for-each (lambda (e) (player-close! (cdr e))) *players*)
+      (set! *players* '())
+      (sound-reset!)
+      (sound-set-border-mode! mode)
+      (sound-set-carry! '(2))
+      (start-source! "moment" A4-MOMENT #t 0)
+      (set! *border* (vector mode (+ (mixer-now) BORDER-EVERY) 'hollow #f)))
+
+    (define (border-frame! now)
+      (let ((b *border*))
+        (when b
+          (when (>= now (vector-ref b 1))
+            (vector-set! b 2 (if (eq? (vector-ref b 2) 'hollow) 'fen 'hollow))
+            (vector-set! b 1 (+ now BORDER-EVERY)))
+          (let ((dt (if (vector-ref b 3) (- now (vector-ref b 3)) 0.0)))
+            (vector-set! b 3 now)
+            (sound-frame! now dt (border-place (vector-ref b 2)))))))
+
+    (define (border-stop!)
+      (set! *border* #f)
+      (sound-reset!)
+      (sound-set-border-mode! 'through))
+
+    (define A4-STEPS
+      (list (cons 0.0 (lambda () (mixer-stats-reset!) (start-bed-carrying! "hollow" A4-HOLLOW '(2))))
+            (cons 5.0 reset-window!)
+            (cons 30.0 (lambda () (report! "a4bed") (start-source! "moment" A4-MOMENT #t 0) (duck! "hollow")))
+            (cons 35.0 reset-window!)
+            (cons 60.0 (lambda () (report! "a4moment")
+                          (stop-source! "hollow")
+                          (mixer-stats-reset!)
+                          (start-bed-carrying! "hollow" A4-HOLLOW '())
+                          (duck! "hollow")
+                          (source-factor! (start-source! "tone" TONE #t 0) 'dist 0.3 0.0 (mixer-now))
+                          (source-factor! (start-source! "hum" TONE #t 0) 'dist 0.2 0.0 (mixer-now))))
+            (cons 65.0 reset-window!)
+            (cons 90.0 (lambda () (report! "a4tones")
+                          (stop-source! "hollow") (stop-source! "tone") (stop-source! "hum") (stop-source! "moment")
+                          (border-start! 'through)))
+            (cons 95.0 reset-window!)
+            (cons 125.0 (lambda () (report! "a4through") (border-start! 'cross)))
+            (cons 130.0 reset-window!)
+            (cons 160.0 (lambda () (report! "a4cross")
+                           (border-stop!)
+                           (*say* "bench" "done")
+                           (set! *done* #t)
+                           (set! *on* #f)))))
+
     ;; Every frame while running: now (s, the shell's clock), the frame's
     ;; interval and its work (ms, the frame before this one: the work of the
     ;; frame in progress is not known yet).
@@ -215,9 +310,10 @@
                (*say* "bench" "open" (list-ref p 0) "parse" (r1 (list-ref p 1)) "open" (r1 (list-ref p 2))
                       "work" (r1 (list-ref p 5)) "dry" (n (- (dry-now) (list-ref p 3))))
                (set! *pending-open* #f)))
+           (border-frame! now)
            (let loop ()
-             (when (< *step* (length STEPS))
-               (let ((s (list-ref STEPS *step*)))
+             (when (< *step* (length (steps)))
+               (let ((s (list-ref (steps) *step*)))
                  (when (>= (- now *t0*) (car s))
                    (set! *step* (+ *step* 1))
                    ((cdr s))

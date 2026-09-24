@@ -29,6 +29,9 @@
 ;;;   (hush-started h name key)           a moment started (key: its room for a fixed one, #f for wandering)
 ;;;   (hush-ended h)                      the playing moment ended (heard, or faded out)
 ;;;   (hush-playing h) (hush-played h) (hush-rooms h) (hush-spent h)
+;;;   (hush-wander-spent? h name)        A4: a wandering moment plays once a playthrough
+;;;   (hush-flags h) (hush-with-flags h flags)   what a save keeps (spent rooms and
+;;;                                      wandering names), and a hush made from it
 ;;;   (hush-why-wander h)                 'ok | 'playing | 'time | 'rooms | 'time+rooms (for the readout)
 
 (define-library (harkfell hush)
@@ -39,6 +42,7 @@
   (export hush-new hush-restore hush-tick hush-enter hush-fixed-decision hush-wander-ok? hush-why-wander
           hush-started hush-ended
           hush? hush-playing hush-played hush-rooms hush-spent hush-last-end
+          hush-wander-spent hush-wander-spent? hush-flags hush-with-flags
           WANDER-S WANDER-ROOMS FIXED-S)
 
   (begin
@@ -56,7 +60,8 @@
       (last-end default: #f)
       (playing default: #f)
       (playing-key default: #f)
-      (spent default: '()))
+      (spent default: '())
+      (wander-spent default: '()))
 
     (define (hush-new) (hush))
 
@@ -100,7 +105,22 @@
       (hush h playing: name playing-key: key
             spent: (if (and key (not (member key (hush-spent h))))
                        (cons key (hush-spent h))
-                       (hush-spent h))))
+                       (hush-spent h))
+            wander-spent: (if (and (not key) name (not (member name (hush-wander-spent h))))
+                              (cons name (hush-wander-spent h))
+                              (hush-wander-spent h))))
+
+    ;; A4: a wandering moment plays once a playthrough (D20: a moment may
+    ;; never come back), like a fixed one: its name is spent when it starts.
+    (define (hush-wander-spent? h name) (and (member name (hush-wander-spent h)) #t))
+
+    ;; The flags a save keeps, and a hush made from them (content's save and
+    ;; continue: the fixed rooms and the wandering names already heard).
+    (define (hush-flags h) (list (hush-spent h) (hush-wander-spent h)))
+    (define (hush-with-flags h flags)
+      (if (and (list? flags) (= (length flags) 2) (list? (car flags)) (list? (cadr flags)))
+          (hush h spent: (car flags) wander-spent: (cadr flags))
+          h))
 
     (define (hush-ended h)
       (hush h playing: #f playing-key: #f

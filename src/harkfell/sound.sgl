@@ -68,6 +68,11 @@
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
+          place-wander place-moment-carrying place-moment-still
+          sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
+          sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
+          sound-wander-due WANDER-TAGS wander-fits?
+          THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
           DRONE-CHANNELS DEFAULT-LEVELS BED-ID MOMENT-ID TONE-ID)
@@ -91,7 +96,8 @@
     (define MAX-PAN 0.6)
     (define DRONE-CHANNELS '(4 5 6 7 8))
     (define HARMONIC-CHANNEL '((2 . 4) (3 . 5) (4 . 6) (5 . 7) (7 . 8)))
-    (define DEFAULT-LEVELS '((wind . 0.5) (water . 0.4) (reeds . 0.4) (texture . 0.4) (drone . 0.6)))
+    ;; hum (A4): the Hollow's channel 3, the fundamental under the floor
+    (define DEFAULT-LEVELS '((wind . 0.5) (water . 0.4) (reeds . 0.4) (texture . 0.4) (hum . 0.3) (drone . 0.6)))
     (define BED-ID "bed")
     (define MOMENT-ID "moment")
     (define TONE-ID "tone-h2")
@@ -115,12 +121,19 @@
     ;;   news     what happened this frame ((harkfell gates), (harkfell
     ;;            creatures)), positions absolute: (pickup N x y) (ring N x y)
     ;;            (sink N x y) (open N x y) (near-miss N x y) (call KIND x y)
+    ;; A4:
+    ;;   wander            the region's wandering moments' tune names (strings)
+    ;;   moment-carrying   the room's fixed moment plays only while you carry
+    ;;                     this harmonic (moment: (... carrying: 2)), or #f
+    ;;   moment-still      it plays only once you have stood still this many
+    ;;                     seconds in the room (moment: (... still: 6)), or #f
     (define-struct place
       (key default: #f) (region default: #f) (bed-tune default: #f) (groups default: '())
       (levels default: '()) (moment default: #f) (frogs default: '()) (water default: #f)
       (px default: 0.0) (py default: 0.0) (rx default: 0) (ry default: 0)
       (still default: #f) (returns default: 0)
-      (carry default: #f) (tones default: #f) (stones default: '()) (news default: '()))
+      (carry default: #f) (tones default: #f) (stones default: '()) (news default: '())
+      (wander default: '()) (moment-carrying default: #f) (moment-still default: #f))
 
     ;; --- state ---------------------------------------------------------------------
     (define *say* (lambda parts #f))
@@ -198,7 +211,42 @@
       (set! *bed-player* #f) (set! *bed-src* #f) (set! *levels* '()) (set! *moments* '())
       (set! *moment* #f) (set! *moment-key* #f) (set! *tone-cutoff* #f)
       (set! *still-for* 0.0) (set! *still* #f) (set! *ears* #f) (set! *next* '()) (set! *waiting* #f)
-      (set! *spots* 0) (set! *carry-changed* #f) (set! *bed-tune* #f) (set! *room-levels* '()) (set! *bed-opened* #f))
+      (set! *spots* 0) (set! *carry-changed* #f) (set! *bed-tune* #f) (set! *room-levels* '()) (set! *bed-opened* #f)
+      (when *opening* (player-close! *opening*))
+      (set! *opening* #f) (set! *opening-skip* #f) (set! *opening-t0* #f) (set! *held* #f)
+      (set! *wander-due* #f) (set! *still-wait* #f) (set! *opening-want* #f) (set! *opening-handoff* #f))
+
+    ;; --- A4: the border, and what a save keeps ---------------------------------------
+    ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
+    ;; moment for BORDER-S) at 5.2 ms a frame on David's phone, over the 4 ms
+    ;; budget. 'through (the default): the old bed fades to THROUGH-MID
+    ;; (-3 dB) while it plays alone, then the new one starts and the two cross
+    ;; over THROUGH-OVERLAP-S (the old to nothing, the new to THROUGH-MID),
+    ;; and the new one comes up to full over the rest of THROUGH-IN-S. Two beds
+    ;; pull together for THROUGH-OVERLAP-S instead of BORDER-S, and the bed
+    ;; dips about 6 dB for that moment rather than to silence. 'cross: A2's
+    ;; four-second crossfade (?sound=border:cross, to compare by ear). Both
+    ;; a region border and a change of what is carried reopen the bed, so
+    ;; both take the mode.
+    (define THROUGH-OUT-S 1.0)
+    (define THROUGH-IN-S 2.0)
+    (define THROUGH-OVERLAP-S 0.3)
+    (define THROUGH-MID 0.7)       ; -3 dB: where the two beds cross
+    (define *border-mode* 'through)
+    (define (sound-set-border-mode! m) (when (memq m '(through cross)) (set! *border-mode* m)))
+
+    ;; A listening door (?sound=moment:NAME): the moment starts now over the
+    ;; bed, with the duck, whatever the hush says; it counts as a wandering
+    ;; moment heard.
+    (define (sound-audition! name)
+      (unless *moment*
+        (*say* "sound" "audition" name)
+        (start-moment! name #f *now*)))
+    (define (sound-border-mode) *border-mode*)
+
+    ;; Content's save: the fixed rooms and wandering moments already heard.
+    (define (sound-flags) (hush-flags *hush*))
+    (define (sound-restore-flags! flags) (set! *hush* (hush-with-flags *hush* flags)))
 
     ;; --- channels and levels ------------------------------------------------------------
     ;; groups: the region's bed-channels, e.g. (wind water reeds drone)
@@ -216,7 +264,7 @@
         (if (not e)
             1.0
             (let* ((r (cdr e)) (from (vector-ref r 0)) (to (vector-ref r 1)) (t0 (vector-ref r 2)) (dur (vector-ref r 3)))
-              (cond ((<= now t0) from)
+              (cond ((< now t0) from)          ; a ramp of no length takes effect at its start (see (engine mixer) ramp-value)
                     ((or (<= dur 0.0) (>= now (+ t0 dur))) to)
                     (else (+ from (* (- to from) (/ (- now t0) dur)))))))))
 
@@ -330,6 +378,8 @@
     (define *outs* 0)
     (define (open-region-bed! region groups bed-tune levels now)
       (let* ((old-src *bed-src*) (old-player *bed-player*) (first? (not old-src))
+             (through? (and old-src (eq? *border-mode* 'through)))
+             (out-s (if through? THROUGH-OUT-S BORDER-S))
              (p (and bed-tune (open-bed bed-tune region))))
         (if (not p)
             (*say* "sound" "error" "no-bed" (if bed-tune bed-tune "none"))
@@ -343,23 +393,48 @@
                 (set! *outs* (+ *outs* 1))
                 (let ((out-id (string-append BED-ID "-out-" (number->string *outs*))))
                   (mixer-rename! BED-ID out-id)
-                  (source-factor! old-src 'fade 0.0 BORDER-S now)
-                  (mixer-at! (+ now BORDER-S) (lambda () (mixer-remove! out-id) (player-close! old-player)))))
-              (set! *bed-src* (mixer-add! BED-ID (pull-of p) #t))
-              (new-bed-levels! levels now first?)))))
+                  (if through?
+                      ;; in two steps: down to THROUGH-MID while it plays alone,
+                      ;; then to nothing across the overlap (the new bed comes
+                      ;; up to THROUGH-MID across the same), so the bed dips
+                      ;; about 6 dB for the overlap rather than to silence
+                      (let ((alone (- THROUGH-OUT-S THROUGH-OVERLAP-S)))
+                        (source-factor! old-src 'fade THROUGH-MID alone now)
+                        (mixer-at! (+ now alone) (lambda () (source-factor! old-src 'fade 0.0 THROUGH-OVERLAP-S (mixer-now)))))
+                      (source-factor! old-src 'fade 0.0 out-s now))
+                  (mixer-at! (+ now out-s) (lambda () (mixer-remove! out-id) (player-close! old-player)))))
+              ;; 'through: the new bed is not pulled until just before the old
+              ;; one is silent (new-bed-levels! starts it)
+              (set! *bed-src* (mixer-add! BED-ID (pull-of p) (not through?)))
+              (when (and first? *opening*) (opening-handoff! now))
+              (new-bed-levels! levels now first? through?)))))
 
     (define (enter-region! pl now)
       (open-region-bed! (place-region pl) (place-groups pl) (place-bed-tune pl) (place-levels pl) now))
 
-    (define (new-bed-levels! levels now first?)
+    (define (new-bed-levels! levels now first? through?)
       (let ((pl-levels levels))
           (when *bed-src*
             ;; channels start at the room's levels (no ramp from 1), the
-            ;; source fades in (the first bed over a second, a border over BORDER-S)
+            ;; source fades in (the first bed over a second, or over the
+            ;; opening's handoff; a border over BORDER-S, or 'through: started
+            ;; late and faded in over THROUGH-IN-S)
             (apply-room-levels! pl-levels now 0.0)
             (apply-mutes!)
             (source-factor! *bed-src* 'fade 0.0 0.0 now)
-            (source-factor! *bed-src* 'fade 1.0 (if first? 1.0 BORDER-S) now)
+            (if through?
+                (let ((src *bed-src*))
+                  (mixer-at! (+ now (- THROUGH-OUT-S THROUGH-OVERLAP-S))
+                             (lambda ()
+                               ;; only if no later bed has replaced it meanwhile
+                               (when (eq? src *bed-src*)
+                                 (source-start! src)
+                                 (source-factor! src 'fade THROUGH-MID THROUGH-OVERLAP-S (mixer-now))
+                                 (mixer-at! (+ (mixer-now) THROUGH-OVERLAP-S)
+                                            (lambda ()
+                                              (when (eq? src *bed-src*)
+                                                (source-factor! src 'fade 1.0 (- THROUGH-IN-S THROUGH-OVERLAP-S) (mixer-now)))))))))
+                (source-factor! *bed-src* 'fade 1.0 (cond ((not first?) BORDER-S) (*opening* OPENING-HANDOFF-S) (else 1.0)) now))
             (when (and *moment* (mixer-find MOMENT-ID) (source-live? (mixer-find MOMENT-ID)))
               (source-factor! *bed-src* 'duck DUCK-GAIN 0.0 now))
             (when *still* (source-factor! *bed-src* 'still DUCK-GAIN 0.0 now)))))
@@ -410,16 +485,191 @@
       (set! *hush* (hush-enter *hush* (place-key pl)))
       (set! *next* '())
       (set! *room-levels* (place-levels pl))
+      (set! *wander-due* #f)
+      (set! *still-wait* #f)
       (if (not (eq? (place-region pl) *region*))
           (enter-region! pl now)
           (apply-room-levels! (place-levels pl) now ROOM-RAMP-S))
       (let ((m (place-moment pl)))
         (when m
-          (let ((d (hush-fixed-decision *hush* (place-key pl))))
-            (cond ((and *moment* (not (eq? d 'spent))) (fade-moment! now))
+          (let ((d (hush-fixed-decision *hush* (place-key pl)))
+                (unmet (moment-unmet pl)))
+            ;; A4's conditions. carrying: unmet, the moment neither plays nor
+            ;; fades the one playing, and stays armed. still: armed now,
+            ;; decided again once you have stood still long enough in the room.
+            (cond (unmet #f)
+                  ((and *moment* (not (eq? d 'spent)) (not (place-moment-still pl))) (fade-moment! now))
+                  ((and (eq? d 'play) (place-moment-still pl))
+                   (set! *still-wait* (list m (place-key pl) (inexact (place-moment-still pl)))))
                   ((eq? d 'play) (start-moment! m (place-key pl) now))
                   (else #f))
-            (*say* "sound" "room" "moment" m (symbol->string d))))))
+            (*say* "sound" "room" "moment" m (if unmet (symbol->string unmet)
+                                                  (if (and (eq? d 'play) (place-moment-still pl)) "still-wait" (symbol->string d)))))))
+      ;; a wandering moment may be drawn for a room with no moment of its own
+      ;; still to come (a fixed moment keeps its room)
+      (unless (or *moment* (room-armed? pl))
+        (maybe-wander! pl now)))
+
+    ;; 'carrying when the room's moment asks for a harmonic not carried, or #f
+    (define (moment-unmet pl)
+      (let ((n (place-moment-carrying pl)))
+        (and n (not (memv n *carry*)) 'carrying)))
+
+    (define (room-armed? pl)
+      (and (place-moment pl) (not (eq? (hush-fixed-decision *hush* (place-key pl)) 'spent))))
+
+    ;; --- A4: wandering moments -------------------------------------------------------------
+    ;; A region's wandering moments (its wander: list) may play in any of its
+    ;; rooms whose sound fits the moment's tag, once the hush allows
+    ;; (hush-wander-ok?: 4 minutes and 6 rooms since the last moment ended),
+    ;; each once a playthrough. The tags are read from the room's own bed:
+    ;; levels, so no room needs a new field: open-sky, a room that names its
+    ;; wind at 0.5 or more; water, one that names its water at 0.6 or more.
+    ;; One is drawn on entering the room and starts WANDER-DELAY-LO to -HI
+    ;; seconds later if you are still there and the hush still allows.
+    ;; David, 2026-09-24: the slice's two wandering moments
+    (define WANDER-TAGS '(("stones-remember" . open-sky) ("seed-wind" . water)))
+    (define WANDER-DELAY-LO 3.0)
+    (define WANDER-DELAY-HI 8.0)
+    (define *wander-due* #f)      ; (name key t)
+    (define (sound-wander-due) *wander-due*)
+
+    (define (named-level levels g) (let ((e (assq g levels))) (and e (cdr e))))
+
+    (define (wander-fits? name levels)
+      (let ((e (assoc name WANDER-TAGS)))
+        (or (not e)
+            (case (cdr e)
+              ((open-sky) (let ((w (named-level levels 'wind))) (and w (>= w 0.5))))
+              ((water) (let ((w (named-level levels 'water))) (and w (>= w 0.6))))
+              (else #t)))))
+
+    (define (maybe-wander! pl now)
+      (when (hush-wander-ok? *hush*)
+        (let ((cands (filter (lambda (n) (and (assoc n *moments*) (not (hush-wander-spent? *hush* n))
+                                              (wander-fits? n (place-levels pl))))
+                             (place-wander pl))))
+          (when (pair? cands)
+            (let ((n (list-ref cands (min (- (length cands) 1) (exact (floor (* (rand!) (length cands))))))))
+              (set! *wander-due* (list n (place-key pl) (+ now (rand-in WANDER-DELAY-LO WANDER-DELAY-HI))))
+              (*say* "sound" "wander" n "due"))))))
+
+    (define (wander-frame! now)
+      (let ((w *wander-due*))
+        (when w
+          (cond ((not (equal? (cadr w) *key*)) (set! *wander-due* #f))
+                ((< now (caddr w)) #f)
+                (else
+                 (set! *wander-due* #f)
+                 (when (and (not *moment*) (hush-wander-ok? *hush*))
+                   (start-moment! (car w) #f now)))))))
+
+    ;; A fixed moment with still: waits in its room for the stillness.
+    (define *still-wait* #f)      ; (name key secs)
+    (define (still-wait-frame! now)
+      (let ((w *still-wait*))
+        (when w
+          (cond ((not (equal? (cadr w) *key*)) (set! *still-wait* #f))
+                ((>= *still-for* (caddr w))
+                 (set! *still-wait* #f)
+                 (let ((d (hush-fixed-decision *hush* (cadr w))))
+                   (*say* "sound" "still" (car w) (symbol->string d))
+                   (when (and (eq? d 'play) (not *moment*)) (start-moment! (car w) (cadr w) now))))
+                (else #f)))))
+
+    ;; --- A4: the opening (D33, the Flux Harmonic card, and D15) ------------------------------
+    ;; One tune, "opening": its calm mark is the card (the fundamental, and
+    ;; overtones 2 to 5 blooming in and fading back, 4 s), its world mark the
+    ;; fundamental held over black while the wind rises, then fading out.
+    ;; Content's frame sequence calls:
+    ;;   (sound-opening-start!)   after the start screen's gesture
+    ;;   (sound-opening-skip!)    a key during the card: the walk jumps to
+    ;;                            world at the next bar (a quarter second);
+    ;;                            the fundamental is one held note, so it
+    ;;                            never breaks
+    ;;   (sound-opening-state)    'card | 'world | 'handoff | #f
+    ;;   (sound-hold! #t / #f)    while held the director treats the world as
+    ;;                            not yet begun (no bed, no room); release it
+    ;;                            when the Hollow is shown at dawn
+    ;; When the world begins (the first bed opens) the opening fades out over
+    ;; OPENING-HANDOFF-S while the bed fades in over the same time.
+    (define OPENING-TUNE "opening")
+    (define OPENING-ID "opening")
+    (define OPENING-HANDOFF-S 3.0)
+    (define *opening* #f)
+    (define *opening-skip* #f)
+    (define *opening-t0* #f)
+    (define *opening-handoff* #f)
+    (define *held* #f)
+    (define (sound-hold! on) (set! *held* (and on #t)))
+    (define (sound-held?) *held*)
+
+    ;; On the web the text may not have arrived at the gesture: the start
+    ;; waits for it (opening-frame!) up to TEXT-WAIT-S, then says so.
+    (define *opening-want* #f)
+    (define (sound-opening-start!)
+      (unless *opening*
+        (if (not (tune-text OPENING-TUNE))
+            (unless *opening-want* (set! *opening-want* *now*))
+            (opening-open!))))
+
+    (define (opening-open!)
+      (set! *opening-want* #f)
+      (unless *opening*
+        (let ((p (open OPENING-TUNE #f)))
+          (if (not p)
+              (*say* "sound" "error" "no-opening")
+              (let ((s (mixer-add! OPENING-ID (pull-of p) #t)))
+                (set! *opening* p)
+                (set! *opening-t0* *now*)
+                (set! *opening-handoff* #f)
+                (source-on-end! s (lambda (t)
+                                    (when (eq? *opening* p)
+                                      (set! *opening* #f)
+                                      (*say* "sound" "opening" "end"))
+                                    (player-close! p)))
+                (*say* "sound" "opening" "start"))))))
+
+    (define (sound-opening-skip!)
+      (when (and *opening* (not *opening-skip*) (eq? (sound-opening-state) 'card))
+        (when (player-jump-to-mark! *opening* 'world)
+          (set! *opening-skip* #t)
+          (*say* "sound" "opening" "skip"))))
+
+    (define (sound-opening-state)
+      (cond ((not *opening*) #f)
+            (*opening-handoff* 'handoff)
+            ((or (player-landed *opening*)
+                 (>= (car (player-position *opening* (exact (round (* DEPTH-S (mixer-rate)))))) 1))
+             'world)
+            (else 'card)))
+
+    ;; A mark jump also confines the walk to the mark's region (motif loops
+    ;; it); the world section must play once and end, so the region is freed
+    ;; once the jump has landed.
+    (define (opening-frame!)
+      (when *opening-want*
+        (cond ((tune-text OPENING-TUNE) (opening-open!))
+              ((> (- *now* *opening-want*) TEXT-WAIT-S)
+               (set! *opening-want* #f)
+               (*say* "sound" "error" "no-opening-text"))
+              (else #f)))
+      (when (and *opening* *opening-skip* (player-landed *opening*))
+        (player-set-region! *opening* #f #f)
+        (set! *opening-skip* #f)))
+
+    (define (opening-handoff! now)
+      (let ((s (mixer-find OPENING-ID)) (p *opening*))
+        (when (and s p (not *opening-handoff*))
+          (set! *opening-handoff* #t)
+          (*say* "sound" "opening" "handoff")
+          (source-on-end! s #f)
+          (source-factor! s 'fade 0.0 OPENING-HANDOFF-S now)
+          (mixer-at! (+ now OPENING-HANDOFF-S)
+                     (lambda ()
+                       (mixer-remove! OPENING-ID)
+                       (player-close! p)
+                       (when (eq? *opening* p) (set! *opening* #f) (set! *opening-handoff* #f)))))))
 
     ;; --- listening: the tone, stillness, the ears ----------------------------------------------
     (define (clamp lo hi x) (max lo (min hi x)))
@@ -628,25 +878,32 @@
     ;; In the order they are rendered at boot (a few blocks a frame, about 7 s
     ;; for all of them at 60 fps): the calls heard in the first rooms first,
     ;; the gate's and the H2 answers after, the ambient spots last.
+    ;; A4, the polish pass: the gains set each cue's loudness in play (the
+    ;; loudest 400 ms of its render times its gain, measured with ffmpeg's
+    ;; ebur128), so the kinds sit apart and each kind together: the pickup
+    ;; -13 LUFS and the ring -14 (the two events you cause), the stone
+    ;; sinking -24 (was -40, inaudible under the bed), the near miss -22,
+    ;; the creatures' calls -26 to -30 (the moths were -18 to -25, louder
+    ;; than the frogs; the reedlings -34), the return tone as David set it.
     (define SPOTS
       (list (list 'return "return-tone" 0.0 0.0 0.5)
             ;; the creatures' calls (A3)
-            (list 'chirp-a "chirp-a" 0.0 0.0 0.35)
-            (list 'chirp-b "chirp-b" 0.0 0.0 0.35)
-            (list 'flurry "flurry" 0.0 0.0 0.45)
+            (list 'chirp-a "chirp-a" 0.0 0.0 0.6)
+            (list 'chirp-b "chirp-b" 0.0 0.0 0.55)
+            (list 'flurry "flurry" 0.0 0.0 0.64)
             (list 'croak-a "croak-a" 0.0 0.0 0.55)
             (list 'croak-b "croak-b" 0.0 0.0 0.55)
-            (list 'moth-a "moth-a" 0.0 0.0 0.3)
-            (list 'moth-b "moth-b" 0.0 0.0 0.3)
+            (list 'moth-a "moth-a" 0.0 0.0 0.19)
+            (list 'moth-b "moth-b" 0.0 0.0 0.13)
             ;; the gate and the pickup (A3): (name tune 0 0 gain)
-            (list 'miss-h2 "miss-h2" 0.0 0.0 0.6)
-            (list 'pickup-h2 "pickup-h2" 0.0 0.0 0.8)
-            (list 'ring-h2 "ring-h2" 0.0 0.0 0.75)
-            (list 'stone-slide "stone-slide" 0.0 0.0 0.55)
+            (list 'miss-h2 "miss-h2" 0.0 0.0 0.34)
+            (list 'pickup-h2 "pickup-h2" 0.0 0.0 0.6)
+            (list 'ring-h2 "ring-h2" 0.0 0.0 0.61)
+            (list 'stone-slide "stone-slide" 0.0 0.0 0.72)
             ;; what H2 changes
             (list 'croak-h2 "croak-h2" 0.0 0.0 0.55)
             (list 'song-h2 "song-h2" 0.0 0.0 0.5)
-            (list 'moth-h2 "moth-h2" 0.0 0.0 0.35)
+            (list 'moth-h2 "moth-h2" 0.0 0.0 0.14)
             ;; A2's spot sounds
             (list 'bird "spot-bird" 14.0 32.0 0.35)
             (list 'plop "spot-plop" 7.0 18.0 0.4)))
@@ -813,7 +1070,7 @@
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
       (set! *cue-job* #f) (set! *cues* (quote ())) (set! *pending-cues* (quote ()))
       (set! *cue-queue* (map car SPOTS))
-      (for-each tune-text (append moments (list TONE-TUNE) (map cadr SPOTS))))
+      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) (map cadr SPOTS))))
 
     ;; One piece of deferred work a frame: a cue render or a moment open,
     ;; whichever has its text; never while a moment plays.
@@ -827,8 +1084,13 @@
             (else #f)))
 
     ;; Every frame. place: #f outside the world (the test room, the atlas).
-    (define (sound-frame! now dt pl)
+    (define (sound-frame! now dt pl0)
       (set! *now* now)
+      (opening-frame!)
+      (let ((pl (and (not *held*) pl0)))
+        (sound-frame-place! now dt pl)))
+
+    (define (sound-frame-place! now dt pl)
       (unless pl (set! *ears* #f))
       (when (and pl (list? (place-carry pl))) (sound-set-carry! (place-carry pl)))
       (when pl
@@ -857,6 +1119,8 @@
           ;; 0.5: "a little too loud" at 0.7 (David, 2026-09-24)
           (cue! 'return 0.5 0.0))
         (still-frame! pl dt now)
+        (still-wait-frame! now)
+        (wander-frame! now)
         (tone-frame! pl now)
         (hum-frame! pl now)
         (news-frame! pl)
@@ -881,6 +1145,9 @@
                              " ears " (if *ears* (symbol->string *ears*) "-"))
               (string-append "hush played " (r1 (hush-played h)) " rooms " (number->string (hush-rooms h))
                              " wander " (symbol->string (hush-why-wander h))
-                             " spent " (number->string (length (hush-spent h)))))))
+                             (if *wander-due* (string-append " (" (car *wander-due*) " due)") "")
+                             " spent " (number->string (+ (length (hush-spent h)) (length (hush-wander-spent h))))
+                             " border " (symbol->string *border-mode*)
+                             (let ((o (sound-opening-state))) (if o (string-append " opening " (symbol->string o)) ""))))))
 
     (define (symbol->string* x) (if (symbol? x) (symbol->string x) x))))

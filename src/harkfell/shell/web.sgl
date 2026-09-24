@@ -287,6 +287,8 @@
             ((string=? type "bench") (audio-bench!) 0)
             ((string=? type "carry") (audio-carry! payload) 0)
             ((string=? type "tone") (audio-tone-room! payload) 0)
+            ;; A4: ?sound=a,b, the sound's listening doors ((harkfell audio))
+            ((string=? type "sound") (audio-sound-door! payload) 0)
             ((string=? type "tune-chunk") (tunes-chunk! payload) 0)
             ((string=? type "tune-done") (tunes-done! payload) 0)
             (else 0)))))

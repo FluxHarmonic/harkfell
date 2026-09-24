@@ -93,7 +93,7 @@
       (assert-true (< -7.5 d -4.5)))))
 
 ;; A change of what is carried reopens the bed with its drone notes (a
-;; crossfade over 4 s). During a moment, the bed going out and the bed coming
+;; crossfade). During a moment, the bed going out and the bed coming
 ;; in both keep the duck (review M1: the outgoing bed was a fresh source and
 ;; jumped 6 dB up for its fade), and it is not a visit (no hush count).
 (define CARRY-AT 6.0)
@@ -105,10 +105,12 @@
     (set! ROOMS-BEFORE (hush-rooms (sound-hush)))
     (sound-set-carry! '(2)))
   REED-BRIDGE)
-(run carry-plan 7.0)
+;; A4: the border mode is 'through, so the two beds overlap only in the last
+;; THROUGH-OVERLAP-S of the old one's THROUGH-OUT-S fade: 6.7 s to 7.0 s here.
+(run carry-plan 6.85)
 (define BEDS (filter (lambda (s) (let ((id (source-id s))) (and (>= (string-length id) 3) (string=? (substring id 0 3) "bed"))))
                      (mixer-sources)))
-(define NOW 7.0)
+(define NOW 6.85)
 ;; captured now: the test bodies run after every run in this file
 (define CARRY-MOMENT (sound-moment-playing))
 (define CARRY-ROOMS (hush-rooms (sound-hush)))

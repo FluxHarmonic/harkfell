@@ -210,6 +210,8 @@
                (shell-set-ms! (and (member "--ms" args) #t))
                ;; A2: the sound; --bench runs the phone measurement natively
                (audio-boot! (lambda parts (say (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts)))))
+               ;; A4: --sound a,b (the sound's listening doors), before --bench reads them
+               (let ((s (arg-value args "--sound"))) (when s (audio-sound-door! s)))
                (when (member "--bench" args) (audio-bench!))
                (let ((c (arg-value args "--carry")) (t (arg-value args "--tone")))
                  (when c (audio-carry! c))

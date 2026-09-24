@@ -70,12 +70,16 @@
     (assert-equal '() (tune-problems (load-content WORLD))))
   (test "a moment with no file is red, naming the room and the path"
     (let* ((src (map (lambda (e)
-                       (if (ends-with? (car e) "x9y3.room")
-                           (cons (car e) (swap (cdr e) "tune: first-open-water" "tune: frog-choir"))
-                           e))
+                       (cond ((ends-with? (car e) "x9y3.room")
+                              (cons (car e) (swap (cdr e) "tune: first-open-water" "tune: no-such-moment")))
+                             ;; A4: every moment the region names has a file now, so the
+                             ;; region names one more that has none
+                             ((ends-with? (car e) "world.sgl")
+                              (cons (car e) (swap (cdr e) "moments: (first-open-water" "moments: (no-such-moment first-open-water")))
+                             (else e)))
                      WORLD))
            (ps (tune-problems (load-content src))))
-      (assert-true (member "reedfen:9,3 moment: no assets/tunes/frog-choir.cts" ps)))))
+      (assert-true (member "reedfen:9,3 moment: no assets/tunes/no-such-moment.cts" ps)))))
 
 ;; A3: every cue the director renders, and for every harmonic placed in the
 ;; world (a pickup or a ring-stone) its finding tone, its pickup cue, its
