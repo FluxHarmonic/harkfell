@@ -259,7 +259,7 @@
             (cols (+ x 1))))
         bv))
 
-    ;; Under the fen: a room with another room right above it has earth
+    ;; Under the fen: a room under a ceiling of rock (under?) has earth
     ;; behind it, not sky. A back wall of peat in the ground's two darkest
     ;; slots: ground-1, with strata of ground-2 dithered in, thin roots
     ;; hanging from the top in leaf-1, and the odd stone in ground-2.
@@ -294,8 +294,15 @@
               (set! *backdrops* (cons (cons key t) *backdrops*))
               t))))
 
+    ;; Under ground: a room whose own top row is mostly rock (a ceiling:
+    ;; more than 15 of its 25 cells solid or climbable) has earth behind it.
+    ;; Not "a room above it": the Hollow stacks two rows of open-air rooms
+    ;; under one sky, and the first rule drew its dawn bowl as a cave.
     (define (under? rm)
-      (and *content* (content-room *content* (room-x rm) (- (room-y rm) 1)) #t))
+      (let loop ((c 0) (n 0))
+        (if (= c ROOM-COLS)
+            (> n 15)
+            (loop (+ c 1) (if (memq (char-kind (room-char rm c 0)) (list (quote solid) (quote climbable))) (+ n 1) n)))))
 
     ;; The focus pull (D16, section 7's depth): while a music moment plays the
     ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
