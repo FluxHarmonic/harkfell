@@ -62,8 +62,8 @@
           (harkfell gates)
           (harkfell save)
           (harkfell frame)
-          (harkfell front)
           (harkfell reveal)
+          (harkfell title)
           (harkfell render))
 
   (export shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
@@ -217,6 +217,7 @@
       (let ((ct (load-content source)))
         (set! *content* ct)
         (set-draw-content! ct)
+        (title-set-content! ct)
         (map problem->string (content-problems ct))))
 
     ;; A3: what the body carries at a door (?carry=, --carry): a
@@ -413,6 +414,7 @@
             (when (null? ps)
               (set! *content* ct)
               (set-draw-content! ct)
+              (title-set-content! ct)
               (when (and *world* (world-room *world*) (placed-data (world-room *world*)))
                 (let* ((p (world-room *world*))
                        (rm (content-room ct (placed-x p) (placed-y p)))
@@ -656,17 +658,18 @@
             (else (present-room! win-w win-h ticks))))
 
     ;; A4: the start screen, the card, the black between: drawn in window
-    ;; pixels ((harkfell front)), no room target.
+    ;; pixels ((harkfell title): the start screen and the card each draw their
+    ;; own pixel view through the palette pass, and IM Fell over it).
     (define (present-front! win-w win-h)
       (begin-frame)
       (set-blend-mode 'normal)
       (case (frame-phase *frame*)
         ((start-in start start-out)
-         (front-start! win-w win-h (frame-words-alpha *frame*) *wall*
+         (draw-start! win-w win-h (frame-words-alpha *frame*) *wall*
                        (and *pointer* (car *pointer*)) (and *pointer* (cdr *pointer*))
                        (frame-web? *frame*) *input-kind*))
-        ((card) (front-card! win-w win-h (frame-card-alpha *frame*) *wall*))
-        (else (front-black! win-w win-h 1.0)))
+        ((card) (draw-card! win-w win-h (frame-card-alpha *frame*) *wall*))
+        (else (set-color 0.0 0.0 0.0 1.0) (draw-filled-rect 0 0 win-w win-h)))
       (end-frame))
 
     ;; The sheet or the atlas: one target the size of the overview, fitted
@@ -705,12 +708,17 @@
         ;; moment pulls the focus
         (set-look-sound! (sound-moment-playing)
                          (let ((e (assq 'wind (sound-bed-levels)))) (and e (cdr e))))
+        ;; D15: the creature curled asleep until the first input
+        (set-look-waking! *waking*)
+        ;; the dawn (D15), the world coming in from black by the dither, in
+        ;; the palette pass: the frame's black joins the world's own dim
         (present-play! *world*
                        (lambda ()
                          (when (and (world-room *world*) (sound-ears) (not (sound-ears-flick)))
                            (let ((o (world-origin *world*)))
                              (draw-ears (world-body *world*) (car o) (cdr o) (sound-ears)
-                                        (lambda () (paint-slot! (slot 'fur-1))))))))
+                                        (lambda () (paint-slot! (slot (quote fur-1))))))))
+                       (if *frame* (frame-black-alpha *frame*) 0.0))
         ;; The room's target is copied OPAQUE (blend none): a translucent draw
         ;; into it (water, A3's light) lowers the target's own alpha, and
         ;; blended over the black window those pixels came out dark (seen in
@@ -723,12 +731,10 @@
                 (with-render-target *sharp-rt*
                   (draw-render-target (room-color-rt) 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
                 (draw-render-target *sharp-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f)))))
-        ;; A4: the dawn, the world coming in from black (D15)
-        (when (and *frame* (> (frame-black-alpha *frame*) 0.0))
-          (front-black! win-w win-h (frame-black-alpha *frame*)))
         ;; D35: the wordmark over the live world, at the first homecoming
+        ;; ((harkfell title)'s draw-reveal!, on (harkfell reveal)'s schedule)
         (when (> (shell-reveal-alpha) 0.0)
-          (front-reveal! win-w win-h (shell-reveal-alpha) (reveal-shown-t *reveal-sch* *reveal-t*)))
+          (draw-reveal! win-w win-h (shell-reveal-alpha) (reveal-shown-t *reveal-sch* *reveal-t*)))
         (when *ms*
           (draw-readout (append (list (string-append "frame " (tenths *frame-ms*)
                                                      " step " (tenths *step-ms*)

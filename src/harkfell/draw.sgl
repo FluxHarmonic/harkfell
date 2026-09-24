@@ -686,8 +686,10 @@
 
     ;; The whole frame of play, as far as the colour target: bake what the
     ;; room needs, draw it as slots (after: a thunk drawn last in the same
-    ;; pass, the ears), resolve it. Outside any pass.
-    (define (present-play! w after)
+    ;; pass, the ears), resolve it; black: optionally a further fade to black
+    ;; (the frame's dawn), by the same dither as the world's dim. Outside any
+    ;; pass.
+    (define (present-play! w after . black)
       (ensure-render!)
       (atlas-ensure!)
       (step-focus!)
@@ -702,7 +704,9 @@
           (set-blend-mode 'normal)
           (after)
           (draw-strips! *strips*))
-        (resolve! (world-ticks w) (world-dim w) (if rm (room-hue w) (slot-of 'h2)))))
+        (resolve! (world-ticks w)
+                  (max (world-dim w) (if (pair? black) (car black) 0.0))
+                  (if rm (room-hue w) (slot-of 'h2)))))
 
     ;; --- the overviews: the region sheet and the atlas ----------------------------------
 
