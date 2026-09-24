@@ -3,6 +3,8 @@
 ;;;   harkfell --room-check [--world DIR] [--parse-only] [--verbose] [REGION:X,Y ...]
 ;;;
 ;;; --parse-only stops before reach (gates 1 and 2 only): quick, and says so.
+;;; --no-reuse searches every carry set afresh (A4: by default the sets after
+;;; the first reuse its memo, (engine reach); the answer is the same).
 ;;;
 ;;;   harkfell --room-check --path REGION:X,Y C,R [--have 2,3]
 ;;;
@@ -114,6 +116,7 @@
         (if (not (file-exists? (string-append dir "/world.sgl")))
             (begin (say "SETUP-FAILED room-check: no " dir "/world.sgl") 2)
             (let* ((t0 (now-s))
+                   (_ (when (member "--no-reuse" args) (set-reach-reuse! #f)))
                    (ct (load-content (read-world-source dir)))
                    (ps (content-problems ct)))
               (say "world: " dir ", " (number->string (length (content-rooms ct))) " rooms")

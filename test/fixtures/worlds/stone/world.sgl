@@ -1,0 +1,18 @@
+;;; A one-room fixture world for the reach checker's REUSE check (A4,
+;;; (harkfell fixtures) "reuse"): a harmonic on the floor west of a wall, and
+;;; the wall's door a ring-stone keyed to it, so the cells east of the wall
+;;; are reached only carrying H2 and the two carry sets' graphs differ.
+(start region: stonefen room: (0 0) cell: (2 8))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region stonefen
+  name: "Stone fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: ()
+  moments: ()
+  gives: ((overtone 2)))

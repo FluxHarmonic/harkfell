@@ -1,0 +1,7 @@
+(map
+  region: stonefen
+  origin: (0 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Stone" "a harmonic, and the door it opens")))

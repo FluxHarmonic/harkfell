@@ -60,6 +60,25 @@
 ;;; movement envelope's). A room that is only traversable by an unsearched
 ;;; trick is reported unreachable: the safe direction.
 ;;;
+;;; REUSE between searches (A4). A search on a tilemap that differs from an
+;;; earlier one in a few cells (a carry set: only the stones keyed to what is
+;;; carried turn to air) repeats almost all of its work. So every search keeps
+;;; a MEMO: for each anchor it expanded, the representative it expanded from,
+;;; the RECTANGLE of cells every body of every trajectory from it overlapped
+;;; (with a cell of margin on each side, which covers every tile the physics
+;;; reads: collision, the ground strip, the wall beside, the head out of the
+;;; water), and what it noted; and for each standing anchor's candidates, the
+;;; same rectangle over the realized paths, the anchors its walk read, and
+;;; the edges it made. reach-search* given an earlier memo and the cells that
+;;; changed takes an anchor's expansion from the memo when its representative
+;;; is the same and no changed cell is in its rectangle, and a standing
+;;; anchor's edges when every anchor its walk read was itself taken from the
+;;; memo, no changed cell is in its rectangle, and every one of those edges'
+;;; witnesses still replays here (the replay runs again: an edge is never
+;;; taken on the memo's word). Anything else is searched afresh. The fixture
+;;; check "reuse" compares a search with reuse against one without, edge for
+;;; edge, and its sabotage (the changed cells ignored) must fail it.
+;;;
 ;;; Pure: no platform.
 
 (define-library (engine reach)
@@ -74,7 +93,8 @@
   (export make-intent* NOTHING
           standable? standable-cells stand-body real-stand-body rest-cell body-cell
           witness witness? witness-from witness-script witness-hops
-          reach-graph reach-graph? reach-search
+          reach-graph reach-graph? reach-search reach-search* graph-memo tilemap-changes
+          graph-same-edges?
           graph-tm graph-cells graph-edges graph-starts graph-stats
           graph-edges-from graph-rejected graph-waters cell-index index-cell
           replay-witness witness-lands? witness-bodies
@@ -254,8 +274,36 @@
       (edges default: #f)           ; vector by cell index: ((to-index . witness) ...)
       (stats default: '())          ; ((name . count) ...)
       (rejected default: '())       ; ((from-cell . to-cell) ...): candidates refused
-      (waters default: '()))        ; ((swim-cell stand-cell ...) ...): each water anchor and the
+      (waters default: '())         ; ((swim-cell stand-cell ...) ...): each water anchor and the
                                     ; standing cells its search reaches (raw, unrealized)
+      (memo default: #f))           ; (expansions . candidates), vectors by anchor key (REUSE)
+
+    (define (graph-memo g) (reach-graph-memo g))
+
+    ;; The cell indices where two tilemaps of one size differ.
+    (define (tilemap-changes a b)
+      (let ((va (tilemap-cells a)) (vb (tilemap-cells b)))
+        (let loop ((i (- (vector-length va) 1)) (acc '()))
+          (if (< i 0) acc (loop (- i 1) (if (eq? (vector-ref va i) (vector-ref vb i)) acc (cons i acc)))))))
+
+    ;; Do two graphs over one tilemap size hold the same edges, witness for
+    ;; witness? (The reuse check's comparison.) -> #t, or the first cell
+    ;; index where they differ.
+    (define (graph-same-edges? a b)
+      (let ((ea (reach-graph-edges a)) (eb (reach-graph-edges b)))
+        (define (norm l) (list-sort (lambda (x y) (string<? (car x) (car y)))
+                                    (map (lambda (e) (list (edge-key e))) l)))
+        (define (edge-key e)
+          (string-append (number->string (car e)) ":" (number->string (witness-hops (cdr e))) ":"
+                         (apply string-append (map (lambda (in) (string-append (number->string (intent-code* in)) ","))
+                                                   (witness-script (cdr e))))))
+        (let loop ((i 0))
+          (cond ((>= i (vector-length ea)) #t)
+                ((equal? (norm (vector-ref ea i)) (norm (vector-ref eb i))) (loop (+ i 1)))
+                (else i)))))
+
+    (define (intent-code* in)
+      (intent-slot (intent-h in) (intent-v in) (intent-jump in) (intent-press in)))
 
     (define (graph-tm g) (reach-graph-tm g))
     (define (graph-cells g) (reach-graph-cells g))
@@ -347,14 +395,63 @@
     ;; Returns a reach graph; its stats count anchors, steps, candidates,
     ;; repaired hops and candidates rejected.
     (define (reach-search tm f starts accept? . log)
+      (apply reach-search* tm f starts accept? #f '() log))
+
+    ;; REUSE: prior, a memo from a search on a tilemap that differs from tm
+    ;; only in the cell indices CHANGED (or #f: nothing to reuse).
+    (define (reach-search* tm f starts accept? prior changed . log)
       (let* ((s (tilemap-size tm))
              (ncells (* (tilemap-cols tm) (tilemap-rows tm)))
-             (reps (make-vector (* NKINDS ncells) #f))
-             (hops (make-vector (* NKINDS ncells) '()))   ; ((to-key . rev-script) ...)
+             (nk (* NKINDS ncells))
+             (reps (make-vector nk #f))
+             (hops (make-vector nk '()))   ; ((to-key . rev-script) ...)
              (queue '())
              (steps 0)
              (expanded 0)
-             (repaired 0))
+             (repaired 0)
+             (reused 0)
+             (reused-cands 0)
+             (prior-exp (and prior (car prior)))
+             (prior-cand (and prior (cdr prior)))
+             (exp-memo (make-vector nk #f))     ; key -> (rep-sig rect notes)
+             (cand-memo (make-vector nk #f))    ; stand key -> (rect deps edges rejected counts)
+             (reused-exp (make-vector nk #f))   ; key -> #t: expanded from the memo in this search
+             (changed-cells (map (lambda (i) (index-cell tm i)) changed)))
+
+        ;; --- REUSE: the rectangle of cells bodies overlap, and the notes ---------
+        (define *rect* #f)      ; #(c0 r0 c1 r1) while recording, else #f
+        (define *notes* #f)     ; ((kind cell side b rev) ...) while recording an expansion
+
+        (define (track! b)
+          (when (and *rect* b)
+            (let ((c0 (- (floor-int (/ (body-x b) s)) 1))
+                  (c1 (+ (floor-int (/ (+ (body-x b) (feel-box-w f)) s)) 1))
+                  (r0 (- (floor-int (/ (body-y b) s)) 1))
+                  (r1 (+ (floor-int (/ (+ (body-y b) (feel-box-h f)) s)) 1)))
+              (when (< c0 (vector-ref *rect* 0)) (vector-set! *rect* 0 c0))
+              (when (< r0 (vector-ref *rect* 1)) (vector-set! *rect* 1 r0))
+              (when (> c1 (vector-ref *rect* 2)) (vector-set! *rect* 2 c1))
+              (when (> r1 (vector-ref *rect* 3)) (vector-set! *rect* 3 r1)))))
+
+        (define (rect-start! b)
+          (set! *rect* (vector 1000000 1000000 -1000000 -1000000))
+          (track! b))
+
+        (define (rect-take!)
+          (let ((r (vector->list *rect*))) (set! *rect* #f) r))
+
+        ;; Is a changed cell inside the rectangle (c0 r0 c1 r1)?
+        (define (rect-changed? rect)
+          (let ((c0 (car rect)) (r0 (cadr rect)) (c1 (caddr rect)) (r1 (cadddr rect)))
+            (let loop ((cs changed-cells))
+              (and (pair? cs)
+                   (or (and (<= c0 (car (car cs)) c1) (<= r0 (cdr (car cs)) r1))
+                       (loop (cdr cs)))))))
+
+        ;; What makes two representatives the same state.
+        (define (rep-sig b)
+          (list (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b) (body-facing b)
+                (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b) (body-cut b)))
 
         (define (key kind c r) (+ kind (* NKINDS (cell-index tm c r))))
         (define (key-kind k) (modulo k NKINDS))
@@ -362,7 +459,9 @@
 
         (define (step b in)
           (set! steps (+ steps 1))
-          (safe-step tm f b in))
+          (let ((b2 (safe-step tm f b in)))
+            (track! b2)
+            b2))
 
         (define (in-map? c r)
           (and (>= c 0) (< c (tilemap-cols tm)) (>= r 0) (< r (tilemap-rows tm))))
@@ -415,7 +514,9 @@
               (let ((k (key kind c r)))
                 (if *sink*
                     (*sink* k b rev)
-                    (note-anchor! from k kind c r side b rev))))))
+                    (begin
+                      (when *notes* (set! *notes* (cons (list kind cell side b rev) *notes*)))
+                      (note-anchor! from k kind c r side b rev)))))))
 
         (define (note-anchor! from k kind c r side b rev)
           (unless (vector-ref reps k)
@@ -656,7 +757,23 @@
           (set! expanded (+ expanded 1))
           (when (pair? log)
             ((car log) expanded steps (key-kind k) (key-cell k)))
-          (expand-kind k (key-kind k) (vector-ref reps k)))
+          (let* ((rep (vector-ref reps k))
+                 (sig (rep-sig rep))
+                 (p (and prior-exp (vector-ref prior-exp k))))
+            (if (and p (equal? (car p) sig) (not (rect-changed? (cadr p))))
+                ;; REUSE: the same state, nothing it touched has changed
+                (begin
+                  (set! reused (+ reused 1))
+                  (vector-set! reused-exp k #t)
+                  (vector-set! exp-memo k p)
+                  (for-each (lambda (n) (apply note! k n)) (reverse (caddr p))))
+                (begin
+                  (rect-start! rep)
+                  (set! *notes* '())
+                  (expand-kind k (key-kind k) rep)
+                  (let ((notes *notes*))
+                    (set! *notes* #f)
+                    (vector-set! exp-memo k (list sig (rect-take!) notes)))))))
 
         ;; Each water anchor's view of the way out: the standing cells reachable
         ;; from anchor k0 over the search's own hops (raw, unrealized). The trap
@@ -770,66 +887,104 @@
                (no-realize 0)
                (rejected-edges '())
                (nkeys (* NKINDS ncells)))
+
+          ;; The walk from stand anchor k, as it always was, but its results
+          ;; collected: (rect deps new-edges rejected-pairs n-cand n-rej n-unreal),
+          ;; deps the anchors whose hops the walk read (REUSE).
+          (define (walk-from k)
+            (let* ((from-cell (key-cell k))
+                   (seen (list k))
+                   (tries '())   ; ((stand-key . failed candidates) ...)
+                   (deps (list k))
+                   (new-edges '())
+                   (rej '())
+                   (nc 0) (nr 0) (nu 0))
+              (rect-start! (vector-ref reps k))
+              (let bfs ((front (map (lambda (h) (list (car h) 1 (list h))) (vector-ref hops k)))
+                        (back '()))
+                (cond ((and (null? front) (null? back)) #f)
+                      ((null? front) (bfs (reverse back) '()))
+                      (else
+                       (let* ((item (car front))
+                              (to (car item))
+                              (n (cadr item))
+                              (path (caddr item)))   ; ((key . rev) ...), last hop first
+                         (if (memv to seen)
+                             (bfs (cdr front) back)
+                             (begin
+                               ;; a stand target is only closed once an edge to it is
+                               ;; accepted or MAX-TRIES paths to it have failed: the first
+                               ;; path's realize can fail where a later one's does not
+                               (unless (= (key-kind to) K-STAND) (set! seen (cons to seen)))
+                               (if (= (key-kind to) K-STAND)
+                                   (let* ((to-cell (key-cell to))
+                                          (hs (reverse path))
+                                          (raw (witness from: from-cell
+                                                        script: (reverse (apply append (map cdr path)))
+                                                        hops: n))
+                                          ;; THE WITNESS REPLAY: the path made real, then
+                                          ;; replayed from a standing state built afresh
+                                          (real (and accept? (realize k hs)))
+                                          (end-cell (if (and real (cdr real)) (key-cell (cdr real)) to-cell))
+                                          (w (if accept?
+                                                 (if (not real)
+                                                     (begin (set! nu (+ nu 1)) #f)
+                                                     (let ((w (witness from: from-cell script: (car real) hops: n)))
+                                                       (and (accept? tm f w end-cell) w)))
+                                                 raw)))
+                                     (set! nc (+ nc 1))
+                                     (let* ((e (assv to tries))
+                                            (failed (if e (cdr e) 0)))
+                                       (if (or (and w (equal? end-cell to-cell)) (>= (+ failed 1) MAX-TRIES))
+                                           (set! seen (cons to seen))
+                                           (set! tries (cons (cons to (+ failed 1)) tries))))
+                                     (if (and w (not (equal? end-cell from-cell)))
+                                         (set! new-edges (cons (list (cell-index tm (car end-cell) (cdr end-cell)) w end-cell)
+                                                               new-edges))
+                                         (begin
+                                           (set! nr (+ nr 1))
+                                           (set! rej (cons (cons from-cell to-cell) rej))))
+                                     (bfs (cdr front) back))
+                                   (begin
+                                     (set! deps (cons to deps))
+                                     (bfs (cdr front)
+                                          (if (>= n PATH-HOPS)
+                                              back
+                                              (append (map (lambda (h)
+                                                             (list (car h) (+ n 1) (cons h path)))
+                                                           (vector-ref hops to))
+                                                      back)))))))))))
+              (list (rect-take!) deps (reverse new-edges) (reverse rej) nc nr nu)))
+
+          ;; REUSE: k's walk from the memo, if every anchor it read was itself
+          ;; taken from the memo, nothing it touched changed, and every edge's
+          ;; witness still replays here. #f otherwise.
+          (define (walk-reused k)
+            (let ((p (and prior-cand (vector-ref prior-cand k))))
+              (and p
+                   (vector-ref reused-exp k)
+                   (not (rect-changed? (car p)))
+                   (let every ((ds (cadr p))) (or (null? ds) (and (vector-ref reused-exp (car ds)) (every (cdr ds)))))
+                   (let every ((es (caddr p)))
+                     (or (null? es)
+                         (and (or (not accept?) (accept? tm f (cadr (car es)) (caddr (car es))))
+                              (every (cdr es)))))
+                   p)))
+
           (let each ((k 0))
             (when (< k nkeys)
               (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
-                (let* ((from-cell (key-cell k))
-                       (seen (list k))
-                       (tries '()))   ; ((stand-key . failed candidates) ...)
-                  (let bfs ((front (map (lambda (h) (list (car h) 1 (list h))) (vector-ref hops k)))
-                            (back '()))
-                    (cond ((and (null? front) (null? back)) #f)
-                          ((null? front) (bfs (reverse back) '()))
-                          (else
-                           (let* ((item (car front))
-                                  (to (car item))
-                                  (n (cadr item))
-                                  (path (caddr item)))   ; ((key . rev) ...), last hop first
-                             (if (memv to seen)
-                                 (bfs (cdr front) back)
-                                 (begin
-                                   ;; a stand target is only closed once an edge to it is
-                                   ;; accepted or MAX-TRIES paths to it have failed: the first
-                                   ;; path's realize can fail where a later one's does not
-                                   (unless (= (key-kind to) K-STAND) (set! seen (cons to seen)))
-                                   (if (= (key-kind to) K-STAND)
-                                       (let* ((to-cell (key-cell to))
-                                              (hs (reverse path))
-                                              (raw (witness from: from-cell
-                                                            script: (reverse (apply append (map cdr path)))
-                                                            hops: n))
-                                              ;; THE WITNESS REPLAY: the path made real, then
-                                              ;; replayed from a standing state built afresh
-                                              (real (and accept? (realize k hs)))
-                                              (end-cell (if (and real (cdr real)) (key-cell (cdr real)) to-cell))
-                                              (w (if accept?
-                                                     (if (not real)
-                                                         (begin (set! no-realize (+ no-realize 1)) #f)
-                                                         (let ((w (witness from: from-cell script: (car real) hops: n)))
-                                                           (and (accept? tm f w end-cell) w)))
-                                                     raw)))
-                                         (set! candidates (+ candidates 1))
-                                         (let* ((e (assv to tries))
-                                                (failed (if e (cdr e) 0)))
-                                           (if (or (and w (equal? end-cell to-cell)) (>= (+ failed 1) MAX-TRIES))
-                                               (set! seen (cons to seen))
-                                               (set! tries (cons (cons to (+ failed 1)) tries))))
-                                         (if (and w (not (equal? end-cell from-cell)))
-                                             (let ((i (cell-index tm (car from-cell) (cdr from-cell))))
-                                               (vector-set! edges i
-                                                            (cons (cons (cell-index tm (car end-cell) (cdr end-cell)) w)
-                                                                  (vector-ref edges i))))
-                                             (begin
-                                               (set! rejected (+ rejected 1))
-                                               (set! rejected-edges (cons (cons from-cell to-cell) rejected-edges))))
-                                         (bfs (cdr front) back))
-                                       (bfs (cdr front)
-                                            (if (>= n PATH-HOPS)
-                                                back
-                                                (append (map (lambda (h)
-                                                               (list (car h) (+ n 1) (cons h path)))
-                                                             (vector-ref hops to))
-                                                        back))))))))))))
+                (let* ((old (walk-reused k))
+                       (r (or old (walk-from k)))
+                       (i (let ((c (key-cell k))) (cell-index tm (car c) (cdr c)))))
+                  (when old (set! reused-cands (+ reused-cands 1)))
+                  (vector-set! cand-memo k r)
+                  (for-each (lambda (e) (vector-set! edges i (cons (cons (car e) (cadr e)) (vector-ref edges i))))
+                            (caddr r))
+                  (set! rejected-edges (append (reverse (cadddr r)) rejected-edges))
+                  (set! candidates (+ candidates (list-ref r 4)))
+                  (set! rejected (+ rejected (list-ref r 5)))
+                  (set! no-realize (+ no-realize (list-ref r 6)))))
               (each (+ k 1))))
           (reach-graph tm: tm
                        cells: (standable-cells tm)
@@ -848,4 +1003,7 @@
                                     (cons 'candidates candidates)
                                     (cons 'rejected rejected)
                                     (cons 'unrealized no-realize)
-                                    (cons 'repairs repaired))))))))
+                                    (cons 'repairs repaired)
+                                    (cons 'reused reused)
+                                    (cons 'reused-walks reused-cands))
+                       memo: (cons exp-memo cand-memo)))))))

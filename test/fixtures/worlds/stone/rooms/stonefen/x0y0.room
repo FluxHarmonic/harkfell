@@ -1,0 +1,19 @@
+(room
+  region: stonefen
+  at: (0 0)
+  title: "Stone"
+  intent: "a harmonic, and the door it opens"
+  grid:
+  ("#########################"
+   "#              #        #"
+   "#              #        #"
+   "#              #        #"
+   "#              #        #"
+   "#              #        #"
+   "#              #        #"
+   "#              #        #"
+   "#              o        #"
+   "#########################"
+   "#########################")
+  things: ((harmonic at: (5 8) overtone: 2)
+           (ring-stone at: (15 8) overtone: 2)))

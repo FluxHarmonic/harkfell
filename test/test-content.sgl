@@ -179,3 +179,19 @@
   (test "a border listed where no other region's room is, is red"
     (let ((ps (problems (border-with FEN-MAP (lambda (t) (swap t "((A east))" "((A east) (A north))"))))))
       (assert-true (has? ps "x0y0's north edge is listed in borders:, but no other region's room is there")))))
+
+;; A4 (David's ruling on the moments): a fixed moment may carry still: and
+;; carrying: as well as when: first-visit, each checked; any other key is red.
+(define (with-moment m)
+  (problems (with-file LEFT (lambda (t) (string-append (substring t 0 (- (string-length t) 2))
+                                                       "\n  moment: " m ")\n")))))
+
+(test-group "content: a moment's conditions (A4)"
+  (test "when: first-visit, still: and carrying: read clean (the control)"
+    (assert-equal '() (with-moment "(tune: a-tune when: first-visit still: 6 carrying: 2)")))
+  (test "each bad value is red, and says which"
+    (assert-true (has? (with-moment "(tune: a-tune when: always)") "moment: when: always is not first-visit"))
+    (assert-true (has? (with-moment "(tune: a-tune when: first-visit still: 0)") "moment: still: 0 is not a number of seconds above 0"))
+    (assert-true (has? (with-moment "(tune: a-tune when: first-visit carrying: 9)") "moment: carrying: 9 is not a harmonic, 2 to 7")))
+  (test "an unknown condition is red, not ignored"
+    (assert-true (has? (with-moment "(tune: a-tune when: first-visit carying: 2)") "moment: carying: is not a condition a moment knows"))))

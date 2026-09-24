@@ -39,6 +39,15 @@
 ;;;    the pillar's lowest block removed must have an edge that rises more
 ;;;    than 2 px there (the check can see a rise).
 ;;;
+;;; 3. REUSE (A4, (engine reach)): on the one-room world in
+;;;    test/fixtures/worlds/stone (a harmonic, and a wall whose door is a
+;;;    ring-stone keyed to it), the H2 set searched with the empty set's memo
+;;;    must have exactly the edges of the H2 set searched afresh, witness for
+;;;    witness; the memo must actually have been used (expansions and walks
+;;;    reused); and the premise must hold (the stone changes the graph).
+;;;    Sabotage: the search ignoring the changed cells reuses what the stone
+;;;    touched, and the edges differ.
+;;;
 ;;; --explore also prints, per fixture, what the search accepts with the
 ;;; replay switched off: a diagnostic for choosing fixtures, never a gate.
 ;;;
@@ -62,7 +71,9 @@
           (harkfell feel)
           (harkfell legend)
           (harkfell rooms)
-          (harkfell content))
+          (harkfell content)
+          (harkfell check)
+          (harkfell source))
 
   (export reach-fixtures-main fixture-tilemap ceiling-rises
           PILLAR-CELL A0-ENTRY-CELL)
@@ -223,6 +234,36 @@
              ", highest rise under column 3 " (number->string (caddr b)) " px (must be over 2)")
         (list ok ok2)))
 
+    ;; --- reuse (A4) ----------------------------------------------------------------------------
+
+    (define (stat g name) (let ((e (assq name (graph-stats g)))) (if e (cdr e) 0)))
+
+    (define (run-reuse)
+      (let* ((ct (load-content (read-world-source "test/fixtures/worlds/stone")))
+             (s (start-cell ct)))
+        (if (or (not (null? (content-problems ct))) (not s))
+            (begin (say "FAIL reuse: test/fixtures/worlds/stone does not load clean") (list #f))
+            (let* ((tm0 (tiles-carrying ct '()))
+                   (tm2 (tiles-carrying ct (list 2)))
+                   (g0 (reach-search tm0 HARKFELL-FEEL (list s) witness-lands?))
+                   (changed (tilemap-changes tm0 tm2))
+                   (fresh (reach-search tm2 HARKFELL-FEEL (list s) witness-lands?))
+                   (reused (reach-search* tm2 HARKFELL-FEEL (list s) witness-lands? (graph-memo g0) changed))
+                   (same (graph-same-edges? fresh reused))
+                   (differs (not (eq? #t (graph-same-edges? g0 fresh))))
+                   (n (stat reused 'reused))
+                   (nw (stat reused 'reused-walks))
+                   (ok (and (eq? same #t) differs (pair? changed) (> n 0) (> nw 0))))
+              (say (if ok "PASS " "FAIL ")
+                   "reuse: the H2 set with the empty set's memo has the edges of the H2 set searched afresh: "
+                   (if (eq? same #t) "yes" (string-append "NO, first difference at cell index " (number->string same)))
+                   "; the stone changes the graph: " (if differs "yes" "NO (the premise)")
+                   "; changed cells " (number->string (length changed))
+                   ", expansions reused " (number->string n) " of " (number->string (stat reused 'anchors))
+                   ", walks reused " (number->string nw)
+                   ", steps " (number->string (stat reused 'steps)) " against " (number->string (stat fresh 'steps)) " afresh")
+              (list ok)))))
+
     ;; --- main -------------------------------------------------------------------------------
 
     (define (reach-fixtures-main args)
@@ -239,7 +280,8 @@
                     ((null? files) (say "SETUP-FAILED reach-fixtures: no fixtures in " dir) 2)
                     (else
                      (let* ((results (append (map (lambda (r) (run-fixture (car r) explore?)) reads)
-                                             (run-ceiling)))
+                                             (run-ceiling)
+                                             (run-reuse)))
                             (fails (length (filter not results))))
                        (if (= fails 0)
                            (begin (say "PASS reach-fixtures: " (number->string (length results)) " checks") 0)

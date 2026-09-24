@@ -45,7 +45,7 @@
   (export start-cell content-reach reach-problems room-report
           room-cells-global global->local local->global room-standable-cells
           room-start-cell reach-summary
-          content-reach-carrying sets-bare room-gated carry-label
+          content-reach-carrying content-reach-carrying* set-reach-reuse! sets-bare room-gated carry-label
           content-pickup-cells content-stone-cells tiles-carrying)
 
   (begin
@@ -146,9 +146,23 @@
     ;; The reach graph from the start, carrying carry (#f with no start).
     ;; log: optional, (expanded steps kind cell) after each anchor.
     (define (content-reach-carrying ct carry . log)
-      (let ((s (start-cell ct)))
+      (apply content-reach-carrying* ct carry #f log))
+
+    ;; A4 (REUSE, (engine reach)): with base, an earlier set's graph, the
+    ;; search takes from its memo whatever the stones that differ did not touch.
+    (define (content-reach-carrying* ct carry base . log)
+      (let ((s (start-cell ct))
+            (tm (tiles-carrying ct carry)))
         (and s
-             (apply reach-search (tiles-carrying ct carry) HARKFELL-FEEL (list s) witness-lands? log))))
+             (if (and base *reuse*)
+                 (apply reach-search* tm HARKFELL-FEEL (list s) witness-lands?
+                        (graph-memo base) (tilemap-changes (graph-tm base) tm) log)
+                 (apply reach-search tm HARKFELL-FEEL (list s) witness-lands? log)))))
+
+    ;; REUSE on (the default) or off: --no-reuse, and the fixture check that
+    ;; compares the two.
+    (define *reuse* #t)
+    (define (set-reach-reuse! on) (set! *reuse* on))
 
     ;; Every carry set a player can hold, each with its graph: ((carry . g) ...),
     ;; the empty set first; #f with no start.
@@ -160,7 +174,10 @@
                      ((assoc (car todo) done) (loop (cdr todo) done))
                      (else
                       (let* ((carry (car todo))
-                             (g (apply content-reach-carrying ct carry log))
+                             ;; the first set searched (the last of done) lends its memo
+                             (g (apply content-reach-carrying* ct carry
+                                       (and (pair? done) (let first ((l done)) (if (null? (cdr l)) (cdr (car l)) (first (cdr l)))))
+                                       log))
                              (fwd (reach-forward g (list (start-cell ct))))
                              (tm (graph-tm g))
                              (next (map (lambda (p) (sorted-carry (cons (car p) carry)))

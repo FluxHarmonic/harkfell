@@ -446,7 +446,34 @@
                                                    (else (find (cdr l))))))))
                   (unless (and (symbol? tune) (or (not reg) (memq tune (or (region-field reg 'moments) '()))))
                     (add! (string-append "moment: " (datum->string m) " does not name one of the region's moments")
-                          "moment")))))
+                          "moment"))
+                  ;; A4 (David's ruling on the moments, SOUND's plan): the
+                  ;; conditions a fixed moment may carry, each checked:
+                  ;;   when: first-visit     (the only kind of fixed moment)
+                  ;;   still: SECONDS        plays once you have stood still that long
+                  ;;   carrying: N           plays only while you carry harmonic N (2 to 7)
+                  ;; Any other key is refused, so a mistyped condition cannot
+                  ;; silently mean "always".
+                  (when (list? m)
+                    (let loop ((l m))
+                      (cond ((null? l) #f)
+                            ((not (and (keyword? (car l)) (pair? (cdr l))))
+                             (add! (string-append "moment: " (datum->string m) " is not (tune: NAME when: first-visit ...)") "moment"))
+                            (else
+                             (let ((k (keyword->string (car l))) (v (cadr l)))
+                               (cond ((string=? k "tune") #f)
+                                     ((string=? k "when")
+                                      (unless (eq? v 'first-visit)
+                                        (add! (string-append "moment: when: " (datum->string v) " is not first-visit") "moment")))
+                                     ((string=? k "still")
+                                      (unless (and (number? v) (> v 0))
+                                        (add! (string-append "moment: still: " (datum->string v) " is not a number of seconds above 0") "moment")))
+                                     ((string=? k "carrying")
+                                      (unless (and (integer? v) (<= 2 v 7))
+                                        (add! (string-append "moment: carrying: " (datum->string v) " is not a harmonic, 2 to 7") "moment")))
+                                     (else
+                                      (add! (string-append "moment: " k ": is not a condition a moment knows (when: still: carrying:)") "moment")))
+                               (loop (cddr l))))))))))
             ;; ring-stones: every o has one, with its overtone, and every one is on an o
             (let* ((things (let ((t (roomfile-field rf 'things '()))) (if (list? t) t '())))
                    (grid (roomfile-grid rf))
