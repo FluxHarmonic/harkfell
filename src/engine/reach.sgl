@@ -603,21 +603,44 @@
           (fly from b0 '() (+ FLY-MAX -80) side #f #f 'fixed)
           (settle from b0 '()))
 
+        ;; The box is in water and its top row is not (a leap is allowed).
+        (define (head-above-water? b)
+          (and (box-any? tm (body-x b) (body-y b) (feel-box-w f) (feel-box-h f) kind-water?)
+               (not (kind-water? (tile-at tm (+ (body-x b) (/ (feel-box-w f) 2.0)) (body-y b))))))
+
         (define (expand-swim from b0)
           (for-each
             (lambda (hv)
               (let ((h (car hv)) (v (cdr hv)))
                 (for-each
-                  (lambda (leap)
+                  (lambda (lp)
+                    (let ((leap (car lp)) (phase (cdr lp)))
                     (let swim ((b b0) (rev '()) (t 0))
                       (when (and b (< t SWIM-MAX))
-                        (cond ((not (eq? (body-mode b) 'swim))
+                        (cond ((and (eq? phase 'head) (not (eq? (body-mode b) 'swim))
+                                    (head-above-water? b) (< t SWIM-MAX))
+                               ;; out of swim but still in the water with the head out:
+                               ;; a press here is a full jump (A0's head-out rule), the
+                               ;; second press a player gives after a leap
+                               (let ((in (make-intent* h 0 #t #t)))
+                                 (swim (step b in) (cons in rev) (+ t 1))))
+                              ((not (eq? (body-mode b) 'swim))
                                (fly from b rev (if leap 1 (+ FLY-MAX -60)) h leap leap 'default))
                               (else
                                (when (memv t SWIM-STOPS) (settle from b rev))
-                               (let ((in (make-intent* h v leap (and leap (= (modulo t 8) 0)))))
-                                 (swim (step b in) (cons in rev) (+ t 1))))))))
-                  (list #f #t))))
+                               (let ((in (make-intent* h v leap
+                                                       (and leap
+                                                            (if (eq? phase 'head)
+                                                                ;; reactive: press the tick the head is out
+                                                                (head-above-water? b)
+                                                                (= (modulo (+ t phase) 8) 0))))))
+                                 (swim (step b in) (cons in rev) (+ t 1)))))))))
+                  ;; (leap . press phase): the search presses on one phase of 8;
+                  ;; a repair (a real, unsnapped state) tries all eight, since a
+                  ;; leap onto a bank two tiles up depends on it (pool-k2)
+                  (cons (cons #f 0)
+                        (cons (cons #t 'head)
+                              (map (lambda (ph) (cons #t ph)) (if *sink* (iota 8) (list 0))))))))
             (list (cons 1 0) (cons -1 0) (cons 0 -1) (cons 0 1)
                   (cons 1 -1) (cons -1 -1) (cons 1 1) (cons -1 1))))
 
@@ -678,24 +701,50 @@
         ;; does not reach its anchor from there is searched again, with that
         ;; anchor kind's own patterns, from the real state (the REPAIR). The
         ;; script so found, or #f when some hop cannot be made.
+        ;; -> (script . final-key): the witness script and the stand anchor it
+        ;; really ends in (the planned target, or, when a repair lands the body
+        ;; standing somewhere else first, that place: the witness proves the
+        ;; edge to where it went); #f when no hop can be made.
         (define (realize from hops)
-          (let loop ((state (vector-ref reps from)) (kind K-STAND) (hs hops) (acc '()) (repairs 0))
+          (let loop ((state (vector-ref reps from)) (kind K-STAND) (hs hops) (acc '()) (repairs 0) (last #f))
             (if (null? hs)
-                (reverse acc)
+                (cons (reverse acc) last)
                 (let* ((k (caar hs))
                        (rev (cdar hs))
                        (b (run-script state (reverse rev))))
                   (if (and b (in-anchor? k b))
-                      (loop b (key-kind k) (cdr hs) (append rev acc) repairs)
-                      (let ((found #f))
+                      (loop b (key-kind k) (cdr hs) (append rev acc) repairs k)
+                      ;; the repair: this anchor kind's patterns from the real state;
+                      ;; reaching ANY later anchor of the path will do (the furthest
+                      ;; one found wins, the target best of all), so a path through
+                      ;; intermediate water or wall cells the real state does not
+                      ;; pass through exactly is not lost for that
+                      (let* ((keys (map car hs))
+                             (best #f)       ; (position body . rev)
+                             (stand #f)      ; (key body . rev): the first standing place reached
+                             (pos (lambda (k2) (let find ((ks keys) (i 0))
+                                                 (cond ((null? ks) #f)
+                                                       ((= (car ks) k2) i)
+                                                       (else (find (cdr ks) (+ i 1))))))))
                         (set! repaired (+ repaired 1))
                         (set! *sink* (lambda (k2 b2 rev2)
-                                       (when (and (not found) (= k2 k)) (set! found (cons b2 rev2)))))
+                                       (let ((i (pos k2)))
+                                         (when (and i (or (not best) (> i (car best))))
+                                           (set! best (cons i (cons b2 rev2))))
+                                         (when (and (not i) (not stand) (= (key-kind k2) K-STAND) (not (= k2 from)))
+                                           (set! stand (cons k2 (cons b2 rev2)))))))
                         (expand-kind from kind state)
                         (set! *sink* #f)
-                        (if found
-                            (loop (car found) (key-kind k) (cdr hs) (append (cdr found) acc) (+ repairs 1))
-                            #f)))))))
+                        (cond (best
+                               (let ((i (car best)) (b2 (cadr best)) (rev2 (cddr best)))
+                                 (loop b2 (key-kind (list-ref keys i)) (list-drop hs (+ i 1)) (append rev2 acc) (+ repairs 1)
+                                       (list-ref keys i))))
+                              (stand
+                               ;; no anchor of the path, but a standing place: the path ends there
+                               (cons (reverse (append (cddr stand) acc)) (car stand)))
+                              (else #f))))))))
+
+        (define (list-drop l n) (if (or (= n 0) (null? l)) l (list-drop (cdr l) (- n 1))))
 
         ;; the anchors, from the starts
         (for-each (lambda (c)
@@ -751,23 +800,24 @@
                                                             hops: n))
                                               ;; THE WITNESS REPLAY: the path made real, then
                                               ;; replayed from a standing state built afresh
+                                              (real (and accept? (realize k hs)))
+                                              (end-cell (if (and real (cdr real)) (key-cell (cdr real)) to-cell))
                                               (w (if accept?
-                                                     (let ((script (realize k hs)))
-                                                       (if (not script)
-                                                           (begin (set! no-realize (+ no-realize 1)) #f)
-                                                           (let ((w (witness from: from-cell script: script hops: n)))
-                                                             (and (accept? tm f w to-cell) w))))
+                                                     (if (not real)
+                                                         (begin (set! no-realize (+ no-realize 1)) #f)
+                                                         (let ((w (witness from: from-cell script: (car real) hops: n)))
+                                                           (and (accept? tm f w end-cell) w)))
                                                      raw)))
                                          (set! candidates (+ candidates 1))
                                          (let* ((e (assv to tries))
                                                 (failed (if e (cdr e) 0)))
-                                           (if (or w (>= (+ failed 1) MAX-TRIES))
+                                           (if (or (and w (equal? end-cell to-cell)) (>= (+ failed 1) MAX-TRIES))
                                                (set! seen (cons to seen))
                                                (set! tries (cons (cons to (+ failed 1)) tries))))
-                                         (if w
+                                         (if (and w (not (equal? end-cell from-cell)))
                                              (let ((i (cell-index tm (car from-cell) (cdr from-cell))))
                                                (vector-set! edges i
-                                                            (cons (cons (cell-index tm (car to-cell) (cdr to-cell)) w)
+                                                            (cons (cons (cell-index tm (car end-cell) (cdr end-cell)) w)
                                                                   (vector-ref edges i))))
                                              (begin
                                                (set! rejected (+ rejected 1))
