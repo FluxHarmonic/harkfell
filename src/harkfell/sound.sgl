@@ -71,7 +71,7 @@
           place-wander place-moment-carrying place-moment-still
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
-          sound-wander-due WANDER-TAGS wander-fits?
+          sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S
           THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
@@ -214,7 +214,8 @@
       (set! *spots* 0) (set! *carry-changed* #f) (set! *bed-tune* #f) (set! *room-levels* '()) (set! *bed-opened* #f)
       (when *opening* (player-close! *opening*))
       (set! *opening* #f) (set! *opening-skip* #f) (set! *opening-t0* #f) (set! *held* #f)
-      (set! *wander-due* #f) (set! *still-wait* #f) (set! *opening-want* #f) (set! *opening-handoff* #f))
+      (set! *wander-due* #f) (set! *still-wait* #f) (set! *opening-want* #f) (set! *opening-handoff* #f)
+      (set! *bed-carried* '()) (set! *bed-start-at* 0.0) (set! *cue-wait* #f) (set! *open-wait* #f))
 
     ;; --- A4: the border, and what a save keeps ---------------------------------------
     ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
@@ -348,12 +349,44 @@
                         (tune-patterns *bed-opened*)))
           0))
 
-    (define (open-bed name region)
+    ;; A bed opened at a border or a carry change starts its voices at once
+    ;; (attack BORDER-ATTACK-S) instead of with their own slow attacks (3 to
+    ;; 6 s, written for the world's first bed rising out of the opening): the
+    ;; review measured the incoming bed still in its attack half a second into
+    ;; a 'through crossing, the bed as heard 14 to 17 dB down. Its source gain
+    ;; fades it in, so a near-instant attack does not click. A drone voice
+    ;; carried for the first time keeps its own slow attack: the pickup's bloom.
+    (define BORDER-ATTACK-S 0.02)
+    (define *bed-carried* '())    ; what the current bed was opened carrying
+
+    (define (quick-attack t slow-channels)
+      (let ((slow-ids (apply append
+                             (map (lambda (p)
+                                    (filter-map* (lambda (c) (and (memv (cell-channel c) slow-channels) (cell-inst c)))
+                                                 (tune-pattern-cells p)))
+                                  (tune-patterns t)))))
+        (tune-with-instruments t
+          (map (lambda (i)
+                 (if (memv (tune-instrument-id i) slow-ids)
+                     i
+                     (tune-instrument i params: (cons (cons 'attack BORDER-ATTACK-S)
+                                                      (filter (lambda (kv) (not (eq? (car kv) 'attack)))
+                                                              (tune-instrument-params i))))))
+               (tune-instruments t)))))
+
+    ;; quick?: opened at a border or a carry change (not the world's first bed)
+    (define (open-bed name region quick?)
       (let ((t (tune-parsed name)))
         (and t (guard (e (#t (*say* "sound" "error" "open" name) #f))
-                 (let ((opened (strip-uncarried t (bed-carry region))))
+                 (let* ((carry (bed-carry region))
+                        (stripped (strip-uncarried t carry))
+                        (fresh (filter-map* (lambda (hc) (and (memv (car hc) carry) (not (memv (car hc) *bed-carried*)) (cdr hc)))
+                                            HARMONIC-CHANNEL))
+                        (opened (if quick? (quick-attack stripped fresh) stripped))
+                        (p (open-tune-player opened (mixer-rate) loop: #t)))
                    (set! *bed-opened* opened)
-                   (open-tune-player opened (mixer-rate) loop: #t))))))
+                   (set! *bed-carried* carry)
+                   p)))))
 
     (define (pull-of p) (lambda (out off n) (player-pull! p out off n)))
 
@@ -376,11 +409,20 @@
     ;; its sink and its factors (its duck, its stillness); the new one fades in.
     ;; A bed that will not open leaves the old one playing as it was (review M2).
     (define *outs* 0)
+    (define *bed-start-at* 0.0)   ; 'through: when the newest bed starts pulling
     (define (open-region-bed! region groups bed-tune levels now)
       (let* ((old-src *bed-src*) (old-player *bed-player*) (first? (not old-src))
              (through? (and old-src (eq? *border-mode* 'through)))
-             (out-s (if through? THROUGH-OUT-S BORDER-S))
-             (p (and bed-tune (open-bed bed-tune region))))
+             ;; 'through, crossed again before the last new bed started: that
+             ;; bed never sounded, so it is dropped, and the bed still fading
+             ;; out hands over to this one when it would have (the review:
+             ;; jittering on a border silenced the bed until it stopped)
+             (pending? (and through? (not (source-started? old-src))))
+             ;; 'through, the bed already low (crossing back soon after a
+             ;; crossing): no time alone, the two cross at once
+             (low? (and through? (not pending?) (< (source-factor old-src 'fade now) THROUGH-MID)))
+             (out-s (cond ((not through?) BORDER-S) (low? THROUGH-OVERLAP-S) (else THROUGH-OUT-S)))
+             (p (and bed-tune (open-bed bed-tune region (not first?)))))
         (if (not p)
             (*say* "sound" "error" "no-bed" (if bed-tune bed-tune "none"))
             (begin
@@ -389,11 +431,14 @@
               (set! *bed-tune* bed-tune)
               (set! *levels* '())
               (set! *bed-player* p)
-              (when old-src
+              (when pending?
+                (mixer-remove! BED-ID)
+                (player-close! old-player))
+              (when (and old-src (not pending?))
                 (set! *outs* (+ *outs* 1))
                 (let ((out-id (string-append BED-ID "-out-" (number->string *outs*))))
                   (mixer-rename! BED-ID out-id)
-                  (if through?
+                  (if (and through? (not low?))
                       ;; in two steps: down to THROUGH-MID while it plays alone,
                       ;; then to nothing across the overlap (the new bed comes
                       ;; up to THROUGH-MID across the same), so the bed dips
@@ -407,12 +452,17 @@
               ;; one is silent (new-bed-levels! starts it)
               (set! *bed-src* (mixer-add! BED-ID (pull-of p) (not through?)))
               (when (and first? *opening*) (opening-handoff! now))
-              (new-bed-levels! levels now first? through?)))))
+              (new-bed-levels! levels now first?
+                               (and through?
+                                    (cond (pending? (max 0.0 (- *bed-start-at* now)))
+                                          (low? 0.0)
+                                          (else (- THROUGH-OUT-S THROUGH-OVERLAP-S)))))))))
 
     (define (enter-region! pl now)
       (open-region-bed! (place-region pl) (place-groups pl) (place-bed-tune pl) (place-levels pl) now))
 
-    (define (new-bed-levels! levels now first? through?)
+    ;; delay: 'through's start, seconds from now; #f: fade in now
+    (define (new-bed-levels! levels now first? delay)
       (let ((pl-levels levels))
           (when *bed-src*
             ;; channels start at the room's levels (no ramp from 1), the
@@ -422,9 +472,10 @@
             (apply-room-levels! pl-levels now 0.0)
             (apply-mutes!)
             (source-factor! *bed-src* 'fade 0.0 0.0 now)
-            (if through?
+            (if delay
                 (let ((src *bed-src*))
-                  (mixer-at! (+ now (- THROUGH-OUT-S THROUGH-OVERLAP-S))
+                  (set! *bed-start-at* (+ now delay))
+                  (mixer-at! (+ now delay)
                              (lambda ()
                                ;; only if no later bed has replaced it meanwhile
                                (when (eq? src *bed-src*)
@@ -477,7 +528,10 @@
           (source-factor! s 'fade 0.0 FADE-S now)
           (source-on-end! s #f)
           (moment-over! now)
-          (mixer-at! (+ now FADE-S) (lambda () (mixer-remove! MOMENT-ID) (player-close! (cdr m)))))))
+          ;; by identity: a moment started within FADE-S has the same id (review)
+          (mixer-at! (+ now FADE-S) (lambda ()
+                                      (when (eq? (mixer-find MOMENT-ID) s) (mixer-remove! MOMENT-ID))
+                                      (player-close! (cdr m)))))))
 
     ;; --- a room entered ----------------------------------------------------------------------
     (define (enter-room! pl now)
@@ -499,12 +553,14 @@
             ;; decided again once you have stood still long enough in the room.
             (cond (unmet #f)
                   ((and *moment* (not (eq? d 'spent)) (not (place-moment-still pl))) (fade-moment! now))
-                  ((and (eq? d 'play) (place-moment-still pl))
+                  ;; a still: room is armed even while the hush blocks it: the
+                  ;; stillness decides again, and waits for the hush
+                  ((and (memq d '(play blocked)) (place-moment-still pl))
                    (set! *still-wait* (list m (place-key pl) (inexact (place-moment-still pl)))))
                   ((eq? d 'play) (start-moment! m (place-key pl) now))
                   (else #f))
             (*say* "sound" "room" "moment" m (if unmet (symbol->string unmet)
-                                                  (if (and (eq? d 'play) (place-moment-still pl)) "still-wait" (symbol->string d)))))))
+                                                  (if (and (memq d '(play blocked)) (place-moment-still pl)) "still-wait" (symbol->string d)))))))
       ;; a wandering moment may be drawn for a room with no moment of its own
       ;; still to come (a fixed moment keeps its room)
       (unless (or *moment* (room-armed? pl))
@@ -571,10 +627,15 @@
         (when w
           (cond ((not (equal? (cadr w) *key*)) (set! *still-wait* #f))
                 ((>= *still-for* (caddr w))
-                 (set! *still-wait* #f)
+                 ;; still long enough: play if the hush allows, keep waiting
+                 ;; while it blocks, give up once spent
                  (let ((d (hush-fixed-decision *hush* (cadr w))))
-                   (*say* "sound" "still" (car w) (symbol->string d))
-                   (when (and (eq? d 'play) (not *moment*)) (start-moment! (car w) (cadr w) now))))
+                   (cond ((and (eq? d 'play) (not *moment*))
+                          (set! *still-wait* #f)
+                          (*say* "sound" "still" (car w) "play")
+                          (start-moment! (car w) (cadr w) now))
+                         ((eq? d 'spent) (set! *still-wait* #f))
+                         (else #f))))
                 (else #f)))))
 
     ;; --- A4: the opening (D33, the Flux Harmonic card, and D15) ------------------------------
@@ -667,8 +728,12 @@
           (source-factor! s 'fade 0.0 OPENING-HANDOFF-S now)
           (mixer-at! (+ now OPENING-HANDOFF-S)
                      (lambda ()
-                       (mixer-remove! OPENING-ID)
-                       (player-close! p)
+                       ;; by identity: after a sound-reset! and a new opening the
+                       ;; id names another source (review: this closure removed
+                       ;; it, and the new opening stayed at 'card for good)
+                       (when (eq? (mixer-find OPENING-ID) s)
+                         (mixer-remove! OPENING-ID)
+                         (player-close! p))
                        (when (eq? *opening* p) (set! *opening* #f) (set! *opening-handoff* #f)))))))
 
     ;; --- listening: the tone, stillness, the ears ----------------------------------------------
@@ -1074,14 +1139,41 @@
 
     ;; One piece of deferred work a frame: a cue render or a moment open,
     ;; whichever has its text; never while a moment plays.
+    ;; A name whose text never comes (no file natively; a failed fetch on the
+    ;; web) is dropped after TEXT-GIVE-UP-S, so it cannot hold up every name
+    ;; behind it (review: a world naming wandering moments with no file left
+    ;; every one after it unopened, so none could ever play).
+    (define TEXT-GIVE-UP-S 10.0)
+    (define *cue-wait* #f)        ; (name . since)
+    (define *open-wait* #f)
+    (define (waited-out? wait name)
+      (and wait (equal? (car wait) name) (> (- *now* (cdr wait)) TEXT-GIVE-UP-S)))
+
     (define (boot-work!)
       (cond (*cue-job* (render-next-cue!))
             ((and (pair? *cue-queue*) (tune-text (cadr (spot-ref (car *cue-queue*)))))
+             (set! *cue-wait* #f)
              (render-next-cue!))
+            ((and (pair? *cue-queue*) (waited-out? *cue-wait* (car *cue-queue*)))
+             (*say* "sound" "error" "no-text" (cadr (spot-ref (car *cue-queue*))))
+             (set! *cue-queue* (cdr *cue-queue*))
+             (set! *cue-wait* #f))
             ((and (pair? *to-open*) (tune-text (car *to-open*)))
+             (set! *open-wait* #f)
              (sound-preopen! (car *to-open*))
              (set! *to-open* (cdr *to-open*)))
-            (else #f)))
+            ((and (pair? *to-open*) (waited-out? *open-wait* (car *to-open*)))
+             (*say* "sound" "error" "no-text" (car *to-open*))
+             (set! *to-open* (cdr *to-open*))
+             (set! *open-wait* #f))
+            (else
+             (when (and (pair? *cue-queue*) (not (and *cue-wait* (equal? (car *cue-wait*) (car *cue-queue*)))))
+               (set! *cue-wait* (cons (car *cue-queue*) *now*)))
+             (when (and (pair? *to-open*) (not (and *open-wait* (equal? (car *open-wait*) (car *to-open*)))))
+               (set! *open-wait* (cons (car *to-open*) *now*))))))
+
+    ;; The moments opened ahead, by name (the gates).
+    (define (sound-moments-ahead) (map car *moments*))
 
     ;; Every frame. place: #f outside the world (the test room, the atlas).
     (define (sound-frame! now dt pl0)

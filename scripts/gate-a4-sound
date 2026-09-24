@@ -34,6 +34,13 @@
 #   opening-loops     the mark region kept after a skip (motif loops it)
 #   opening-hard-jump the skip as player-jump! (every voice gated off)
 #   held-ignored      the director enters the world while held
+# and five from the adversarial review's findings:
+#   slow-attack       a border's new bed keeps its instruments' slow attacks
+#                     (the heard bed fell 14-17 dB; the gain factors said -6)
+#   pending-kept      a re-crossing before the new bed starts treats it as sounding
+#   stale-handoff     the handoff's removal by id, not identity
+#   queue-stall       a moment with no file holds up the pre-open queue
+#   still-blocked     a still: room entered during a moment is dropped
 #
 # Exit: 0 all as expected, 1 a check or a leg went the wrong way, 2 SETUP-FAILED.
 # Scratch goes under /tmp; nothing is written in the tree but the plants.
@@ -166,7 +173,7 @@ plant() {
 A4T=test/test-a4-sound.sgl
 green_all() {
   tunes
-  green "$A4T" 33
+  green "$A4T" 40
   green test/test-tunes.sgl 5
 }
 
@@ -201,6 +208,11 @@ passes "$A4T" "'through: two beds pull together for at most the overlap"
 passes "$A4T" "and the tune ends after a skip"
 passes "$A4T" "the fundamental holds across the skip"
 passes "$A4T" "while held, the world has not begun: no bed"
+passes "$A4T" "one crossing: the heard bed never falls more than 7 dB"
+passes "$A4T" "jittering across the border: the bed never drops out"
+passes "$A4T" "a new opening after a reset survives the old handoff's removal"
+passes "$A4T" "a moment named with no file does not hold up the ones behind it"
+passes "$A4T" "and plays after it, once the hush allows and you stand still"
 
 plant wander-no-hush "$S" \
   "      (when (hush-wander-ok? *hush*)
@@ -245,5 +257,28 @@ plant held-ignored "$S" \
   "      (let ((pl pl0))" \
   "$A4T" "while held, the world has not begun: no bed"
 
-if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all ten RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+plant slow-attack "$S" \
+  "                        (opened (if quick? (quick-attack stripped fresh) stripped))" \
+  "                        (opened stripped)" \
+  "$A4T" "one crossing: the heard bed never falls more than 7 dB"
+plant pending-kept "$S" \
+  "             (pending? (and through? (not (source-started? old-src))))" \
+  "             (pending? #f)" \
+  "$A4T" "jittering across the border: the bed never drops out"
+plant stale-handoff "$S" \
+  "                       (when (eq? (mixer-find OPENING-ID) s)
+                         (mixer-remove! OPENING-ID)" \
+  "                       (when #t
+                         (mixer-remove! OPENING-ID)" \
+  "$A4T" "a new opening after a reset survives the old handoff's removal"
+plant queue-stall "$S" \
+  "            ((and (pair? *to-open*) (waited-out? *open-wait* (car *to-open*)))" \
+  "            ((and #f (pair? *to-open*) (waited-out? *open-wait* (car *to-open*)))" \
+  "$A4T" "a moment named with no file does not hold up the ones behind it"
+plant still-blocked "$S" \
+  "                  ((and (memq d '(play blocked)) (place-moment-still pl))" \
+  "                  ((and (eq? d 'play) (place-moment-still pl))" \
+  "$A4T" "and plays after it, once the hush allows and you stand still"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all fifteen RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
 exit $FAIL

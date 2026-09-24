@@ -261,6 +261,8 @@
 
     (define (border-stop!)
       (set! *border* #f)
+      (for-each (lambda (e) (player-close! (cdr e))) *players*)
+      (set! *players* '())
       (sound-reset!)
       (sound-set-border-mode! 'through))
 

@@ -76,7 +76,7 @@
     (define OPENING-WORLD-S 6.0)
     (define MOMENT-DOOR-S 4.0)
     (define *moment-door* #f)      ; #f | (name) | (name . t)
-    (define *opening-door* #f)     ; #f | armed | playing | (world . t) | done
+    (define *opening-door* #f)     ; #f | armed | playing | (started . t) | (world . t) | done
     (define (audio-sound-door! s)
       (for-each (lambda (item)
                   (cond ((string=? item "border:cross") (sound-set-border-mode! 'cross))
@@ -93,9 +93,15 @@
         (cond ((and (eq? d 'armed) (eq? (mixer-state) 'running))
                (sound-opening-start!)
                (set! *opening-door* 'playing))
-              ((and (eq? d 'playing) (memq (sound-opening-state) '(world)))
+              ((eq? d 'playing) (set! *opening-door* (cons 'started now)))
+              ((and (pair? d) (eq? (car d) 'started) (memq (sound-opening-state) '(world)))
                (set! *opening-door* (cons 'world now)))
-              ((and (pair? d) (>= now (+ (cdr d) OPENING-WORLD-S)))
+              ;; the opening never came (no text, an open error): let the world begin
+              ((and (pair? d) (eq? (car d) 'started) (not (sound-opening-state))
+                    (> (- now (cdr d)) (+ OPENING-WORLD-S 6.0)))
+               (sound-hold! #f)
+               (set! *opening-door* 'done))
+              ((and (pair? d) (eq? (car d) 'world) (>= now (+ (cdr d) OPENING-WORLD-S)))
                (sound-hold! #f)
                (set! *opening-door* 'done))
               (else #f))))
