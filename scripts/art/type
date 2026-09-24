@@ -23,6 +23,8 @@ set -eu
 export LC_ALL=C
 cd "$(dirname "$0")/../.." || exit 1
 mkdir -p assets/type
+out_dir="$(mktemp -d)"
+trap 'rm -rf "$out_dir"' EXIT
 for f in IMFeENrm28P IMFeENit28P IMFeENsc28P; do
   [ -f "assets/fonts/$f.ttf" ] || { echo "type: no assets/fonts/$f.ttf"; exit 1; }
 done
@@ -32,7 +34,7 @@ item() {
   for k in 1 2 3 4 5 6 7 8; do
     px=$(awk -v s="$size" -v k="$k" 'BEGIN { printf "%.2f", s * k }')
     kern=$(awk -v t="$track" -v p="$px" 'BEGIN { printf "%.2f", t * p / 100 }')
-    out="assets/type/$id@$k.png"
+    out="$out_dir/$id@$k.png"
     convert -background none -fill white -font "$font" -pointsize "$px" -density 72 \
       -kerning "$kern" label:"$text" -trim +repage -bordercolor none -border 2 \
       +set date:create +set date:modify -define png:exclude-chunks=date,time,tIME,tEXt,zTXt \
@@ -47,4 +49,7 @@ item step-both  IMFeENit28P 9.5 0 "Press any key, or touch, to step in."
 item step-keys  IMFeENit28P 9.5 0 "Press any key to step in."
 item step-touch IMFeENit28P 9.5 0 "Touch to step in."
 [ "$n" -eq 40 ] || { echo "type: made $n images, want 40"; exit 1; }
+# all made: only now do they replace the old ones (a failure part way leaves
+# the old set whole, not a mix)
+cp "$out_dir"/*.png assets/type/
 echo "type: $n images -> assets/type/"

@@ -145,7 +145,15 @@
 
     ;; --- drawing ---------------------------------------------------------------------------
 
-    (define (cell name) (atlas-index name))
+    ;; a cell's atlas index, looked up once per name (not every frame)
+    (define *cells* (quote ()))
+    (define (cell name)
+      (let ((e (assoc name *cells*)))
+        (if e
+            (cdr e)
+            (let ((i (atlas-index name)))
+              (set! *cells* (cons (cons name i) *cells*))
+              i))))
 
     (define (draw-cell-centred! i x y face)
       (when i

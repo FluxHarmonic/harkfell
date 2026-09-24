@@ -60,8 +60,11 @@
 
     (define *content* #f)
     (define *rgb* '())             ; ((region . rgb-vector) ...)
-    (define *strips* #f)           ; the strips texture
-    (define *strips-region* #f)    ; whose colours it holds now
+    (define *strips* #f)           ; the strips texture in use
+    (define *strip-texs* (quote ()))   ; ((region . texture) ...): one per region, so
+                                   ; an overview of two regions never uploads one
+                                   ; texture twice in a frame (sigil-graphics refuses)
+    (define *strips-stale* (quote ()))  ; regions whose texture predates the content
 
     ;; A0's fallback: greys and a pale body, for the test room and a world
     ;; whose region has no palette.
@@ -98,17 +101,21 @@
                                          FALLBACK))))
                            (content-regions ct))
                       '()))
-      (set! *strips-region* #f)
+      (set! *strips-stale* (map car *strip-texs*))
       (set! *layers-key* #f)
       (drop-overview!))
 
-    ;; The strips for a region, into the texture (made on first use).
+    ;; The strips for a region: its own texture, made on first use, its
+    ;; colours brought up to date once after the content changes.
     (define (use-region! name)
-      (unless (and *strips* (eq? *strips-region* name))
-        (if *strips*
-            (strips-update! *strips* (region-rgb name))
-            (set! *strips* (make-strips (region-rgb name))))
-        (set! *strips-region* name)))
+      (let ((e (assq name *strip-texs*)))
+        (cond ((not e)
+               (set! *strip-texs* (cons (cons name (make-strips (region-rgb name))) *strip-texs*)))
+              ((memq name *strips-stale*)
+               (strips-update! (cdr e) (region-rgb name))
+               (set! *strips-stale* (filter (lambda (r) (not (eq? r name))) *strips-stale*)))
+              (else #f))
+        (set! *strips* (cdr (assq name *strip-texs*)))))
 
     ;; A slot by name (the sprites and the ears paint through this).
     (define (slot name) (slot-of name))
@@ -325,12 +332,22 @@
     (define CLOUDS (list (list "sky/cloud-a" 30 22) (list "sky/cloud-c" 190 40) (list "sky/cloud-b" 320 14)))
     (define CLOUD-SPAN (+ VIEW-W 80))
 
+    ;; the clouds' atlas indices, looked up once (not by name every frame)
+    (define *cloud-cells* (quote ()))
+    (define (cloud-index name)
+      (let ((e (assoc name *cloud-cells*)))
+        (if e
+            (cdr e)
+            (let ((i (atlas-index name)))
+              (set! *cloud-cells* (cons (cons name i) *cloud-cells*))
+              i))))
+
     (define (draw-clouds! rm t)
       (unless (under? rm)
         (let ((shift (+ (floor-int (/ t 120)) (* 137 (room-x rm)) (* 61 (room-y rm)))))
           (set-color 1.0 1.0 1.0 1.0)
           (for-each (lambda (c)
-                      (let ((i (atlas-index (car c))))
+                      (let ((i (cloud-index (car c))))
                         (when i
                           (atlas-draw! i (- (modulo (+ (cadr c) shift) CLOUD-SPAN) 40) (caddr c) 1))))
                     CLOUDS))))

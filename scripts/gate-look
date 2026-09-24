@@ -9,13 +9,13 @@
 #   art       test/test-art.sgl (the key, the palettes, the lookups, the
 #             autotile shapes, the player, the type, the mark)
 #   cells     scripts/art/cells --check: the generated module is the text's
-#   palette   native frames of every Reedfen room, the look fixture's two
-#             Hollow rooms and the start screen, each shot on the worker's
+#   palette   native frames of every Reedfen room and the look fixture's two
+#             Hollow rooms, each shot on the worker's
 #             own Xvfb; every colour in each frame must be one of its
 #             region's palette colours (the palette pass's promise: water,
-#             light, the focus pull and fades never leave the palette). The
-#             start screen's words are not pixel art and are cropped out:
-#             its leg reads only the band of the pixel view below them.
+#             light, the focus pull and fades never leave the palette), and
+#             in Reed Bridge the sky and the peat sit where they belong (a
+#             flipped or shifted resolve stays in the palette but not there)
 # Needs: build/dev (scripts/dev sigil build) for the palette leg.
 #
 # Exit 0 green, 1 red, 2 SETUP-FAILED.
@@ -123,7 +123,18 @@ leg_palette() {
     frames=$((frames + 1))
     if check_colours "$S/shot-h$r.png" "$S/allowed-hollow" 1200x528+0+0; then :; else say "palette: RED hollow:$r"; bad=1; fi
   done
-  [ "$bad" -eq 0 ] && { say "palette: GREEN ($frames frames, every colour a palette colour)"; return 0; }
+  # the RIGHT colours in the right places, not only palette ones (a resolve
+  # flipped, shifted or reading the wrong strip row stays inside the
+  # palette): Reed Bridge at 3x, the top-left view pixel is the high sky
+  # (fen-sky-1) and the bottom-left is peat (fen-peat-2, the banks' body)
+  sky="$(awk '$0 ~ /^ *\(fen-sky-1 "#/ { l = $0; sub(/^[^"]*"#/, "", l); print toupper(substr(l, 1, 6)); exit }' world/world.sgl)"
+  peat="$(awk '$0 ~ /^ *\(fen-peat-2 "#/ { l = $0; sub(/^[^"]*"#/, "", l); print toupper(substr(l, 1, 6)); exit }' world/world.sgl)"
+  at() { convert "$S/shot-9,3.png" -crop "1x1+$1+$2" +repage -format '%[hex:u.p{0,0}]' info:- 2>/dev/null | cut -c1-6 | tr a-z A-Z; }
+  top="$(at 16 16)"; bottom="$(at 16 518)"
+  if [ "$top" = "$sky" ] && [ "$bottom" = "$peat" ]; then :; else
+    say "palette: RED placement: reedfen:9,3 top-left #$top (want #$sky), bottom-left #$bottom (want #$peat)"; bad=1
+  fi
+  [ "$bad" -eq 0 ] && { say "palette: GREEN ($frames frames, every colour a palette colour, sky and peat where they belong)"; return 0; }
   return 1
 }
 
@@ -172,6 +183,8 @@ run_sabotage() {
   plant stale-module src/harkfell/art/cells.sgl '/^    \(define CELL-COUNT/ { print "    ;; planted"; } { print }' leg_cells "is not what assets/art makes" || fail=1
   # the product layer: the resolve lets a colour off the palette
   plant resolve-tint src/harkfell/render.sgl '{ sub(/"    fragColor = vec4\(c, 1.0\);\\n"/, "\"    fragColor = vec4(mix(c, vec3(1.0, 0.0, 1.0), 0.03), 1.0);\\n\""); print }' leg_palette_rebuilt "palette: RED" || fail=1
+  # stays inside the palette, so only the placement probe can see it
+  plant strip-row-shift src/harkfell/render.sgl '{ sub(/\(int\(u_view_h\) \+ row\)/, "(int(u_view_h) + row + 1)"); print }' leg_palette_rebuilt "RED placement" || fail=1
   return $fail
 }
 

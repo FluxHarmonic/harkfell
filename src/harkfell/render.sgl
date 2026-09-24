@@ -146,6 +146,9 @@
        "out vec4 fragColor;\n"
        "vec4 px(int x, int y) {\n"
        "    x = clamp(x, 0, int(u_size.x) - 1);\n"
+       ;; above the top row is the top row (water reaching the room's top
+       ;; reads as deeper water, not as a skin)
+       "    y = max(y, 0);\n"
        "    return texelFetch(iTexChannel0_iSmpChannel0, ivec2(x, int(u_size.y) - 1 - y), 0);\n"
        "}\n"
        "int slotof(vec4 p) { return int(p.r * 255.0 + 0.5); }\n"

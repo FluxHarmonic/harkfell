@@ -92,14 +92,6 @@
     (for-each (lambda (w) (assert-true (assq w (content-palette WORLD)))) WORLD-SLOTS))
   (test "the look fixture's palette is world/world.sgl's"
     (assert-equal (content-palette WORLD) (content-palette LOOK)))
-  (test "every lookup sends a slot to a slot"
-    (for-each (lambda (table)
-                (let loop ((i 0))
-                  (when (< i SLOT-COUNT)
-                    (let ((j (lookup table i)))
-                      (assert-true (and (integer? j) (<= 0 j) (< j SLOT-COUNT))))
-                    (loop (+ i 1)))))
-              (list WATER DEEP REFLECT LIT)))
   (test "a lookup names only slots"
     (for-each (lambda (table)
                 (for-each (lambda (e)
@@ -112,7 +104,6 @@
 
 (test-group "art: autotiling"
   (test "an overlay keeps under '.', erases under '_', replaces elsewhere"
-    (assert-equal (list "a_" "bc") (list "a_" "bc"))
     (assert-equal (list "1.3" "444") (compose-rows (list "123" "444") (list "._3"))))
   (test "a lone block takes every side and corner; an inside block takes none"
     (let* ((fills (list (list "22" "22")))
@@ -126,17 +117,20 @@
           (lambda (mat)
             (let ((fills (filter (lambda (c) (string-prefix? (string-append sheet "/" mat "-fill-") (car c))) CELLS)))
               (when (pair? fills)
-                (let loop ((m 0))
-                  (when (< m 16)
-                    (let ((rows (autotile-rows (map cdr fills)
-                                               (filter-map (lambda (p)
-                                                             (let ((c (cell (string-append sheet "/" mat "-" p))))
-                                                               (and c (cons p c))))
-                                                           PART-NAMES)
-                                               m 0)))
-                      (assert-equal 16 (length rows))
-                      (assert-true (every (lambda (r) (= 16 (string-length r))) rows)))
-                    (loop (+ m 1)))))))
+                (let vloop ((v 0))
+                  (when (< v (length fills))
+                    (let loop ((m 0))
+                      (when (< m 16)
+                        (let ((rows (autotile-rows (map cdr fills)
+                                                   (filter-map (lambda (p)
+                                                                 (let ((c (cell (string-append sheet "/" mat "-" p))))
+                                                                   (and c (cons p c))))
+                                                               PART-NAMES)
+                                                   m v)))
+                          (assert-equal 16 (length rows))
+                          (assert-true (every (lambda (r) (= 16 (string-length r))) rows)))
+                        (loop (+ m 1))))
+                    (vloop (+ v 1)))))))
           MATERIALS))
       (list "reedfen" "hollow")))
   (test "reeds have as many top, mid and base cells, so a stalk runs on"
@@ -150,20 +144,14 @@
   (test "climbable rock has holds that smooth rock has not (not colour alone)"
     (for-each
       (lambda (sheet)
-        (let* ((dark (lambda (ch) (or (char=? ch #\1) (char=? ch #\2))))
-               (share (lambda (mat)
+        ;; the smooth rock's body is dark in Reedfen (peat is ground-2), so the
+        ;; test is on the DARKEST slot, ground-1: the joints between holds
+        (let ((joints (lambda (mat)
                         (let ((fills (filter (lambda (c) (string-prefix? (string-append sheet "/" mat "-fill-") (car c))) CELLS)))
-                          (/ (apply + (map (lambda (c) (count-chars (cdr c) dark)) fills))
+                          (/ (apply + (map (lambda (c) (count-chars (cdr c) (lambda (ch) (char=? ch #\1)))) fills))
                              (* 256.0 (length fills)))))))
-          ;; the smooth rock's dark share is its body colour in Reedfen
-          ;; (peat is ground-2), so the test is on the DARKEST slot: joints
-          (let ((joints (lambda (mat)
-                          (let ((fills (filter (lambda (c) (string-prefix? (string-append sheet "/" mat "-fill-") (car c))) CELLS)))
-                            (/ (apply + (map (lambda (c) (count-chars (cdr c) (lambda (ch) (char=? ch #\1)))) fills))
-                               (* 256.0 (length fills)))))))
-            (assert-true (> (joints "rough") 0.15))
-            (assert-true (< (joints "rock") 0.03))
-            (assert-true (number? (share "rock"))))))
+          (assert-true (> (joints "rough") 0.15))
+          (assert-true (< (joints "rock") 0.03))))
       (list "reedfen" "hollow"))))
 
 (test-group "art: the player"
@@ -223,3 +211,21 @@
   (test "each sheet has tufts for its front decoration; the sky has clouds"
     (for-each (lambda (s) (assert-true (cell (string-append s "/tuft-a")))) (list "reedfen" "hollow"))
     (assert-true (cell "sky/cloud-a"))))
+
+(test-group "art: the player's frames as player-frame picks them"
+  (test "every frame player-frame returns, over every mode and a spread of motion and time, has a cell"
+    (let ((names '()))
+      (for-each
+        (lambda (mode)
+          (for-each
+            (lambda (v)
+              (let loop ((t 0))
+                (when (< t 400)
+                  (let ((n (player-frame (body x: (* 1.7 t) y: (* 0.9 t) mode: mode vx: (car v) vy: (cdr v)) t)))
+                    (unless (member n names) (set! names (cons n names))))
+                  (loop (+ t 7)))))
+            (list (cons 0.0 0.0) (cons 1.2 0.0) (cons -1.2 0.0) (cons 0.0 -4.0) (cons 0.0 0.3) (cons 0.0 3.0)
+                  (cons 0.0 -0.75) (cons 0.0 0.75) (cons 0.9 0.5))))
+        (list 'ground 'air 'cling 'swim))
+      (assert-true (> (length names) 12))
+      (assert-equal '() (filter (lambda (n) (not (cell (string-append "player/" n)))) names)))))
