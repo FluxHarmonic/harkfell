@@ -541,6 +541,8 @@
       (set! *clock* (clock-advance *clock* dt))
       (set! *launched* #f)
       (when *look* (set! *look-s* (+ *look-s* dt)))
+      ;; ?look=reveal plays the reveal once; a key or a tap plays it again
+      (when (and (eq? *look* (quote reveal)) (or *key-edge* *gesture*)) (set! *look-s* 0.0))
       ;; A4: the frame steps in wall time until it plays; each phase entered
       ;; goes to the listeners (the sound, the page's trace)
       (when *frame*
@@ -762,10 +764,11 @@
         ;; ((harkfell title)'s draw-reveal!, on (harkfell reveal)'s schedule)
         (when (> (shell-reveal-alpha) 0.0)
           (draw-reveal! win-w win-h (shell-reveal-alpha) (reveal-shown-t *reveal-sch* *reveal-t*)))
-        ;; A4 look: ?look=reveal plays the room with D35's reveal over it, on a
-        ;; loop (2 s in, 4 s hold, 2 s out, CONTENT's defaults, then 2 s gone)
+        ;; A4 look: ?look=reveal plays the room with D35's reveal over it once, as
+        ;; the game will (2 s in, 4 s hold, 2 s out, CONTENT's defaults), then the
+        ;; world alone; a key or a tap plays it again; &hold keeps it at full
         (when (eq? *look* (quote reveal))
-          (let ((s (- *look-s* (* 10.0 (floor (/ *look-s* 10.0))))))
+          (let ((s *look-s*))
             (draw-reveal! win-w win-h
                           (cond (*look-alpha* *look-alpha*) ((< s 2.0) (/ s 2.0)) ((< s 6.0) 1.0) ((< s 8.0) (- 1.0 (/ (- s 6.0) 2.0))) (else 0.0))
                           s)))

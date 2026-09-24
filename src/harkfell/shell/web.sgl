@@ -44,7 +44,8 @@
 ;;;                          keys, touch or both: which words the start screen
 ;;;                          says. "new" ignores the save (?new). The page sends
 ;;;                          it only when no door (?room=, ?atlas, ...) is asked
-;;;   ("look", "start|card KIND")  (A4) ?look=: the start screen or the card alone
+;;;   ("look", "start|card|reveal KIND [hold]")  (A4) ?look=: the start screen or the card
+;;;                          alone, or the name's reveal over play (&hold at full)
 ;;;   ("pointer", "X,Y")     (A4) the pointer in canvas pixels, for the start
 ;;;                          screen's moths
 ;;;
@@ -291,6 +292,9 @@
              (let ((w (string-split payload " ")))
                (shell-set-look! (string->symbol (car w))
                                 (if (pair? (cdr w)) (string->symbol (cadr w)) (quote both)))
+               ;; &hold: the reveal held at full strength
+               (when (and (pair? (cdr w)) (pair? (cddr w)) (string=? (caddr w) "hold"))
+                 (shell-set-look-alpha! 1.0))
                (say "look" payload))
              0)
             ((string=? type "pointer")

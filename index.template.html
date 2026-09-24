@@ -276,8 +276,9 @@
         send("look", look + " " + (params.get("kind") || (coarse ? "touch" : (lookTouchy ? "both" : "keys"))));
       }
       // ?look=reveal: play as a door does, with D35's reveal of the name over
-      // the room on a loop (the controls stay, play goes on)
-      if (look === "reveal") send("look", "reveal both");
+      // the room once, as the game will (a key or a tap plays it again; &hold
+      // keeps it at full strength to study it); the controls stay, play goes on
+      if (look === "reveal") send("look", "reveal both" + (params.has("hold") ? " hold" : ""));
       var door = room || params.has("atlas") || params.get("sheet") || params.has("test-room") ||
                  params.has("replay") || params.has("envelope") || params.has("bench") || params.get("carry") ||
                  params.get("frame") === "off" || look === "start" || look === "card" || look === "reveal";
