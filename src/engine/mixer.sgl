@@ -122,9 +122,14 @@
     (define (source-start! s) (set-source-started! s #t))
     (define (source-on-end! s proc) (set-source-on-end! s proc))
 
+    ;; A4 fix: a ramp of no length takes effect AT its start. With (<= now
+    ;; t0) first, a set followed by a ramp in the same instant (a new bed:
+    ;; fade to 0 now, then to 1 over a second) read the set as not yet
+    ;; happened, so the ramp ran from the old value: every new bed since A2
+    ;; started at full instead of fading in (test-a4-sound's handoff test).
     (define (ramp-value r now)
       (let ((from (vector-ref r 0)) (to (vector-ref r 1)) (t0 (vector-ref r 2)) (dur (vector-ref r 3)))
-        (cond ((<= now t0) from)
+        (cond ((< now t0) from)
               ((or (<= dur 0.0) (>= now (+ t0 dur))) to)
               (else (+ from (* (- to from) (/ (- now t0) dur)))))))
 
