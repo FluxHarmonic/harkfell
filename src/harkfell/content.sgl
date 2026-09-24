@@ -34,9 +34,11 @@
 ;;;                      map's connections are the seams: two neighbours are
 ;;;                      joined in the layout exactly when their shared edge
 ;;;                      has an open cell
-;;;   seams              (engine worldmap)'s rule, room by room, with open sky:
-;;;                      a top edge with no room above may be open (David,
-;;;                      2026-09-24: "Definitely open sky")
+;;;   seams              (engine worldmap)'s rule, room by room, with open sky
+;;;                      (D28): a top edge may be open when the slot above is
+;;;                      inside no region's bounds (outside the planned world);
+;;;                      a slot inside a region's bounds with no room is a
+;;;                      MISSING room, and an edge opening onto it is red
 ;;;
 ;;; Gate 3, reach, is (harkfell check): it runs the physics.
 
@@ -264,6 +266,16 @@
                                    (filter (lambda (c) (not (assq c creatures))) roster))
                               (list (pb path (field-line text "roster") (string-append "region " name ": roster: is not a list of names")))))))
                     regions))))
+
+    ;; Is the room slot (x, y) sky: inside no region's bounds? (D28)
+    (define (sky-slot? regions)
+      (lambda (x y)
+        (not (find (lambda (r)
+                     (let ((b (region-field r 'bounds)))
+                       (and (list? b) (= (length b) 2) (int-pair? (car b)) (int-pair? (cadr b))
+                            (<= (car (car b)) x (car (cadr b)))
+                            (<= (cadr (car b)) y (cadr (cadr b))))))
+                   regions))))
 
     (define (find-region regions name)
       (let loop ((rs regions))
@@ -628,7 +640,7 @@
              (wm (make-worldmap placed-rooms ROOM-COLS ROOM-ROWS TILE))
              (broken (map (lambda (rm) (cons (room-x rm) (room-y rm)))
                           (filter (lambda (rm) (not (grid-whole? rm))) rooms)))
-             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm kind-open? broken #t))))
+             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm kind-open? broken (sky-slot? regions)))))
              (map-reads (map (lambda (e) (read-map-source (car e) (cdr e)))
                              (filter (lambda (e) (and (starts-with? (car e) "world/regions/") (ends-with? (car e) ".map")))
                                      source)))

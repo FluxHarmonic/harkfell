@@ -104,6 +104,23 @@
   (test "a top edge with no room above may be open: open sky (David, 2026-09-24)"
     (let ((ps (problems (with-file RIGHT (lambda (t) (swap t "  (\"#########################\"" "  (\"####    #################\""))))))
       (assert-false (has? ps "top edge"))))
+  (test "open sky is only above the planned world: a room below the top whose upper neighbour is missing is red (D28's control)"
+    ;; testfen's bounds are ((0 0) (3 3)); a room at (2 1) has the slot (2 0)
+    ;; above it, inside those bounds and with no room: a missing room, not sky
+    (let* ((room (lambda (top)
+                   (string-append
+                     "(room region: testfen at: (2 1) title: \"Below\" intent: \"a probe\"\n  grid:\n  (\""
+                     top "\"\n"
+                     "   \"#                       #\"\n   \"#                       #\"\n   \"#                       #\"\n"
+                     "   \"#                       #\"\n   \"#                       #\"\n   \"#                       #\"\n"
+                     "   \"#                       #\"\n   \"#                       #\"\n   \"#                       #\"\n"
+                     "   \"#########################\"))\n")))
+           (with (lambda (top) (problems (cons (cons "world/rooms/testfen/x2y1.room" (room top)) TINY))))
+           (open (with "#####     ###############"))
+           (closed (with "#########################")))
+      (assert-true (has? open "x2y1 top edge opens onto no room, columns 5 6 7 8 9"))
+      ;; the control: the same room closed at the top has no top-edge problem
+      (assert-false (has? closed "x2y1 top edge"))))
   (test "a hole in a floor above nothing is red"
     (let ((ps (problems (with-file LEFT (lambda (t) (swap t "   \"#########################\")\n  things:" "   \"#### ####################\")\n  things:"))))))
       (assert-true (has? ps "x0y0 bottom edge opens onto no room, columns 4")))))

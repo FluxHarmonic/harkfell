@@ -17,7 +17,8 @@
 ;;; bottom and the top of the room below. An edge with no room beyond it
 ;;; must be closed on every cell: a room never opens onto nothing. The one
 ;;; exception is a game's to choose (seam-problems' sky option): a TOP edge
-;;; with no room above may be open, as sky.
+;;; may be open onto a slot the game calls sky (outside the planned world),
+;;; never onto a slot where a room is simply missing.
 ;;;
 ;;; Pure: no platform.
 
@@ -130,8 +131,10 @@
     ;; default). unknown: coordinates ((x . y) ...) where a room exists but is
     ;; not on the map (the game left it off, its grid being broken): an edge
     ;; facing one is not checked, so a broken room is reported once, as
-    ;; itself, and not again as its neighbours opening onto nothing. sky: #t
-    ;; lets a top edge with no room above be open (open sky).
+    ;; itself, and not again as its neighbours opening onto nothing. sky: #f,
+    ;; or a procedure (x y) -> bool saying whether the empty slot at room
+    ;; coordinate (x, y) is sky; a top edge may be open onto a sky slot and
+    ;; onto nothing else.
     (define (seam-problems wm . opts)
       (let* ((open? (if (pair? opts) (car opts) kind-open?))
              (unknown (if (and (pair? opts) (pair? (cdr opts))) (cadr opts) '()))
@@ -183,7 +186,7 @@
                                     (list (string-append name " top edge and " (room-name up)
                                                          " bottom edge disagree on columns " (nums m)))))
                               (let ((o (opens p (row-cells 0))))
-                                (if (or (null? o) sky (unknown? x (- y 1))) '()
+                                (if (or (null? o) (and sky (sky x (- y 1))) (unknown? x (- y 1))) '()
                                     (list (string-append name " top edge opens onto no room, columns " (nums o))))))
                           (if right
                               '()
