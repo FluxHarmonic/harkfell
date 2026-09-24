@@ -27,3 +27,28 @@
            (p (window->view f 300 234 400 176)))
       (assert-equal (cons 100.0 50.0) p)
       (assert-false (window->view f 50 50 400 176)))))
+
+(test-group "view fit, integer only (D37, the native window)"
+  (test "700x300 is 1x, centred, not sharp, when integer only; sharp again after"
+    (view-set-integer-only! #t)
+    (let ((f (view-fit 700 300 400 176)))
+      (view-set-integer-only! #f)
+      (assert-equal 'integer (fit-mode f))
+      (assert-equal 1 (fit-scale f))
+      (assert-equal 150 (fit-x f))
+      (assert-equal 62 (fit-y f)))
+    (assert-equal 'sharp (fit-mode (view-fit 700 300 400 176))))
+  (test "a 1920x1080 screen is 4x (1600x704) centred with black around it"
+    (view-set-integer-only! #t)
+    (let ((f (view-fit 1920 1080 400 176)))
+      (view-set-integer-only! #f)
+      (assert-equal 4 (fit-scale f))
+      (assert-equal 1600 (fit-w f))
+      (assert-equal 160 (fit-x f))
+      (assert-equal 188 (fit-y f))))
+  (test "a window smaller than the view still draws at 1x, cropped"
+    (view-set-integer-only! #t)
+    (let ((f (view-fit 300 100 400 176)))
+      (view-set-integer-only! #f)
+      (assert-equal 'integer (fit-mode f))
+      (assert-equal 1 (fit-scale f)))))

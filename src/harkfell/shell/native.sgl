@@ -64,14 +64,36 @@
           (harkfell save)
           (harkfell check)
           (engine store)
-          (harkfell images))
+          (harkfell images)
+          (harkfell settings)
+          (engine view)
+          (sigil math))
 
   (export native-main)
 
   (begin
-    ;; Three times the view: 1200x528, a whole scale from the first frame.
-    (define WINDOW-W (* 3 VIEW-W))
-    (define WINDOW-H (* 3 VIEW-H))
+    ;; D37 (David, 2026-09-24): a Knytt-style small window. It opens at the
+    ;; remembered whole scale of the view (the settings' scale row, stored as
+    ;; x2 .. x8; x2, 800x352, the first time), and the view is always drawn
+    ;; at the largest whole scale that fits the window, centred, black around
+    ;; it ((engine view)'s integer-only fit), whatever size the window manager
+    ;; gives it. A resize remembers the whole scale it now fits.
+    (define (stored-scale)
+      (let* ((st (setting-ref (quote scale)))
+             (d (store-read-datum (setting-key st)))
+             (v (if (and d (setting-value? st d)) d (setting-default st))))
+        (case v ((x3) 3) ((x4) 4) ((x5) 5) ((x6) 6) ((x7) 7) ((x8) 8) (else 2))))
+
+    (define *window-k* #f)          ; the whole scale the window last fit
+
+    ;; After a resize: the whole scale the window fits now, remembered when it
+    ;; is one the settings name (2 to 8).
+    (define (note-window-size! w h)
+      (let ((k (max 1 (exact (floor (min (/ w (* 1.0 VIEW-W)) (/ h (* 1.0 VIEW-H))))))))
+        (unless (eqv? k *window-k*)
+          (when (and *window-k* (<= 2 k 8))
+            (store-write-datum! "scale" (string->symbol (string-append "x" (number->string k)))))
+          (set! *window-k* k))))
 
     (define RELOAD-EVERY 30)         ; frames between looks at the files
 
@@ -142,6 +164,7 @@
         (let frame ((n 0))
           (let* ((dt (wait-frame)))
             (poll-keys!)
+            (note-window-size! (frame-width) (frame-height))
             (when (key-pressed? 'r) (shell-reset-world!))
             (when (key-pressed? 'escape) (shell-save-now!) (request-quit))
             ;; nothing a reload meets may take the frame down: an error is
@@ -228,6 +251,8 @@
                        (when lk
                          (shell-set-look! (string->symbol lk) (string->symbol (or (arg-value args "--kind") "keys")))
                          (let ((a (arg-value args "--look-alpha"))) (when a (shell-set-look-alpha! (string->number a))))))
-                     (run-game "Harkfell" WINDOW-W WINDOW-H (loop))
+                     (view-set-integer-only! #t)
+                     (let ((k (stored-scale)))
+                       (run-game "Harkfell" (* k VIEW-W) (* k VIEW-H) (loop)))
                      0)
                    1)))))))

@@ -38,7 +38,13 @@
 
     ;; Built with list, not quoted (Crash's wasm literal hazard).
     (define SETTINGS
-      (list (setting id: 'stick name: "STICK" values: (list 'fixed 'float) default: 'fixed key: "stick")))
+      (list (setting id: 'stick name: "STICK" values: (list 'fixed 'float) default: 'fixed key: "stick")
+            ;; D37 (David, 2026-09-24): the native window's whole scale of the
+            ;; 400x176 view (x2 is 800x352, Knytt's small window), or fullscreen
+            ;; at the largest whole scale that fits; remembered between runs.
+            ;; Native only: the web fits its canvas.
+            (setting id: 'scale name: "SCALE" values: (list 'x2 'x3 'x4 'x5 'x6 'x7 'x8 'fullscreen)
+                     default: 'x2 key: "scale")))
 
     (define SETTING-IDS (map setting-id SETTINGS))
 

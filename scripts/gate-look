@@ -68,7 +68,9 @@ xvfb_up() {
 # One native frame: args to the game; the capture of the root window.
 shoot() {
   out="$1"; shift
-  mkdir -p "$S/xdg"
+  mkdir -p "$S/xdg/harkfell"
+  # D37: the native window opens at the stored scale; the leg reads 3x frames
+  printf "x3" > "$S/xdg/harkfell/scale.sgl"
   env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET DISPLAY=":$DISPLAYN" PULSE_SINK=worker-null XDG_DATA_HOME="$S/xdg" \
     setsid scripts/dev ./build/dev/bin/harkfell "$@" > "$S/game.log" 2>&1 &
   pid=""; n=0

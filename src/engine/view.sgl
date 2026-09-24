@@ -18,19 +18,28 @@
 ;;; its CSS size times devicePixelRatio, so a whole scale here is whole in
 ;;; device pixels, which CSS pixels at a fractional ratio are not.
 ;;;
-;;; Pure: no platform, no drawing. The shells draw from the fit.
+;;; No platform, no drawing: the shells draw from the fit. One switch of
+;;; state, integer-only, which the native shell sets (D37).
 
 (define-library (engine view)
   (import (sigil struct)
           (sigil math))
 
   (export fit fit? fit-mode fit-scale fit-x fit-y fit-w fit-h fit-up
-          view-fit window->view SHARP-BELOW)
+          view-fit window->view SHARP-BELOW view-set-integer-only!)
 
   (begin
     ;; The integer fit must cover at least this share of the limiting side
     ;; of the float fit, or the fit is 'sharp.
     (define SHARP-BELOW 0.8)
+
+    ;; Integer only (ruling D37, the native desktop window): never 'sharp;
+    ;; the largest whole scale that fits, centred, whatever the window's size
+    ;; (a tiling window manager sizes windows as it likes), black around it.
+    ;; The web leaves it off: a phone's screen is what it is. A window too
+    ;; small for 1x still draws at 1x, cropped.
+    (define *integer-only* #f)
+    (define (view-set-integer-only! on) (set! *integer-only* (and on #t)))
 
     ;; mode: 'integer or 'sharp. scale: window pixels per view pixel (a
     ;; whole number for 'integer, the float fit for 'sharp). x y w h: the
@@ -52,8 +61,8 @@
       (let* ((sx (/ (* 1.0 win-w) vw))
              (sy (/ (* 1.0 win-h) vh))
              (s (min sx sy))
-             (k (floor-int s)))
-        (if (and (>= k 1) (>= (/ k s) SHARP-BELOW))
+             (k (if *integer-only* (max 1 (floor-int s)) (floor-int s))))
+        (if (and (>= k 1) (or *integer-only* (>= (/ k s) SHARP-BELOW)))
             (let ((w (* k vw))
                   (h (* k vh)))
               (fit mode: 'integer
