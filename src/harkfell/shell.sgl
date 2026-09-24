@@ -68,7 +68,7 @@
 
   (export shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
           shell-add-frame-listener! shell-set-save-extras! shell-set-input-kind!
-          shell-save-now! shell-saving? shell-reveal-alpha shell-revealed? shell-set-moment-clock!
+          shell-save-now! shell-saving? shell-reveal-alpha shell-revealed? shell-set-moment-clock! shell-set-look!
           shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
           shell-stick! shell-jump! shell-sector
@@ -510,11 +510,35 @@
 
     ;; dt: the frame's wall seconds. Returns the ticks run. Notes whether any
     ;; tick launched a jump or a wall kick (JUMP settles on that).
+    ;; A4 look: ?look=start|card, --look start|card: the start screen (D32)
+    ;; or the Flux Harmonic card (D33) alone, to look at, drawn by (harkfell
+    ;; title) as the frame draws them; the card comes round every 5.5 s. A
+    ;; look begins no game: the frame and the save stay the plain boot's.
+    (define *look* #f)            ; #f, start or card
+    (define *look-s* 0.0)         ; seconds since the look began
+
+    (define (shell-set-look! look kind)
+      (set! *look* look)
+      (set! *look-s* 0.0)
+      (set! *input-kind* kind))
+
+    (define (present-look! win-w win-h)
+      (begin-frame)
+      (set-blend-mode (quote normal))
+      (if (eq? *look* (quote card))
+          (let ((s (- *look-s* (* 5.5 (floor (/ *look-s* 5.5))))))
+            (draw-card! win-w win-h (card-fade s) *look-s*))
+          (draw-start! win-w win-h (min 1.0 (/ *look-s* 1.5)) *look-s*
+                       (and *pointer* (car *pointer*)) (and *pointer* (cdr *pointer*))
+                       #t *input-kind*))
+      (end-frame))
+
     (define (shell-frame! dt)
       (set! *frame-start* (now-ms))
       (set! *frame-ms* (* 1000.0 dt))
       (set! *clock* (clock-advance *clock* dt))
       (set! *launched* #f)
+      (when *look* (set! *look-s* (+ *look-s* dt)))
       ;; A4: the frame steps in wall time until it plays; each phase entered
       ;; goes to the listeners (the sound, the page's trace)
       (when *frame*
@@ -533,7 +557,7 @@
       (set! *key-edge* #f)
       (set! *gesture* #f)
       (let loop ((i 0))
-        (when (and (< i (clock-steps *clock*)) (eq? *mode* 'play) (not *still*)
+        (when (and (< i (clock-steps *clock*)) (eq? *mode* 'play) (not *still*) (not *look*)
                    (or (not *frame*) (frame-world-steps? *frame*)))
           (let ((in (tick-intent *keys* *sector* *touch-jump* *press*)))
             (set! *press* #f)
@@ -653,7 +677,8 @@
     ;; Draw the frame onto a window of win-w x win-h pixels. ticks: what
     ;; shell-frame! ran (for the latency record).
     (define (shell-present! win-w win-h ticks)
-      (cond ((and *frame* (not (frame-world-visible? *frame*))) (present-front! win-w win-h))
+      (cond (*look* (present-look! win-w win-h))
+            ((and *frame* (not (frame-world-visible? *frame*))) (present-front! win-w win-h))
             ((and *content* (not (eq? *mode* 'play))) (present-overview! win-w win-h))
             (else (present-room! win-w win-h ticks))))
 

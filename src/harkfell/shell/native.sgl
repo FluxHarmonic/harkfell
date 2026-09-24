@@ -223,6 +223,10 @@
                  (when t (audio-tone-room! t)))
                (if (or (member "--test-room" args) (enter-world! args))
                    (begin
+                     ;; A4 look: --look start|card [--kind keys|touch|both]
+                     (let ((lk (arg-value args "--look")))
+                       (when lk
+                         (shell-set-look! (string->symbol lk) (string->symbol (or (arg-value args "--kind") "keys")))))
                      (run-game "Harkfell" WINDOW-W WINDOW-H (loop))
                      0)
                    1)))))))

@@ -44,6 +44,7 @@
 ;;;                          keys, touch or both: which words the start screen
 ;;;                          says. "new" ignores the save (?new). The page sends
 ;;;                          it only when no door (?room=, ?atlas, ...) is asked
+;;;   ("look", "start|card KIND")  (A4) ?look=: the start screen or the card alone
 ;;;   ("pointer", "X,Y")     (A4) the pointer in canvas pixels, for the start
 ;;;                          screen's moths
 ;;;
@@ -284,6 +285,14 @@
                      (else (say "save" "continue" (shell-room-label))
                            (for-each (lambda (n) (say "save" "forgave:" n)) notes)))
                1))
+            ;; A4 look: ?look=start|card (and the input kind): the start screen
+            ;; or the card alone ((harkfell shell)'s shell-set-look!)
+            ((string=? type "look")
+             (let ((w (string-split payload " ")))
+               (shell-set-look! (string->symbol (car w))
+                                (if (pair? (cdr w)) (string->symbol (cadr w)) (quote both)))
+               (say "look" payload))
+             0)
             ((string=? type "pointer")
              (let ((f (fields payload)))
                (when (and (= (length f) 2) (car f) (cadr f)) (shell-pointer! (car f) (cadr f))))

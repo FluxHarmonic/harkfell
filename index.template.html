@@ -265,9 +265,19 @@
       // A4: no door asked, so the game begins: the start screen (the
       // gesture gate the audio needs), the card, the opening, and the save.
       // The touch controls wait for "harkfell: frame play".
+      // A4 look: ?look=start|card shows the start screen or the card alone,
+      // to look at (the frame itself is the plain boot's); like a door, it
+      // begins no game. The pointer is handed over as in the frame.
+      var look = params.get("look");
+      if (look === "start" || look === "card") {
+        var lookTouchy = (navigator.maxTouchPoints || 0) > 0;
+        inFrame = true;
+        touchLayer.classList.remove("on");
+        send("look", look + " " + (params.get("kind") || (coarse ? "touch" : (lookTouchy ? "both" : "keys"))));
+      }
       var door = room || params.has("atlas") || params.get("sheet") || params.has("test-room") ||
                  params.has("replay") || params.has("envelope") || params.has("bench") || params.get("carry") ||
-                 params.get("frame") === "off";
+                 params.get("frame") === "off" || look === "start" || look === "card";
       if (files.length && !door) {
         var touchy = (navigator.maxTouchPoints || 0) > 0;
         var kind = coarse ? "touch" : (touchy ? "both" : "keys");
