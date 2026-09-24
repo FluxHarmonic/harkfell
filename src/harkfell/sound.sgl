@@ -993,6 +993,9 @@
             (list 'miss-h2 "miss-h2" 0.0 0.0 0.34)
             (list 'pickup-h2 "pickup-h2" 0.0 0.0 0.6)
             (list 'ring-h2 "ring-h2" 0.0 0.0 0.61)
+            ;; the Hollow's sealed H3 stone (content's map): its near miss and its ring
+            (list 'miss-h3 "miss-h3" 0.0 0.0 0.32)
+            (list 'ring-h3 "ring-h3" 0.0 0.0 0.57)
             (list 'stone-slide "stone-slide" 0.0 0.0 0.72)
             ;; what H2 changes
             (list 'croak-h2 "croak-h2" 0.0 0.0 0.55)

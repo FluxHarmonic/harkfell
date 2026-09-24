@@ -105,5 +105,5 @@
       (assert-true (member "ring-h2" (a3-tunes ct)))
       (assert-true (member "croak-h2" (a3-tunes ct)))
       (assert-equal '() (unreadable (a3-tunes ct)))))
-  (test "a harmonic with no tunes is red (H3 has none yet)"
-    (assert-true (member "ring-h3" (unreadable (list "ring-h2" "ring-h3"))))))
+  (test "a harmonic with no tunes is red (H4 has none yet; H3 gained its stone's in A4)"
+    (assert-true (member "ring-h4" (unreadable (list "ring-h2" "ring-h4"))))))
