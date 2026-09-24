@@ -11,14 +11,15 @@
 ;;;     (stones (REGION X Y C R N) ...)   the ring-stones opened
 ;;;     (moments KEY ...)             the fixed moments heard (the hush's spent
 ;;;                                   rooms), so none plays twice (D20)
-;;;     (played SECONDS))             seconds of play (the play note's clock)
+;;;     (played SECONDS)              seconds of play (the play note's clock)
+;;;     (revealed #t|#f))             the wordmark has had its one showing (D35)
 ;;;
 ;;; Plain symbols and lists, no keywords: a keyword does not write out as text
 ;;; and read back (measured: it prints as #<object>).
 ;;;
 ;;; Places are a room and a cell of it, never global pixels: the world map's
 ;;; origin moves whenever a region is added west or north of the others (the
-;;; Hollow moved it from x 8 to x 2), and a save has to survive that.
+;;; Hollow moved it from x 8 to x 1), and a save has to survive that.
 ;;;
 ;;; Restoring forgives, because a save must never stop a game starting; each
 ;;; thing forgiven is a NOTE (the shell prints them):
@@ -46,7 +47,7 @@
   (export SAVE-KEY SAVE-VERSION
           save-datum save-restore
           restored restored? restored-cell restored-carry restored-stones
-          restored-moments restored-played restored-notes
+          restored-moments restored-played restored-revealed restored-notes
           body-room-cell)
 
   (begin
@@ -62,6 +63,7 @@
       (stones default: '())
       (moments default: '())
       (played default: 0.0)
+      (revealed default: #f)
       (notes default: '()))
 
     ;; A save's field: (NAME . rest) -> rest, or #f.
@@ -79,10 +81,14 @@
                       (+ (worldmap-y0 wm) (exact (floor (/ (cdr cell) ROOM-ROWS)))))))
 
     ;; A body's cell (global) and the room it is in: (room . local-cell), or #f.
+    ;; The cell it rests in (rest-cell: a body overhanging a lip stands on the
+    ;; lip's cell, its centre may be over the gap; the review's finding 5), or
+    ;; else its centre's.
     (define (body-room-cell ct b)
       (let* ((c (body-center b HARKFELL-FEEL))
              (s (worldmap-size (content-map ct)))
-             (cell (cons (exact (floor (/ (car c) s))) (exact (floor (/ (cdr c) s)))))
+             (cell (or (rest-cell (worldmap-tiles (content-map ct)) HARKFELL-FEEL b)
+                       (cons (exact (floor (/ (car c) s))) (exact (floor (/ (cdr c) s))))))
              (rm (room-of-cell ct cell)))
         (and rm (cons rm (global->local ct rm cell)))))
 
@@ -90,7 +96,7 @@
     ;; harmonics; stones the world's stones ((harkfell gates)); moments the
     ;; hush's spent keys; played seconds. #f when the entry is outside the
     ;; written world (A0's room).
-    (define (save-datum ct entry carry stones moments played)
+    (define (save-datum ct entry carry stones moments played . revealed)
       (let ((rc (and ct entry (body-room-cell ct entry))))
         (and rc
              (let ((rm (car rc)) (cell (cdr rc)))
@@ -108,7 +114,8 @@
                                                                  (car l) (cdr l) (stone-overtone st)))))))
                                            stones)))
                      (cons 'moments moments)
-                     (list 'played played))))))
+                     (list 'played played)
+                     (list 'revealed (and (pair? revealed) (car revealed) #t)))))))
 
     ;; A save read back into this content: a restored, or #f for "no save"
     ;; (nothing there, or not a save of this version).
@@ -165,4 +172,5 @@
                            stones: stones
                            moments: (if (list? moments) (filter string? moments) '())
                            played: (if (number? played) played 0.0)
+                           revealed: (let ((v (field fields 'revealed))) (and (pair? v) (eq? (car v) #t)))
                            notes: (reverse notes))))))))

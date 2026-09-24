@@ -19,8 +19,9 @@
 ;;; saved place fading in. A door (?room=, --room, ?atlas, ?sheet=, the test
 ;;; room) skips all of it: those are for looking, not for playing.
 ;;;
-;;; Every change of phase is an EVENT the shell hands to its listener (the
-;;; sound: the card's tune, the wind, the bed): start, card, hold, dawn, play.
+;;; Every change of phase is an EVENT the shell hands to its listeners (the
+;;; sound: the card's tune, the wind, the bed): start, start-out, card, hold,
+;;; dawn, play; and card-skip, just before hold, when a key cut the card short.
 ;;;
 ;;; Pure: (frame-step f dt key? gesture?) -> a new frame. Timing is in seconds
 ;;; of wall time, not ticks: the frame is not the world.
@@ -81,7 +82,10 @@
                  ((or key? (>= (+ t FADE-S) START-S)) (enter f 'start-out))
                  (else f)))
           ((start-out) (if (>= t FADE-S) (enter f 'card) f))
-          ((card) (if (or key? (>= t CARD-S)) (enter f 'hold) f))
+          ((card) (cond ((>= t CARD-S) (enter f 'hold))
+                        ;; skipped: the sound hears it too (the opening's walk jumps on)
+                        (key? (enter (frame f events: (append (frame-events f) (list 'card-skip))) 'hold))
+                        (else f)))
           ((hold) (if (>= t HOLD-S) (enter f 'dawn) f))
           ((dawn) (if (>= t DAWN-S) (enter f 'play) f))
           (else f))))

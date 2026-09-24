@@ -178,7 +178,9 @@
                                       (else (shell-goto! key)))))
                      (say "harkfell: room " key) #t)
                     (key (say "harkfell: no room " key (if (arg-value args "--at") (string-append " or no open cell " (arg-value args "--at")) "")) #f)
-                    ((member "--no-frame" args)
+                    ;; doors: another world (a fixture's), a carry to listen with, or
+                    ;; no frame asked: straight in, and never the player's save
+                    ((or (member "--no-frame" args) (arg-value args "--carry") (not (string=? dir "world")))
                      (if (shell-goto-start!)
                          (begin (say "harkfell: start " (shell-room-label)) #t)
                          (begin (say "harkfell: the world has no start to enter") #f)))

@@ -12,6 +12,7 @@
 ;;;                                              pointer (window px) or #f
 ;;;   (front-card! win-w win-h alpha t)          the card
 ;;;   (front-black! win-w win-h alpha)           black over everything
+;;;   (front-reveal! win-w win-h alpha t)        the wordmark over the live world (D35)
 
 (define-library (harkfell front)
   (import (sigil math)
@@ -19,7 +20,7 @@
           (sigil graphics)
           (engine font))
 
-  (export front-start! front-card! front-black! START-LINES)
+  (export front-start! front-card! front-black! front-reveal! START-LINES)
 
   (begin
     ;; D32's words. The 3x5 font has no comma or capitals; IM Fell will.
@@ -78,6 +79,17 @@
             (let ((tw (text-width-mini (car ls) scale)))
               (draw-text-mini (car ls) (exact (floor (/ (- w tw) 2))) (exact (floor y)) scale))
             (loop (cdr ls) (+ y line-h))))))
+
+    ;; D35: the wordmark, once, over the world at the first homecoming.
+    (define (front-reveal! w h a t)
+      (when (> a 0.0)
+        (let* ((scale (max 3 (exact (floor (/ (min w (* 2 h)) 120)))))
+               (text "harkfell")
+               (tw (text-width-mini text scale)))
+          (set-color 0.0 0.0 0.0 (* 0.35 a))
+          (draw-filled-rect 0 (- (/ h 3) (* 2 scale)) w (* 9 scale))
+          (set-color 0.95 0.88 0.70 a)
+          (draw-text-mini text (exact (floor (/ (- w tw) 2))) (exact (floor (/ h 3))) scale))))
 
     ;; The mark: three bars, the harmonic series' 1 2 3, in the dawn's gold.
     (define (front-card! w h a t)

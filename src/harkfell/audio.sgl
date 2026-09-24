@@ -49,6 +49,9 @@
       (shell-set-save-extras! save-extras restore-extras!)
       ;; A4: the frame's phases: the card's tune, the hold, the dawn (frame-event!)
       (shell-add-frame-listener! frame-event!)
+      ;; D35: the wordmark's reveal is timed by the playing moment as heard
+      (shell-set-moment-clock! (lambda () (let ((m (sound-moment-playing)))
+                                            (and m (let ((t (sound-moment-time))) (and t (cons m t)))))))
       (*say* "audio" (number->string (mixer-rate)) (symbol->string (mixer-state))))
 
     (define (audio-gesture!) (mixer-resume!))

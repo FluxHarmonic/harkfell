@@ -62,11 +62,12 @@
           (harkfell gates)
           (harkfell save)
           (harkfell frame)
-          (harkfell front))
+          (harkfell front)
+          (harkfell reveal))
 
   (export shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
           shell-add-frame-listener! shell-set-save-extras! shell-set-input-kind!
-          shell-save-now! shell-saving?
+          shell-save-now! shell-saving? shell-reveal-alpha shell-revealed? shell-set-moment-clock!
           shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
           shell-stick! shell-jump! shell-sector
@@ -133,6 +134,15 @@
     (define *saving* #f)             ; this game writes its save
     (define *save-sig* #f)           ; what the last save held (a new one is written on a change)
     (define *waking* #f)             ; the creature has not been moved yet (D15)
+    ;; D35: the wordmark's one showing, at the first homecoming
+    (define *revealed* #f)           ; it has had its showing (this save)
+    (define *reveal-t* #f)           ; seconds since the home stone rang, while it shows
+    (define *reveal-sch* #f)         ; its schedule ((harkfell reveal))
+    ;; The playing moment's time as heard, for D35's timing: a procedure giving
+    ;; (name . seconds) or #f ((harkfell audio) wires the sound's).
+    (define *moment-clock* (lambda () #f))
+    (define (shell-set-moment-clock! f) (set! *moment-clock* f))
+    (define *home-stone* #f)         ; the start room's H2 stone, as (overtone x y) its ring news carries
     ;; The sound's part of a save: a getter giving (moments played), and a
     ;; setter taking them on a continue ((harkfell audio) wires the sound).
     (define *save-get* (lambda () (list '() 0.0)))
@@ -145,6 +155,24 @@
     (define (shell-pointer! x y) (set! *pointer* (cons x y)))
     (define (shell-frame-phase) (if *frame* (frame-phase *frame*) 'play))
     (define (shell-waking?) *waking*)
+    (define (shell-revealed?) *revealed*)
+    ;; How much of the wordmark shows now, 0..1 (0 when it is not showing).
+    (define (shell-reveal-alpha) (if *reveal-t* (reveal-alpha *reveal-sch* *reveal-t*) 0.0))
+
+    ;; The start room's stone keyed to H2 (the bowl's), as the ring news
+    ;; names it: (2 x y), x y its centre in the world map's pixels; #f if the
+    ;; start room has none.
+    (define (home-stone ct)
+      (let* ((s (start-cell ct))
+             (wm (content-map ct))
+             (room-of (lambda (cell) (cons (exact (floor (/ (car cell) ROOM-COLS)))
+                                           (exact (floor (/ (cdr cell) ROOM-ROWS)))))))
+        (and s
+             (let ((st (find (lambda (st) (and (= (stone-overtone st) 2)
+                                                (equal? (room-of (stone-cell st)) (room-of s))))
+                             (content-stones ct))))
+               (and st (let ((c (cell-centre (worldmap-tiles wm) (stone-cell st))))
+                         (list 2 (car c) (cdr c))))))))
     (define (shell-saving?) *saving*)
 
     (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
@@ -278,7 +306,10 @@
       (set! *saving* #t)
       (set! *save-sig* #f)
       (set! *waking* #t)
+      (set! *reveal-t* #f)
+      (set! *home-stone* (and *content* (home-stone *content*)))
       (let ((r (and d *content* (save-restore *content* d))))
+        (set! *revealed* (and r (restored-revealed r)))
         (cond (r
                (let* ((open (restored-stones r))
                       (stones (map (lambda (s)
@@ -298,7 +329,7 @@
       (and *content* *world* (world-gates *world*)
            (let ((x (*save-get*)))
              (save-datum *content* (world-entry *world*) (world-carry *world*) (world-stones *world*)
-                         (car x) (cadr x)))))
+                         (car x) (cadr x) *revealed*))))
 
     ;; Write the save when what it holds has changed: the entry (a room
     ;; entered), the carry, the stones opened, the moments heard. Not the
@@ -307,7 +338,8 @@
       (let* ((e (world-entry *world*))
              (sig (list (body-x e) (body-y e) (world-carry *world*)
                         (length (filter stone-open? (world-stones *world*)))
-                        (length (car (*save-get*))))))
+                        (car (*save-get*))
+                        *revealed*)))
         (unless (equal? sig *save-sig*)
           (let ((d (current-save)))
             (when d
@@ -407,7 +439,9 @@
     ;; --- input ------------------------------------------------------------------
 
     (define (shell-key-down! k)
-      (set! *key-edge* #t)
+      ;; a fresh press only (review: a key held through the start screen's fade
+      ;; autorepeats on the web and would skip the card)
+      (unless (memq k *keys*) (set! *key-edge* #t))
       (set! *gesture* #t)
       (unless (memq k *keys*)
         (set! *keys* (cons k *keys*))
@@ -486,7 +520,13 @@
           (set! *wall* (+ *wall* dt)))
         (let ((p (frame-take-events *frame*)))
           (set! *frame* (cdr p))
-          (for-each (lambda (ev) (for-each (lambda (f) (f ev)) *frame-listeners*)) (car p))))
+          (for-each (lambda (ev)
+                      ;; review: a jump pressed (or a key still held) to leave the start
+                      ;; screen or skip the card must not move the creature on the
+                      ;; dawn's first tick (D15: the first input in the world is yours)
+                      (when (eq? ev 'dawn) (shell-keys-clear!))
+                      (for-each (lambda (f) (f ev)) *frame-listeners*))
+                    (car p))))
       (set! *key-edge* #f)
       (set! *gesture* #f)
       (let loop ((i 0))
@@ -508,7 +548,23 @@
       (let ((p (world-take-news *world*)))
         (set! *world* (cdr p))
         (set! *frame-news* (car p))
-        (draw-news! (car p) (world-ticks *world*)))
+        (draw-news! (car p) (world-ticks *world*))
+        ;; D35: the first homecoming. The home stone rings, the save has had no
+        ;; showing: the wordmark begins (and the save says so at once below)
+        (when (and *saving* *home-stone* (not *revealed*)
+                   (find (lambda (n) (and (eq? (car n) 'ring)
+                                          (= (cadr n) (car *home-stone*))
+                                          (< (abs (- (caddr n) (cadr *home-stone*))) 1.0)
+                                          (< (abs (- (cadddr n) (caddr *home-stone*))) 1.0)))
+                         (car p)))
+          (set! *revealed* #t)
+          (set! *reveal-t* 0.0)
+          (set! *reveal-sch* (reveal-schedule (let ((m (*moment-clock*)))
+                                                (and (pair? m) (equal? (car m) "hollow-answers") (cdr m)))))
+          (for-each (lambda (f) (f 'reveal)) *frame-listeners*)))
+      (when *reveal-t*
+        (set! *reveal-t* (+ *reveal-t* dt))
+        (when (reveal-done? *reveal-sch* *reveal-t*) (set! *reveal-t* #f)))
       (when (and *saving* (or (not *frame*) (frame-world-steps? *frame*)) (world-gates *world*))
         (save-if-changed!))
       (set! *step-ms* (- (now-ms) *frame-start*))
@@ -664,6 +720,9 @@
         ;; A4: the dawn, the world coming in from black (D15)
         (when (and *frame* (> (frame-black-alpha *frame*) 0.0))
           (front-black! win-w win-h (frame-black-alpha *frame*)))
+        ;; D35: the wordmark over the live world, at the first homecoming
+        (when (> (shell-reveal-alpha) 0.0)
+          (front-reveal! win-w win-h (shell-reveal-alpha) (reveal-shown-t *reveal-sch* *reveal-t*)))
         (when *ms*
           (draw-readout (append (list (string-append "frame " (tenths *frame-ms*)
                                                      " step " (tenths *step-ms*)

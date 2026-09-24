@@ -1,0 +1,58 @@
+;;; (harkfell reveal) - The wordmark's one showing (D35): the first time you
+;;; come home carrying H2 and the bowl's stone rings, HARKFELL fades in over
+;;; the live world, holds, and fades out. Nothing stops for it: no pause, no
+;;; input held, nothing to dismiss. Once per save (the save's (revealed #t)).
+;;;
+;;; A SCHEDULE is made once, at the ring, in seconds from the ring: #(delay in
+;;; hold-end out) (the fade in starts at delay and lasts in; full until
+;;; hold-end; then fades out over out).
+;;;
+;;;   Keyed to hollow-answers (SOUND's timing, its tune time tt as heard):
+;;;   the fade starts at tt 13.3 and is full at 15.0 (the arrival: flute and
+;;;   bell on D5 over the full chord), holds to 24.0, and fades out over 2 s
+;;;   with the ring-out. A ring before 13.3 waits for it; a ring after it
+;;;   starts at once (and still holds to 24.0, or 1.7 s, whichever is later).
+;;;
+;;;   With no moment playing (the fallback): REVEAL-DELAY-S, then 2 s in, 4 s
+;;;   held, 2 s out.
+;;;
+;;; Pure.
+
+(define-library (harkfell reveal)
+  (import (sigil math))
+
+  (export REVEAL-DELAY-S REVEAL-IN-S REVEAL-HOLD-S REVEAL-OUT-S
+          TUNE-FADE-AT TUNE-FULL-AT TUNE-HOLD-TO TUNE-OUT-S
+          reveal-schedule reveal-alpha reveal-done? reveal-shown-t)
+
+  (begin
+    (define REVEAL-DELAY-S 0.0)
+    (define REVEAL-IN-S 2.0)
+    (define REVEAL-HOLD-S 4.0)
+    (define REVEAL-OUT-S 2.0)
+    (define TUNE-FADE-AT 13.3)
+    (define TUNE-FULL-AT 15.0)
+    (define TUNE-HOLD-TO 24.0)
+    (define TUNE-OUT-S 2.0)
+
+    ;; tt: the playing hollow-answers' time as heard at the ring, or #f.
+    (define (reveal-schedule tt)
+      (if (number? tt)
+          (let* ((d (max 0.0 (- TUNE-FADE-AT tt)))
+                 (in (- TUNE-FULL-AT TUNE-FADE-AT)))
+            (vector d in (max (+ d in) (- TUNE-HOLD-TO tt)) TUNE-OUT-S))
+          (vector REVEAL-DELAY-S REVEAL-IN-S (+ REVEAL-DELAY-S REVEAL-IN-S REVEAL-HOLD-S) REVEAL-OUT-S)))
+
+    ;; Seconds since the wordmark began to show, t seconds after the ring.
+    (define (reveal-shown-t sch t) (- t (vector-ref sch 0)))
+
+    ;; How much of it shows, 0..1, t seconds after the ring.
+    (define (reveal-alpha sch t)
+      (let ((d (vector-ref sch 0)) (in (vector-ref sch 1)) (h (vector-ref sch 2)) (out (vector-ref sch 3)))
+        (cond ((< t d) 0.0)
+              ((< t (+ d in)) (/ (- t d) in))
+              ((< t h) 1.0)
+              ((< t (+ h out)) (/ (- (+ h out) t) out))
+              (else 0.0))))
+
+    (define (reveal-done? sch t) (>= t (+ (vector-ref sch 2) (vector-ref sch 3))))))

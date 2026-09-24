@@ -266,7 +266,7 @@
       // gesture gate the audio needs), the card, the opening, and the save.
       // The touch controls wait for "harkfell: frame play".
       var door = room || params.has("atlas") || params.get("sheet") || params.has("test-room") ||
-                 params.has("replay") || params.has("envelope") || params.has("bench") ||
+                 params.has("replay") || params.has("envelope") || params.has("bench") || params.get("carry") ||
                  params.get("frame") === "off";
       if (files.length && !door) {
         var touchy = (navigator.maxTouchPoints || 0) > 0;

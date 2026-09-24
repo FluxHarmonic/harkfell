@@ -554,16 +554,22 @@ if (LEGS.includes("save")) {
   const saved = await evaluate("localStorage.getItem('save')");
   await open("trace&frame=on");
   const cont = await waitFor(() => lines.find((l) => l.startsWith("harkfell: save ")), 10000, "save: continue");
+  // the save's place, carry and stones, without the time played (leaving a page
+  // hides it, and a hidden tab rewrites the save with the time so far)
+  const place = (s) => (s || "").replace(/\(played [^)]*\)/, "");
   await open("trace&room=reedfen:10,4");
   await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "save: door");
+  const atDoor = await evaluate("localStorage.getItem('save')");
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft" });
   await sleep(4000);
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft" });
   await sleep(500);
   const walked = await where();
   const after = await evaluate("localStorage.getItem('save')");
-  (saved && saved.startsWith("(harkfell-save 1") && cont && cont.startsWith("harkfell: save continue") && after === saved && walked.x < 2 * 400 ? pass : fail)("save",
-    `saved: ${saved ? saved.slice(0, 60) : saved}; reload: ${cont}; after a door and a walk to x ${walked.x}: unchanged ${after === saved}`);
+  // reedfen:10,4 spans x 3600..4000 (the map starts at x1); walking west leaves it
+  (saved && saved.startsWith("(harkfell-save 1") && cont && cont.startsWith("harkfell: save continue") &&
+   atDoor && place(after) === place(atDoor) && walked.x < 9 * 400 ? pass : fail)("save",
+    `saved: ${saved ? saved.slice(0, 60) : saved}; reload: ${cont}; after a door and a walk west to x ${walked.x}: the place is unchanged ${place(after) === place(atDoor)}`);
 }
 
 if (LEGS.includes("errors")) {
