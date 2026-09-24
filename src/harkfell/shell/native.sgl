@@ -85,40 +85,58 @@
         (when (eq? v (quote fullscreen)) (set! *fullscreen-asked* #t))
         (case v ((x3) 3) ((x4) 4) ((x5) 5) ((x6) 6) ((x7) 7) ((x8) 8) (else 2))))
 
-    (define *window-k* #f)          ; the whole scale the window last fit
+    (define *opened-k* 2)           ; the whole scale the window was opened at
+    (define *stored-k* #f)          ; the whole scale last remembered
+    (define *sizes-ok* #f)          ; the first frame came back at the size asked for
     (define *last-size* #f)         ; (w . h), the framebuffer last seen
+    (define *stable* 0)             ; frames the framebuffer has held that size
+    (define *snapped-from* '())     ; sizes a snap has been asked from (never asked again)
     (define *fullscreen-asked* #f)  ; the stored scale is fullscreen: go there on the first frame
+    (define SETTLE-FRAMES 20)       ; a resize settles before it snaps (a drag is not fought)
 
     (define (scale-symbol k) (string->symbol (string-append "x" (number->string k))))
     (define (fit-k w h) (max 1 (exact (floor (min (/ w (* 1.0 VIEW-W)) (/ h (* 1.0 VIEW-H)))))))
 
     ;; Once a frame. F11 or Alt+Enter: fullscreen (the largest whole scale
     ;; that fits the monitor, black around it: (engine view)'s integer-only
-    ;; fit does the placing) and back, remembered. A window resized by hand
-    ;; snaps to the whole scale it fits and remembers it (asked once per size
-    ;; seen: a tiling window manager may refuse, and then the view is drawn
-    ;; at that scale in the middle of what it gave). Sizes are framebuffer
-    ;; pixels; on a scaled output (a HiDPI Wayland) the snap asks for a
-    ;; window that many screen units, which the scale makes larger.
+    ;; fit does the placing) and back, remembered.
+    ;;
+    ;; A window resized by hand, once the size has settled for SETTLE-FRAMES,
+    ;; snaps to the whole scale it fits and remembers it. Two guards, from
+    ;; the A4 review:
+    ;;   - only when the first frame came back at exactly the size asked for.
+    ;;     Otherwise the framebuffer is not in screen units (a HiDPI output,
+    ;;     where it is the scale times larger) or the window manager chose
+    ;;     the size (sway's tiling), and a snap would double the window or
+    ;;     fight the manager. The view is still drawn at the largest whole
+    ;;     scale that fits, whatever the size.
+    ;;   - never twice from the same size, so a refusing manager, a maximize
+    ;;     or a compositor that sends its own size back is not fought.
     (define (window-frame!)
       (when (or (key-pressed? (quote f11))
                 (and (key-pressed? (quote return)) (or (key-down? (quote alt)) (key-down? (quote right-alt)))))
         (let ((on (not (fullscreen?))))
           (set-fullscreen! on)
-          (store-write-datum! "scale" (if on (quote fullscreen) (scale-symbol (max 2 (or *window-k* 2)))))))
-      (when *fullscreen-asked*
-        (set! *fullscreen-asked* #f)
-        (set-fullscreen! #t))
+          (cond (on (store-write-datum! "scale" (quote fullscreen)))
+                (*stored-k* (store-write-datum! "scale" (scale-symbol *stored-k*)))
+                (else (store-write-datum! "scale" (scale-symbol *opened-k*))))))
       (let ((w (frame-width)) (h (frame-height)))
-        (unless (and *last-size* (= w (car *last-size*)) (= h (cdr *last-size*)))
-          (set! *last-size* (cons w h))
-          (unless (fullscreen?)
-            (let ((k (fit-k w h)))
-              (when (and *window-k* (not (eqv? k *window-k*)) (<= 2 k 8))
-                (store-write-datum! "scale" (scale-symbol k)))
-              (set! *window-k* k)
-              (unless (and (= w (* k VIEW-W)) (= h (* k VIEW-H)))
-                (window-set-size! (* k VIEW-W) (* k VIEW-H))))))))
+        (unless *last-size*
+          (set! *sizes-ok* (and (= w (* *opened-k* VIEW-W)) (= h (* *opened-k* VIEW-H)))))
+        (if (and *last-size* (= w (car *last-size*)) (= h (cdr *last-size*)))
+            (set! *stable* (+ *stable* 1))
+            (begin (set! *last-size* (cons w h)) (set! *stable* 0)))
+        (when *fullscreen-asked*
+          (set! *fullscreen-asked* #f)
+          (set-fullscreen! #t))
+        (when (and *sizes-ok* (= *stable* SETTLE-FRAMES) (not (fullscreen?)))
+          (let ((k (fit-k w h)))
+            (when (and (<= 2 k 8) (not (eqv? k *stored-k*)))
+              (store-write-datum! "scale" (scale-symbol k))
+              (set! *stored-k* k))
+            (unless (or (and (= w (* k VIEW-W)) (= h (* k VIEW-H))) (member (cons w h) *snapped-from*))
+              (set! *snapped-from* (cons (cons w h) *snapped-from*))
+              (window-set-size! (* k VIEW-W) (* k VIEW-H)))))))
 
     (define RELOAD-EVERY 30)         ; frames between looks at the files
 
@@ -190,6 +208,8 @@
           (let* ((dt (wait-frame)))
             (poll-keys!)
             (window-frame!)
+            ;; the mouse, for the start screen's moths (drawn toward the pointer, D32)
+            (shell-pointer! (mouse-x) (mouse-y))
             (when (key-pressed? 'r) (shell-reset-world!))
             (when (key-pressed? 'escape) (shell-save-now!) (request-quit))
             ;; nothing a reload meets may take the frame down: an error is
@@ -227,9 +247,10 @@
                                       (else (shell-goto! key)))))
                      (say "harkfell: room " key) #t)
                     (key (say "harkfell: no room " key (if (arg-value args "--at") (string-append " or no open cell " (arg-value args "--at")) "")) #f)
-                    ;; doors: another world (a fixture's), a carry to listen with, or
-                    ;; no frame asked: straight in, and never the player's save
-                    ((or (member "--no-frame" args) (arg-value args "--carry") (not (string=? dir "world")))
+                    ;; doors: another world (a fixture's), a carry to listen with, --look
+                    ;; (the start screen or card alone, like ?look=), or no frame asked:
+                    ;; straight in, and never the player's save
+                    ((or (member "--no-frame" args) (arg-value args "--carry") (arg-value args "--look") (not (string=? dir "world")))
                      (if (shell-goto-start!)
                          (begin (say "harkfell: start " (shell-room-label)) #t)
                          (begin (say "harkfell: the world has no start to enter") #f)))
@@ -278,6 +299,8 @@
                          (let ((a (arg-value args "--look-alpha"))) (when a (shell-set-look-alpha! (string->number a))))))
                      (view-set-integer-only! #t)
                      (let ((k (stored-scale)))
+                       (set! *opened-k* k)
+                       (set! *stored-k* k)
                        (run-game "Harkfell" (* k VIEW-W) (* k VIEW-H) (loop)))
                      0)
                    1)))))))

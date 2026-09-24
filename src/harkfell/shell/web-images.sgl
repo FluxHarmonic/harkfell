@@ -33,6 +33,7 @@
 (define-library (harkfell shell web-images)
   (import (sigil core)
           (sigil time)
+          (sigil math)
           (sigil graphics)
           (sigil graphics image)
           (sigil list)

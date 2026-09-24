@@ -231,3 +231,11 @@
         (list 'ground 'air 'cling 'swim))
       (assert-true (> (length names) 12))
       (assert-equal '() (filter (lambda (n) (not (cell (string-append "player/" n)))) names)))))
+
+(test-group "art: the reveal's halo (D35)"
+  (test "the wordmark's halo is made at every whole scale, beside the wordmark"
+    (let loop ((k 1))
+      (when (<= k 8)
+        (assert-true (file-exists? (string-append "assets/type/wordmark-halo@" (number->string k) ".png")))
+        (assert-true (file-exists? (string-append "assets/type/wordmark@" (number->string k) ".png")))
+        (loop (+ k 1))))))
