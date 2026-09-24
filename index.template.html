@@ -141,8 +141,11 @@
       stick.form = send("stick-form", "?") === 1 ? "float" : "fixed";
       if (params.has("trace")) send("trace", "on");
       if (params.has("ms")) send("ms", "on");
-      // the world, then the doors
-      var files = window.HARKFELL_WORLD || [];
+      // the world, then the doors. HARKFELL_WORLD_LIVE, when a tool sets it
+      // before the page loads (scripts/shot.mjs), is the working tree's world
+      // and wins over the one baked in at build time.
+      var files = window.HARKFELL_WORLD_LIVE || window.HARKFELL_WORLD || [];
+      if (window.HARKFELL_WORLD_LIVE) console.log("harkfell: page world live " + files.length + " files");
       files.forEach(function (f) { send("world-file", f[0] + "\n" + f[1]); });
       if (files.length) send("world-done", "");
       if (params.has("test-room")) send("test-room", "");

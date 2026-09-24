@@ -52,7 +52,7 @@
   (export ROOM-COLS ROOM-ROWS
           content content? load-content
           content-regions content-rooms content-map content-problems
-          content-start content-palette content-creatures content-maps
+          content-start content-palette content-creatures content-maps content-source
           region region? region-name region-field
           room room? room-path room-region room-x room-y room-title room-intent
           room-grid room-things room-bed room-moment room-decor room-start
@@ -623,7 +623,9 @@
              (whole (filter grid-whole? rooms))
              (placed-rooms (map room-placed whole))
              (wm (make-worldmap placed-rooms ROOM-COLS ROOM-ROWS TILE))
-             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm))))
+             (broken (map (lambda (rm) (cons (room-x rm) (room-y rm)))
+                          (filter (lambda (rm) (not (grid-whole? rm))) rooms)))
+             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm kind-open? broken))))
              (map-reads (map (lambda (e) (read-map-source (car e) (cdr e)))
                              (filter (lambda (e) (and (starts-with? (car e) "world/regions/") (ends-with? (car e) ".map")))
                                      source)))

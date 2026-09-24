@@ -2,7 +2,11 @@
 // the game draws (one texel per view pixel, times --scale).
 //
 //   node scripts/shot.mjs BUILD OUT.png --query "room=reedfen:9,3&still"
-//                         [--scale N] [--port N] [--cdp N]
+//                         [--scale N] [--port N] [--cdp N] [--world DIR | --baked]
+//
+// The rooms drawn are the working tree's world/ (or --world DIR), handed to
+// the page before it loads, so an edited room shows without rebuilding the
+// wasm; --baked draws the world baked into build/web instead.
 //
 // Serves BUILD on loopback, boots headless Chrome (SwiftShader) on
 // index.html?trace&QUERY, waits for the game to say what it is showing
@@ -26,7 +30,7 @@ import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
-const VALUED = ["--query", "--scale", "--port", "--cdp"];
+const VALUED = ["--query", "--scale", "--port", "--cdp", "--world"];
 const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && VALUED.includes(args[i - 1])));
 const ROOT = path.resolve(positional[0] || "build/web");
 const OUT = positional[1] || "/tmp/harkfell-shot.png";
@@ -109,6 +113,23 @@ async function waitLine(re, ms) {
   return null;
 }
 
+// The working tree's world (the files (harkfell source) reads), handed to the
+// page before it loads, so a shot shows the rooms as they are on disk now and
+// not as they were when build/web was built. --baked uses the built page's.
+function worldFiles(dir) {
+  const out = [];
+  if (fs.existsSync(path.join(dir, "world.sgl"))) out.push("world.sgl");
+  const rd = path.join(dir, "regions");
+  if (fs.existsSync(rd)) for (const n of fs.readdirSync(rd).sort()) if (n.endsWith(".map")) out.push("regions/" + n);
+  const rm = path.join(dir, "rooms");
+  if (fs.existsSync(rm)) for (const r of fs.readdirSync(rm).sort()) for (const n of fs.readdirSync(path.join(rm, r)).sort()) if (n.endsWith(".room")) out.push("rooms/" + r + "/" + n);
+  return out.map((f) => ["world/" + f, fs.readFileSync(path.join(dir, f), "utf8")]);
+}
+if (!args.includes("--baked")) {
+  const live = worldFiles(path.resolve(opt("--world", "world")));
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.HARKFELL_WORLD_LIVE = " + JSON.stringify(live) + ";" });
+  console.log(`world: live, ${live.length} files from ${opt("--world", "world")}`);
+} else console.log("world: baked into the page at build time");
 await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/index.html?trace&${QUERY}` });
 const world = await waitLine(/^harkfell: world (\d+) files, (\d+) problems/, 60000);
 if (!world) { console.log("SETUP-FAILED: no world line in 60 s; console: " + JSON.stringify(lines.slice(0, 20))); shutdown(2); await new Promise(() => {}); }

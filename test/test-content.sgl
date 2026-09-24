@@ -60,7 +60,9 @@
 (test-group "content: parse and legend (gate 1)"
   (test "a 24-character row is red, naming the file and the row's line"
     (let ((ps (problems (with-file LEFT (lambda (t) (swap t "\"#                        \"\n   \"#            ###" "\"#                       \"\n   \"#            ###"))))))
-      (assert-true (has? ps "x0y0.room:15: grid row 7 is 24 characters, not 25"))))
+      (assert-true (has? ps "x0y0.room:15: grid row 7 is 24 characters, not 25"))
+      ;; reported once, as itself: its neighbour does not open onto nothing
+      (assert-false (has? ps "opens onto no room"))))
   (test "an undeclared character is red, naming the file, line, row and column"
     (let ((ps (problems (with-file LEFT (lambda (t) (swap t "#            ###" "#     Q      ###"))))))
       (assert-true (has? ps "x0y0.room:16: grid row 8 column 6: 'Q' is not in the legend"))))

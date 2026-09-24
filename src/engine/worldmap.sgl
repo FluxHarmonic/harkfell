@@ -124,9 +124,15 @@
       (list->string (map (lambda (c) (if (kind-open? (tilemap-ref tm (car c) (cdr c))) #\o #\-)) cells)))
 
     ;; Every seam problem, as strings naming both rooms and the rows or
-    ;; columns that disagree. open?: the passable test (kind-open? by default).
-    (define (seam-problems wm . open?)
-      (let* ((open? (if (pair? open?) (car open?) kind-open?))
+    ;; columns that disagree. open?: the passable test (kind-open? by
+    ;; default). unknown: coordinates ((x . y) ...) where a room exists but is
+    ;; not on the map (the game left it off, its grid being broken): an edge
+    ;; facing one is not checked, so a broken room is reported once, as
+    ;; itself, and not again as its neighbours opening onto nothing.
+    (define (seam-problems wm . opts)
+      (let* ((open? (if (pair? opts) (car opts) kind-open?))
+             (unknown (if (and (pair? opts) (pair? (cdr opts))) (cadr opts) '()))
+             (unknown? (lambda (x y) (member (cons x y) unknown)))
              (cols (worldmap-cols wm))
              (rows (worldmap-rows wm)))
         (define (col-cells c) (map (lambda (r) (cons c r)) (iota rows)))
@@ -165,7 +171,7 @@
                                     (list (string-append name " left edge and " (room-name left)
                                                          " right edge disagree on rows " (nums m)))))
                               (let ((o (opens p (col-cells 0))))
-                                (if (null? o) '()
+                                (if (or (null? o) (unknown? (- x 1) y)) '()
                                     (list (string-append name " left edge opens onto no room, rows " (nums o))))))
                           (if up
                               (let ((m (mismatches up (row-cells (- rows 1)) p (row-cells 0))))
@@ -173,16 +179,16 @@
                                     (list (string-append name " top edge and " (room-name up)
                                                          " bottom edge disagree on columns " (nums m)))))
                               (let ((o (opens p (row-cells 0))))
-                                (if (null? o) '()
+                                (if (or (null? o) (unknown? x (- y 1))) '()
                                     (list (string-append name " top edge opens onto no room, columns " (nums o))))))
                           (if right
                               '()
                               (let ((o (opens p (col-cells (- cols 1)))))
-                                (if (null? o) '()
+                                (if (or (null? o) (unknown? (+ x 1) y)) '()
                                     (list (string-append name " right edge opens onto no room, rows " (nums o))))))
                           (if down
                               '()
                               (let ((o (opens p (row-cells (- rows 1)))))
-                                (if (null? o) '()
+                                (if (or (null? o) (unknown? x (+ y 1))) '()
                                     (list (string-append name " bottom edge opens onto no room, columns " (nums o)))))))))
                     (worldmap-rooms wm)))))))

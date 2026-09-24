@@ -4,6 +4,14 @@
 ;;;
 ;;; --parse-only stops before reach (gates 1 and 2 only): quick, and says so.
 ;;;
+;;;   harkfell --room-check --path REGION:X,Y C,R
+;;;
+;;; How the checker says a cell is reached: the shortest chain of accepted
+;;; edges from the start to cell (C, R) of that room, each edge's witness as
+;;; run-length input (R right, L left, U up, D down, J jump held, * the press;
+;;; "30 R" is thirty ticks of right) and where the body came to rest. Every
+;;; line is a witness that replayed.
+;;;
 ;;; Reads the world (world/ by default), runs gates 1 to 3 of section 8
 ;;; (parse and legend, the region map, seams; then reach, over the whole
 ;;; world from its start), prints every problem as FILE:LINE: message, then
@@ -28,6 +36,8 @@
           (engine roomfile)
           (engine reach)
           (engine worldmap)
+          (engine body)
+          (harkfell feel)
           (harkfell content)
           (harkfell check)
           (harkfell source))
@@ -43,6 +53,58 @@
         (and m (pair? (cdr m)) (cadr m))))
 
     (define (now-s) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
+
+    (define (intent-code in)
+      (let ((s (string-append (cond ((> (intent-h in) 0) "R") ((< (intent-h in) 0) "L") (else ""))
+                              (cond ((< (intent-v in) 0) "U") ((> (intent-v in) 0) "D") (else ""))
+                              (if (intent-jump in) "J" "")
+                              (if (intent-press in) "*" ""))))
+        (if (string=? s "") "-" s)))
+
+    ;; list-tail is not bound in this Sigil (measured: unbound variable).
+    (define (drop-n l n) (if (or (= n 0) (null? l)) l (drop-n (cdr l) (- n 1))))
+
+    ;; A script as "N CODE, N CODE, ...".
+    (define (script-rle script)
+      (let loop ((s script) (acc '()))
+        (if (null? s)
+            (string-join (reverse acc) ", ")
+            (let* ((c (intent-code (car s)))
+                   (n (let count ((l s) (k 0)) (if (and (pair? l) (string=? (intent-code (car l)) c)) (count (cdr l) (+ k 1)) k))))
+              (loop (drop-n s n) (cons (string-append (number->string n) " " c) acc))))))
+
+    (define (cell-label ct cell)
+      (let* ((wm (content-map ct))
+             (p (worldmap-room wm (+ (worldmap-x0 wm) (exact (floor (/ (car cell) ROOM-COLS))))
+                                  (+ (worldmap-y0 wm) (exact (floor (/ (cdr cell) ROOM-ROWS)))))))
+        (if p
+            (let ((l (global->local ct (placed-data p) cell)))
+              (string-append (room-label (placed-data p)) " (" (number->string (car l)) "," (number->string (cdr l)) ")"))
+            "outside")))
+
+    ;; The chain of edges from the start to cell (breadth first).
+    (define (print-path ct g target)
+      (let* ((start (start-cell ct)))
+        (let loop ((front (list start)) (parents (list (cons start #f))))
+          (cond ((null? front) (say "no path from the start to " (cell-label ct target)))
+                ((assoc target parents)
+                 (let walk ((c target) (chain '()))
+                   (let ((p (cdr (assoc c parents))))
+                     (if (not p)
+                         (for-each (lambda (e)
+                                     (say "  " (cell-label ct (car e)) " -> " (cell-label ct (cadr e))
+                                          ", " (number->string (length (witness-script (caddr e)))) " ticks"
+                                          (if (> (witness-hops (caddr e)) 1)
+                                              (string-append ", " (number->string (witness-hops (caddr e))) " hops")
+                                              "")
+                                          ":\n      " (script-rle (witness-script (caddr e)))))
+                                   chain)
+                         (walk (car p) (cons (list (car p) c (cdr p)) chain))))))
+                (else
+                 (let* ((c (car front))
+                        (next (filter (lambda (e) (not (assoc (car e) parents))) (graph-edges-from g c))))
+                   (loop (append (cdr front) (map car next))
+                         (append parents (map (lambda (e) (cons (car e) (cons c (cdr e)))) next)))))))))
 
     (define (room-check-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
@@ -84,7 +146,18 @@
                                          (number->string (cadr e)) "," (number->string (cddr e)) ")"))
                                   (graph-rejected g))))
                     (for-each (lambda (p) (say (problem->string p))) rps)
-                    (when g
+                    (let ((pk (arg-value args "--path"))
+                          (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
+                      (when (and g pk pc)
+                        (let* ((k (parse-room-key pk))
+                               (rm (and k (content-room ct (cadr k) (caddr k))))
+                               (xy (map string->number (string-split pc ","))))
+                          (if (and rm (= (length xy) 2) (car xy) (cadr xy))
+                              (begin
+                                (say "path to " pk " (" pc "):")
+                                (print-path ct g (local->global ct rm (car xy) (cadr xy))))
+                              (say "--path: no room " pk " or no cell " pc)))))
+                    (when (and g (not (member "--path" args)))
                       (for-each (lambda (rm)
                                   (newline)
                                   (for-each say (room-report ct g rm)))
