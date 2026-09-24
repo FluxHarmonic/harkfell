@@ -41,7 +41,22 @@
 //              its timeStamp a synthetic touch reaches the page (headless
 //              Chrome delivers CDP touches ~90 ms late, so the latency legs
 //              prove the readout works, not what a phone measures)
+//   world      (A1) the page hands over the baked world and it loads clean:
+//              "harkfell: world 8 files, 0 problems", and a plain boot enters
+//              the world's start (reedfen:8,3)
+//   door       (A1) ?room=reedfen:10,4 boots into that room ("harkfell: room
+//              reedfen:10,4") with the body inside the room's slot; a room that
+//              does not exist answers "harkfell: no-room"
+//   atlas      (A1) ?atlas shows every room at quarter scale ("harkfell: view
+//              atlas 308 94"); a click on the Drowned Channel's picture enters
+//              it ("harkfell: room reedfen:9,4") and play resumes
+//   sheet      (A1) ?sheet=reedfen: the region's rooms at full scale ("harkfell:
+//              view sheet:reedfen 1216 364")
 //   errors     no console error and no exception in any leg
+//
+// A0's control legs (keys, float, fixed, jump, two, timing) run in A0's test
+// room (&test-room): they measure the controls, and their geometry (the
+// chimney, the first pit) is that room's.
 
 import http from "node:http";
 import fs from "node:fs";
@@ -57,7 +72,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -214,6 +229,63 @@ if (LEGS.includes("render")) {
   }
 }
 
+if (LEGS.includes("world")) {
+  ran.add("world");
+  await open("trace");
+  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "world");
+  const w = lines.find((l) => l.startsWith("harkfell: world "));
+  const r = lines.find((l) => l.startsWith("harkfell: room "));
+  (w === "harkfell: world 8 files, 0 problems" && r === "harkfell: room reedfen:8,3" ? pass : fail)("world", `${w}; ${r}`);
+}
+
+if (LEGS.includes("door")) {
+  ran.add("door");
+  await open("trace&room=reedfen:10,4");
+  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door");
+  const r = lines.find((l) => l.startsWith("harkfell: room "));
+  const at = await where();
+  // reedfen:10,4 is the third room across (x 8..10) and the second down (y 3..4)
+  const inside = at.x >= 2 * 400 && at.x < 3 * 400 && at.y >= 176 && at.y < 2 * 176;
+  await open("trace&room=reedfen:40,40");
+  await sleep(500);
+  const none = lines.find((l) => l.startsWith("harkfell: no-room"));
+  (r === "harkfell: room reedfen:10,4" && inside && none === "harkfell: no-room reedfen:40,40" ? pass : fail)("door", `${r}; body at ${at.x},${at.y} inside the room's slot: ${inside}; ${none}`);
+}
+
+// A click at canvas pixel (cx, cy) as a real mouse event (the page maps it).
+async function clickCanvas(cx, cy) {
+  const r = await evaluate(`(() => { const c = document.getElementById("stage"); const b = c.getBoundingClientRect(); return [b.left, b.top, b.width / c.width, b.height / c.height]; })()`);
+  const x = r[0] + cx * r[2], y = r[1] + cy * r[3];
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+}
+
+if (LEGS.includes("atlas")) {
+  ran.add("atlas");
+  await open("trace&atlas");
+  const v = await waitFor(() => lines.find((l) => l.startsWith("harkfell: view atlas")), 10000, "atlas");
+  const [, , , vw, vh] = v.split(" ").map((x, i) => (i >= 3 ? Number(x) : x));
+  // the game fits the atlas at the largest whole scale, centred
+  const cw = await evaluate("document.getElementById('stage').width"), ch = await evaluate("document.getElementById('stage').height");
+  const k = Math.floor(Math.min(cw / vw, ch / vh));
+  const ox = Math.floor((cw - vw * k) / 2), oy = Math.floor((ch - vh * k) / 2);
+  // the Drowned Channel, x9y4: the second column and row of 102x46 cells (a 2 px gap, rooms at 1/4)
+  const px = 2 + 102 * 1 + 50, py = 2 + 46 * 1 + 22;
+  const before = lines.length;
+  await clickCanvas(ox + px * k, oy + py * k);
+  await waitFor(() => lines.slice(before).find((l) => l.startsWith("harkfell: room ")), 5000, "atlas click");
+  const r = lines.slice(before).find((l) => l.startsWith("harkfell: room "));
+  const a = await where(); await sleep(400); const b = await where();
+  (v === "harkfell: view atlas 308 94" && r === "harkfell: room reedfen:9,4" ? pass : fail)("atlas", `${v}; clicked canvas ${ox + px * k},${oy + py * k} (scale ${k}); ${r}; body at ${b.x},${b.y}`);
+}
+
+if (LEGS.includes("sheet")) {
+  ran.add("sheet");
+  await open("trace&sheet=reedfen");
+  const v = await waitFor(() => lines.find((l) => l.startsWith("harkfell: view sheet")), 10000, "sheet");
+  (v === "harkfell: view sheet:reedfen 1216 364" ? pass : fail)("sheet", v);
+}
+
 if (LEGS.includes("replay")) {
   ran.add("replay");
   await open("trace&replay");
@@ -246,7 +318,7 @@ if (LEGS.includes("envelope")) {
 
 if (LEGS.includes("keys")) {
   ran.add("keys");
-  await open("trace");
+  await open("trace&test-room");
   const a = await where();
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await sleep(500);
@@ -281,7 +353,7 @@ async function drag(x, y, dx, ms) {
 // back at the entry.
 if (LEGS.includes("float")) {
   ran.add("float");
-  await open("trace&touch&stick=float");
+  await open("trace&touch&stick=float&test-room");
   const g = await ring();
   // lower-left quarter, well outside the ring and its slack, 2.2 radii right
   // of home. Re-centring is what makes a drag LEFT from here read w: measured
@@ -313,7 +385,7 @@ if (LEGS.includes("float")) {
 
 if (LEGS.includes("fixed")) {
   ran.add("fixed");
-  await open("trace&touch&stick=fixed");
+  await open("trace&touch&stick=fixed&test-room");
   const g = await ring();
   const x = Math.min(W / 2 - 20, g.x + 2.2 * g.r), y = Math.max(H / 2 + 20, g.y - 0.3 * g.r);
   const a = await where();
@@ -329,7 +401,7 @@ if (LEGS.includes("fixed")) {
 
 if (LEGS.includes("jump")) {
   ran.add("jump");
-  await open("trace&touch&stick=float");
+  await open("trace&touch&stick=float&test-room");
   const a = await where();
   await touch("touchStart", [[W * 0.85, H * 0.8, 2]]);
   await sleep(180);
@@ -345,7 +417,7 @@ if (LEGS.includes("jump")) {
 
 if (LEGS.includes("two")) {
   ran.add("two");
-  await open("trace&touch&stick=float");
+  await open("trace&touch&stick=float&test-room");
   const g = await ring();
   const a = await where();
   // finger 1 on the stick, dragged LEFT and held (the body presses into the
