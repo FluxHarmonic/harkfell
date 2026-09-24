@@ -64,7 +64,7 @@
 
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
           sound-ears sound-lines sound-hush sound-bed-levels sound-moment-playing sound-reset!
-          sound-set-rng! strip-uncarried
+          sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
@@ -168,7 +168,8 @@
       (set! *hush* (hush-new)) (set! *key* #f) (set! *region* #f) (set! *groups* '())
       (set! *bed-player* #f) (set! *bed-src* #f) (set! *levels* '()) (set! *moments* '())
       (set! *moment* #f) (set! *moment-key* #f) (set! *tone-player* #f) (set! *tone-cutoff* #f)
-      (set! *still-for* 0.0) (set! *still* #f) (set! *ears* #f) (set! *next* '()) (set! *waiting* #f))
+      (set! *still-for* 0.0) (set! *still* #f) (set! *ears* #f) (set! *next* '()) (set! *waiting* #f)
+      (set! *spots* 0) (set! *carry-changed* #f) (set! *bed-tune* #f) (set! *room-levels* '()))
 
     ;; --- channels and levels ------------------------------------------------------------
     ;; groups: the region's bed-channels, e.g. (wind water reeds drone)
@@ -200,18 +201,34 @@
               (else 0.5))))
 
     ;; Ramp every channel of the bed to the room's levels.
-    (define (apply-room-levels! levels now secs)
+    ;; D23 (David, 2026-09-24: "keep the volume of them lower while moving"):
+    ;; the drone channels sit DRONE-MOVING (-9 dB) under the room's drone
+    ;; level while you move and come up to it once you stand still (STILL-S),
+    ;; so standing still makes the drone swell while the rest of the bed dips.
+    ;; The factor is folded into the channel target here, in the one function
+    ;; that ramps channels, so a room change and a stop or a start can never
+    ;; overwrite each other's ramp (player-ramp!'s one ramp per target).
+    (define DRONE-MOVING 0.35)
+    (define DRONE-DOWN-S 1.5)
+    (define DRONE-UP-S 2.0)
+
+    (define (channel-target levels g)
+      (* (room-level levels g) (if (and (eq? g 'drone) (not *still*)) DRONE-MOVING 1.0)))
+
+    ;; only: a group to ramp alone (the drone on a stop or a start), or all
+    (define (apply-room-levels! levels now secs . only)
       (when *bed-player*
         (for-each
           (lambda (gc)
-            (let ((v (room-level levels (car gc))))
+            (let ((v (channel-target levels (car gc))))
               (for-each (lambda (ch)
                           (let ((from (level-now ch now)))
                             (player-ramp! *bed-player* (cons 'channel-volume ch) from v (* 1000.0 secs))
                             (set! *levels* (cons (cons ch (vector from v now secs))
                                                  (filter (lambda (e) (not (eqv? (car e) ch))) *levels*)))))
                         (cdr gc))))
-          (bed-channels-of *groups*))))
+          (filter (lambda (gc) (or (null? only) (eq? (car gc) (car only))))
+                  (bed-channels-of *groups*)))))
 
     ;; The bed as opened: the notes of every drone channel whose harmonic is
     ;; not carried are dropped. Measured (native dev build, 20 s of reedfen-bed
@@ -449,7 +466,8 @@
           (when *bed-src*
             (source-factor! *bed-src* 'still (if now-still DUCK-GAIN 1.0) (if now-still STILL-IN-S STILL-OUT-S) now))
           (let ((s (mixer-find TONE-ID)))
-            (when s (source-factor! s 'still (if now-still TONE-FORWARD 1.0) (if now-still STILL-IN-S STILL-OUT-S) now)))))
+            (when s (source-factor! s 'still (if now-still TONE-FORWARD 1.0) (if now-still STILL-IN-S STILL-OUT-S) now)))
+          (apply-room-levels! *room-levels* now (if now-still DRONE-UP-S DRONE-DOWN-S) 'drone)))
       (set! *ears*
             (and *still*
                  (let* ((g (tone-geometry pl)) (dx (car g)) (dy (cadr g)) (d (caddr g)))
@@ -464,7 +482,7 @@
       '((frog "spot-frog" 5.0 14.0 0.55)
         (bird "spot-bird" 14.0 32.0 0.35)
         (plop "spot-plop" 7.0 18.0 0.4)
-        (return "return-tone" 0.0 0.0 0.5)))
+        (return "return-tone" 0.0 0.0 0.7)))
 
     (define (spot-ref name) (assq name SPOTS))
 
@@ -517,6 +535,7 @@
         m))
 
     (define (cue! name gain pan)
+      (unless (eq? name 'return) (set! *spots* (+ *spots* 1)))
       (let ((c (assq name *cues*)))
         (when c (mixer-cue! (cdr c) gain pan))))
 
@@ -529,7 +548,17 @@
                #t)
               (else #f))))
 
+    ;; No spot sound starts while a moment plays (David, 2026-09-24: "they
+    ;; shouldn't be playing while the moment tune is going on"); their clocks
+    ;; start again after it. *spots* counts the ones played (the gates).
+    (define *spots* 0)
+    (define (sound-spots-played) *spots*)
     (define (spots-frame! pl now)
+      (if *moment*
+          (set! *next* '())
+          (spots-frame-quiet! pl now)))
+
+    (define (spots-frame-quiet! pl now)
       (let ((frogs (place-frogs pl))
             (reeds (room-level (place-levels pl) 'reeds))
             (water (room-level (place-levels pl) 'water))
@@ -592,7 +621,7 @@
           (open-region-bed! *region* *groups* *bed-tune* *room-levels* now))
         (when (> (place-returns pl) *returns*)
           (set! *returns* (place-returns pl))
-          (cue! 'return 0.5 0.0))
+          (cue! 'return 0.7 0.0))
         (still-frame! pl dt now)
         (tone-frame! pl now)
         (spots-frame! pl now)))

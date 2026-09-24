@@ -21,6 +21,8 @@
 #   blocked-spent hush.sgl spends a moment on any visit  -> gate 2 red
 #   relative-px   audio.sgl passes the map's own pixels (the review's H1)
 #                 -> the listening test on the real world red
+#   spots-in-moment  sound.sgl lets spot sounds play under a moment
+#                 (David's ruling, 2026-09-24) -> "no spot sound" red
 #   channel-duck  sound.sgl ducks with channel ramps    -> gate 4 red
 # A leg is RED only if the test run exits non-zero AND the named test is
 # reported failing (not merely absent from the passes). --sabotage runs the
@@ -98,7 +100,7 @@ plant() {
 # The green arm: each file's run, and every named test seen passing.
 green_all() {
   green test/test-hush.sgl 11
-  green test/test-sound.sgl 8
+  green test/test-sound.sgl 13
   green test/test-tunes.sgl 3
   green test/test-place.sgl 6
 }
@@ -117,6 +119,7 @@ if [ "${1:-}" = "--sabotage" ]; then
   passes test/test-hush.sgl "and plays on the following visit once the hush allows"
   passes test/test-sound.sgl "and the duck held"
   passes test/test-place.sgl "in Old Stone, still: the ears lean east and the tone sounds"
+  passes test/test-sound.sgl "and no spot sound had played"
   plant first-visit src/harkfell/hush.sgl \
     "      (cond ((member key (hush-spent h)) 'spent)
             ((hush-playing h) 'blocked)" \
@@ -143,7 +146,13 @@ if [ "${1:-}" = "--sabotage" ]; then
                            py: (+ (body-y b) 6.0 (* (worldmap-rows wm) (worldmap-size wm) (worldmap-y0 wm)))" \
     "                           px: (+ (body-x b) 4.0) py: (+ (body-y b) 6.0)" \
     test/test-place.sgl "in Old Stone, still: the ears lean east and the tone sounds"
-  if [ "$FAIL" -eq 0 ]; then echo "GATE-SOUND SABOTAGE: all five RED"; else echo "GATE-SOUND SABOTAGE: a leg was not caught"; fi
+  plant spots-in-moment src/harkfell/sound.sgl \
+    "      (if *moment*
+          (set! *next* '())
+          (spots-frame-quiet! pl now)))" \
+    "      (spots-frame-quiet! pl now))" \
+    test/test-sound.sgl "and no spot sound had played"
+  if [ "$FAIL" -eq 0 ]; then echo "GATE-SOUND SABOTAGE: all six RED"; else echo "GATE-SOUND SABOTAGE: a leg was not caught"; fi
   exit $FAIL
 fi
 
