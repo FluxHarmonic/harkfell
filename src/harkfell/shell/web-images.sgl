@@ -4,20 +4,31 @@
 ;;; to the page, so "assets/type/..." is served beside it), the wasm decodes
 ;;; it (stb_image, load-image-from-memory) and makes a texture. Crash's web
 ;;; shell's route (its ensure-texture!), for any number of paths at once. A
-;;; fetch that has not landed after GIVE-UP asks (about ten seconds at one
-;;; ask a frame) is failed for good: (harkfell images) stops asking.
+;;; fetch that has not landed is asked for again (below); nothing here ever
+;;; answers failed but an image that does not decode.
 ;;;
-;;; No fetch starts until HOLD-MS after the first ask. Measured 2026-09-24
-;;; in headless Chrome (a CDP probe logging Network.loadingFailed):
-;;;   - every request in flight at one moment just after the page's boot is
-;;;     aborted (net::ERR_ABORTED), whether the wasm or the page's own JS
-;;;     issued it;
-;;;   - the same request issued 0.2 s later lands;
-;;;   - the gles3 bridge logs each abort as a console error and never
-;;;     marks the slot ready.
-;;; The start screen asks for its words on its first frame, inside that
-;;; moment, so without the hold its words never came. What aborts them is
-;;; not found; the page's own tune fetches retry around the same window.
+;;; When to fetch, measured 2026-09-24 in headless Chrome (a CDP probe
+;;; logging Page.frame*, lifecycle and Network.loadingFailed):
+;;;   - there is no navigation and no reload during boot;
+;;;   - the start screen's three requests went out at 2.3 s, and all three
+;;;     were cancelled (net::ERR_ABORTED, canceled: true) at 5.51 s, the
+;;;     moment a ~3.2 s block of the main thread ended (the game's first
+;;;     frames: the atlas and the backdrop baked), just before the first
+;;;     contentful paint;
+;;;   - requests issued just after such a block were cancelled the same way,
+;;;     and ones 0.2 s later landed;
+;;;   - the gles3 bridge logs each cancel as a console error and never marks
+;;;     its slot ready.
+;;; Why Chrome cancels in-flight requests across a long block is not known
+;;; (hypothesis: the blocked renderer cannot take the responses).
+;;; So:
+;;;   - no fetch starts until asks have come at a steady frame rate: none
+;;;     more than GAP-MS apart for STEADY-MS. A long frame restarts the
+;;;     count, however slow the device;
+;;;   - a fetch that has not landed after RETRY-MS is issued again,
+;;;     doubling the wait each time up to RETRY-CAP-MS;
+;;;   - it is never given up: (harkfell images) goes on answering #f until
+;;;     the image lands.
 
 (define-library (harkfell shell web-images)
   (import (sigil core)
@@ -30,22 +41,36 @@
   (export web-fetcher)
 
   (begin
-    (define GIVE-UP 600)
-    (define HOLD-MS 1000.0)
-    (define *pending* '())      ; ((path handle . asks) ...)
-    (define *first-ask* #f)     ; ms, the first ask
+    (define GAP-MS 250.0)
+    (define STEADY-MS 300.0)
+    (define RETRY-MS 3000.0)
+    (define RETRY-CAP-MS 24000.0)
+    (define *pending* '())      ; ((path handle issued-ms . wait-ms) ...)
+    (define *last-ask* #f)      ; ms of the last ask
+    (define *steady-since* #f)  ; ms since when asks have come steadily
 
     (define (now-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
 
     (define (drop! path)
       (set! *pending* (filter (lambda (e) (not (string=? (car e) path))) *pending*)))
 
+    (define (issue! path wait)
+      (drop! path)
+      (set! *pending* (cons (cons path (cons (gles3-fetch-image path) (cons (now-ms) wait))) *pending*)))
+
+    ;; Called once per ask: is the page steady (no long frame lately)?
+    (define (steady! now)
+      (when (or (not *last-ask*) (> (- now *last-ask*) GAP-MS))
+        (set! *steady-since* now))
+      (set! *last-ask* now)
+      (> (- now *steady-since*) STEADY-MS))
+
     (define (web-fetcher path)
-      (unless *first-ask* (set! *first-ask* (now-ms)))
-      (let ((e (assoc path *pending*)))
+      (let* ((now (now-ms))
+             (steady (steady! now))
+             (e (assoc path *pending*)))
         (cond ((not e)
-               (when (> (- (now-ms) *first-ask*) HOLD-MS)
-                 (set! *pending* (cons (cons path (cons (gles3-fetch-image path) 0)) *pending*)))
+               (when steady (issue! path RETRY-MS))
                #f)
               ((gles3-image-ready? (cadr e))
                (drop! path)
@@ -55,5 +80,8 @@
                        (image-free! img)
                        (or tex 'failed))
                      'failed)))
-              ((> (cddr e) GIVE-UP) (drop! path) 'failed)
-              (else (set-cdr! (cdr e) (+ 1 (cddr e))) #f))))))
+              ;; not landed in its wait: again, when steady, waiting twice as long
+              ((and steady (> (- now (caddr e)) (cdddr e)))
+               (issue! path (min RETRY-CAP-MS (* 2.0 (cdddr e))))
+               #f)
+              (else #f))))))

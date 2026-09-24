@@ -10,7 +10,7 @@
 ;;;   (set-image-fetcher! proc)     (proc path) -> a texture, #f (not yet) or
 ;;;                                 'failed; asked again each call until it
 ;;;                                 answers a texture or 'failed
-;;;   (image-state path)            'ready 'pending 'failed or #f (never asked)
+;;;   (image-state path)            'ready, 'failed, or #f (not landed yet)
 ;;;
 ;;; Linear-filtered (load-texture's): meant for images drawn 1:1 at the
 ;;; window's resolution, like (harkfell title)'s words.
