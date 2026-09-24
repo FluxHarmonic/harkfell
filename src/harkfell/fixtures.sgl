@@ -33,11 +33,15 @@
 ;;;
 ;;; 2. THE CEILING (A0's test room, from the design's section 8): the tile
 ;;;    before the first gap lies under the chimney pillar, whose underside is
-;;;    2 px above a standing body's head. No accepted edge from that tile may
-;;;    take the body more than 2 px above its standing height while the body
-;;;    is still under the pillar. Its positive control: the same room with
-;;;    the pillar's lowest block removed must have an edge that rises more
-;;;    than 2 px there (the check can see a rise).
+;;;    2 px above a standing body's head. No trajectory the search tries from
+;;;    that tile may take the body more than 2 px above its standing height
+;;;    while the body is still under the pillar (every script it followed to
+;;;    an anchor, not only the accepted edges: A4 found that after A2's faster
+;;;    walk every accepted edge from there is a run-up that leaves the column
+;;;    before it rises, so a check on accepted edges alone could not fail).
+;;;    Its positive control: the same room with the pillar's lowest block
+;;;    removed must have a tried trajectory that rises more than 2 px there
+;;;    (the search does try standing jumps, and the check can see a rise).
 ;;;
 ;;; 3. REUSE (A4, (engine reach)): on the one-room world in
 ;;;    test/fixtures/worlds/stone (a harmonic, and a wall whose door is a
@@ -202,7 +206,8 @@
     ;; it. -> (list edges-examined ticks-under max-rise)
     (define (ceiling-rises tm)
       (let* ((g (reach-search tm HARKFELL-FEEL (list A0-ENTRY-CELL) witness-lands?))
-             (edges (graph-edges-from g PILLAR-CELL))
+             (edges (map (lambda (s) (cons #f (witness from: PILLAR-CELL script: s)))
+                         (graph-stand-scripts g PILLAR-CELL)))
              (stand-y (- (* TILE (+ (cdr PILLAR-CELL) 1)) (feel-box-h HARKFELL-FEEL)))
              (lo (* TILE (car PILLAR-CELL)))
              (hi (* TILE (+ (car PILLAR-CELL) 1))))
@@ -229,10 +234,10 @@
              (ok (and (> (car a) 0) (> (cadr a) 0) (<= (caddr a) 2.0001)))
              (b (ceiling-rises (room-tiles (parse-harkfell-room (a0-rows-without-pillar-foot)))))
              (ok2 (> (caddr b) 2.0001)))
-        (say (if ok "PASS " "FAIL ") "ceiling: A0's room, edges out of (3,7) " (number->string (car a))
+        (say (if ok "PASS " "FAIL ") "ceiling: A0's room, trajectories tried from (3,7) " (number->string (car a))
              ", ticks under the pillar " (number->string (cadr a))
              ", highest rise there " (number->string (caddr a)) " px (at most 2)")
-        (say (if ok2 "PASS " "FAIL ") "ceiling control: pillar foot removed, edges out of (3,7) " (number->string (car b))
+        (say (if ok2 "PASS " "FAIL ") "ceiling control: pillar foot removed, trajectories tried from (3,7) " (number->string (car b))
              ", highest rise under column 3 " (number->string (caddr b)) " px (must be over 2)")
         (list ok ok2)))
 

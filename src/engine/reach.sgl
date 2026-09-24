@@ -93,7 +93,7 @@
   (export make-intent* NOTHING
           standable? standable-cells stand-body real-stand-body rest-cell body-cell
           witness witness? witness-from witness-script witness-hops
-          reach-graph reach-graph? reach-search reach-search* graph-memo tilemap-changes
+          reach-graph reach-graph? reach-search reach-search* graph-memo tilemap-changes graph-stand-scripts
           graph-same-edges?
           graph-tm graph-cells graph-edges graph-starts graph-stats
           graph-edges-from graph-rejected graph-waters cell-index index-cell
@@ -279,6 +279,18 @@
       (memo default: #f))           ; (expansions . candidates), vectors by anchor key (REUSE)
 
     (define (graph-memo g) (reach-graph-memo g))
+
+    ;; Every script the search tried from the standing anchor at cell and
+    ;; followed to an anchor (walks, jumps, grabs: its expansion's notes, from
+    ;; the memo), in order, as intent lists from standing there. Every
+    ;; trajectory tried, not only the accepted witnesses (the ceiling fixture
+    ;; measures them: A2's faster walk made every ACCEPTED edge a run-up).
+    ;; '() if the search never stood there.
+    (define (graph-stand-scripts g cell)
+      (let* ((tm (reach-graph-tm g))
+             (memo (reach-graph-memo g))
+             (e (and memo (vector-ref (car memo) (+ K-STAND (* NKINDS (cell-index tm (car cell) (cdr cell))))))))
+        (if e (map (lambda (n) (reverse (list-ref n 4))) (reverse (caddr e))) '())))
 
     ;; The cell indices where two tilemaps of one size differ.
     (define (tilemap-changes a b)
