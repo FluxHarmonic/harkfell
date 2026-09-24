@@ -51,7 +51,7 @@
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
-          slot player-frame set-look-sound! region-colours)
+          slot player-frame set-look-sound! region-colours set-look-waking! waking-frame)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -318,6 +318,23 @@
             (with-blend-mode (quote none)
               (set-color 1.0 1.0 1.0 1.0)
               (draw-texture tex 0 0 VIEW-W VIEW-H)))))
+    ;; The sky's slow movers: three clouds over a room open to the sky, a
+    ;; pixel every two seconds (section 7), each at its own height, coming
+    ;; back round from the west. Placed by the room's coordinate, so two
+    ;; rooms side by side do not show the same sky.
+    (define CLOUDS (list (list "sky/cloud-a" 30 22) (list "sky/cloud-c" 190 40) (list "sky/cloud-b" 320 14)))
+    (define CLOUD-SPAN (+ VIEW-W 80))
+
+    (define (draw-clouds! rm t)
+      (unless (under? rm)
+        (let ((shift (+ (floor-int (/ t 120)) (* 137 (room-x rm)) (* 61 (room-y rm)))))
+          (set-color 1.0 1.0 1.0 1.0)
+          (for-each (lambda (c)
+                      (let ((i (atlas-index (car c))))
+                        (when i
+                          (atlas-draw! i (- (modulo (+ (cadr c) shift) CLOUD-SPAN) 40) (caddr c) 1))))
+                    CLOUDS))))
+
     ;; --- the layers: solids and foliage, baked per room ---------------------------------------
 
     ;; One tile of a solid material: its autotile cell, or a plain block.
@@ -391,7 +408,38 @@
                              (draw-filled-rect x (+ y py) S 1)
                              (rows (+ py 1))))))))))
 
+    ;; Front decoration (a room's decor: auto): a tuft of grass on about one
+    ;; bare top in three of rock or rough rock (one with air above it), in
+    ;; front of the creature, swaying; its weight rises up the tuft's six rows.
+    (define (draw-front! rm)
+      (when (eq? (room-decor rm) (quote auto))
+        (let* ((sheet (region-sheet (room-region rm)))
+               (tufts (filter (lambda (x) x)
+                              (map (lambda (v) (atlas-index (string-append sheet "/tuft-" v))) (list "a" "b" "c"))))
+               (bare? (lambda (mat gc gr) (and (memq mat (list (quote rock) (quote rough)))
+                                               (not (material-at gc (- gr 1))))))
+               (pick (lambda (gc gr) (tile-variant (+ gc 7) (+ gr 3) (* 3 (max 1 (length tufts)))))))
+          (when (pair? tufts)
+            (set-blend-mode (quote normal))
+            (each-tile rm (lambda (m) (memq m (list (quote rock) (quote rough))))
+                       (lambda (mat x y m gc gr)
+                         (let ((k (pick gc gr)))
+                           (when (and (bare? mat gc gr) (< k (length tufts)))
+                             (set-color 1.0 1.0 1.0 1.0)
+                             (atlas-draw! (list-ref tufts k) x (- y 6) 1)))))
+            (with-additive-blend
+              (each-tile rm (lambda (m) (memq m (list (quote rock) (quote rough))))
+                         (lambda (mat x y m gc gr)
+                           (let ((k (pick gc gr)))
+                             (when (and (bare? mat gc gr) (< k (length tufts)))
+                               (let rows ((py 0))
+                                 (when (< py 6)
+                                   (set-color 0.0 (/ (- 6 py) 6.0) 0.0 1.0)
+                                   (draw-filled-rect x (+ (- y 6) py) S 1)
+                                   (rows (+ py 1)))))))))))))
+
     (define *solid-rt* #f)
+    (define *front-rt* #f)
     (define *foliage-rt* #f)
     (define *layers-key* #f)       ; the room the layers hold
 
@@ -399,7 +447,8 @@
     (define (prepare-layers! rm)
       (unless *solid-rt*
         (set! *solid-rt* (make-render-target VIEW-W VIEW-H 'nearest))
-        (set! *foliage-rt* (make-render-target VIEW-W VIEW-H 'nearest)))
+        (set! *foliage-rt* (make-render-target VIEW-W VIEW-H (quote nearest)))
+        (set! *front-rt* (make-render-target VIEW-W VIEW-H (quote nearest))))
       (unless (eq? *layers-key* rm)
         (atlas-ensure!)
         (with-render-target *solid-rt*
@@ -408,6 +457,9 @@
         (with-render-target *foliage-rt*
           (set-blend-mode 'normal)
           (draw-foliage! rm))
+        (with-render-target *front-rt*
+          (set-blend-mode (quote normal))
+          (draw-front! rm))
         (set! *layers-key* rm)))
 
     ;; The water: G over every water cell of the room, in the current pass.
@@ -448,6 +500,17 @@
                  ((< (modulo t 12) 6) "fall-a")
                  (else "fall-b"))))))
 
+    ;; The opening (D15): from the dawn until the first input the creature
+    ;; lies curled with its ears flat, breathing (wake-a, wake-b), and every
+    ;; six seconds or so lifts its head a moment (wake-c). The shell says when
+    ;; (CONTENT's shell-waking?).
+    (define *waking* #f)
+    (define (set-look-waking! on) (set! *waking* (and on #t)))
+    (define (waking-frame t)
+      (cond ((< (modulo t 380) 70) "wake-c")
+            ((< (modulo t 110) 55) "wake-a")
+            (else "wake-b")))
+
     (define *player-cells* '())    ; ((name . atlas index) ...)
     (define (player-cell name)
       (let ((e (assoc name *player-cells*)))
@@ -460,7 +523,7 @@
     ;; The body with its box's top-left at (bx, by): its frame standing on
     ;; the box's bottom, centred on it, mirrored facing left.
     (define (draw-body-at b bx by t)
-      (let ((i (and (atlas-ready?) (player-cell (player-frame b t)))))
+      (let ((i (and (atlas-ready?) (player-cell (if *waking* (waking-frame t) (player-frame b t))))))
         (if i
             (let* ((sz (atlas-size i))
                    (x (- (floor-int (+ bx 4)) (floor-int (/ (car sz) 2))))
@@ -557,6 +620,7 @@
                    (eyes? (lambda (c) (eq? (critter-frame c) 'eyes))))
               (draw-backdrop! rm)
               (set-blend-mode 'normal)
+              (draw-clouds! rm t)
               (sway-composite! *foliage-rt* t (wind-at t))
               (for-each (lambda (st)
                           (let* ((cell (stone-cell st)) (s (tilemap-size tm))
@@ -577,6 +641,9 @@
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (draw-water! rm)
               (for-each (lambda (c) (draw-critter c ox oy t slot)) (filter eyes? cs))
+              ;; front decoration, in front of the creature, swaying
+              (set-blend-mode (quote normal))
+              (sway-composite! *front-rt* t (wind-at t))
               (for-each (lambda (pk)
                           (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
                             (when (in-room? x y) (draw-pickup (pickup-overtone pk) x y t slot))))
@@ -660,6 +727,7 @@
     (define (draw-room-still rm)
       (draw-backdrop! rm)
       (set-blend-mode 'normal)
+      (draw-clouds! rm 0)
       (sway-composite! *foliage-rt* 0 0.0)
       (set-color 1.0 1.0 1.0 1.0)
       (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))

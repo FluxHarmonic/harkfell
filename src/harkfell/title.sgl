@@ -22,10 +22,10 @@
 ;;; the timing; both draw on the window, after begin-frame:
 ;;;   (draw-start! w h alpha t px py web? kind)
 ;;;       w h: the window in pixels; alpha 0..1: how far it is faded in; t:
-;;;       the caller's 60 Hz tick (the moths are stepped up to it); px py:
-;;;       the pointer in window pixels, or #f; web?: the web build (the second
-;;;       line names touch); kind: 'touch on a touch-only device
-;;;   (draw-card! w h alpha t)    the Flux Harmonic card at alpha 0..1
+;;;       seconds of wall time (the moths are stepped at 60 Hz up to it); px py:
+;;;       the pointer in window pixels, or #f; web?: the web build; kind:
+;;;       'keys, 'touch or 'both, which second line (D32)
+;;;   (draw-card! w h alpha t)    the Flux Harmonic card at alpha 0..1, t seconds
 ;;;   (card-fade s)               D33's envelope at s seconds (in over 1.2 s,
 ;;;                               held, out by CARD-SECONDS), for a caller
 ;;;                               that wants it
@@ -192,24 +192,24 @@
             (set-color (car rgb) (cadr rgb) (caddr rgb) alpha)
             (draw-texture tex (floor-int (- cx (/ w 2))) (floor-int (- cy (/ h 2))) w h)))))
 
-    ;; Which second line: D32's "Press any key, or touch, to step in.", less
-    ;; "or touch" on a native build and less "any key" on a touch-only
-    ;; device. kind: 'touch for a touch-only device, anything else keys (and
-    ;; touch too on the web).
-    (define (step-id web? kind)
-      (cond ((not web?) "step-keys")
-            ((eq? kind 'touch) "step-touch")
-            (else "step-both")))
+    ;; Which second line (D32): kind 'both "Press any key, or touch, to step
+    ;; in.", 'keys drops "or touch" (the desktop build), 'touch drops "any
+    ;; key" (a touch-only device).
+    (define (step-id kind)
+      (case kind
+        ((keys) "step-keys")
+        ((touch) "step-touch")
+        (else "step-both")))
 
-    ;; The moths are stepped up to tick t (the caller's clock, 60 Hz); a
+    ;; The moths are stepped at 60 Hz up to tick n (from the caller's seconds); a
     ;; clock that went back, or leapt more than a few seconds, starts them
     ;; anew rather than running them through the gap.
-    (define (advance-moths! t pointer)
-      (when (or (null? *moths*) (< t *tick*) (> (- t *tick*) 600))
+    (define (advance-moths! n pointer)
+      (when (or (null? *moths*) (< n *tick*) (> (- n *tick*) 600))
         (start-reset!)
-        (set! *tick* t))
+        (set! *tick* n))
       (let loop ()
-        (when (< *tick* t)
+        (when (< *tick* n)
           (start-tick! pointer)
           (loop))))
 
@@ -217,11 +217,13 @@
 
     ;; The start screen on a window of w x h pixels, after begin-frame.
     ;; alpha: 0..1, how far it has faded in (the words and the moths); t: the
-    ;; caller's tick; px py: the pointer in window pixels, or #f; web?: the
-    ;; web build; kind: 'touch on a touch-only device.
+    ;; caller's seconds of wall time; px py: the pointer in window pixels, or
+    ;; #f; web?: the web build (unused: kind decides the line); kind: 'keys,
+    ;; 'touch or 'both.
     (define (draw-start! w h alpha t px py web? kind)
       (let* ((f (fit-of w h))
-             (pointer (and px py (window->view f px py VIEW-W VIEW-H))))
+             (pointer (and px py (window->view f px py VIEW-W VIEW-H)))
+             (t (floor-int (* 60.0 t))))
         (advance-moths! t pointer)
         (pixel-pass!
           (lambda ()
@@ -245,7 +247,7 @@
         (set-blend-mode 'normal)
         (let ((colours (rgb)))
           (for-each (lambda (l)
-                      (draw-words! f (if (string=? (car l) "step") (step-id web? kind) (car l))
+                      (draw-words! f (if (string=? (car l) "step") (step-id kind) (car l))
                                    (cadr l) (caddr l) (vector-ref colours (slot-of (cadddr l))) alpha))
                     TEXT-LAYOUT))))
 
@@ -263,7 +265,7 @@
     ;; goes by the dither, never by a translucency), after begin-frame.
     (define (draw-card! w h alpha t)
       (let ((f (fit-of w h)))
-        (set! *tick* t)
+        (set! *tick* (floor-int (* 60.0 t)))
         (pixel-pass!
           (lambda () (draw-cell-centred! (cell "mark/flux-harmonic") 200 88 1))
           (- 1.0 alpha))

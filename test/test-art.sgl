@@ -26,7 +26,9 @@
         (harkfell art cells)
         (harkfell source)
         (harkfell content)
-        (harkfell draw))
+        (harkfell draw)
+        (harkfell title)
+        (sigil fs))
 
 (define (string-prefix? p s)
   (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
@@ -186,3 +188,38 @@
       (assert-equal "cling-a" (player-frame (b 'cling 0.0 0.0) 10))
       (assert-true (string-prefix? "climb-" (player-frame (b 'cling 0.0 -0.75) 10)))
       (assert-equal "swim-a" (player-frame (b 'swim 0.0 0.0) 10)))))
+
+(test-group "art: the start screen, the card, the type (D32-D34)"
+  (test "the card fades in over 1.2 s, holds, and is gone by CARD-SECONDS"
+    (assert-equal 0.0 (card-fade 0.0))
+    (assert-true (< 0.4 (card-fade 0.6) 0.6))
+    (assert-equal 1.0 (card-fade 2.0))
+    (assert-equal 0.0 (card-fade CARD-SECONDS))
+    (assert-equal 4.0 CARD-SECONDS))
+  (test "every line of words is made at every whole scale, 1 to 8"
+    (for-each (lambda (id)
+                (let loop ((k 1))
+                  (when (<= k 8)
+                    (assert-true (file-exists? (string-append "assets/type/" id "@" (number->string k) ".png")))
+                    (loop (+ k 1)))))
+              (list "wordmark" "listen" "step-both" "step-keys" "step-touch")))
+  (test "a scale picks the nearest image, 1 to 8"
+    (assert-equal 2 (type-scale 2.0))
+    (assert-equal 3 (type-scale 2.6))
+    (assert-equal 1 (type-scale 0.4))
+    (assert-equal 8 (type-scale 12.0)))
+  (test "the fonts ship with their licence (OFL)"
+    (for-each (lambda (f) (assert-true (file-exists? (string-append "assets/fonts/" f))))
+              (list "IMFeENrm28P.ttf" "IMFeENit28P.ttf" "IMFeENsc28P.ttf" "OFL.txt")))
+  (test "the mark is in its four slots only, and reserved"
+    (let ((rows (cell "mark/flux-harmonic")))
+      (assert-true (> (length rows) 20))
+      (assert-false (any (lambda (r) (any (lambda (ch) (not (memv ch (list #\0 #\F #\x #\h)))) (string->list r))) rows))
+      (assert-true (file-exists? "assets/RESERVED.md"))))
+  (test "the waking frames exist and are the player's slots only"
+    (for-each (lambda (n) (assert-true (cell (string-append "player/" n)))) (list "wake-a" "wake-b" "wake-c"))
+    (assert-equal "wake-c" (waking-frame 10))
+    (assert-true (member (waking-frame 200) (list "wake-a" "wake-b"))))
+  (test "each sheet has tufts for its front decoration; the sky has clouds"
+    (for-each (lambda (s) (assert-true (cell (string-append s "/tuft-a")))) (list "reedfen" "hollow"))
+    (assert-true (cell "sky/cloud-a"))))
