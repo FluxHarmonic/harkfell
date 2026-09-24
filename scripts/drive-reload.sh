@@ -18,6 +18,12 @@
 #   refuse    a row of the same room is cut to 24 characters: the game prints
 #             "harkfell: NOT reloaded" with the file and line, keeps running,
 #             and the window's picture does not change
+#   restore   the row put back: reloaded again
+#   two       a change that needs two files: the Reed Bridge's title changed
+#             in the room file alone is refused (the map disagrees); then in
+#             the map too, and both are taken together
+# The window is the one owned by the game's PID; a capture that fails (an
+# empty hash) is SETUP-FAILED, never a "picture held".
 # The game is stopped by its own PID (exe = the release binary, cwd = this
 # worktree), never by pattern. Nothing under the repo is written: the world
 # copy, the captures and the game's store live in OUT-DIR.
@@ -50,20 +56,26 @@ trap stop EXIT
 [ -n "$GPID" ] || { echo "SETUP-FAILED: the game did not start"; cat "$LOG"; exit 2; }
 echo "game pid $GPID"
 X() { guix shell xdotool -- xdotool "$@"; }
-shot() { guix shell imagemagick -- import -window "$XID" "$1" 2>/dev/null; guix shell imagemagick -- identify -format '%#' "$1"; }
+shot() {
+  rm -f "$1"
+  guix shell imagemagick -- import -window "$XID" "$1" 2>/dev/null
+  h=$(guix shell imagemagick -- identify -format '%#' "$1" 2>/dev/null)
+  [ -n "$h" ] || { echo "SETUP-FAILED: no capture of window $XID into $1" >&2; exit 2; }
+  echo "$h"
+}
 i=0; XID=""
-while [ $i -lt 30 ] && [ -z "$XID" ]; do XID=$(X search --name Harkfell 2>/dev/null | head -1); i=$((i+1)); sleep 1; done
+while [ $i -lt 30 ] && [ -z "$XID" ]; do XID=$(X search --pid "$GPID" --name Harkfell 2>/dev/null | head -1); i=$((i+1)); sleep 1; done
 fails=0
 if grep -q "harkfell: room reedfen:9,3" "$LOG" && [ -n "$XID" ]; then echo "PASS boot: window $XID"; else echo "FAIL boot"; cat "$LOG"; exit 1; fi
 sleep 3
-H0=$(shot "$OUT/before.png"); echo "before: $H0"
+H0=$(shot "$OUT/before.png") || exit 2; echo "before: $H0"
 
 # reload: the bridge becomes rock
 sed -i 's/"         =======         "/"         #######         "/' "$ROOM"
 grep -q '"         #######         "' "$ROOM" || { echo "SETUP-FAILED: the reload plant did not land"; exit 2; }
 i=0; while [ $i -lt 6 ] && ! grep -q "reloaded world/rooms/reedfen/x9y3.room" "$LOG"; do sleep 0.5; i=$((i+1)); done
 sleep 1
-H1=$(shot "$OUT/after-reload.png"); echo "after reload: $H1"
+H1=$(shot "$OUT/after-reload.png") || exit 2; echo "after reload: $H1"
 if grep -q "harkfell: reloaded world/rooms/reedfen/x9y3.room" "$LOG" && [ "$H0" != "$H1" ]; then
   echo "PASS reload: the line printed and the picture changed"
 else echo "FAIL reload"; fails=$((fails+1)); fi
@@ -73,11 +85,34 @@ sed -i 's/"   ||  |         |  ||   "/"   ||  |         |  ||  "/' "$ROOM"
 grep -q '"   ||  |         |  ||  "' "$ROOM" || { echo "SETUP-FAILED: the refuse plant did not land"; exit 2; }
 i=0; while [ $i -lt 6 ] && ! grep -q "NOT reloaded" "$LOG"; do sleep 0.5; i=$((i+1)); done
 sleep 1
-H2=$(shot "$OUT/after-refuse.png"); echo "after refuse: $H2"
+H2=$(shot "$OUT/after-refuse.png") || exit 2; echo "after refuse: $H2"
 if grep -q "harkfell: NOT reloaded world/rooms/reedfen/x9y3.room" "$LOG" && grep -q "x9y3.room:16: grid row 7 is 24 characters" "$LOG" \
    && [ "$H1" = "$H2" ] && [ -d "/proc/$GPID" ]; then
   echo "PASS refuse: the problem named, the picture held, the game still running"
 else echo "FAIL refuse"; fails=$((fails+1)); fi
+# restore: the row put back
+n0=$(grep -c "harkfell: reloaded" "$LOG")
+sed -i 's/"   ||  |         |  ||  "/"   ||  |         |  ||   "/' "$ROOM"
+i=0; while [ $i -lt 8 ] && [ "$(grep -c "harkfell: reloaded" "$LOG")" -le "$n0" ]; do sleep 0.5; i=$((i+1)); done
+if [ "$(grep -c "harkfell: reloaded" "$LOG")" -gt "$n0" ]; then echo "PASS restore: reloaded again"; else echo "FAIL restore"; fails=$((fails+1)); fi
+
+# two: the title in the room file alone, then in the map
+MAP="$W/regions/reedfen.map"
+n1=$(grep -c "NOT reloaded" "$LOG"); r1=$(grep -c "harkfell: reloaded" "$LOG")
+sed -i 's/title: "Reed Bridge"/title: "Plank Bridge"/' "$ROOM"
+grep -q 'title: "Plank Bridge"' "$ROOM" || { echo "SETUP-FAILED: the title plant did not land"; exit 2; }
+i=0; while [ $i -lt 8 ] && [ "$(grep -c "NOT reloaded" "$LOG")" -le "$n1" ]; do sleep 0.5; i=$((i+1)); done
+refused_alone=$( [ "$(grep -c "NOT reloaded" "$LOG")" -gt "$n1" ] && grep -q "is not the file's \"Plank Bridge\"" "$LOG" && echo yes || echo no)
+sed -i 's/(B "Reed Bridge"/(B "Plank Bridge"/' "$MAP"
+grep -q '(B "Plank Bridge"' "$MAP" || { echo "SETUP-FAILED: the map plant did not land"; exit 2; }
+i=0; while [ $i -lt 8 ] && [ "$(grep -c "harkfell: reloaded" "$LOG")" -le "$r1" ]; do sleep 0.5; i=$((i+1)); done
+both=$(grep "harkfell: reloaded" "$LOG" | tail -1)
+case "$both" in
+  *x9y3.room*reedfen.map*|*reedfen.map*x9y3.room*)
+    if [ "$refused_alone" = yes ]; then echo "PASS two: the room alone refused (map mismatch), then both taken together: $both"
+    else echo "FAIL two: the room alone was not refused"; fails=$((fails+1)); fi ;;
+  *) echo "FAIL two: no reload naming both files (last: $both)"; fails=$((fails+1)) ;;
+esac
 echo "--- game log"; cat "$LOG"
 [ $fails -eq 0 ] && echo "PASS drive-reload" || echo "FAIL drive-reload: $fails legs"
 exit $fails

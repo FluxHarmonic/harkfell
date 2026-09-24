@@ -45,6 +45,7 @@ if (!fs.existsSync(BIN)) setupFailed(BIN + " missing; scripts/dev sigil build --
 const binTime = fs.statSync(BIN).mtimeMs;
 const stale = [];
 (function walk(d) { for (const n of fs.readdirSync(d)) { const p = path.join(d, n); const s = fs.statSync(p); if (s.isDirectory()) walk(p); else if (n.endsWith(".sgl") && s.mtimeMs > binTime) stale.push(p); } })(path.join(ROOT, "src"));
+for (const f of ["package.sgl", "sigil.lock"]) if (fs.statSync(path.join(ROOT, f)).mtimeMs > binTime) stale.push(f);
 if (stale.length) setupFailed(BIN + " is older than " + stale.slice(0, 3).join(" "));
 
 // The grid rows of a room file: [line index, start col of the string's text] per row.
@@ -57,6 +58,13 @@ function gridRows(lines) {
     else if (q >= 0 && i === g) out.push([i, q + 1]);
   }
   return out;
+}
+
+// The character at grid (row, col) of a room file of a world dir.
+function cellAt(dir, room, r, c) {
+  const lines = fs.readFileSync(path.join(dir, "rooms", room), "utf8").split("\n");
+  const [li, start] = gridRows(lines)[r];
+  return lines[li][start + c];
 }
 
 // cells: [[row, col, char], ...] in a room file of the copy.
@@ -122,13 +130,16 @@ for (const leg of LEGS) {
   const dir = copyWorld();
   if (leg.cells.length) plant(dir, leg.room, leg.cells);
   const changed = changedCells(dir);
-  if (changed !== leg.cells.length) {
+  const misplaced = leg.cells.filter(([r, c, ch]) => cellAt(dir, leg.room, r, c) !== ch || cellAt(path.join(ROOT, "world"), leg.room, r, c) === ch);
+  if (changed !== leg.cells.length || misplaced.length) {
+    if (misplaced.length) console.log(`SETUP-FAILED leg ${leg.name}: planted cells not where named: ${JSON.stringify(misplaced)}`);
     console.log(`SETUP-FAILED leg ${leg.name}: the plant changed ${changed} cells, not ${leg.cells.length}`);
     fs.rmSync(dir, { recursive: true, force: true });
     process.exit(2);
   }
   const t0 = Date.now();
-  const r = spawnSync(BIN, ["--room-check", "--world", dir], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 << 20 });
+  const r = spawnSync(BIN, ["--room-check", "--world", dir], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 << 20, timeout: 1800000 });
+  if (r.error && r.error.code === "ETIMEDOUT") { console.log(`TIMED-OUT leg ${leg.name} after 1800 s`); process.exit(2); }
   const out = (r.stdout || "") + (r.stderr || "");
   const secs = Math.round((Date.now() - t0) / 1000);
   const missing = leg.expect.filter((e) => !out.includes(e));

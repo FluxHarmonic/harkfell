@@ -13,15 +13,21 @@
 #
 # Runs the native release binary (the reach search is millions of physics
 # ticks; the bytecode build is about six times slower). Refuses (exit 2,
-# SETUP-FAILED) when the binary is missing or older than any source file:
-# a gate run on a stale binary checks code that is not the tree's.
-# Exit 0 PASS, 1 FAIL, 2 SETUP-FAILED.
+# SETUP-FAILED) when the binary is missing or older than any source file,
+# package.sgl or sigil.lock: a gate run on a stale binary checks code that is
+# not the tree's. (mtime is conservative: a rebase or a checkout also asks
+# for a rebuild.) A run longer than ROOM_CHECK_TIMEOUT seconds (3600) is
+# stopped and reported TIMED-OUT, never as a slow pass.
+# Exit 0 PASS, 1 FAIL, 2 SETUP-FAILED or TIMED-OUT.
 cd "$(dirname "$0")/.." || exit 2
 BIN=build/release/bin/harkfell
 [ -x "$BIN" ] || { echo "SETUP-FAILED: $BIN missing; scripts/dev sigil build --config release"; exit 2; }
-newer=$(find src -name '*.sgl' -newer "$BIN" | head -3)
+newer=$( (find src -name '*.sgl' -newer "$BIN"; find package.sgl sigil.lock -newer "$BIN") | head -3)
 if [ -n "$newer" ]; then
   echo "SETUP-FAILED: $BIN is older than: $newer ... (scripts/dev sigil build --config release)"
   exit 2
 fi
-exec "$BIN" --room-check "$@"
+timeout "${ROOM_CHECK_TIMEOUT:-3600}" "$BIN" --room-check "$@"
+rc=$?
+if [ $rc -eq 124 ]; then echo "TIMED-OUT room-check after ${ROOM_CHECK_TIMEOUT:-3600} s"; exit 2; fi
+exit $rc

@@ -65,7 +65,7 @@
           shell-latency-lines now-ms
           shell-load-content! shell-content shell-goto! shell-goto-start!
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
-          shell-tap! shell-replace-file! shell-room-label shell-view-size
+          shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-view-size
           VIEW-W VIEW-H)
 
   (begin
@@ -209,16 +209,22 @@
                   (shell-goto! (room-label rm))
                   (room-label rm)))))
 
-    ;; A file of the world changed (live reload): the source with that file's
-    ;; new text is loaded again, and if it is clean the world moves onto the
-    ;; new map with the body where it was. Returns the problems (strings);
-    ;; with problems nothing changes.
+    ;; One file changed (live reload); see shell-replace-files!.
     (define (shell-replace-file! path text)
+      (shell-replace-files! (list (cons path text))))
+
+    ;; Files of the world changed (live reload): changes is ((path . text)
+    ;; ...), text #f for a file that is gone. All of them are applied to the
+    ;; source together (a new room and its map line arrive in one poll and are
+    ;; checked as one world), the source is loaded again, and if it is clean
+    ;; the world moves onto the new map with the body where it was. Returns
+    ;; the problems (strings); with problems nothing changes.
+    (define (shell-replace-files! changes)
       (if (not *content*)
           (list "no world loaded")
-          (let* ((source (cons (cons path text)
-                               (filter (lambda (e) (not (string=? (car e) path)))
-                                       (content-source *content*))))
+          (let* ((paths (map car changes))
+                 (kept (filter (lambda (e) (not (member (car e) paths))) (content-source *content*)))
+                 (source (append (filter cdr changes) kept))
                  (ct (load-content source))
                  (ps (map problem->string (content-problems ct))))
             (when (null? ps)

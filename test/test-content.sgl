@@ -83,9 +83,19 @@
       (assert-true (has? ps "x0y0.room:7: grid: the ring-stone at (6 8) is not in things:")))
     (let ((ps (problems (with-file LEFT (lambda (t) (swap t "(frog at: (5 9))" "(frog at: (5 9)) (ring-stone at: (7 9) overtone: 2)"))))))
       (assert-true (has? ps "x0y0.room:19: things: ring-stone at: (7 9) is not on an o in the grid"))))
+  (test "a comment mentioning grid: or at: does not move a problem's line (the A1 review)"
+    (let ((ps (problems (with-file LEFT (lambda (t)
+                                          (string-append ";; the grid: below; look at: it\n"
+                                                         (swap t "\"#                        \"\n   \"#            ###" "\"#                       \"\n   \"#            ###")))))))
+      ;; one header line added: row 7 moves from line 15 to 16
+      (assert-true (has? ps "x0y0.room:16: grid row 7 is 24 characters, not 25"))))
+  (test "an unreached cell outside the grid is red"
+    (let ((ps (problems (with-file LEFT (lambda (t) (swap t "  bed: (wind 0.5)" "  bed: (wind 0.5)\n  unreached: ((99 99))"))))))
+      (assert-true (has? ps "unreached: is not ((C R) ...) with cells inside the grid"))))
   (test "at: not matching the file name is red"
-    (let ((ps (problems (with-file RIGHT (lambda (t) (swap t "at: (1 0)" "at: (2 0)"))))))
-      (assert-true (has? ps "x1y0.room:3: at: is (2 0) but the file is named x1y0")))))
+    (let ((ps (problems (with-file RIGHT (lambda (t) (string-append ";; look at: this\n" (swap t "at: (1 0)" "at: (2 0)")))))))
+      ;; the comment's "at:" is not the field: the problem is on line 4
+      (assert-true (has? ps "x1y0.room:4: at: is (2 0) but the file is named x1y0")))))
 
 (test-group "content: seams (gate 2)"
   (test "one row of a shared edge closed on one side only is red, naming both rooms and the row"

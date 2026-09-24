@@ -50,6 +50,10 @@
 //   atlas      (A1) ?atlas shows every room at quarter scale ("harkfell: view
 //              atlas 308 94"); a click on the Drowned Channel's picture enters
 //              it ("harkfell: room reedfen:9,4") and play resumes
+//   atlas2     (A1) the atlas at devicePixelRatio 2 on a 200x150 CSS viewport
+//              (a 400x300 canvas): the fit is not a whole scale ('sharp'), and a
+//              click mapped through CSS pixels, device pixels and the fractional
+//              fit still enters the Drowned Channel
 //   sheet      (A1) ?sheet=reedfen: the region's rooms at full scale ("harkfell:
 //              view sheet:reedfen 1216 364")
 //   errors     no console error and no exception in any leg
@@ -72,7 +76,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -277,6 +281,29 @@ if (LEGS.includes("atlas")) {
   const r = lines.slice(before).find((l) => l.startsWith("harkfell: room "));
   const a = await where(); await sleep(400); const b = await where();
   (v === "harkfell: view atlas 308 94" && r === "harkfell: room reedfen:9,4" ? pass : fail)("atlas", `${v}; clicked canvas ${ox + px * k},${oy + py * k} (scale ${k}); ${r}; body at ${b.x},${b.y}`);
+}
+
+if (LEGS.includes("atlas2")) {
+  ran.add("atlas2");
+  await send("Emulation.setDeviceMetricsOverride", { width: 200, height: 150, deviceScaleFactor: 2, mobile: false });
+  await open("trace&atlas");
+  const v = await waitFor(() => lines.find((l) => l.startsWith("harkfell: view atlas")), 10000, "atlas2");
+  await sleep(500);
+  const [vw, vh] = v.split(" ").slice(3).map(Number);
+  const cw = await evaluate("document.getElementById('stage').width"), ch = await evaluate("document.getElementById('stage').height");
+  // (engine view): the whole scale k if k/s >= 0.8, else the float fit s (sharp)
+  const sc = Math.min(cw / vw, ch / vh), k = Math.floor(sc);
+  const sharp = !(k >= 1 && k / sc >= 0.8);
+  const f = sharp ? sc : k;
+  const w = Math.floor(f * vw), h = Math.floor(f * vh);
+  const ox = Math.floor((cw - w) / 2), oy = Math.floor((ch - h) / 2);
+  const px = 2 + 102 * 1 + 50, py = 2 + 46 * 1 + 22;
+  const before = lines.length;
+  await clickCanvas(ox + px * (w / vw), oy + py * (h / vh));
+  await waitFor(() => lines.slice(before).find((l) => l.startsWith("harkfell: room ")), 5000, "atlas2 click");
+  const r = lines.slice(before).find((l) => l.startsWith("harkfell: room "));
+  await send("Emulation.clearDeviceMetricsOverride");
+  (sharp && cw === 400 && r === "harkfell: room reedfen:9,4" ? pass : fail)("atlas2", `canvas ${cw}x${ch} at dpr 2, fit ${sharp ? "sharp " + sc.toFixed(3) : "whole " + k}; ${r}`);
 }
 
 if (LEGS.includes("sheet")) {

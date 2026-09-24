@@ -83,21 +83,32 @@
     (define *world-dir* "world")
     (define *mtimes* '())
 
+    ;; Every file new, changed or gone since the last look, applied together
+    ;; (a new room needs its map line, a seam opened needs both rooms). If the
+    ;; world with all of them is not clean, none is taken, and the next change
+    ;; is judged against the last good world plus everything changed since.
+    (define *pending* '())          ; changes not yet taken: ((path . text-or-#f) ...)
+
     (define (check-reload!)
-      (let ((now (source-mtimes *world-dir*)))
-        (for-each
-          (lambda (e)
-            (let ((old (assoc (car e) *mtimes*)))
-              (when (or (not old) (not (= (cdr old) (cdr e))))
-                (let* ((text (read-file-string (room-file-path *world-dir* (car e))))
-                       (ps (shell-replace-file! (car e) text)))
-                  (if (null? ps)
-                      (say "harkfell: reloaded " (car e))
-                      (begin
-                        (say "harkfell: NOT reloaded " (car e) " (" (number->string (length ps)) " problems):")
-                        (for-each (lambda (p) (say "  " p)) ps)))))))
-          now)
-        (set! *mtimes* now)))
+      (let* ((now (source-mtimes *world-dir*))
+             (changed (filter (lambda (e)
+                                (let ((old (assoc (car e) *mtimes*)))
+                                  (or (not old) (not (= (cdr old) (cdr e))))))
+                              now))
+             (gone (filter (lambda (e) (not (assoc (car e) now))) *mtimes*))
+             (fresh (append (map (lambda (e) (cons (car e) (read-file-string (room-file-path *world-dir* (car e)))))
+                                 changed)
+                            (map (lambda (e) (cons (car e) #f)) gone))))
+        (set! *mtimes* now)
+        (unless (null? fresh)
+          (set! *pending* (append fresh (filter (lambda (p) (not (assoc (car p) fresh))) *pending*)))
+          (let ((ps (shell-replace-files! *pending*))
+                (names (string-join (map (lambda (p) (string-append (car p) (if (cdr p) "" " (gone)"))) *pending*) " ")))
+            (if (null? ps)
+                (begin (say "harkfell: reloaded " names) (set! *pending* '()))
+                (begin
+                  (say "harkfell: NOT reloaded " names " (" (number->string (length ps)) " problems):")
+                  (for-each (lambda (p) (say "  " p)) ps)))))))
 
     (define (loop)
       (lambda ()

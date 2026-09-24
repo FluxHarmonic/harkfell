@@ -163,19 +163,44 @@
     (define (lines-of text) (string-split text "\n"))
 
     ;; The first line (1-based) holding "NAME:", or #f.
+    ;; The first line holding "NAME:" as code (not inside a comment or a
+    ;; string), or #f. A keyword is preceded by a space, a paren or the line's
+    ;; start, so "at:" inside "format:" does not count.
     (define (field-line text name)
-      (let ((needle (string-append name ":")))
-        (let loop ((ls (lines-of text)) (n 1))
-          (cond ((null? ls) #f)
-                ((string-contains? (car ls) needle) n)
-                (else (loop (cdr ls) (+ n 1)))))))
+      (let ((k (code-index text (string-append name ":"))))
+        (and k (line-at text k))))
+
+    ;; The index of the first occurrence of needle in text that is code: not
+    ;; in a ; comment, not in a string, and not the tail of a longer word.
+    (define (code-index text needle)
+      (let ((n (string-length text))
+            (m (string-length needle)))
+        (define (word-start? k)
+          (or (= k 0) (memv (string-ref text (- k 1)) (list #\space #\( #\newline #\tab))))
+        (let loop ((k 0))
+          (if (> (+ k m) n)
+              #f
+              (let ((c (string-ref text k)))
+                (cond ((char=? c #\;)
+                       (let skip ((k k))
+                         (cond ((>= k n) #f)
+                               ((char=? (string-ref text k) #\newline) (loop (+ k 1)))
+                               (else (skip (+ k 1))))))
+                      ((char=? c #\")
+                       (let str ((k (+ k 1)))
+                         (cond ((>= k n) #f)
+                               ((char=? (string-ref text k) #\\) (str (+ k 2)))
+                               ((char=? (string-ref text k) #\") (loop (+ k 1)))
+                               (else (str (+ k 1))))))
+                      ((and (word-start? k) (string=? (substring text k (+ k m)) needle)) k)
+                      (else (loop (+ k 1)))))))))
 
     ;; The line of grid row i (0-based): the i-th string literal after the
     ;; first "grid:". A semicolon outside a string starts a comment to the
     ;; end of the line, as the reader has it. #f when there is no such row.
     (define (grid-row-line text i)
       (let* ((n (string-length text))
-             (start (string-index-of text "grid:")))
+             (start (code-index text "grid:")))
         (and start
              (let loop ((k start) (line (line-at text start)) (seen 0))
                (if (>= k n)
