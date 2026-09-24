@@ -51,7 +51,7 @@
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
-          slot player-frame)
+          slot player-frame set-look-sound!)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -288,12 +288,34 @@
     (define (under? rm)
       (and *content* (content-room *content* (room-x rm) (- (room-y rm) 1)) #t))
 
+    ;; The focus pull (D16, section 7's depth): while a music moment plays the
+    ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
+    ;; easing in over about a second and out again after; the room itself
+    ;; stays sharp. *focus* is 0..1, stepped once a drawn frame.
+    (define FOCUS-R 2.2)
+    (define *focus* 0.0)
+    (define *moment* #f)
+    (define *bed-wind* 0.5)
+
+    ;; From the shell, each frame: whether a moment plays, and the bed's wind
+    ;; level now (0..1; the reeds bend with what you hear).
+    (define (set-look-sound! moment wind)
+      (set! *moment* (and moment #t))
+      (set! *bed-wind* (if (number? wind) wind 0.5)))
+
+    (define (step-focus!)
+      (set! *focus* (if *moment* (min 1.0 (+ *focus* 0.018)) (max 0.0 (- *focus* 0.012)))))
+
     ;; The room's backdrop: its region's sky, or earth when it lies under
-    ;; another room.
+    ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
-      (with-blend-mode 'none
-        (set-color 1.0 1.0 1.0 1.0)
-        (draw-texture (backdrop (if (under? rm) 'under (room-region rm))) 0 0 VIEW-W VIEW-H)))
+      (let ((tex (backdrop (if (under? rm) (quote under) (room-region rm))))
+            (r (* FOCUS-R *focus* *focus*)))
+        (if (> r 0.3)
+            (draw-texture-scattered! tex VIEW-W VIEW-H r)
+            (with-blend-mode (quote none)
+              (set-color 1.0 1.0 1.0 1.0)
+              (draw-texture tex 0 0 VIEW-W VIEW-H)))))
     ;; --- the layers: solids and foliage, baked per room ---------------------------------------
 
     ;; One tile of a solid material: its autotile cell, or a plain block.
@@ -501,9 +523,12 @@
 
     (define (in-room? x y) (and (< -16 x (+ VIEW-W 16)) (< -16 y (+ VIEW-H 16))))
 
-    ;; The wind the reeds bend in, 0..1 (a slow swell; the bed's gusts
-    ;; will drive it when the sound exports one).
-    (define (wind-at t) (+ 0.55 (* 0.3 (sin (* t 0.004))) (* 0.15 (sin (* t 0.0113)))))
+    ;; The wind the reeds bend in: a slow swell, scaled by the bed's wind level
+    ;; now (set-look-sound!), so a windy room's reeds bend harder. The bed's
+    ;; own gusts would drive it if the sound exported one.
+    (define (wind-at t)
+      (* (min 1.3 (/ *bed-wind* 0.5))
+         (+ 0.55 (* 0.3 (sin (* t 0.004))) (* 0.15 (sin (* t 0.0113))))))
 
     ;; The slot of the light's own colour in the room: the harmonic the
     ;; room's light belongs to (its pickup, its stone, the moths' draw).
@@ -538,7 +563,14 @@
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
-              (for-each (lambda (c) (unless (eyes? c) (draw-critter c ox oy t slot)))
+              ;; a reedling perched on a reed tip rides the tip's sway
+              (for-each (lambda (c)
+                          (unless (eyes? c)
+                            (let ((d (if (and (eq? (critter-kind c) 'reedling)
+                                              (memq (critter-frame c) (list 'perch 'peck 'sing)))
+                                         (sway-offset (floor-int (- (critter-x c) ox)) t (wind-at t) 1.0)
+                                         0)))
+                              (draw-critter c (- ox d) oy t slot))))
                         (filter (lambda (c) (not ((kind? 'moth) c))) cs))
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (draw-water! rm)
@@ -572,6 +604,7 @@
     (define (present-play! w after)
       (ensure-render!)
       (atlas-ensure!)
+      (step-focus!)
       (let* ((p (world-room w))
              (rm (and p (placed-data p)))
              (region (if rm (room-region rm) 'none)))

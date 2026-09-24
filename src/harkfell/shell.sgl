@@ -701,6 +701,10 @@
         ;; the room as palette slots, resolved into (harkfell render)'s colour
         ;; target ((harkfell draw)'s present-play!); the ears in the same pass,
         ;; in the fur-1 slot
+        ;; the look follows the sound: the bed's wind bends the reeds, a
+        ;; moment pulls the focus
+        (set-look-sound! (sound-moment-playing)
+                         (let ((e (assq 'wind (sound-bed-levels)))) (and e (cdr e))))
         (present-play! *world*
                        (lambda ()
                          (when (and (world-room *world*) (sound-ears) (not (sound-ears-flick)))

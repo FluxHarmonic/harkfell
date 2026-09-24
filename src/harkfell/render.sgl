@@ -51,7 +51,7 @@
           paint-slot! paint-slot-a! paint-water! paint-light!
           strip-bytes make-strips strips-update! draw-strips!
           ensure-render! room-index-rt room-color-rt
-          resolve! sway-composite! GLSL-PREFIX VERT-SOURCE)
+          resolve! sway-composite! sway-offset draw-texture-scattered! GLSL-PREFIX VERT-SOURCE)
 
   (begin
     (define VIEW-W 400)
@@ -234,6 +234,53 @@
        "    if (p.a < 0.5) discard;\n"
        "    fragColor = vec4(p.r, 0.0, 0.0, 1.0);\n"
        "}\n"))
+
+    ;; The sway shader's offset at view column x for sway weight w (1 at a
+    ;; stalk's tip), on the CPU: a bird perched on a reed tip rides it. The
+    ;; same arithmetic as SWAY-FRAGMENT's (floats may differ at a half pixel,
+    ;; a pixel's disagreement for a frame).
+    (define (sway-offset x t wind w)
+      (let ((gust (+ 0.55 (* 0.45 (sin (- (* t 0.021) (* x 0.018))))))
+            (own (* 0.35 (sin (+ (* t 0.047) (* x 0.61))))))
+        (exact (floor (+ 0.5 (* wind 2.4 w w (+ gust own)))))))
+
+    ;; The focus pull: a texture of slots drawn with each pixel taking a
+    ;; neighbour's slot up to u_r pixels away, the neighbour picked by the
+    ;; Bayer matrix (a scatter, not an average: slots cannot be averaged, and
+    ;; a scatter stays in the palette). A texture's memory is top-down, so no
+    ;; flip here.
+    (define BLUR-FRAGMENT
+      (string-append
+       GLSL-PREFIX
+       "uniform sampler2D iTexChannel0_iSmpChannel0;\n"
+       "uniform vec2 u_size;\n"
+       "uniform float u_r;\n"
+       "in vec2 texUV;\n"
+       "in vec4 iColor;\n"
+       "out vec4 fragColor;\n"
+       "float bayer(int x, int y) {\n"
+       "    int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);\n"
+       "    return (float(m[(y & 3) * 4 + (x & 3)]) + 0.5) / 16.0;\n"
+       "}\n"
+       "void main() {\n"
+       "    ivec2 p = ivec2(floor(texUV * u_size));\n"
+       "    float jx = (bayer(p.x, p.y) - 0.5) * 2.0 * u_r;\n"
+       "    float jy = (bayer(p.y + 1, p.x + 2) - 0.5) * 2.0 * u_r;\n"
+       "    ivec2 q = clamp(p + ivec2(int(floor(jx + 0.5)), int(floor(jy + 0.5))), ivec2(0), ivec2(u_size) - 1);\n"
+       "    fragColor = texelFetch(iTexChannel0_iSmpChannel0, q, 0);\n"
+       "}\n"))
+
+    (define *blur* #f)
+
+    ;; A w x h slot texture at the origin of the current pass, scattered by
+    ;; r pixels (0: as it is).
+    (define (draw-texture-scattered! tex w h r)
+      (unless *blur* (set! *blur* (load-shader VERT-SOURCE BLUR-FRAGMENT 'none)))
+      (set-shader-uniform *blur* 'u_size (list (inexact w) (inexact h)))
+      (set-shader-uniform *blur* 'u_r (inexact r))
+      (set-color 1.0 1.0 1.0 1.0)
+      (with-shader *blur*
+        (draw-texture tex 0 0 w h)))
 
     ;; --- the targets ------------------------------------------------------------------
 
