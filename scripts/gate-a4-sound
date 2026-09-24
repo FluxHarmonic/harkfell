@@ -41,6 +41,13 @@
 #   stale-handoff     the handoff's removal by id, not identity
 #   queue-stall       a moment with no file holds up the pre-open queue
 #   still-blocked     a still: room entered during a moment is dropped
+# and for the web opening and the movement sounds:
+#   opening-clock     the opening's text wait timed from a clock no frame has set
+#   steps-unlocked    a step on every change of the run cycle's frame
+#   moment-loud       movement at full level during a moment
+# UNDER THE WORLD: every movement cue, in play (its loudest 400 ms times its
+# gain in (harkfell sound)'s SPOTS), is quieter than the quietest bed
+# (-33 LUFS), and a step quieter than -40. A cue that names no gain fails.
 #
 # Exit: 0 all as expected, 1 a check or a leg went the wrong way, 2 SETUP-FAILED.
 # Scratch goes under /tmp; nothing is written in the tree but the plants.
@@ -112,6 +119,24 @@ tunes() {
   [ "$done_n" -eq "$POP" ] && [ "$fails" -eq 0 ] && [ "$rcbad" -eq 0 ] && [ "$voices" -gt 0 ] || FAIL=1
 }
 
+# --- under the world: the movement cues' levels in play ----------------------------------
+under_world() {
+  n=0; bad=0
+  for c in step-fen-a step-fen-b step-grass-a step-grass-b step-stone-a step-stone-b step-wood-a step-wood-b jump wall-jump land-soft land-hard splash; do
+    g=$(grep -o "(list '$c \"$c\" 0.0 0.0 [0-9.]*)" src/harkfell/sound.sgl | awk '{print $NF}' | tr -d ')')
+    [ -n "$g" ] || { echo "UNDER-WORLD FAIL $c: no gain in SPOTS"; bad=$((bad + 1)); continue; }
+    "$TOOL" render-tune "assets/tunes/$c.cts" "$TMP/uw-$c.wav" > /dev/null 2>&1 || { echo "UNDER-WORLD FAIL $c: does not render"; bad=$((bad + 1)); continue; }
+    m=$(ffmpeg -hide_banner -nostats -i "$TMP/uw-$c.wav" -af "apad=pad_dur=1,ebur128" -f null - 2>&1 | grep -o 'M: *-\?[0-9.]*' | awk '{print $2}' | sort -g | tail -1)
+    lim=-33; case $c in step-*) lim=-40;; esac
+    v=$(awk -v m="$m" -v g="$g" 'BEGIN{printf "%.1f", m + 20*log(g)/log(10)}')
+    n=$((n + 1))
+    if [ -n "$m" ] && awk -v v="$v" -v l="$lim" 'BEGIN{exit !(v <= l)}'; then echo "under-world $c: $v LUFS in play (limit $lim)"
+    else echo "UNDER-WORLD FAIL $c: ${v:-?} LUFS in play, limit $lim"; bad=$((bad + 1)); fi
+  done
+  echo "under-world: $n of 13 measured, $bad over"
+  [ "$n" -eq 13 ] && [ "$bad" -eq 0 ] || FAIL=1
+}
+
 # --- the director ------------------------------------------------------------------------
 green() {
   out="$TMP/$(basename "$1").out"
@@ -173,7 +198,9 @@ plant() {
 A4T=test/test-a4-sound.sgl
 green_all() {
   tunes
-  green "$A4T" 40
+  green "$A4T" 53
+  green test/test-a4-web-opening.sgl 3
+  under_world
   green test/test-tunes.sgl 5
 }
 
@@ -213,6 +240,9 @@ passes "$A4T" "jittering across the border: the bed never drops out"
 passes "$A4T" "a new opening after a reset survives the old handoff's removal"
 passes "$A4T" "a moment named with no file does not hold up the ones behind it"
 passes "$A4T" "and plays after it, once the hush allows and you stand still"
+passes test/test-a4-web-opening.sgl "a second without it: still waiting"
+passes "$A4T" "running on the fen: a step where each foot comes down"
+passes "$A4T" "during a moment the movement is quieter"
 
 plant wander-no-hush "$S" \
   "      (when (hush-wander-ok? *hush*)
@@ -280,5 +310,18 @@ plant still-blocked "$S" \
   "                  ((and (eq? d 'play) (place-moment-still pl))" \
   "$A4T" "and plays after it, once the hush allows and you stand still"
 
-if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all fifteen RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+plant opening-clock "$S" \
+  "            (unless *opening-want* (set! *opening-want* 'asked))" \
+  "            (unless *opening-want* (set! *opening-want* *now*))" \
+  test/test-a4-web-opening.sgl "a second without it: still waiting"
+plant steps-unlocked "$S" \
+  "            (when (and *step-idx* (not (= i *step-idx*)) (memv i STEP-FEET))" \
+  "            (when (and *step-idx* (not (= i *step-idx*)))" \
+  "$A4T" "running on the fen: a step where each foot comes down"
+plant moment-loud "$S" \
+  "    (define MOVE-IN-MOMENT 0.5)" \
+  "    (define MOVE-IN-MOMENT 1.0)" \
+  "$A4T" "during a moment the movement is quieter"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all eighteen RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
 exit $FAIL

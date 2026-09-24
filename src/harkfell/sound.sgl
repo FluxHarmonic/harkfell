@@ -72,6 +72,7 @@
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
+          place-moves place-mode place-vx place-bx place-foot sound-moved spot-gain
           THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
@@ -133,7 +134,8 @@
       (px default: 0.0) (py default: 0.0) (rx default: 0) (ry default: 0)
       (still default: #f) (returns default: 0)
       (carry default: #f) (tones default: #f) (stones default: '()) (news default: '())
-      (wander default: '()) (moment-carrying default: #f) (moment-still default: #f))
+      (wander default: '()) (moment-carrying default: #f) (moment-still default: #f)
+      (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f))
 
     ;; --- state ---------------------------------------------------------------------
     (define *say* (lambda parts #f))
@@ -222,7 +224,8 @@
       (when *opening* (player-close! *opening*))
       (set! *opening* #f) (set! *opening-skip* #f) (set! *opening-t0* #f) (set! *held* #f)
       (set! *wander-due* #f) (set! *still-wait* #f) (set! *opening-want* #f) (set! *opening-handoff* #f)
-      (set! *bed-carried* '()) (set! *bed-start-at* 0.0) (set! *cue-wait* #f) (set! *open-wait* #f))
+      (set! *bed-carried* '()) (set! *bed-start-at* 0.0) (set! *cue-wait* #f) (set! *open-wait* #f)
+      (set! *step-idx* #f) (set! *step-alt* #f) (set! *moved* '()))
 
     ;; --- A4: the border, and what a save keeps ---------------------------------------
     ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
@@ -964,6 +967,20 @@
     ;; than the frogs; the reedlings -34), the return tone as David set it.
     (define SPOTS
       (list (list 'return "return-tone" 0.0 0.0 0.5)
+            ;; the creature's movement (A4): rendered first, it moves at once
+            (list 'step-fen-a "step-fen-a" 0.0 0.0 0.3)
+            (list 'step-fen-b "step-fen-b" 0.0 0.0 0.28)
+            (list 'step-grass-a "step-grass-a" 0.0 0.0 0.24)
+            (list 'step-grass-b "step-grass-b" 0.0 0.0 0.25)
+            (list 'step-stone-a "step-stone-a" 0.0 0.0 0.16)
+            (list 'step-stone-b "step-stone-b" 0.0 0.0 0.15)
+            (list 'step-wood-a "step-wood-a" 0.0 0.0 0.52)
+            (list 'step-wood-b "step-wood-b" 0.0 0.0 0.52)
+            (list 'jump "jump" 0.0 0.0 0.32)
+            (list 'wall-jump "wall-jump" 0.0 0.0 0.2)
+            (list 'land-soft "land-soft" 0.0 0.0 0.81)
+            (list 'land-hard "land-hard" 0.0 0.0 0.65)
+            (list 'splash "splash" 0.0 0.0 0.09)
             ;; the creatures' calls (A3)
             (list 'chirp-a "chirp-a" 0.0 0.0 0.6)
             (list 'chirp-b "chirp-b" 0.0 0.0 0.55)
@@ -1134,6 +1151,83 @@
         (when (and (> water 0.3) (due? 'plop now 7.0 18.0))
           (cue! 'plop (* 0.4 water) (rand-in (- MAX-PAN) MAX-PAN)))))
 
+    ;; --- A4: the creature's movement ----------------------------------------------------
+    ;; David, 2026-09-24: "something minimal but there", under the world. Each
+    ;; cue is a short tune in SPOTS, played on the cue path (it lands on the
+    ;; frame, not a stream's depth later), at the player (no distance, pan
+    ;; near centre), and quieter during a moment (MOVE-IN-MOMENT, steps
+    ;; MOVE-STEP-IN-MOMENT). Levels in play (the loudest 400 ms times the
+    ;; gain): steps -42 LUFS, the jump -38, the wall jump -37, landings -37 to
+    ;; -34, a splash -33; the calls sit at -26 to -30 and the beds at -33 to -36.
+    ;;   jump, wall-jump   from the tick's body events
+    ;;   land              land-soft, or land-hard from HARD-FALL px a tick,
+    ;;                     louder with the fall speed; none under SOFT-FALL (a
+    ;;                     step down)
+    ;;   splash            entering water
+    ;;   steps             on the ground while running, when LOOK's run cycle
+    ;;                     puts a foot down: its frames are paced by the distance
+    ;;                     run, floor(x / 3.5) mod 6, feet down on frames a and d
+    ;;                     (0 and 3), so the sound is locked to the drawing
+    ;; The surface is the tile under the feet and the region: a ledge is a plank
+    ;; in Reedfen and stone elsewhere, rough rock is stone, and smooth ground
+    ;; is peat in Reedfen and turf in the Hollow.
+    (define STEP-PX 3.5)
+    (define STEP-FRAMES 6)
+    (define STEP-FEET '(0 3))
+    (define STEP-VX 0.15)
+    (define SOFT-FALL 1.0)
+    (define HARD-FALL 4.5)
+    (define MAX-FALL-SPEED 7.0)
+    (define MOVE-IN-MOMENT 0.5)
+    (define MOVE-STEP-IN-MOMENT 0.33)
+    (define *step-idx* #f)
+    (define *step-alt* #f)
+    (define *moved* '())          ; ((name . gain) ...) this frame, newest first (the gates)
+    (define (sound-moved) *moved*)
+
+    (define (surface pl)
+      (let ((k (place-foot pl)) (r (place-region pl)))
+        (case k
+          ((ledge) (if (eq? r 'reedfen) 'wood 'stone))
+          ((climbable) 'stone)
+          ((solid) (case r ((reedfen) 'fen) ((hollow) 'grass) (else 'stone)))
+          (else #f))))
+
+    (define (move-cue! name gain pan)
+      (let ((c (assq name *cues*)) (g (* gain (spot-gain name) (if *moment* MOVE-IN-MOMENT 1.0))))
+        (set! *moved* (cons (cons name g) *moved*))
+        (when c (mixer-cue! (cdr c) g pan))))
+
+    (define (step! pl)
+      (let ((s (surface pl)))
+        (when s
+          (set! *step-alt* (not *step-alt*))
+          (move-cue! (string->symbol (string-append "step-" (symbol->string s) (if *step-alt* "-a" "-b")))
+                     (if *moment* (/ MOVE-STEP-IN-MOMENT MOVE-IN-MOMENT) 1.0)
+                     (if *step-alt* -0.08 0.08)))))
+
+    (define (land! vy)
+      (when (>= vy SOFT-FALL)
+        (let ((f (clamp 0.0 1.0 (/ (- vy SOFT-FALL) (- MAX-FALL-SPEED SOFT-FALL)))))
+          (move-cue! (if (>= vy HARD-FALL) 'land-hard 'land-soft) (+ 0.6 (* 0.4 f)) 0.0))))
+
+    (define (movement-frame! pl)
+      (set! *moved* '())
+      (for-each (lambda (e)
+                  (case (car e)
+                    ((jump) (move-cue! 'jump 1.0 0.0))
+                    ((wall-jump) (move-cue! 'wall-jump 1.0 0.0))
+                    ((land) (land! (cdr e)))
+                    ((splash) (move-cue! 'splash 1.0 0.0))
+                    (else #f)))
+                (place-moves pl))
+      (if (and (eq? (place-mode pl) 'ground) (> (abs (place-vx pl)) STEP-VX))
+          (let ((i (modulo (exact (floor (/ (place-bx pl) STEP-PX))) STEP-FRAMES)))
+            (when (and *step-idx* (not (= i *step-idx*)) (memv i STEP-FEET))
+              (step! pl))
+            (set! *step-idx* i))
+          (set! *step-idx* #f)))
+
     ;; --- boot and the frame ----------------------------------------------------------------------
     ;; moments: the fixed moments' tune names the world holds (opened ahead,
     ;; one per frame after boot, like the cues).
@@ -1228,6 +1322,7 @@
         (tone-frame! pl now)
         (hum-frame! pl now)
         (news-frame! pl)
+        (movement-frame! pl)
         (pending-cues-frame!)
         (spots-frame! pl now)))
 

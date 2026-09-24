@@ -539,3 +539,74 @@
     (display "  moment time ") (display MT) (newline)
     (assert-equal "hollow-answers" MT-NAME)
     (assert-true (< (abs (- MT (- 2.0 DEPTH-S))) 0.15))))
+
+;; --- 9. the creature's movement (David, 2026-09-24) ----------------------------------
+;; The director is handed the body's mode, speed, x and the tile under its
+;; feet, and the frame's body events as (event . fall speed before).
+(define (runner region foot mode vx bx . moves)
+  (place key: 'run region: region bed-tune: #f groups: '(wind water reeds drone) levels: '((wind . 0.4))
+         tones: '() carry: '() px: 100.0 py: 100.0 rx: 9 ry: 3
+         mode: mode vx: vx bx: bx foot: foot moves: (if (pair? moves) (car moves) '())))
+
+;; a run from x 0.2 to 21.2 at 0.7 px a frame: LOOK's cycle puts a foot
+;; down at x 10.5 and 21.0, two steps
+(define (run-steps region foot mode vx)
+  (mixer-open-headless! RATE #f)
+  (sound-reset!)
+  (let loop ((x 0.2) (t 0.0) (acc '()))
+    (if (> x 21.2)
+        (reverse acc)
+        (begin
+          (sound-frame! t (/ 1.0 60.0) (runner region foot mode vx x))
+          (loop (+ x 0.7) (+ t (/ 1.0 60.0)) (append (map car (sound-moved)) acc))))))
+
+(define FEN-STEPS (run-steps 'reedfen 'solid 'ground 1.2))
+(define HOLLOW-STEPS (run-steps 'hollow 'solid 'ground 1.2))
+(define PLANK-STEPS (run-steps 'reedfen 'ledge 'ground 1.2))
+(define ROCK-STEPS (run-steps 'hollow 'climbable 'ground 1.2))
+(define AIR-STEPS (run-steps 'reedfen 'solid 'air 1.2))
+(define SLOW-STEPS (run-steps 'reedfen 'solid 'ground 0.05))
+
+(define (one-frame moves)
+  (mixer-open-headless! RATE #f)
+  (sound-reset!)
+  (sound-frame! 0.0 (/ 1.0 60.0) (runner 'reedfen 'solid 'ground 0.0 50.0 moves))
+  (sound-moved))
+(define HARD (one-frame '((land . 6.0))))
+(define SOFT (one-frame '((land . 2.0))))
+(define TINY (one-frame '((land . 0.4))))
+(define KICKS (map car (one-frame '((jump . 0.0) (wall-jump . 1.0) (splash . 3.0)))))
+
+;; during a moment: quieter
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+(sound-frame! 0.0 (/ 1.0 60.0) (runner 'reedfen 'solid 'ground 0.0 50.0))
+(sound-audition! "seed-wind")
+(sound-frame! 0.1 (/ 1.0 60.0) (runner 'reedfen 'solid 'ground 0.0 50.0 '((jump . 0.0))))
+(define JUMP-IN-MOMENT (cdr (car (sound-moved))))
+(sound-reset!)
+(sound-frame! 0.0 (/ 1.0 60.0) (runner 'reedfen 'solid 'ground 0.0 50.0 '((jump . 0.0))))
+(define JUMP-ALONE (cdr (car (sound-moved))))
+
+(test-group "a4 sound: 9, the creature's movement"
+  (test "running on the fen: a step where each foot comes down (x 10.5 and 21.0), a and b in turn"
+    (display "  fen steps ") (display FEN-STEPS) (newline)
+    (assert-equal '(step-fen-a step-fen-b) FEN-STEPS))
+  (test "the surface: turf in the Hollow, a plank in Reedfen, rough rock is stone"
+    (assert-equal '(step-grass-a step-grass-b) HOLLOW-STEPS)
+    (assert-equal '(step-wood-a step-wood-b) PLANK-STEPS)
+    (assert-equal '(step-stone-a step-stone-b) ROCK-STEPS))
+  (test "no steps in the air, or standing"
+    (assert-equal '() AIR-STEPS)
+    (assert-equal '() SLOW-STEPS))
+  (test "a hard landing, a soft one, and none for a step down"
+    (assert-equal 'land-hard (car (car HARD)))
+    (assert-equal 'land-soft (car (car SOFT)))
+    (assert-equal '() TINY))
+  (test "the harder the fall, the louder"
+    (assert-true (> (/ (cdr (car HARD)) (spot-gain 'land-hard)) (/ (cdr (car SOFT)) (spot-gain 'land-soft)))))
+  (test "a jump, a wall jump and a splash each sound"
+    (assert-equal '(splash wall-jump jump) KICKS))
+  (test "during a moment the movement is quieter"
+    (display "  jump gain alone ") (display JUMP-ALONE) (display ", in a moment ") (display JUMP-IN-MOMENT) (newline)
+    (assert-true (< JUMP-IN-MOMENT (* 0.6 JUMP-ALONE)))))

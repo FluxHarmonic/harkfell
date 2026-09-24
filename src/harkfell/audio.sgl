@@ -20,6 +20,7 @@
           (engine mixer)
           (engine body)
           (engine worldmap)
+          (engine tilemap)
           (harkfell world)
           (harkfell content)
           (harkfell shell)
@@ -237,7 +238,20 @@
                                        (memq (body-mode b) '(ground))
                                        (< (abs (body-vx b)) 0.01)
                                        (< (abs (body-vy b)) 0.01))
-                           returns: (world-returns w))))))
+                           returns: (world-returns w)
+                           ;; A4: the movement sounds read the body and the tile under its feet
+                           mode: (body-mode b)
+                           vx: (body-vx b)
+                           bx: (body-x b)
+                           foot: (foot-kind (world-tiles w) b))))))
+
+    ;; The tile kind just under the body's feet (its box: 8 by 14 px,
+    ;; HARKFELL-FEEL), or #f off the map.
+    (define (foot-kind tm b)
+      (let ((col (exact (floor (/ (+ (body-x b) 4.0) TILE))))
+            (row (exact (floor (/ (+ (body-y b) 14.5) TILE)))))
+        (and (>= col 0) (>= row 0) (< col (tilemap-cols tm)) (< row (tilemap-rows tm))
+             (tilemap-ref tm col row))))
 
     (define (filter-map f l)
       (let loop ((l l) (acc '()))
@@ -255,10 +269,12 @@
     (define (audio-frame! frame-ms work-ms)
       (let ((now (audio-now)))
         (if (or (bench-running?) (bench-done?))
-            (begin (shell-take-news!) (when (bench-running?) (bench-frame! now frame-ms work-ms)))
+            (begin (shell-take-news!) (shell-take-body-events!) (when (bench-running?) (bench-frame! now frame-ms work-ms)))
             (let ((dt (if *last* (min 0.25 (- now *last*)) 0.0)))
               (moment-door-frame! now)
-              (sound-frame! now dt (world-place (shell-world) (shell-content) (shell-take-news!)))))
+              (let ((moves (shell-take-body-events!))
+                    (pl (world-place (shell-world) (shell-content) (shell-take-news!))))
+                (sound-frame! now dt (and pl (place pl moves: moves))))))
         (set! *last* now)
         (mixer-pump! now)))
 
