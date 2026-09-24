@@ -1,0 +1,17 @@
+(room
+  region: testhollow
+  at: (1 0)
+  title: "Hollow"
+  intent: "the hollow's side of the border"
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "                        #"
+   "                        #"
+   "#########################"))

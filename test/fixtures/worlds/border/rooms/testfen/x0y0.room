@@ -1,0 +1,17 @@
+(room
+  region: testfen
+  at: (0 0)
+  title: "Fen"
+  intent: "the fen's side of the border"
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                        "
+   "#                        "
+   "#########################"))

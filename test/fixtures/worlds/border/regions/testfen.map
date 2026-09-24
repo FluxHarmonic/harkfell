@@ -1,0 +1,8 @@
+(map
+  region: testfen
+  origin: (0 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Fen" "the fen's side of the border"))
+  borders: ((A east)))

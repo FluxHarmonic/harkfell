@@ -1,0 +1,28 @@
+;;; A two-region fixture world whose regions MEET (A4): testfen's room (0 0)
+;;; and testhollow's (1 0) share an edge, open at rows 8 and 9. Each map
+;;; lists the crossing in borders:, the only way a map may join another
+;;; region's room (test/test-content.sgl, "the map across regions").
+(start region: testfen room: (0 0) cell: (2 9))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region testfen
+  name: "Test fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: (frog)
+  moments: ())
+
+(region testhollow
+  name: "Test hollow"
+  bounds: ((1 0) (1 0))
+  bed: "bed-hollow"
+  bed-channels: (wind water texture drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: (frog)
+  moments: ())
+
+(creature frog behaviour: hop)

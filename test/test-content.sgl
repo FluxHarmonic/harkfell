@@ -144,3 +144,38 @@
   (test "a map room with no file is red"
     (let ((ps (problems (with-file MAP (lambda (t) (swap (swap t "(\"A-B\")" "(\"A-B-C\")") "(B \"Right\" \"a gap to jump\")" "(B \"Right\" \"a gap to jump\")\n   (C \"More\" \"nothing yet\")"))))))
       (assert-true (has? ps "room C at x2y0 has no file")))))
+
+;; A4: the map across regions. The border fixture's two regions meet: testfen's
+;; x0y0 and testhollow's x1y0 share an edge open at rows 8 and 9, and each map
+;; lists the crossing in borders:. Before A4 such a world was always red
+;; (A1's known limit L9): the map could not join rooms of two regions.
+(define BORDER (read-world-source "test/fixtures/worlds/border"))
+(define (border-with path f)
+  (map (lambda (e) (if (string=? (car e) path) (cons (car e) (f (cdr e))) e)) BORDER))
+(define FEN-MAP "world/regions/testfen.map")
+(define FEN-ROOM "world/rooms/testfen/x0y0.room")
+(define HOL-ROOM "world/rooms/testhollow/x1y0.room")
+
+(test-group "content: the map across regions (A4)"
+  (test "two regions meeting at a listed border read clean (the control)"
+    (assert-equal '() (problems BORDER)))
+  (test "an open edge onto another region's room that the map does not list is red"
+    (let ((ps (problems (border-with FEN-MAP (lambda (t) (swap t "  borders: ((A east)))" ")"))))))
+      (assert-true (has? ps "x0y0's east edge opens onto testhollow's x1y0, but the map does not list it in borders:"))))
+  (test "a listed border whose edge is closed is red"
+    (let* ((close-fen (lambda (t) (swap (swap t "   \"#                        \"\n" "   \"#                       #\"\n")
+                                    "   \"#                        \"\n" "   \"#                       #\"\n")))
+           (close-hol (lambda (t) (swap (swap t "   \"                        #\"\n" "   \"#                       #\"\n")
+                                        "   \"                        #\"\n" "   \"#                       #\"\n")))
+           (ps (problems (border-with HOL-ROOM close-hol)))
+           (ps2 (problems (map (lambda (e) (cond ((string=? (car e) FEN-ROOM) (cons (car e) (close-fen (cdr e))))
+                                                 ((string=? (car e) HOL-ROOM) (cons (car e) (close-hol (cdr e))))
+                                                 (else e)))
+                               BORDER))))
+      ;; closing one side only is a seam problem; closing both is the border's
+      (assert-true (has? ps "disagree on rows"))
+      (assert-true (has? ps2 "x0y0's east edge is listed in borders:, but it is closed"))
+      (assert-true (has? ps2 "x1y0's west edge is listed in borders:, but it is closed"))))
+  (test "a border listed where no other region's room is, is red"
+    (let ((ps (problems (border-with FEN-MAP (lambda (t) (swap t "((A east))" "((A east) (A north))"))))))
+      (assert-true (has? ps "x0y0's north edge is listed in borders:, but no other region's room is there")))))

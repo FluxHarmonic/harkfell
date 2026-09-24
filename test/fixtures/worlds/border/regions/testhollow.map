@@ -1,0 +1,8 @@
+(map
+  region: testhollow
+  origin: (1 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Hollow" "the hollow's side of the border"))
+  borders: ((A west)))

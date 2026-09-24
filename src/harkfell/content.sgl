@@ -33,8 +33,11 @@
 ;;;                      its map entry, with the same title and intent, and the
 ;;;                      map's connections are the seams: two neighbours are
 ;;;                      joined in the layout exactly when their shared edge
-;;;                      has an open cell
-;;;   seams              (engine worldmap)'s rule, room by room, with open sky
+;;;                      has an open cell. Across regions (A4) the layout cannot
+;;;                      join, so the map lists each crossing in borders:
+;;;                      ((LETTER west|east|north|south) ...): a room's edge onto
+;;;                      another region's room is open exactly when it is listed
+;;;   seams             (engine worldmap)'s rule, room by room, with open sky
 ;;;                      (D28): a top edge may be open when the slot above is
 ;;;                      inside no region's bounds (outside the planned world);
 ;;;                      a slot inside a region's bounds with no room is a
@@ -95,13 +98,15 @@
       (start default: #f)           ; (c . r) or #f
       (unreached default: '()))     ; ((c . r) ...) declared unreachable
 
-    ;; A region map: ((letter x y title intent) ...), and which neighbours are joined.
+    ;; A region map: ((letter x y title intent) ...), which neighbours are
+    ;; joined, and (A4) which of its rooms open onto another region's.
     (define-struct region-map
       (path default: "")
       (region default: #f)
       (origin default: #f)
       (rooms default: '())          ; ((letter x y title intent) ...)
-      (joins default: '()))         ; (((x1 . y1) . (x2 . y2)) ...)
+      (joins default: '())          ; (((x1 . y1) . (x2 . y2)) ...)
+      (borders default: '()))       ; ((x y side) ...), side west east north south
 
     (define-struct content
       (source default: '())
@@ -530,6 +535,7 @@
              (origin (roomfile-field rf 'origin))
              (layout (roomfile-field rf 'layout))
              (rooms (roomfile-field rf 'rooms))
+             (borders (roomfile-field rf 'borders '()))
              (ps '()))
         (define (add! msg name) (set! ps (cons (pb path (and name (line name)) msg) ps)))
         (if (not (roomfile-ok? rf))
@@ -543,6 +549,11 @@
                                                    (string? (cadr e)) (string? (caddr e))))
                                   rooms))
                 (add! "rooms: is not ((LETTER \"title\" \"intent\") ...)" "rooms"))
+              (unless (and (list? borders)
+                           (every (lambda (b) (and (list? b) (= (length b) 2) (symbol? (car b))
+                                                   (memq (cadr b) (list 'west 'east 'north 'south))))
+                                  borders))
+                (add! "borders: is not ((LETTER west|east|north|south) ...)" "borders"))
               (if (not (null? ps))
                   (cons (region-map path: path region: reg) (reverse ps))
                   ;; letters at even (col, row) of the layout; joins at the odd places between
@@ -594,8 +605,22 @@
                                             (and (pair? ls) (or (eq? (string->symbol (string (car (car ls)))) (car e)) (find (cdr ls)))))
                                     (add! (string-append "rooms: " (symbol->string (car e)) " is not in the layout") "rooms")))
                                 rooms)
-                      (cons (region-map path: path region: reg origin: origin rooms: entries joins: joins)
-                            (reverse ps)))))))))
+                      ;; borders: each (LETTER SIDE) names a room of the layout
+                      (let ((bs (filter (lambda (x) x)
+                                        (map (lambda (b)
+                                               (let ((e (find (lambda (e) (eq? (string->symbol (string (car e))) (car b)))
+                                                              entries)))
+                                                 (if e
+                                                     (list (cadr e) (caddr e) (cadr b))
+                                                     (begin
+                                                       (add! (string-append "borders: room " (symbol->string (car b))
+                                                                            " is not in the layout")
+                                                             "borders")
+                                                       #f))))
+                                             borders))))
+                        (cons (region-map path: path region: reg origin: origin rooms: entries joins: joins
+                                          borders: bs)
+                              (reverse ps))))))))))
 
     (define (joined? m a b)
       (let loop ((js (region-map-joins m)))
@@ -646,7 +671,9 @@
                   (let* ((nx (+ x (car d))) (ny (+ y (cdr d)))
                          (a (worldmap-room wm x y))
                          (b (worldmap-room wm nx ny)))
-                    (when (and a b)
+                    ;; inside the region only: an edge onto another region's
+                    ;; room is a border, checked below
+                    (when (and a b (eq? (room-region (placed-data b)) reg))
                       (let ((open (shared-edge-open? a b (car d)))
                             (j (joined? m (cons x y) (cons nx ny))))
                         (cond ((and open (not j))
@@ -656,6 +683,35 @@
                                (add! (string-append "the map joins " (room-key x y) " and " (room-key nx ny)
                                                     ", but their shared edge is closed"))))))))
                 (list (cons 1 0) (cons 0 1)))))
+          (region-map-rooms m))
+        ;; borders (A4): each side of each room that meets another region's
+        ;; room is open exactly when the map lists it
+        (for-each
+          (lambda (e)
+            (let ((x (cadr e)) (y (caddr e)))
+              (for-each
+                (lambda (s)
+                  (let* ((side (car s))
+                         (a (worldmap-room wm x y))
+                         (b (worldmap-room wm (+ x (cadr s)) (+ y (caddr s))))
+                         (listed (member (list x y side) (region-map-borders m)))
+                         (where (string-append (room-key x y) "'s " (symbol->string side) " edge")))
+                    (cond ((and a b (not (eq? (room-region (placed-data b)) reg)))
+                           (let ((open (case side
+                                         ((east) (shared-edge-open? a b 1))
+                                         ((west) (shared-edge-open? b a 1))
+                                         ((south) (shared-edge-open? a b 0))
+                                         (else (shared-edge-open? b a 0)))))
+                             (cond ((and open (not listed))
+                                    (add! (string-append where " opens onto "
+                                                         (symbol->string (room-region (placed-data b)))
+                                                         "'s " (room-key (placed-x b) (placed-y b))
+                                                         ", but the map does not list it in borders:")))
+                                   ((and listed (not open))
+                                    (add! (string-append where " is listed in borders:, but it is closed"))))))
+                          ((and listed a)
+                           (add! (string-append where " is listed in borders:, but no other region's room is there"))))))
+                (list (list 'east 1 0) (list 'west -1 0) (list 'south 0 1) (list 'north 0 -1)))))
           (region-map-rooms m))
         (reverse ps)))
 
