@@ -6,7 +6,7 @@
   intent: "you step off the Hollow's rim and the land opens into reeds and sky"
   bed: (wind 0.7 reeds 0.4 drone 0.2)
   grid:
-  ("#########################"
+  ("#                        "
    "#                        "
    "#                        "
    "#                        "

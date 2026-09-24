@@ -6,7 +6,7 @@
   intent: "the first open water; a breath after the Hollow's climbs"
   bed: (wind 0.4 water 0.8 reeds 0.5)
   grid:
-  ("#########################"
+  ("                         "
    "                         "
    "                         "
    "                         "

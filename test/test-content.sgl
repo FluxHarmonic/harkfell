@@ -101,6 +101,9 @@
   (test "one row of a shared edge closed on one side only is red, naming both rooms and the row"
     (let ((ps (problems (with-file RIGHT (lambda (t) (swap t "\"                        #\"\n   \"#######" "\"#                       #\"\n   \"#######"))))))
       (assert-true (has? ps "x1y0 left edge and x0y0 right edge disagree on rows 8"))))
+  (test "a top edge with no room above may be open: open sky (David, 2026-09-24)"
+    (let ((ps (problems (with-file RIGHT (lambda (t) (swap t "  (\"#########################\"" "  (\"####    #################\""))))))
+      (assert-false (has? ps "top edge"))))
   (test "a hole in a floor above nothing is red"
     (let ((ps (problems (with-file LEFT (lambda (t) (swap t "   \"#########################\")\n  things:" "   \"#### ####################\")\n  things:"))))))
       (assert-true (has? ps "x0y0 bottom edge opens onto no room, columns 4")))))

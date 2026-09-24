@@ -6,7 +6,7 @@
   intent: "a mute stone seen before it can matter, across a gap that needs a run"
   bed: (wind 0.6 reeds 0.3 drone 0.4)
   grid:
-  ("#########################"
+  ("                        #"
    "                        #"
    "                        #"
    "                        #"

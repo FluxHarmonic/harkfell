@@ -34,7 +34,9 @@
 ;;;                      map's connections are the seams: two neighbours are
 ;;;                      joined in the layout exactly when their shared edge
 ;;;                      has an open cell
-;;;   seams              (engine worldmap)'s rule, room by room
+;;;   seams              (engine worldmap)'s rule, room by room, with open sky:
+;;;                      a top edge with no room above may be open (David,
+;;;                      2026-09-24: "Definitely open sky")
 ;;;
 ;;; Gate 3, reach, is (harkfell check): it runs the physics.
 
@@ -626,7 +628,7 @@
              (wm (make-worldmap placed-rooms ROOM-COLS ROOM-ROWS TILE))
              (broken (map (lambda (rm) (cons (room-x rm) (room-y rm)))
                           (filter (lambda (rm) (not (grid-whole? rm))) rooms)))
-             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm kind-open? broken))))
+             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm kind-open? broken #t))))
              (map-reads (map (lambda (e) (read-map-source (car e) (cdr e)))
                              (filter (lambda (e) (and (starts-with? (car e) "world/regions/") (ends-with? (car e) ".map")))
                                      source)))

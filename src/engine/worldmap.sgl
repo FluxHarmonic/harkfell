@@ -15,7 +15,9 @@
 ;;; every row of the left room's last column must be open exactly where the
 ;;; right room's first column is; the same for columns across a room's
 ;;; bottom and the top of the room below. An edge with no room beyond it
-;;; must be closed on every cell: a room never opens onto nothing.
+;;; must be closed on every cell: a room never opens onto nothing. The one
+;;; exception is a game's to choose (seam-problems' sky option): a TOP edge
+;;; with no room above may be open, as sky.
 ;;;
 ;;; Pure: no platform.
 
@@ -128,10 +130,12 @@
     ;; default). unknown: coordinates ((x . y) ...) where a room exists but is
     ;; not on the map (the game left it off, its grid being broken): an edge
     ;; facing one is not checked, so a broken room is reported once, as
-    ;; itself, and not again as its neighbours opening onto nothing.
+    ;; itself, and not again as its neighbours opening onto nothing. sky: #t
+    ;; lets a top edge with no room above be open (open sky).
     (define (seam-problems wm . opts)
       (let* ((open? (if (pair? opts) (car opts) kind-open?))
              (unknown (if (and (pair? opts) (pair? (cdr opts))) (cadr opts) '()))
+             (sky (and (pair? opts) (pair? (cdr opts)) (pair? (cddr opts)) (caddr opts)))
              (unknown? (lambda (x y) (member (cons x y) unknown)))
              (cols (worldmap-cols wm))
              (rows (worldmap-rows wm)))
@@ -179,7 +183,7 @@
                                     (list (string-append name " top edge and " (room-name up)
                                                          " bottom edge disagree on columns " (nums m)))))
                               (let ((o (opens p (row-cells 0))))
-                                (if (or (null? o) (unknown? x (- y 1))) '()
+                                (if (or (null? o) sky (unknown? x (- y 1))) '()
                                     (list (string-append name " top edge opens onto no room, columns " (nums o))))))
                           (if right
                               '()
