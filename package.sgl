@@ -141,8 +141,9 @@
       features: '(web wasm graphics)))
 
   dependencies: (list
-    ;; Window and keyboard (GLFW); native only.
-    (from-git url: app-repo version: "^0.10.2" configs: '(dev release))
+    ;; Window and keyboard (GLFW); native only. 0.11.0 for D37: the window's
+    ;; size and fullscreen (window-set-size!, set-fullscreen!).
+    (from-git url: app-repo version: "^0.11.0" configs: '(dev release))
     ;; Drawing, both targets.
     (from-git url: graphics-repo version: "^0.11.4")
     ;; Web only: the wasm runtime and loader, the WebGL2 bridge and app
