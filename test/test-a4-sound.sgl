@@ -20,7 +20,8 @@
         (sigil math)
         (engine mixer)
         (harkfell hush)
-        (harkfell sound))
+        (harkfell sound)
+        (only (harkfell audio) frame-event! save-extras restore-extras!))
 
 (define RATE 32000)
 (define SAID '())
@@ -476,3 +477,65 @@
     (assert-equal "seed-wind" CHOIR-DURING))
   (test "and plays after it, once the hush allows and you stand still"
     (assert-equal "frog-choir" CHOIR-AFTER)))
+
+;; --- 8. the frame's events, the save's extras, the moment's time ---------------------
+;; (harkfell audio)'s frame-event! is what content's frame calls: card starts
+;; the opening and holds the world, hold skips to the world mark, dawn lets
+;; the world begin.
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+(sound-frame! 0.0 0.0 #f)
+(frame-event! 'card)
+(frames! 0.0 1.0 (/ 1.0 60.0) (lambda (t) HOLLOW) #t)
+(define CARD-STATE (sound-opening-state))
+(define CARD-HELD (sound-held?))
+(define CARD-BED (and (mixer-find BED-ID) #t))
+(frame-event! 'hold)
+(frames! 1.0 1.6 (/ 1.0 60.0) (lambda (t) HOLLOW) #t)
+(define HOLD-STATE (sound-opening-state))
+(frame-event! 'dawn)
+(frames! 1.6 2.0 (/ 1.0 60.0) (lambda (t) HOLLOW) #t)
+(define DAWN-HELD (sound-held?))
+(define DAWN-STATE (sound-opening-state))
+(define DAWN-BED (and (mixer-find BED-ID) #t))
+
+;; the save: fixed rooms and wandering moments in one list of strings
+(sound-reset!)
+(restore-extras! '("reedfen:9,3" "wander:seed-wind") 321.0)
+(define X-FIXED (hush-fixed-decision (sound-hush) "reedfen:9,3"))
+(define X-WANDER (hush-wander-spent? (sound-hush) "seed-wind"))
+(define X-PLAYED (hush-played (sound-hush)))
+(define X-BACK (save-extras))
+
+;; D35: the moment's time as heard
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+;; the audition reads the director's clock as the last frame left it: a frame
+;; at exactly 1.0 first
+(frames! 0.0 1.01 0.5 (lambda (t) (fen 'mt WET)) #t)
+(sound-audition! "hollow-answers")
+(frames! 1.0 3.0 0.1 (lambda (t) (fen 'mt WET)) #t)
+(define MT (sound-moment-time))
+(define MT-NAME (sound-moment-playing))
+
+(test-group "a4 sound: 8, the frame, the save, the moment's time"
+  (test "card: the card plays and the world is held (no bed)"
+    (assert-equal 'card CARD-STATE)
+    (assert-true CARD-HELD)
+    (assert-false CARD-BED))
+  (test "hold after a second: the tune moves to its world section (a skip)"
+    (assert-equal 'world HOLD-STATE))
+  (test "dawn: the world begins, the bed opens and the opening hands over"
+    (assert-false DAWN-HELD)
+    (assert-true DAWN-BED)
+    (assert-equal 'handoff DAWN-STATE))
+  (test "a save's list gives back the fixed rooms, the wandering moments and the time"
+    (assert-equal 'spent X-FIXED)
+    (assert-true X-WANDER)
+    (assert-equal 321.0 X-PLAYED))
+  (test "and is written back the same"
+    (assert-equal '(("reedfen:9,3" "wander:seed-wind") 321.0) X-BACK))
+  (test "the moment's time: two seconds after its start, less the sink's depth"
+    (display "  moment time ") (display MT) (newline)
+    (assert-equal "hollow-answers" MT-NAME)
+    (assert-true (< (abs (- MT (- 2.0 DEPTH-S))) 0.15))))

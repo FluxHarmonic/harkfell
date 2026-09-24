@@ -1,0 +1,47 @@
+;;; The opening on the web (a regression found by the web probe, 2026-09-24):
+;;; the page fetches tune texts, so at the card's event the opening's text
+;;; may not be in yet. The start waited for it with a clock read before any
+;;; frame had set the director's (0.0), so the first real frame (the page's
+;;; clock, seconds since an epoch) read as a timeout and the opening never
+;;; played. Natively texts are read at once, so this file simulates the web:
+;;; the loader's WANT hook is set before anything reads a tune, and the text
+;;; is handed over late, as the page's fetch would.
+
+(import (sigil test)
+        (sigil list)
+        (sigil io)
+        (sigil fs)
+        (engine mixer)
+        (harkfell tunes)
+        (harkfell sound))
+
+(define WANTED '())
+(tunes-set-want! (lambda (name) (set! WANTED (cons name WANTED))))
+(define SAID '())
+(define (say . parts) (set! SAID (cons parts SAID)))
+
+(mixer-open-headless! 32000 #f)
+(sound-reset!)
+(sound-boot! '() say)
+;; a page clock far from zero, as the web's is
+(define T0 5000.0)
+(sound-opening-start!)
+(define (frames! t0 t1)
+  (let loop ((t t0)) (when (< t t1) (sound-frame! t (/ 1.0 30.0) #f) (mixer-pump! t) (loop (+ t (/ 1.0 30.0))))))
+(frames! T0 (+ T0 1.0))
+(define WAITING-STATE (sound-opening-state))
+(define GAVE-UP-EARLY (and (member '("sound" "error" "no-opening-text") SAID) #t))
+;; the fetch lands a second in
+(tunes-provide! "opening" (read-file-string (tune-path "opening")))
+(frames! (+ T0 1.0) (+ T0 2.0))
+(define STARTED-STATE (sound-opening-state))
+(tunes-set-want! #f)
+
+(test-group "a4 sound: the opening on the web"
+  (test "the page was asked for the opening's text"
+    (assert-true (member "opening" WANTED)))
+  (test "a second without it: still waiting, not given up (the clock was read in a frame)"
+    (assert-false GAVE-UP-EARLY)
+    (assert-false WAITING-STATE))
+  (test "the text arrives: the card plays"
+    (assert-equal 'card STARTED-STATE)))

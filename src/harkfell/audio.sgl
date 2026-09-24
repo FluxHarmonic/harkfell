@@ -31,7 +31,7 @@
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
           audio-carry! audio-tone-room! audio-lines world-place room-moment-name
-          audio-sound-door!)
+          audio-sound-door! frame-event! save-extras restore-extras!)
 
   (begin
     (define *say* (lambda parts #f))
@@ -45,12 +45,9 @@
       (shell-set-extra-lines! audio-lines)
       ;; A4: a save keeps the moments heard and the time played, and a
       ;; continue gives them back ((harkfell save))
-      (shell-set-save-extras! (lambda () (let ((h (sound-hush))) (list (hush-spent h) (hush-played h))))
-                              sound-restore-hush!)
-      ;; A4: the frame's phases (start, start-out, card, hold, dawn, play).
-      ;; The sound track's to fill: the card's tune on card, the wind rising
-      ;; on hold. Until then the bed simply begins at the hold (world-place).
-      (shell-add-frame-listener! (lambda (ev) #f))
+      (shell-set-save-extras! save-extras restore-extras!)
+      ;; A4: the frame's phases: the card's tune, the hold, the dawn (frame-event!)
+      (shell-add-frame-listener! frame-event!)
       (*say* "audio" (number->string (mixer-rate)) (symbol->string (mixer-state))))
 
     (define (audio-gesture!) (mixer-resume!))
@@ -66,54 +63,67 @@
 
     ;; ?sound=a,b / --sound a,b (A4): the sound's listening doors.
     ;;   border:cross | border:through   the region-border fallback (default through)
-    ;;   opening        the opening (D33, D15) plays once the audio runs (the web's
-    ;;                  first tap), the world held until OPENING-WORLD-S after its
-    ;;                  world mark: a stand-in for content's frame sequence, to hear it
     ;;   bench:a4       the slice's phone measurement ((harkfell bench), A4's phases)
     ;;   moment:NAME    the moment NAME plays over the bed MOMENT-DOOR-S after the
-    ;;                  bed has opened, whatever the hush says (to hear a moment
-    ;;                  whose room is not written yet)
-    (define OPENING-WORLD-S 6.0)
+    ;;                  bed has opened and the tune's text is in, whatever the hush
+    ;;                  says (to hear a moment whose room is not written yet)
+    ;; The opening needs no door: the frame plays it on every launch (below).
     (define MOMENT-DOOR-S 4.0)
     (define *moment-door* #f)      ; #f | (name) | (name . t)
-    (define *opening-door* #f)     ; #f | armed | playing | (started . t) | (world . t) | done
     (define (audio-sound-door! s)
       (for-each (lambda (item)
                   (cond ((string=? item "border:cross") (sound-set-border-mode! 'cross))
                         ((string=? item "border:through") (sound-set-border-mode! 'through))
-                        ((string=? item "opening") (set! *opening-door* 'armed) (sound-hold! #t))
                         ((string=? item "bench:a4") (bench-set-phases! 'a4))
                         ((and (> (string-length item) 7) (string=? (substring item 0 7) "moment:"))
-                         (set! *moment-door* (list (substring item 7 (string-length item)))))
+                         (let ((name (substring item 7 (string-length item))))
+                           ;; ask for the text now: on the web the page fetches it
+                           (tune-text name)
+                           (set! *moment-door* (list name))))
                         (else (*say* "audio" "unknown-door" item))))
                 (string-split s ",")))
 
-    (define (opening-door-frame! now)
-      (let ((d *opening-door*))
-        (cond ((and (eq? d 'armed) (eq? (mixer-state) 'running))
-               (sound-opening-start!)
-               (set! *opening-door* 'playing))
-              ((eq? d 'playing) (set! *opening-door* (cons 'started now)))
-              ((and (pair? d) (eq? (car d) 'started) (memq (sound-opening-state) '(world)))
-               (set! *opening-door* (cons 'world now)))
-              ;; the opening never came (no text, an open error): let the world begin
-              ((and (pair? d) (eq? (car d) 'started) (not (sound-opening-state))
-                    (> (- now (cdr d)) (+ OPENING-WORLD-S 6.0)))
-               (sound-hold! #f)
-               (set! *opening-door* 'done))
-              ((and (pair? d) (eq? (car d) 'world) (>= now (+ (cdr d) OPENING-WORLD-S)))
-               (sound-hold! #f)
-               (set! *opening-door* 'done))
-              (else #f))))
-
+    ;; The web probe (2026-09-24): the door auditioned before the page had
+    ;; fetched the tune, so no player opened and nothing played. It waits for
+    ;; the text as well as the bed.
     (define (moment-door-frame! now)
       (let ((d *moment-door*))
         (cond ((not d) #f)
-              ((and (null? (cdr d)) (sound-region)) (set! *moment-door* (cons (car d) now)))
+              ((and (null? (cdr d)) (sound-region) (tune-text (car d))) (set! *moment-door* (cons (car d) now)))
               ((and (number? (cdr d)) (>= now (+ (cdr d) MOMENT-DOOR-S)))
                (sound-audition! (car d))
                (set! *moment-door* #f))
               (else #f))))
+
+    ;; --- the frame (content's (harkfell frame)): D32, D33, D15 ------------------------
+    ;; card   the card's tune starts (the fundamental and its overtones), and
+    ;;        the world is held: no bed yet
+    ;; hold   black: the card is over or skipped; the tune goes on to its world
+    ;;        section (a skip lands there at the next bar), the fundamental held
+    ;;        as the wind rises
+    ;; dawn   the Hollow fades in: the world is released, the bed opens, and the
+    ;;        opening hands over to it over OPENING-HANDOFF-S (3 s, the dawn's length)
+    ;; A door into a room skips the frame, so none of this happens there.
+    (define (frame-event! ev)
+      (case ev
+        ((card) (sound-hold! #t) (sound-opening-start!))
+        ((hold) (sound-opening-skip!))
+        ((dawn play) (sound-hold! #f))
+        (else #f)))
+
+    ;; What a save keeps of the sound: the fixed moments' rooms heard and the
+    ;; wandering moments heard, in the save's one list of strings (a wandering
+    ;; one as "wander:NAME"), and the time played.
+    (define WANDER-PREFIX "wander:")
+    (define (save-extras)
+      (let ((h (sound-hush)))
+        (list (append (hush-spent h) (map (lambda (n) (string-append WANDER-PREFIX n)) (hush-wander-spent h)))
+              (hush-played h))))
+    (define (wander-key? k) (and (string? k) (>= (string-length k) 7) (string=? (substring k 0 7) WANDER-PREFIX)))
+    (define (restore-extras! moments played)
+      (sound-restore-hush! (filter (lambda (k) (not (wander-key? k))) moments)
+                           played
+                           (map (lambda (k) (substring k 7 (string-length k))) (filter wander-key? moments))))
 
     ;; ?tone= (A2's placeholder door): the finding tones are placed from the
     ;; world's pickups now; this moves A2's placeholder only, which sounds
@@ -247,7 +257,6 @@
         (if (or (bench-running?) (bench-done?))
             (begin (shell-take-news!) (when (bench-running?) (bench-frame! now frame-ms work-ms)))
             (let ((dt (if *last* (min 0.25 (- now *last*)) 0.0)))
-              (opening-door-frame! now)
               (moment-door-frame! now)
               (sound-frame! now dt (world-place (shell-world) (shell-content) (shell-take-news!)))))
         (set! *last* now)

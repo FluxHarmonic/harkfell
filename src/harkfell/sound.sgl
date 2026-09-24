@@ -71,7 +71,7 @@
           place-wander place-moment-carrying place-moment-still
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
-          sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S
+          sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
           THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
@@ -164,9 +164,16 @@
 
     (define (sound-hush) *hush*)
     ;; A4 (save and continue): the moments heard and the time played, from a save.
-    (define (sound-restore-hush! spent played) (set! *hush* (hush-restore spent played)))
+    ;; wander (A4): the wandering moments heard, from the same save
+    (define (sound-restore-hush! spent played . wander)
+      (set! *hush* (hush-with-flags (hush-restore spent played)
+                                    (list spent (if (pair? wander) (car wander) '())))))
     (define (sound-region) *region*)
     (define (sound-moment-playing) (and *moment* (car *moment*)))
+    ;; D35: seconds since the playing moment's start was HEARD (its sink
+    ;; holds DEPTH-S), or #f. Content times the wordmark's reveal by it.
+    (define *moment-t0* 0.0)
+    (define (sound-moment-time) (and *moment* (max 0.0 (- *now* *moment-t0* DEPTH-S))))
     (define (sound-ears) *ears*)
 
     ;; The ears FLICK (David, 2026-09-24: "Small flick would probably be more
@@ -495,6 +502,7 @@
       (let ((p (take-moment! name)))
         (when p
           (set! *moment* (cons name p))
+          (set! *moment-t0* now)
           (set! *moment-key* key)
           (set! *hush* (hush-started *hush* name key))
           (*say* "sound" "moment" name "start")
@@ -671,7 +679,10 @@
     (define (sound-opening-start!)
       (unless *opening*
         (if (not (tune-text OPENING-TUNE))
-            (unless *opening-want* (set! *opening-want* *now*))
+            ;; the wait is timed from opening-frame!, where *now* is this
+            ;; frame's clock (the web probe: timed here, before any frame had
+            ;; set *now*, it ran out at once and the opening never played)
+            (unless *opening-want* (set! *opening-want* 'asked))
             (opening-open!))))
 
     (define (opening-open!)
@@ -709,6 +720,7 @@
     ;; it); the world section must play once and end, so the region is freed
     ;; once the jump has landed.
     (define (opening-frame!)
+      (when (eq? *opening-want* 'asked) (set! *opening-want* *now*))
       (when *opening-want*
         (cond ((tune-text OPENING-TUNE) (opening-open!))
               ((> (- *now* *opening-want*) TEXT-WAIT-S)
