@@ -1,0 +1,19 @@
+(room
+  region: testfen
+  at: (0 0)
+  title: "Fen"
+  intent: "the harmonic on the floor"
+  bed: (wind 0.5 drone 0.6)
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#########################")
+  things: ((harmonic at: (12 9) overtone: 2)))

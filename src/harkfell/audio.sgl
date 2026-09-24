@@ -25,6 +25,7 @@
           (harkfell shell)
           (harkfell tunes)
           (harkfell sound)
+          (harkfell gates)
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
@@ -49,8 +50,13 @@
     ;; "2,3" -> (2 3)
     (define (numbers s) (filter number? (map string->number (string-split s ","))))
 
-    (define (audio-carry! s) (sound-set-carry! (numbers s)))
+    ;; ?carry=: the body carries these (the world's, A3; and the sound's,
+    ;; for A0's room, which has no world of gates)
+    (define (audio-carry! s) (shell-set-carry! (numbers s)) (sound-set-carry! (numbers s)))
 
+    ;; ?tone= (A2's placeholder door): the finding tones are placed from the
+    ;; world's pickups now; this moves A2's placeholder only, which sounds
+    ;; only where the world has no gates.
     (define (audio-tone-room! s)
       (let ((n (numbers s)))
         (when (= (length n) 2) (sound-set-tone-room! (car n) (cadr n)))))
@@ -81,7 +87,38 @@
 
     ;; The place the director needs, from the running world; #f outside the
     ;; written world (A0's test room, the atlas, the sheet).
-    (define (world-place w ct)
+    ;; A3: the world's pickups, stones and news in absolute world pixels
+    ;; (shift: the map's own pixel origin, as for px py below).
+    (define (abs-news news sx sy)
+      (map (lambda (n)
+             (let ((k (length n)))
+               ;; every item ends with x y
+               (append (list-head* n (- k 2))
+                       (list (+ sx (list-ref n (- k 2))) (+ sy (list-ref n (- k 1)))))))
+           news))
+
+    (define (list-head* l n) (if (or (= n 0) (null? l)) '() (cons (car l) (list-head* (cdr l) (- n 1)))))
+
+    (define (world-place w ct . news)
+      (let* ((wm (and w (world-map w)))
+             (sx (if wm (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)) 0))
+             (sy (if wm (* (worldmap-rows wm) (worldmap-size wm) (worldmap-y0 wm)) 0))
+             (pl (world-place-a2 w ct)))
+        (and pl
+             (if (world-gates w)
+                 (let ((tm (world-tiles w)))
+                   (place pl
+                          carry: (world-carry w)
+                          tones: (map (lambda (p) (let ((c (cell-centre tm (pickup-cell p))))
+                                                    (list (pickup-overtone p) (+ sx (car c)) (+ sy (cdr c)))))
+                                      (world-pickups w))
+                          stones: (map (lambda (st) (let ((c (cell-centre tm (stone-cell st))))
+                                                      (list (stone-overtone st) (stone-state st) (+ sx (car c)) (+ sy (cdr c)))))
+                                       (world-stones w))
+                          news: (abs-news (if (pair? news) (car news) '()) sx sy)))
+                 pl))))
+
+    (define (world-place-a2 w ct)
       (let* ((p (and w (world-room w)))
              (rm (and p (placed-data p))))
         (and rm ct
@@ -125,9 +162,9 @@
     (define (audio-frame! frame-ms work-ms)
       (let ((now (audio-now)))
         (if (or (bench-running?) (bench-done?))
-            (when (bench-running?) (bench-frame! now frame-ms work-ms))
+            (begin (shell-take-news!) (when (bench-running?) (bench-frame! now frame-ms work-ms)))
             (let ((dt (if *last* (min 0.25 (- now *last*)) 0.0)))
-              (sound-frame! now dt (world-place (shell-world) (shell-content)))))
+              (sound-frame! now dt (world-place (shell-world) (shell-content) (shell-take-news!)))))
         (set! *last* now)
         (mixer-pump! now)))
 

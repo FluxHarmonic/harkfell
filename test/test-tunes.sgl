@@ -16,6 +16,8 @@
         (harkfell content)
         (harkfell source)
         (harkfell tunes)
+        (harkfell sound)
+        (harkfell gates)
         (harkfell audio))
 
 (define WORLD (read-world-source "world"))
@@ -74,3 +76,30 @@
                      WORLD))
            (ps (tune-problems (load-content src))))
       (assert-true (member "reedfen:9,3 moment: no assets/tunes/frog-choir.cts" ps)))))
+
+;; A3: every cue the director renders, and for every harmonic placed in the
+;; world (a pickup or a ring-stone) its finding tone, its pickup cue, its
+;; ring and its near miss: each has a file that reads. The director plays
+;; nothing for a harmonic whose tune is missing, so a missing file would be
+;; silent in play.
+(define (a3-tunes ct)
+  (append (sound-cue-tunes)
+          (apply append
+                 (map (lambda (n)
+                        (map (lambda (base) (string-append base (number->string n)))
+                             (list "tone-h" "pickup-h" "ring-h" "miss-h")))
+                      (append (map pickup-overtone (content-pickups ct))
+                              (map stone-overtone (content-stones ct)))))))
+
+(define (unreadable names)
+  (filter (lambda (n) (not (and (tune-exists? n) (guard (x (#t #f)) (read-tune-string (tune-text n))))))
+          names))
+
+(test-group "tunes: the A3 cues and each placed harmonic's sounds"
+  (test "the world places H2 (the check has a subject), and every cue and H2 tune reads"
+    (let ((ct (load-content WORLD)))
+      (assert-true (member "ring-h2" (a3-tunes ct)))
+      (assert-true (member "croak-h2" (a3-tunes ct)))
+      (assert-equal '() (unreadable (a3-tunes ct)))))
+  (test "a harmonic with no tunes is red (H3 has none yet)"
+    (assert-true (member "ring-h3" (unreadable (list "ring-h2" "ring-h3"))))))

@@ -64,9 +64,10 @@
 
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
           sound-ears sound-lines sound-hush sound-bed-levels sound-moment-playing sound-reset!
-          sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING
+          sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING sound-bed-notes sound-region sound-cue-tunes sound-voice-source HUM-ID
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
+          place-carry place-tones place-stones place-news
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
           DRONE-CHANNELS DEFAULT-LEVELS BED-ID MOMENT-ID TONE-ID)
@@ -105,11 +106,21 @@
     ;;   px py    the body's centre in world pixels; rx ry the room's coordinate
     ;;   still    the body is at rest this frame
     ;;   returns  soft returns so far
+    ;; A3:
+    ;;   carry    the harmonics carried (the world's), or #f: leave the carry
+    ;;            as sound-set-carry! set it (A2's tests)
+    ;;   tones    ((overtone x y) ...): each unfound harmonic where it lies, in
+    ;;            absolute world pixels; #f: A2's one placeholder tone (tests)
+    ;;   stones   ((overtone state x y) ...): the ring-stones, absolute pixels
+    ;;   news     what happened this frame ((harkfell gates), (harkfell
+    ;;            creatures)), positions absolute: (pickup N x y) (ring N x y)
+    ;;            (sink N x y) (open N x y) (near-miss N x y) (call KIND x y)
     (define-struct place
       (key default: #f) (region default: #f) (bed-tune default: #f) (groups default: '())
       (levels default: '()) (moment default: #f) (frogs default: '()) (water default: #f)
       (px default: 0.0) (py default: 0.0) (rx default: 0) (ry default: 0)
-      (still default: #f) (returns default: 0))
+      (still default: #f) (returns default: 0)
+      (carry default: #f) (tones default: #f) (stones default: '()) (news default: '()))
 
     ;; --- state ---------------------------------------------------------------------
     (define *say* (lambda parts #f))
@@ -126,10 +137,8 @@
     (define *moments* '())        ; ((name . player) ...) opened ahead
     (define *moment* #f)          ; (name . player) playing
     (define *moment-key* #f)
-    (define *tone-player* #f)
     (define *tone-room* (cons 11 3))   ; PLACEHOLDER: east of A1's six rooms, until A3 places H2
     (define *tone-cutoff* #f)
-    (define *pan* (cons 1.0 1.0)) ; the tone's L R gains
     (define *still-for* 0.0)
     (define *still* #f)
     (define *ears* #f)
@@ -141,6 +150,7 @@
     (define *seed* 20260924)
 
     (define (sound-hush) *hush*)
+    (define (sound-region) *region*)
     (define (sound-moment-playing) (and *moment* (car *moment*)))
     (define (sound-ears) *ears*)
 
@@ -180,12 +190,13 @@
       (when *bed-player* (player-close! *bed-player*))
       (when *moment* (player-close! (cdr *moment*)))
       (for-each (lambda (m) (player-close! (cdr m))) *moments*)
-      (when *tone-player* (player-close! *tone-player*))
+      (for-each (lambda (v) (player-close! (vector-ref (cdr v) 0))) *voices*)
+      (set! *voices* '()) (set! *hum-n* #f) (set! *pending-cues* '())
       (set! *hush* (hush-new)) (set! *key* #f) (set! *region* #f) (set! *groups* '())
       (set! *bed-player* #f) (set! *bed-src* #f) (set! *levels* '()) (set! *moments* '())
-      (set! *moment* #f) (set! *moment-key* #f) (set! *tone-player* #f) (set! *tone-cutoff* #f)
+      (set! *moment* #f) (set! *moment-key* #f) (set! *tone-cutoff* #f)
       (set! *still-for* 0.0) (set! *still* #f) (set! *ears* #f) (set! *next* '()) (set! *waiting* #f)
-      (set! *spots* 0) (set! *carry-changed* #f) (set! *bed-tune* #f) (set! *room-levels* '()))
+      (set! *spots* 0) (set! *carry-changed* #f) (set! *bed-tune* #f) (set! *room-levels* '()) (set! *bed-opened* #f))
 
     ;; --- channels and levels ------------------------------------------------------------
     ;; groups: the region's bed-channels, e.g. (wind water reeds drone)
@@ -273,10 +284,26 @@
         (and t (guard (e (#t (*say* "sound" "error" "open" name) #f))
                  (open-tune-player t (mixer-rate) loop: loop?)))))
 
-    (define (open-bed name)
+    ;; The harmonics a region's bed sounds: what you carry, the same in
+    ;; EVERY region (section 5: "the drone is present in every region's
+    ;; bed, so you hear your progress everywhere"; A3's gate).
+    (define (bed-carry region) *carry*)
+
+    ;; The bed as last opened (after strip-uncarried): for the gates.
+    (define *bed-opened* #f)
+    (define (sound-bed-notes ch)
+      (if *bed-opened*
+          (apply + (map (lambda (p) (length (filter (lambda (c) (and (eqv? (cell-channel c) ch) (number? (cell-note c))))
+                                                    (tune-pattern-cells p))))
+                        (tune-patterns *bed-opened*)))
+          0))
+
+    (define (open-bed name region)
       (let ((t (tune-parsed name)))
         (and t (guard (e (#t (*say* "sound" "error" "open" name) #f))
-                 (open-tune-player (strip-uncarried t *carry*) (mixer-rate) loop: #t)))))
+                 (let ((opened (strip-uncarried t (bed-carry region))))
+                   (set! *bed-opened* opened)
+                   (open-tune-player opened (mixer-rate) loop: #t))))))
 
     (define (pull-of p) (lambda (out off n) (player-pull! p out off n)))
 
@@ -301,7 +328,7 @@
     (define *outs* 0)
     (define (open-region-bed! region groups bed-tune levels now)
       (let* ((old-src *bed-src*) (old-player *bed-player*) (first? (not old-src))
-             (p (and bed-tune (open-bed bed-tune))))
+             (p (and bed-tune (open-bed bed-tune region))))
         (if (not p)
             (*say* "sound" "error" "no-bed" (if bed-tune bed-tune "none"))
             (begin
@@ -395,13 +422,29 @@
     ;; --- listening: the tone, stillness, the ears ----------------------------------------------
     (define (clamp lo hi x) (max lo (min hi x)))
 
-    (define (tone-geometry pl)
-      ;; the tone's place: the centre of its room, in world pixels
-      (let* ((tx (+ (* ROOM-W (car *tone-room*)) (/ ROOM-W 2.0)))
-             (ty (+ (* ROOM-H (cdr *tone-room*)) (/ ROOM-H 2.0)))
-             (dx (/ (- tx (place-px pl)) ROOM-W))
-             (dy (/ (- ty (place-py pl)) ROOM-H)))
+    ;; The unfound harmonics' places: ((overtone x y) ...), absolute world
+    ;; pixels. A3: the place's (the world's pickups); without them, A2's one
+    ;; placeholder, H2 at the centre of *tone-room*.
+    (define (tone-spots pl)
+      (or (place-tones pl)
+          (if (memv 2 *carry*)
+              '()
+              (list (list 2 (+ (* ROOM-W (car *tone-room*)) (/ ROOM-W 2.0))
+                          (+ (* ROOM-H (cdr *tone-room*)) (/ ROOM-H 2.0)))))))
+
+    ;; (dx dy d) in rooms from the body to (x, y).
+    (define (geometry-to pl x y)
+      (let ((dx (/ (- x (place-px pl)) ROOM-W))
+            (dy (/ (- y (place-py pl)) ROOM-H)))
         (list dx dy (sqrt (+ (* dx dx) (* dy dy))))))
+
+    ;; The loudest unfound harmonic's geometry (the ears point to it), or #f.
+    (define (tone-geometry pl)
+      (let loop ((ts (tone-spots pl)) (best #f))
+        (if (null? ts)
+            best
+            (let ((g (geometry-to pl (cadr (car ts)) (caddr (car ts)))))
+              (loop (cdr ts) (if (or (not best) (< (caddr g) (caddr best))) g best))))))
 
     (define (tone-gain d)
       (cond ((> d (+ TONE-ROOMS 0.5)) 0.0)
@@ -422,20 +465,31 @@
                    ((> dy 0.5) (* base 0.6))
                    (else base)))))
 
-    ;; the one-pole's coefficient for a corner (1.0: no filtering), eased
-    ;; toward its target each frame so a change of band is not a step
-    (define *tone-a* 1.0)
-    (define *tone-a-target* 1.0)
-    (define *lp-l* 0.0)
-    (define *lp-r* 0.0)
+    ;; --- voices: the finding tones and the stone's hum (A3) ------------------------------
+    ;; A VOICE is a looping tune played as a source with its own pan and
+    ;; one-pole low-pass: #(player pan-l pan-r a a-target lp-l lp-r). Each
+    ;; unfound harmonic has one ("tone-hN", tune tone-hN), open while you are
+    ;; in its range; the nearest mute stone has one ("stone-hum", the same
+    ;; tune as its harmonic's finding tone: "the same note you heard when you
+    ;; were finding its harmonic", section 3).
+    (define *voices* '())          ; ((id . state) ...)
+    (define HUM-R 88.0)            ; px: a mute stone hums inside this (5.5 tiles)
+    (define HUM-GAIN 0.3)
+    (define TONE-OPEN-ROOMS (+ TONE-ROOMS 0.5))
+    (define TONE-CLOSE-ROOMS (+ TONE-ROOMS 1.0))
+    (define HUM-ID "stone-hum")
+
+    (define (tone-id n) (string-append "tone-h" (number->string n)))
+    (define (tone-id? id) (and (>= (string-length id) 6) (string=? (substring id 0 6) "tone-h")))
+
     (define (corner->a fc)
       (if fc (- 1.0 (exp (/ (* -2.0 3.14159265 fc) (mixer-rate)))) 1.0))
 
-    (define (tone-pull p)
+    (define (voice-pull st)
       (lambda (out off n)
-        (and (player-pull! p out off n)
-             (let ((gl (car *pan*)) (gr (cdr *pan*)) (a *tone-a*))
-               (let loop ((i 0) (yl *lp-l*) (yr *lp-r*))
+        (and (player-pull! (vector-ref st 0) out off n)
+             (let ((gl (vector-ref st 1)) (gr (vector-ref st 2)) (a (vector-ref st 3)))
+               (let loop ((i 0) (yl (vector-ref st 5)) (yr (vector-ref st 6)))
                  (if (< i n)
                      (let* ((o (+ off (* 8 i)))
                             (yl (+ yl (* a (- (bytevector-ieee-single-ref out o 'little) yl))))
@@ -443,36 +497,100 @@
                        (bytevector-ieee-single-set! out o (* gl yl) 'little)
                        (bytevector-ieee-single-set! out (+ o 4) (* gr yr) 'little)
                        (loop (+ i 1) yl yr))
-                     (begin (set! *lp-l* yl) (set! *lp-r* yr))))
+                     (begin (vector-set! st 5 yl) (vector-set! st 6 yr))))
                #t))))
 
-    (define (close-tone!)
-      (mixer-remove! TONE-ID)
-      (when *tone-player* (player-close! *tone-player*))
-      (set! *tone-player* #f))
+    ;; Each opening of a voice is its own mixer source, "ID#N" (review, A3:
+    ;; with one id per voice, leaving and re-entering the hum's range inside
+    ;; a fade's 0.6 s let the fade's pending remove delete the NEW source,
+    ;; and the hum stayed silent for good). st slot 7 holds the source id.
+    (define *voice-n* 0)
 
+    (define (voice-src id)
+      (let ((v (assoc id *voices*)))
+        (and v (mixer-find (vector-ref (cdr v) 7)))))
+
+    (define (voice-open! id tune now)
+      (let ((p (and (tune-text tune) (open tune #t))))
+        (when p
+          (set! *voice-n* (+ *voice-n* 1))
+          (let* ((sid (string-append id "#" (number->string *voice-n*)))
+                 (st (vector p 1.0 1.0 1.0 1.0 0.0 0.0 sid))
+                 (s (mixer-add! sid (voice-pull st) #t)))
+            (source-factor! s 'dist 0.0 0.0 now)
+            (when (and *still* (tone-id? id)) (source-factor! s 'still TONE-FORWARD 0.0 now))
+            (set! *voices* (cons (cons id st) (filter (lambda (v) (not (string=? (car v) id))) *voices*)))))
+        p))
+
+    ;; Fade a voice out and close it (once).
+    (define (voice-fade! id now)
+      (let ((s (voice-src id)) (v (assoc id *voices*)))
+        (when (and s v)
+          (let* ((st (cdr v)) (sid (vector-ref st 7)))
+            (source-factor! s 'dist 0.0 0.5 now)
+            (set! *voices* (filter (lambda (x) (not (eq? x v))) *voices*))
+            (mixer-at! (+ now 0.6) (lambda () (mixer-remove! sid) (player-close! (vector-ref st 0))))))))
+
+    ;; A voice's mixer source (the gates read the tone's gain), or #f.
+    (define (sound-voice-source id) (voice-src id))
+
+    ;; gain; pan -1..1 (equal power, neither side above unity); fc a low-pass
+    ;; corner or #f
+    (define (voice-set! id gain pan fc now)
+      (let ((s (voice-src id)) (v (assoc id *voices*)))
+        (when (and s v)
+          (let ((st (cdr v)) (a (* 0.25 3.14159265 (+ pan 1.0))))
+            (source-factor! s 'dist gain 0.25 now)
+            (vector-set! st 1 (min 1.0 (* 1.41421356 (cos a))))
+            (vector-set! st 2 (min 1.0 (* 1.41421356 (sin a))))
+            (vector-set! st 4 (corner->a fc))
+            (vector-set! st 3 (+ (vector-ref st 3) (* 0.1 (- (vector-ref st 4) (vector-ref st 3)))))))))
+
+    ;; Every unfound harmonic's tone: open in range, placed, faded and closed
+    ;; once found (review M5) or out of range.
     (define (tone-frame! pl now)
-      (when (and (not (memv 2 *carry*)) (not *tone-player*) (tune-text TONE-TUNE))
-        (set! *tone-player* (open TONE-TUNE #t))
-        (when *tone-player*
-          (let ((s (mixer-add! TONE-ID (tone-pull *tone-player*) #t)))
-            (source-factor! s 'dist 0.0 0.0 now))))
-      (let ((s (mixer-find TONE-ID)))
-        (when s
-          (if (memv 2 *carry*)
-              ;; carried: the tone fades and its player closes (review M5)
-              (unless (> (source-factor s 'dist now) 0.99)
-                (source-factor! s 'dist 0.0 0.5 now)
-                (let ((p *tone-player*))
-                  (mixer-at! (+ now 0.6) (lambda () (when (eq? p *tone-player*) (close-tone!))))))
-              (let* ((g (tone-geometry pl)) (dx (car g)) (dy (cadr g)) (d (caddr g))
-                     (pan (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx))))
-                (source-factor! s 'dist (tone-gain d) 0.25 now)
-                ;; equal power, at most MAX-PAN toward it; neither side above unity
-                (let ((a (* 0.25 3.14159265 (+ pan 1.0))))
-                  (set! *pan* (cons (min 1.0 (* 1.41421356 (cos a))) (min 1.0 (* 1.41421356 (sin a))))))
-                (set! *tone-a-target* (corner->a (tone-cutoff d dy)))
-                (set! *tone-a* (+ *tone-a* (* 0.1 (- *tone-a-target* *tone-a*)))))))))
+      (let ((spots (tone-spots pl)))
+        (for-each
+          (lambda (sp)
+            (let* ((n (car sp)) (id (tone-id n))
+                   (g (geometry-to pl (cadr sp) (caddr sp)))
+                   (dx (car g)) (dy (cadr g)) (d (caddr g))
+                   (open? (assoc id *voices*)))
+              (cond ((and (not open?) (< d TONE-OPEN-ROOMS))
+                     (when (voice-open! id (tone-id n) now)
+                       (voice-set! id (tone-gain d) (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx)) (tone-cutoff d dy) now)))
+                    ((and open? (> d TONE-CLOSE-ROOMS)) (voice-fade! id now))
+                    (open? (voice-set! id (tone-gain d) (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx)) (tone-cutoff d dy) now))
+                    (else #f))))
+          spots)
+        ;; a tone whose harmonic is no longer unfound (carried): fades
+        (for-each (lambda (v)
+                    (when (and (tone-id? (car v))
+                               (not (find (lambda (sp) (string=? (tone-id (car sp)) (car v))) spots)))
+                      (voice-fade! (car v) now)))
+                  *voices*)))
+
+    ;; The nearest mute stone (shut, its harmonic not carried) within HUM-R
+    ;; hums its harmonic's note, quietly, louder as you come closer.
+    (define *hum-n* #f)
+    (define (hum-frame! pl now)
+      (let* ((near (let loop ((ss (place-stones pl)) (best #f) (bd HUM-R))
+                     (if (null? ss)
+                         best
+                         (let* ((st (car ss))
+                                (d (sqrt (+ (expt (- (caddr st) (place-px pl)) 2) (expt (- (cadddr st) (place-py pl)) 2)))))
+                           (if (and (eq? (cadr st) 'shut) (not (memv (car st) *carry*)) (< d bd))
+                               (loop (cdr ss) (cons st d) d)
+                               (loop (cdr ss) best bd))))))
+             (n (and near (car (car near)))))
+        (when (and (assoc HUM-ID *voices*) (not (eqv? n *hum-n*)))
+          (voice-fade! HUM-ID now))
+        (when near
+          (unless (assoc HUM-ID *voices*) (voice-open! HUM-ID (tone-id n) now))
+          (let* ((st (car near)) (d (cdr near))
+                 (dx (/ (- (caddr st) (place-px pl)) 200.0)))
+            (voice-set! HUM-ID (* HUM-GAIN (- 1.0 (/ d HUM-R))) (clamp (- MAX-PAN) MAX-PAN dx) #f now)))
+        (set! *hum-n* n)))
 
     (define (still-frame! pl dt now)
       (set! *still-for* (if (place-still pl) (+ *still-for* dt) 0.0))
@@ -481,8 +599,11 @@
           (set! *still* now-still)
           (when *bed-src*
             (source-factor! *bed-src* 'still (if now-still DUCK-GAIN 1.0) (if now-still STILL-IN-S STILL-OUT-S) now))
-          (let ((s (mixer-find TONE-ID)))
-            (when s (source-factor! s 'still (if now-still TONE-FORWARD 1.0) (if now-still STILL-IN-S STILL-OUT-S) now)))
+          (for-each (lambda (v)
+                      (when (tone-id? (car v))
+                        (let ((s (voice-src (car v))))
+                          (when s (source-factor! s 'still (if now-still TONE-FORWARD 1.0) (if now-still STILL-IN-S STILL-OUT-S) now)))))
+                    *voices*)
           (apply-room-levels! *room-levels* now (if now-still DRONE-UP-S DRONE-DOWN-S) 'drone)))
       (let ((was *ears*))
         (set-ears! pl)
@@ -491,21 +612,109 @@
     (define (set-ears! pl)
       (set! *ears*
             (and *still*
-                 (let* ((g (tone-geometry pl)) (dx (car g)) (dy (cadr g)) (d (caddr g)))
-                   (cond ((or (memv 2 *carry*) (> d (+ TONE-ROOMS 0.5)) (< d 0.3)) 'up)
+                 (let* ((g (or (tone-geometry pl) (list 0.0 0.0 1000.0))) (dx (car g)) (dy (cadr g)) (d (caddr g)))
+                   (cond ((or (> d (+ TONE-ROOMS 0.5)) (< d 0.3)) 'up)
                          ((>= (abs dx) (abs dy)) (if (> dx 0) 'right 'left))
                          ((< dy 0) 'up)
                          (else 'below))))))
 
     ;; --- spot sounds ---------------------------------------------------------------------------
     ;; (name tune lo hi gain): rendered from assets/tunes/TUNE.cts at boot
+    ;; A3: the bellfrogs call from (harkfell creatures) now, so frog is not a
+    ;; scheduled spot sound; the cues below the first three are played by name
+    ;; from the world's news.
+    ;; In the order they are rendered at boot (a few blocks a frame, about 7 s
+    ;; for all of them at 60 fps): the calls heard in the first rooms first,
+    ;; the gate's and the H2 answers after, the ambient spots last.
     (define SPOTS
-      '((frog "spot-frog" 5.0 14.0 0.55)
-        (bird "spot-bird" 14.0 32.0 0.35)
-        (plop "spot-plop" 7.0 18.0 0.4)
-        (return "return-tone" 0.0 0.0 0.5)))
+      (list (list 'return "return-tone" 0.0 0.0 0.5)
+            ;; the creatures' calls (A3)
+            (list 'chirp-a "chirp-a" 0.0 0.0 0.35)
+            (list 'chirp-b "chirp-b" 0.0 0.0 0.35)
+            (list 'flurry "flurry" 0.0 0.0 0.45)
+            (list 'croak-a "croak-a" 0.0 0.0 0.55)
+            (list 'croak-b "croak-b" 0.0 0.0 0.55)
+            (list 'moth-a "moth-a" 0.0 0.0 0.3)
+            (list 'moth-b "moth-b" 0.0 0.0 0.3)
+            ;; the gate and the pickup (A3): (name tune 0 0 gain)
+            (list 'miss-h2 "miss-h2" 0.0 0.0 0.6)
+            (list 'pickup-h2 "pickup-h2" 0.0 0.0 0.8)
+            (list 'ring-h2 "ring-h2" 0.0 0.0 0.75)
+            (list 'stone-slide "stone-slide" 0.0 0.0 0.55)
+            ;; what H2 changes
+            (list 'croak-h2 "croak-h2" 0.0 0.0 0.55)
+            (list 'song-h2 "song-h2" 0.0 0.0 0.5)
+            (list 'moth-h2 "moth-h2" 0.0 0.0 0.35)
+            ;; A2's spot sounds
+            (list 'bird "spot-bird" 14.0 32.0 0.35)
+            (list 'plop "spot-plop" 7.0 18.0 0.4)))
+
+    ;; The world's news as cues, panned by x from the body and quieter with
+    ;; distance. A creature's call, like a spot sound, never starts during a
+    ;; moment (David, 2026-09-24); the gate's and the pickup's always do:
+    ;; they answer what you did.
+    (define (cue-at! name gain x pl)
+      (let* ((dx (- x (place-px pl)))
+             (g (* gain (- 1.0 (* 0.5 (min 1.0 (/ (abs dx) ROOM-W)))))))
+        (cue! name g (clamp (- MAX-PAN) MAX-PAN (/ dx 200.0)))))
+
+    (define (spot-gain name) (let ((e (spot-ref name))) (if e (list-ref e 4) 0.5)))
+
+    (define (harmonic-cue base n) (string->symbol (string-append base (number->string n))))
+
+    ;; The gate's cues are rare and are what A3's web probe listens for, so
+    ;; each says a line (harkfell: sound cue NAME, or cue-missing: not rendered
+    ;; yet or no tune).
+    ;;
+    ;; A gate cue not rendered yet (a door that drops you onto a harmonic
+    ;; takes it on the first frame, before the boot renders have reached it:
+    ;; seen by A3's web probe) jumps the render queue and plays as soon as it
+    ;; is ready ("cue-late"), if that is within PENDING-S; never silently.
+    (define PENDING-S 3.0)
+    (define *pending-cues* '())    ; ((name gain pan since) ...)
+
+    (define (gate-cue! name gain x pl)
+      (cond ((assq name *cues*)
+             (*say* "sound" "cue" (symbol->string name))
+             (cue-at! name gain x pl))
+            ((spot-ref name)
+             (*say* "sound" "cue-waiting" (symbol->string name))
+             (let* ((dx (- x (place-px pl)))
+                    (g (* gain (- 1.0 (* 0.5 (min 1.0 (/ (abs dx) ROOM-W)))))))
+               (set! *pending-cues* (cons (list name g (clamp (- MAX-PAN) MAX-PAN (/ dx 200.0)) *now*) *pending-cues*)))
+             (unless (and *cue-job* (eq? (vector-ref *cue-job* 0) name))
+               (set! *cue-queue* (cons name (filter (lambda (n) (not (eq? n name))) *cue-queue*)))))
+            (else (*say* "sound" "cue-missing" (symbol->string name)))))
+
+    (define (pending-cues-frame!)
+      (set! *pending-cues*
+            (filter (lambda (p)
+                      (cond ((assq (car p) *cues*)
+                             (*say* "sound" "cue-late" (symbol->string (car p)))
+                             (cue! (car p) (cadr p) (caddr p))
+                             #f)
+                            ((> (- *now* (cadddr p)) PENDING-S)
+                             (*say* "sound" "cue-dropped" (symbol->string (car p)))
+                             #f)
+                            (else #t)))
+                    *pending-cues*)))
+
+    (define (news-frame! pl)
+      (for-each
+        (lambda (item)
+          (case (car item)
+            ((pickup) (let ((c (harmonic-cue "pickup-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((ring) (let ((c (harmonic-cue "ring-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((near-miss) (let ((c (harmonic-cue "miss-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
+            ((call) (unless *moment* (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
+            (else #f)))
+        (place-news pl)))
 
     (define (spot-ref name) (assq name SPOTS))
+
+    ;; Every tune the director renders as a cue (the gates check each exists).
+    (define (sound-cue-tunes) (map cadr SPOTS))
 
     ;; Render the queued cues a few blocks a frame (review M7: a whole cue at
     ;; once, its notes and motif's 2 s release tail, was one long frame each).
@@ -584,10 +793,6 @@
             (reeds (room-level (place-levels pl) 'reeds))
             (water (room-level (place-levels pl) 'water))
             (bx (- (place-px pl) (* ROOM-W (place-rx pl)))))
-        (when (and (pair? frogs) (due? 'frog now 5.0 14.0))
-          (let* ((fx (list-ref frogs (min (- (length frogs) 1) (exact (floor (* (rand!) (length frogs)))))))
-                 (dist (abs (- fx bx))))
-            (cue! 'frog (* 0.55 (- 1.0 (* 0.5 (min 1.0 (/ dist ROOM-W))))) (clamp (- MAX-PAN) MAX-PAN (/ (- fx bx) 200.0)))))
         (when (and (> reeds 0.2) (due? 'bird now 14.0 32.0))
           (cue! 'bird (* 0.35 reeds 1.5) (rand-in (- MAX-PAN) MAX-PAN)))
         (when (and (> water 0.3) (due? 'plop now 7.0 18.0))
@@ -601,6 +806,10 @@
     (define (sound-boot! moments say)
       (set! *say* say)
       (set! *to-open* moments)
+      ;; a boot renders every cue afresh (a second boot, a world reloaded, starts
+      ;; from nothing: the late-cue gate relies on it)
+      (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
+      (set! *cue-job* #f) (set! *cues* (quote ())) (set! *pending-cues* (quote ()))
       (set! *cue-queue* (map car SPOTS))
       (for-each tune-text (append moments (list TONE-TUNE) (map cadr SPOTS))))
 
@@ -619,6 +828,7 @@
     (define (sound-frame! now dt pl)
       (set! *now* now)
       (unless pl (set! *ears* #f))
+      (when (and pl (list? (place-carry pl))) (sound-set-carry! (place-carry pl)))
       (when pl
         (set! *hush* (hush-tick *hush* dt))
         (unless (moment-busy?) (boot-work!))
@@ -646,6 +856,9 @@
           (cue! 'return 0.5 0.0))
         (still-frame! pl dt now)
         (tone-frame! pl now)
+        (hum-frame! pl now)
+        (news-frame! pl)
+        (pending-cues-frame!)
         (spots-frame! pl now)))
 
     (define (moment-busy?) (and *moment* #t))

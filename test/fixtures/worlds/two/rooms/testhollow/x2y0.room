@@ -1,0 +1,18 @@
+(room
+  region: testhollow
+  at: (2 0)
+  title: "Hollow"
+  intent: "another region's bed"
+  bed: (wind 0.5 drone 0.6)
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#########################"))

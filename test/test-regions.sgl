@@ -1,0 +1,111 @@
+;;; A3's every-region gate (harkfell-design section 10, A3): carrying H2
+;;; unmutes drone channel 4 in EVERY region's bed, not only the bed of the
+;;; region where it was found.
+;;;
+;;; "Unmutes" is measured as A2's handoff asks: the notes of channel 4 are
+;;; PRESENT in the bed as it is opened (a muted channel still synthesises, so
+;;; the director drops the notes of an uncarried harmonic instead of muting
+;;; them: topics/motif-muted-channel-still-synthesises).
+;;;
+;;; On a fixture world of two regions (test/fixtures/worlds/two): testfen,
+;;; whose bed is Reedfen's and where H2 lies on the floor, and testhollow,
+;;; whose bed is the Hollow's. Driven end to end: the real world ticks, the
+;;; body takes H2 by touch, the real adapter ((harkfell audio) world-place)
+;;; hands the director its place, and the director opens each region's bed.
+;;; Every region is visited before the pickup (the control: no channel-4
+;;; notes anywhere) and after it.
+
+(import (sigil test)
+        (sigil list)
+        (engine worldmap)
+        (engine body)
+        (engine reach)
+        (engine mixer)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell sound)
+        (harkfell audio))
+
+(define CT (load-content (read-world-source "test/fixtures/worlds/two")))
+(define TM (worldmap-tiles (content-map CT)))
+
+(define (standing x y c r from)
+  (let* ((rm (content-room CT x y))
+         (g (local->global CT rm c r))
+         (w (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g)))))
+    (if from
+        (world-populate w (world-stones from) (world-pickups from) (world-carry from))
+        (world-populate w (content-stones CT) (content-pickups CT) '()))))
+
+;; The director in the world w for secs seconds; the notes of channel 4 in
+;; the bed it has open at the end, and the region it thinks it is in.
+(define *t* 0.0)
+(define (hear w secs)
+  (let loop ((f 0) (w w))
+    (if (> f (* 30 secs))
+        (list (sound-bed-notes 4) (sound-region) w)
+        (let* ((w (world-tick w NOTHING))
+               (p (world-take-news w)))
+          (set! *t* (+ *t* (/ 1 30.0)))
+          (sound-frame! *t* (/ 1 30.0) (world-place (cdr p) CT (car p)))
+          (mixer-pump! *t*)
+          (loop (+ f 1) (cdr p))))))
+
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(sound-reset!)
+;; the director's cues, rendered at boot as in the game; what it says is kept
+(define *said* '())
+(sound-boot! '() (lambda parts (set! *said* (cons parts *said*))))
+(define (said? . parts) (and (member parts *said*) #t))
+
+(define W0 (standing 0 0 3 9 #f))                       ; testfen, away from H2
+(define FEN-BEFORE (hear W0 20))                        ; long enough to render every cue
+(define SAID-BEFORE *said*)
+(define HOLLOW-BEFORE (hear (standing 2 0 5 9 (caddr FEN-BEFORE)) 1))
+(define TAKE (hear (standing 0 0 12 9 (caddr HOLLOW-BEFORE)) 1))   ; on H2: taken
+(define SAID-TAKE *said*)
+(define FEN-AFTER (hear (caddr TAKE) 5))
+(define HOLLOW-AFTER (hear (standing 2 0 5 9 (caddr FEN-AFTER)) 5))
+
+(test-group "every region: before H2"
+  (test "the fixture loads clean, with two regions"
+    (assert-equal '() (content-problems CT))
+    (assert-equal 2 (length (content-regions CT))))
+  (test "testfen's bed: no channel-4 notes"
+    (assert-equal 'testfen (cadr FEN-BEFORE))
+    (assert-equal 0 (car FEN-BEFORE)))
+  (test "testhollow's bed: no channel-4 notes"
+    (assert-equal 'testhollow (cadr HOLLOW-BEFORE))
+    (assert-equal 0 (car HOLLOW-BEFORE))))
+
+(test-group "every region: after H2"
+  (test "the body took H2 in testfen"
+    (assert-equal '(2) (world-carry (caddr TAKE))))
+  (test "and the director played its pickup cue (and had not before)"
+    (assert-false (member (list "sound" "cue" "pickup-h2") SAID-BEFORE))
+    (assert-true (member (list "sound" "cue" "pickup-h2") SAID-TAKE)))
+  (test "testfen's bed, where it was found: channel 4 sounds"
+    (assert-equal 'testfen (cadr FEN-AFTER))
+    (assert-true (> (car FEN-AFTER) 0)))
+  (test "testhollow's bed, another region: channel 4 sounds too"
+    (assert-equal 'testhollow (cadr HOLLOW-AFTER))
+    (assert-true (> (car HOLLOW-AFTER) 0))))
+
+;; A door onto the harmonic takes it on the first frame, before the boot has
+;; rendered its cue (seen by A3's web probe: the pickup was silent). The cue
+;; waits, jumps the render queue, and plays late rather than never.
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(sound-reset!)
+(set! *said* '())
+(sound-boot! '() (lambda parts (set! *said* (cons parts *said*))))
+(define ON-IT (hear (standing 0 0 12 9 #f) 3))
+
+(test-group "every region: the pickup's cue on the first frame"
+  (test "it was not ready, so it waited, and then it played"
+    (assert-true (said? "sound" "cue-waiting" "pickup-h2"))
+    (assert-true (said? "sound" "cue-late" "pickup-h2"))
+    (assert-false (said? "sound" "cue-dropped" "pickup-h2"))))

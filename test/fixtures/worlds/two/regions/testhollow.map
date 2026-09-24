@@ -1,0 +1,7 @@
+(map
+  region: testhollow
+  origin: (2 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Hollow" "another region's bed")))

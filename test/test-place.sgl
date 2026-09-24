@@ -18,16 +18,20 @@
         (harkfell feel)
         (engine mixer)
         (harkfell sound)
+        (harkfell gates)
         (harkfell audio))
 
 (define CT (load-content (read-world-source "world")))
 
-;; The body standing in room (x, y) at its start cell, as a world.
+;; The body standing in room (x, y) at its start cell, as a world with its
+;; gates (the pickups, the stones), as the shell makes it.
 (define (world-in x y)
   (let* ((rm (content-room CT x y))
          (cell (room-start-cell CT rm)))
-    (world-at (content-map CT)
-              (cell-body (worldmap-tiles (content-map CT)) HARKFELL-FEEL (car cell) (cdr cell)))))
+    (world-populate
+      (world-at (content-map CT)
+                (cell-body (worldmap-tiles (content-map CT)) HARKFELL-FEEL (car cell) (cdr cell)))
+      (content-stones CT) (content-pickups CT) '())))
 
 (define (inside? pl)
   (and (<= (* 400 (place-rx pl)) (place-px pl) (* 400 (+ 1 (place-rx pl))))
@@ -52,13 +56,14 @@
       (assert-true (every (lambda (x) (< 0 x 400)) (place-frogs pl))))))
 
 ;; Listening, end to end on the real world: the director given the adapter's
-;; place, standing still for 3 s. H2's tone is at its placeholder room (11 3),
-;; east of Old Stone (10 3); Fen Edge (8 3) is three rooms from it. The tone
-;; must sound in both, louder in Old Stone, and the ears must lean east.
+;; place, standing still for 3 s. H2's tone is where the world's pickup lies
+;; (A3): the Drowned Channel (9 4), cell (18 7). From the Climb Back (10 4)
+;; it is west, next door; from the Fen Edge (8 3) it is east and below, about
+;; two rooms off. The tone must sound in both, louder in the Climb Back, and
+;; the ears must lean west in one and east in the other.
 (define (listen-in x y)
   (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
   (sound-reset!)
-  (sound-set-tone-room! 11 3)
   (let* ((w (world-in x y))
          (base (world-place w CT))
          (pl (place base still: #t)))
@@ -68,19 +73,19 @@
           (sound-frame! now (if (= f 0) 0.0 (/ 1 30.0)) pl)
           (mixer-pump! now)
           (loop (+ f 1)))))
-    (let ((s (mixer-find TONE-ID)))
+    (let ((s (sound-voice-source TONE-ID)))
       (list (sound-ears) (and s (source-gain s 3.0))))))
 
-(define OLD-STONE (listen-in 10 3))
+(define CLIMB-BACK (listen-in 10 4))
 (define FEN-EDGE (listen-in 8 3))
 
 (test-group "place: listening on the real world"
-  (test "in Old Stone, still: the ears lean east and the tone sounds"
-    (assert-equal 'right (car OLD-STONE))
-    (assert-true (> (cadr OLD-STONE) 0.2)))
-  (test "in Fen Edge, three rooms away: fainter, but there"
+  (test "in the Climb Back, still: the ears lean west and the tone sounds"
+    (assert-equal 'left (car CLIMB-BACK))
+    (assert-true (> (cadr CLIMB-BACK) 0.2)))
+  (test "in the Fen Edge, further: the ears lean east, fainter, but there"
     (assert-equal 'right (car FEN-EDGE))
-    (assert-true (< 0.0 (cadr FEN-EDGE) (cadr OLD-STONE)))))
+    (assert-true (< 0.0 (cadr FEN-EDGE) (cadr CLIMB-BACK)))))
 
 ;; The ears' flick (David, 2026-09-24): down and back twice in the first
 ;; 0.36 s after they rise (0.09 s steps), again every 4 s, and up otherwise.
@@ -95,3 +100,33 @@
     (assert-false (ears-flick? 2.0))
     (assert-false (ears-flick? 3.95))
     (assert-true (ears-flick? 4.05))))
+
+;; The mute stone's hum survives leaving its range and coming straight back
+;; (the review's finding 2: the first fade's pending remove deleted the
+;; reopened hum's source, and it stayed silent for good).
+(define (hum-after steps)
+  (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+  (sound-reset!)
+  (let* ((w (world-in 10 3))
+         (base (world-place w CT))
+         (st (car (place-stones base)))
+         (near (place base px: (- (caddr st) 50.0) py: (cadddr st)))
+         (far (place base px: (- (caddr st) 150.0) py: (cadddr st))))
+    (let loop ((ps steps) (f 0))
+      (if (null? ps)
+          (let ((s (sound-voice-source HUM-ID)))
+            (and s (source-gain s (/ f 30.0))))
+          (begin
+            (sound-frame! (/ f 30.0) (/ 1 30.0) (if (eq? (car ps) 'near) near far))
+            (mixer-pump! (/ f 30.0))
+            (loop (cdr ps) (+ f 1)))))))
+
+(define (times n x) (if (= n 0) '() (cons x (times (- n 1) x))))
+
+(test-group "place: the stone's hum"
+  (test "near a mute stone, it hums"
+    (assert-true (> (or (hum-after (times 60 'near)) 0.0) 0.05)))
+  (test "out of range for one frame and straight back: it still hums 3 s later"
+    (assert-true (> (or (hum-after (append (times 30 'near) (list 'far) (times 90 'near))) 0.0) 0.05)))
+  (test "far from it: silent"
+    (assert-false (let ((g (hum-after (times 60 'far)))) (and g (> g 0.01))))))

@@ -1,0 +1,7 @@
+(map
+  region: testfen
+  origin: (0 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Fen" "the harmonic on the floor")))
