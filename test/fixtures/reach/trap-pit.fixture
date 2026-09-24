@@ -1,0 +1,21 @@
+;; A trap: a pit four wide and five deep in smooth rock. Walked into, it is
+;; never climbed out of: a held jump rises 3.25 tiles, one smooth wall is not
+;; climbable, and walls four apart are not a chimney (chimney-4).
+(fixture
+  name: "a pit four wide and five deep"
+  expect: trap
+  why: "the envelope (3.25 tiles) and chimney-4"
+  start: (3 4)
+  target: ((11 9) (12 9))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#########    ############"
+   "#########    ############"
+   "#########    ############"
+   "#########    ############"
+   "#########    ############"
+   "#########################"))

@@ -72,11 +72,11 @@
           (engine body))
 
   (export make-intent* NOTHING
-          standable? standable-cells stand-body rest-cell body-cell
+          standable? standable-cells stand-body real-stand-body rest-cell body-cell
           witness witness? witness-from witness-script witness-hops
           reach-graph reach-graph? reach-search
           graph-tm graph-cells graph-edges graph-starts graph-stats
-          graph-edges-from graph-rejected cell-index index-cell
+          graph-edges-from graph-rejected graph-waters cell-index index-cell
           replay-witness witness-lands? witness-bodies
           reach-forward reach-backward)
 
@@ -118,13 +118,16 @@
     (define (open-kind? k)
       (not (or (kind-solid? k) (kind-ledge? k) (kind-water? k) (kind-hazard? k))))
 
-    ;; An open cell (not rock, ledge, water or hazard) inside the map with a
-    ;; floor (rock or ledge) under it.
+    ;; A cell a body can stand in: not rock, water or hazard (a one-way
+    ;; ledge's own cell counts: a body passes into it from below and can stand
+    ;; there on whatever is under it), inside the map, with a floor (rock or
+    ;; ledge) under it.
     (define (standable? tm c r)
-      (and (>= c 0) (< c (tilemap-cols tm))
-           (>= r 0) (< r (- (tilemap-rows tm) 1))
-           (open-kind? (tilemap-ref tm c r))
-           (kind-floor? (tilemap-ref tm c (+ r 1)))))
+      (let ((k (tilemap-ref tm c r)))
+        (and (>= c 0) (< c (tilemap-cols tm))
+             (>= r 0) (< r (- (tilemap-rows tm) 1))
+             (not (or (kind-solid? k) (kind-water? k) (kind-hazard? k)))
+             (kind-floor? (tilemap-ref tm c (+ r 1))))))
 
     ;; Every standable cell, as (c . r), in reading order.
     (define (standable-cells tm)
@@ -183,9 +186,23 @@
     ;; Run a witness from a standing state built afresh, then let the body
     ;; settle (no input) until it is at rest or SETTLE-MAX ticks pass. Returns
     ;; the final body, or #f if it touched a hazard or left the map.
+    ;; A standing state that is really at rest: stand-body's placement, kept
+    ;; only if a tick with no input leaves it where it is, grounded and still
+    ;; (a floor under it, nothing pushing it). #f otherwise.
+    (define (real-stand-body tm f c r)
+      (let* ((b (stand-body tm f c r))
+             (b2 (body-step b NOTHING tm f)))
+        (and (eq? (body-mode b2) 'ground)
+             (= (body-x b2) (body-x b)) (= (body-y b2) (body-y b))
+             (= (body-vx b2) 0) (= (body-vy b2) 0)
+             (null? (body-events b2))
+             b)))
+
+    ;; The replay starts from a standing state checked to be at rest
+    ;; (real-stand-body); a start that is not refuses the witness.
     (define (replay-witness tm f w)
       (let ((from (witness-from w)))
-        (let loop ((b (stand-body tm f (car from) (cdr from)))
+        (let loop ((b (real-stand-body tm f (car from) (cdr from)))
                    (s (witness-script w)))
           (cond ((not b) #f)
                 ((null? s) (settle-quietly tm f b))
@@ -236,7 +253,9 @@
       (starts default: '())         ; the cells the search began from
       (edges default: #f)           ; vector by cell index: ((to-index . witness) ...)
       (stats default: '())          ; ((name . count) ...)
-      (rejected default: '()))      ; ((from-cell . to-cell) ...): candidates the replay refused
+      (rejected default: '())       ; ((from-cell . to-cell) ...): candidates refused
+      (waters default: '()))        ; ((swim-cell stand-cell ...) ...): each water anchor and the
+                                    ; standing cells its search reaches (raw, unrealized)
 
     (define (graph-tm g) (reach-graph-tm g))
     (define (graph-cells g) (reach-graph-cells g))
@@ -244,6 +263,7 @@
     (define (graph-edges g) (reach-graph-edges g))
     (define (graph-stats g) (reach-graph-stats g))
     (define (graph-rejected g) (reach-graph-rejected g))
+    (define (graph-waters g) (reach-graph-waters g))
 
     ;; The accepted edges out of cell (c . r): ((to-cell . witness) ...).
     (define (graph-edges-from g cell)
@@ -310,6 +330,7 @@
     (define CLIMB-MAX 240)
     (define SWIM-MAX 150)
     (define PATH-HOPS 6)
+    (define MAX-TRIES 4)                   ; candidate paths tried per standing target
     (define KICK-TICKS (list 8 20 40))     ; climb ticks to kick off at
     (define OVER-STOPS (list 10 18 26 40)) ; ticks after a mantle to stop at
     (define SWIM-STOPS (list 15 40 90))    ; swim ticks to stop at
@@ -614,6 +635,20 @@
             ((car log) expanded steps (key-kind k) (key-cell k)))
           (expand-kind k (key-kind k) (vector-ref reps k)))
 
+        ;; Each water anchor's view of the way out: the standing cells reachable
+        ;; from anchor k0 over the search's own hops (raw, unrealized). The trap
+        ;; check reads it: water with no way to a standing cell that leads home
+        ;; is a trap even though no cell in it is standable.
+        (define (stands-from k0)
+          (let loop ((front (list k0)) (seen (list k0)) (acc '()))
+            (if (null? front)
+                acc
+                (let* ((k (car front))
+                       (nexts (filter (lambda (t) (not (memv t seen))) (map car (vector-ref hops k)))))
+                  (loop (append (cdr front) nexts)
+                        (append nexts seen)
+                        (if (and (= (key-kind k) K-STAND) (not (= k k0))) (cons (key-cell k) acc) acc))))))
+
         ;; --- realizing a candidate: the witness, from real states ---------------
 
         (define (kind-side kind)
@@ -683,13 +718,15 @@
         (let* ((edges (make-vector ncells '()))
                (candidates 0)
                (rejected 0)
+               (no-realize 0)
                (rejected-edges '())
                (nkeys (* NKINDS ncells)))
           (let each ((k 0))
             (when (< k nkeys)
               (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
                 (let* ((from-cell (key-cell k))
-                       (seen (list k)))
+                       (seen (list k))
+                       (tries '()))   ; ((stand-key . failed candidates) ...)
                   (let bfs ((front (map (lambda (h) (list (car h) 1 (list h))) (vector-ref hops k)))
                             (back '()))
                     (cond ((and (null? front) (null? back)) #f)
@@ -702,7 +739,10 @@
                              (if (memv to seen)
                                  (bfs (cdr front) back)
                                  (begin
-                                   (set! seen (cons to seen))
+                                   ;; a stand target is only closed once an edge to it is
+                                   ;; accepted or MAX-TRIES paths to it have failed: the first
+                                   ;; path's realize can fail where a later one's does not
+                                   (unless (= (key-kind to) K-STAND) (set! seen (cons to seen)))
                                    (if (= (key-kind to) K-STAND)
                                        (let* ((to-cell (key-cell to))
                                               (hs (reverse path))
@@ -713,11 +753,17 @@
                                               ;; replayed from a standing state built afresh
                                               (w (if accept?
                                                      (let ((script (realize k hs)))
-                                                       (and script
-                                                            (let ((w (witness from: from-cell script: script hops: n)))
-                                                              (and (accept? tm f w to-cell) w))))
+                                                       (if (not script)
+                                                           (begin (set! no-realize (+ no-realize 1)) #f)
+                                                           (let ((w (witness from: from-cell script: script hops: n)))
+                                                             (and (accept? tm f w to-cell) w))))
                                                      raw)))
                                          (set! candidates (+ candidates 1))
+                                         (let* ((e (assv to tries))
+                                                (failed (if e (cdr e) 0)))
+                                           (if (or w (>= (+ failed 1) MAX-TRIES))
+                                               (set! seen (cons to seen))
+                                               (set! tries (cons (cons to (+ failed 1)) tries))))
                                          (if w
                                              (let ((i (cell-index tm (car from-cell) (cdr from-cell))))
                                                (vector-set! edges i
@@ -737,6 +783,13 @@
               (each (+ k 1))))
           (reach-graph tm: tm
                        cells: (standable-cells tm)
+                       waters: (let each ((k 0) (acc '()))
+                                 (if (>= k nkeys)
+                                     acc
+                                     (each (+ k 1)
+                                           (if (and (vector-ref reps k) (= (key-kind k) K-SWIM))
+                                               (cons (cons (key-cell k) (stands-from k)) acc)
+                                               acc))))
                        starts: starts
                        edges: edges
                        rejected: (reverse rejected-edges)
@@ -744,4 +797,5 @@
                                     (cons 'steps steps)
                                     (cons 'candidates candidates)
                                     (cons 'rejected rejected)
+                                    (cons 'unrealized no-realize)
                                     (cons 'repairs repaired))))))))

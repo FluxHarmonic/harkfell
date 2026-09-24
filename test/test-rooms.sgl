@@ -9,10 +9,15 @@
 ;;;                top edge 14 (right, down, left); a variant is the same every
 ;;;                time and in range
 ;;;   room change  in the two-room fixture world, walking right across the
-;;;                seam makes the right room current, counts one room entered,
-;;;                and makes the body at the crossing the entry; falling in
-;;;                the right room's pit then returns the body to that entry,
-;;;                not to the start in the left room
+;;;                seam makes the right room current and counts one room
+;;;                entered; the entry is a body standing on ground (the body
+;;;                at the crossing on foot, else the first standing tick);
+;;;                falling in the right room's pit returns the body to that
+;;;                entry, not to the start in the left room
+;;;   no loop      the A1 review's loop world: a hole drops into a room floored
+;;;                with brackish water; the soft return puts the body back
+;;;                standing in the room above, and with no input it stays
+;;;                there (one return, not a return every half second)
 
 (import (sigil test)
         (sigil list)
@@ -121,14 +126,17 @@
          (w0 (world-at (content-map ct) (stand-body tm F (car start) (cdr start)))))
     (test "the world starts in the left room"
       (assert-equal 0 (placed-x (world-room w0))))
-    (test "walking right across the seam enters the right room, and the body there is the entry"
+    (test "walking right across the seam enters the right room, and its entry stands on ground"
       (let loop ((w w0) (t 0))
         (cond ((> t 600) (assert-true #f))
               ((= (placed-x (world-room w)) 1)
                (assert-equal 1 (world-entered w))
-               (assert-true (eq? (world-entry w) (world-body w))))
+               (assert-equal 'ground (body-mode (world-entry w)))
+               (when (eq? (body-mode (world-body w)) 'ground)
+                 (assert-equal (body-x (world-body w)) (body-x (world-entry w)))
+                 (assert-equal 0.0 (body-vx (world-entry w)))))
               (else (loop (world-tick w (intent h: 1 jump: (= (modulo t 40) 0) press: (= (modulo t 40) 0))) (+ t 1))))))
-    (test "the right room's pit returns the body to the seam, not to the start"
+    (test "the right room's pit returns the body to its entry, not to the start"
       (let loop ((w w0) (t 0) (entry #f))
         (cond ((> t 1500) (assert-true #f))
               ((> (world-returns w) 0)
@@ -141,4 +149,21 @@
                               (intent h: 1 jump: (= (modulo t 40) 0) press: (= (modulo t 40) 0))
                               (intent h: 1)))
                       (w2 (world-tick w in)))
-                 (loop w2 (+ t 1) (if (and (not entry) (= (placed-x (world-room w2)) 1)) (world-entry w2) entry)))))))))
+                 (loop w2 (+ t 1) (if (and (= (world-returns w2) 0) (= (placed-x (world-room w2)) 1)) (world-entry w2) entry)))))))))
+
+(test-group "rooms: no soft-return loop"
+  (let* ((ct (load-content (read-world-source "test/fixtures/worlds/loop")))
+         (tm (worldmap-tiles (content-map ct)))
+         (start (start-cell ct))
+         (w0 (world-at (content-map ct) (stand-body tm F (car start) (cdr start)))))
+    (test "the loop world loads clean"
+      (assert-equal '() (content-problems ct)))
+    (test "falling through the hole into brackish water returns the body standing in the room above, once"
+      ;; walk right into the hole (columns 11-12), then no input at all
+      (let loop ((w w0) (t 0))
+        (cond ((> t 900)
+               (assert-equal 1 (world-returns w))
+               (assert-equal 0 (placed-y (world-room w)))
+               (assert-equal 'ground (body-mode (world-body w))))
+              (else (loop (world-tick w (if (and (< t 400) (= (world-returns w) 0)) (intent h: 1) NO-INTENT))
+                          (+ t 1))))))))

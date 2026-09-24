@@ -1,0 +1,20 @@
+;; The same pool with the far bank two tiles up (16 of 22 policies land, the
+;; A1 review).
+(fixture
+  name: "a pool, the far bank two tiles up"
+  expect: reachable
+  why: "the A1 review's direct physics runs: 16 of 22 swim-and-leap policies land"
+  start: (3 6)
+  target: ((20 4))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                ########"
+   "#                ########"
+   "########~~~~~~~~~########"
+   "########~~~~~~~~~########"
+   "########~~~~~~~~~########"
+   "#########################"))

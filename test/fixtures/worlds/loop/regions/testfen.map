@@ -1,0 +1,10 @@
+(map
+  region: testfen
+  origin: (0 0)
+  layout:
+  ("A"
+   "|"
+   "B")
+  rooms:
+  ((A "Top" "a floor with a hole")
+   (B "Below" "a drop onto brackish water")))

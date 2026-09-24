@@ -1,0 +1,17 @@
+(room
+  region: testfen
+  at: (0 1)
+  title: "Below"
+  intent: "a drop onto brackish water"
+  grid:
+  ("###########  ############"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#xxxxxxxxxxxxxxxxxxxxxxx#"))

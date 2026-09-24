@@ -9,14 +9,21 @@
 ;;;
 ;;;      (fixture
 ;;;        name: "a single smooth wall"
-;;;        expect: unreachable        ; or reachable (a positive control)
+;;;        expect: unreachable        ; or reachable, trap, water-trap
 ;;;        why: "..."                 ; where the answer comes from
 ;;;        start: (C R)
 ;;;        target: ((C R) ...)
 ;;;        grid: ( 11 rows of 25, the world legend ))
 ;;;
-;;;    The search runs from start with the witness replay, and every target
-;;;    must be reachable or not, as expect says. An IMPOSSIBLE room (expect
+;;;    The search runs from start with the witness replay. expect says what
+;;;    must hold of every target cell:
+;;;      unreachable  not reached from start
+;;;      reachable    reached, and start reached back from it (a positive
+;;;                   control for both directions)
+;;;      trap         reached, and start NOT reached back from it
+;;;      water-trap   target cells are water; the search swims into at least
+;;;                   one of them, and from none it swims into does anything
+;;;                   it reaches lead back to start An IMPOSSIBLE room (expect
 ;;;    unreachable) is one a player could not get through: David's "I can't
 ;;;    get up there" rooms go here and stay red for good. Some are chosen
 ;;;    because the search alone (its cell-keyed anchors, which take a wall
@@ -97,8 +104,8 @@
              (start (roomfile-field rf 'start))
              (target (roomfile-field rf 'target)))
         (cond ((not (null? ps)) (cons #f ps))
-              ((not (memq expect (list 'reachable 'unreachable)))
-               (cons #f (list (problem path: path line: (field-line text "expect") message: "expect: is neither reachable nor unreachable"))))
+              ((not (memq expect (list 'reachable 'unreachable 'trap 'water-trap)))
+               (cons #f (list (problem path: path line: (field-line text "expect") message: "expect: is not reachable, unreachable, trap or water-trap"))))
               ((not (int-pair? start))
                (cons #f (list (problem path: path line: (field-line text "start") message: "start: is not (C R)"))))
               ((not (and (list? target) (pair? target) (every int-pair? target)))
@@ -114,33 +121,59 @@
 
     (define (every pred l) (or (null? l) (and (pred (car l)) (every pred (cdr l)))))
 
-    ;; Which targets the search reaches from start, with accept? deciding edges.
+    ;; Which targets the search reaches from start, with accept? deciding
+    ;; edges: (graph reached returning water-trapped), each a list of targets:
+    ;; reached from start, reached and leading back to start, and (for water
+    ;; targets) water the search entered with no way back.
     (define (targets-reached rows start targets accept?)
       (let* ((tm (fixture-tilemap rows))
              (g (reach-search tm HARKFELL-FEEL (list start) accept?))
-             (fwd (reach-forward g (list start))))
-        (cons g (filter (lambda (c) (vector-ref fwd (cell-index tm (car c) (cdr c)))) targets))))
+             (fwd (reach-forward g (list start)))
+             (back (reach-backward g (list start)))
+             (idx (lambda (c) (cell-index tm (car c) (cdr c))))
+             (reached (filter (lambda (c) (vector-ref fwd (idx c))) targets)))
+        (list g
+              reached
+              (filter (lambda (c) (vector-ref back (idx c))) reached)
+              (filter (lambda (c)
+                        (let ((w (assoc c (graph-waters g))))
+                          (and w (not (find (lambda (x) (vector-ref back (idx x))) (cdr w))))))
+                      targets)
+              (filter (lambda (c) (assoc c (graph-waters g))) targets))))
 
     (define (run-fixture fx explore?)
       (let* ((path (list-ref fx 0)) (name (list-ref fx 1)) (expect (list-ref fx 2))
              (start (list-ref fx 3)) (targets (list-ref fx 4)) (rows (list-ref fx 5))
              (r (targets-reached rows start targets witness-lands?))
              (g (car r))
-             (reached (cdr r))
+             (reached (cadr r))
+             (returning (caddr r))
+             (wet (cadddr r))
+             (anchored (list-ref r 4))
              (stats (graph-stats g))
-             (ok (if (eq? expect 'reachable)
-                     (= (length reached) (length targets))
-                     (null? reached))))
+             (all (lambda (l) (= (length l) (length targets))))
+             (ok (case expect
+                   ((reachable) (and (all reached) (all returning)))
+                   ((unreachable) (null? reached))
+                   ((trap) (and (all reached) (null? returning)))
+                   (else (and (pair? anchored) (= (length wet) (length anchored)))))))
         (say (if ok "PASS " "FAIL ") "fixture " name " (" path "): expect " (symbol->string expect)
              ", reached " (string-join (map cell-str reached) " ")
              (if (null? reached) "none" "")
+             ", back to start from " (string-join (map cell-str returning) " ")
+             (if (null? returning) "none" "")
+             (if (eq? expect 'water-trap)
+                 (string-append ", water swum into " (string-join (map cell-str anchored) " ")
+                                "; of it with no way back " (string-join (map cell-str wet) " "))
+                 "")
              "; candidates " (number->string (cdr (assq 'candidates stats)))
              ", repaired hops " (number->string (cdr (assq 'repairs stats)))
-             ", rejected by replay " (number->string (cdr (assq 'rejected stats))))
+             ", refused " (number->string (cdr (assq 'rejected stats)))
+             " (" (number->string (cdr (assq 'unrealized stats))) " not realized)")
         (when explore?
           (let ((r2 (targets-reached rows start targets #f)))
-            (say "  explore: with no replay, reached " (string-join (map cell-str (cdr r2)) " ")
-                 (if (null? (cdr r2)) "none" ""))))
+            (say "  explore: with no replay, reached " (string-join (map cell-str (cadr r2)) " ")
+                 (if (null? (cadr r2)) "none" ""))))
         ok))
 
     ;; --- the ceiling (A0's room) ---------------------------------------------------------

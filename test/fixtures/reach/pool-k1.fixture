@@ -1,0 +1,23 @@
+;; A nine-wide pool whose far bank stands one tile above the water. Found by
+;; the A1 review: the first build reported it unreachable (the search tried
+;; one candidate path per target and that path would not realize), while
+;; the physics crosses it: holding right and pressing jump every p ticks
+;; landed on the bank in 19 of 22 policies (the reviewer's test-pool).
+(fixture
+  name: "a pool, the far bank one tile up"
+  expect: reachable
+  why: "the A1 review's direct physics runs: 19 of 22 swim-and-leap policies land"
+  start: (3 6)
+  target: ((20 5))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                ########"
+   "########~~~~~~~~~########"
+   "########~~~~~~~~~########"
+   "########~~~~~~~~~########"
+   "#########################"))

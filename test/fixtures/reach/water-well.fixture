@@ -1,0 +1,22 @@
+;; A water trap, from the A1 review: a smooth-walled well whose water lies
+;; four tiles below the lip. Fallen in, the body swims for ever: a leap
+;; (about two tiles) does not reach the lip and the walls are smooth. No cell
+;; in water is standable, so only the water-trap check sees it.
+(fixture
+  name: "a water well four tiles below the lip"
+  expect: water-trap
+  why: "a leap from the surface is about two tiles; the lip is four up"
+  start: (2 2)
+  target: ((10 7) (11 7) (12 7) (13 7) (14 7) (10 8) (11 8) (12 8) (13 8) (14 8) (10 9) (11 9) (12 9) (13 9) (14 9))
+  grid:
+  ("#########################"
+   "#             ###########"
+   "#             ###########"
+   "##########     ##########"
+   "##########     ##########"
+   "##########     ##########"
+   "##########     ##########"
+   "##########~~~~~##########"
+   "##########~~~~~##########"
+   "##########~~~~~##########"
+   "#########################"))

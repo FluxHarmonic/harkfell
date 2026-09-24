@@ -13,6 +13,10 @@
 ;;;                 declaration has gone stale).
 ;;;   trap          a cell the start reaches from which no path leads back
 ;;;                 to the start: once there, you are stuck. Red.
+;;;   water trap    water the search swims into (a water anchor) from which no
+;;;                 standing cell that leads back to the start is reached: a
+;;;                 well you swim in for ever. Red. (No cell in water is
+;;;                 standable, so the plain trap check cannot see it.)
 ;;;
 ;;; "Back to the start" is stronger than the design's "an exit or the
 ;;; room's entry" and is what the world check means for a region you can
@@ -120,12 +124,20 @@
                       (declared (room-unreached rm))
                       (local (lambda (c) (global->local ct rm c)))
                       (unreached (filter (lambda (c) (not (vector-ref fwd (idx c)))) cells))
-                      (traps (filter (lambda (c) (and (vector-ref fwd (idx c)) (not (vector-ref back (idx c))))) cells)))
+                      (traps (filter (lambda (c) (and (vector-ref fwd (idx c)) (not (vector-ref back (idx c))))) cells))
+                      (o (let ((g (global->local ct rm (cons 0 0)))) (cons (- (car g)) (- (cdr g)))))
+                      (in-room? (lambda (c) (and (<= (car o) (car c) (+ (car o) ROOM-COLS -1))
+                                                 (<= (cdr o) (cdr c) (+ (cdr o) ROOM-ROWS -1)))))
+                      (wet (filter (lambda (w)
+                                     (and (in-room? (car w))
+                                          (not (find (lambda (c) (vector-ref back (idx c))) (cdr w)))))
+                                   (graph-waters g))))
                  (list rm
                        (filter (lambda (c) (not (member c declared))) (map local unreached))
                        (map local traps)
                        (filter (lambda (c) (member c declared))
-                               (map local (filter (lambda (c) (vector-ref fwd (idx c))) cells))))))
+                               (map local (filter (lambda (c) (vector-ref fwd (idx c))) cells)))
+                       (map (lambda (w) (local (car w))) wet))))
              (content-rooms ct))))
 
     ;; Problems ((engine roomfile) problems, one per room and kind).
@@ -146,6 +158,11 @@
                                                message: (string-append (room-label rm) ": cells "
                                                                        (string-join (map cell-str (caddr e)) " ")
                                                                        " are traps: no way back to the start from them"))))
+                            (if (null? (list-ref e 4)) '()
+                                (list (problem path: (room-path rm) line: #f
+                                               message: (string-append (room-label rm) ": water at "
+                                                                       (string-join (map cell-str (list-ref e 4)) " ")
+                                                                       " is a trap: swimming there reaches no standing place that leads back to the start"))))
                             (if (null? (cadddr e)) '()
                                 (list (problem path: (room-path rm) line: (field-line (roomfile-text (room-file rm)) "unreached")
                                                message: (string-append (room-label rm) ": unreached: lists "
@@ -186,6 +203,7 @@
                                ", traps " (number->string (length (caddr e)))))
           (if (null? (cadr e)) '() (list (string-append "  UNREACHABLE " (string-join (map cell-str (cadr e)) " "))))
           (if (null? (caddr e)) '() (list (string-append "  TRAP " (string-join (map cell-str (caddr e)) " "))))
+          (if (null? (list-ref e 4)) '() (list (string-append "  WATER TRAP " (string-join (map cell-str (list-ref e 4)) " "))))
           (if (null? (cadddr e)) '() (list (string-append "  STALE unreached: " (string-join (map cell-str (cadddr e)) " ")))))))
 
     (define (reach-summary g)

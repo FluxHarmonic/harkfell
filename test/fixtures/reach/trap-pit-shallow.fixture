@@ -1,0 +1,20 @@
+;; The trap's control: the same pit three deep is jumped out of (a held jump
+;; reaches a 3-tile ledge), so its floor is reached AND leads back.
+(fixture
+  name: "a pit four wide and three deep"
+  expect: reachable
+  why: "the envelope: a held jump reaches a 3-tile ledge"
+  start: (3 6)
+  target: ((11 9) (12 9))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#########    ############"
+   "#########    ############"
+   "#########    ############"
+   "#########################"))

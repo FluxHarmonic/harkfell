@@ -6,9 +6,16 @@
 ;;; The body lives in global pixels on the world map's one tilemap ((engine
 ;;; worldmap)), so it walks, falls and jumps across a seam with no special
 ;;; case. The ROOM it is in is the slot its center is in; the tick its
-;;; center crosses into another room, that room becomes the current one and
-;;; the body as it is that tick becomes the room's ENTRY (A0's note: "where
-;;; you entered" is the seam you came through, kept as a body).
+;;; center crosses into another room, that room becomes the current one.
+;;;
+;;; The ENTRY, where a soft return puts you, is always a body standing on
+;;; ground. Crossing a seam on foot, the body at the crossing is the entry
+;;; ("where you entered", A0's note). Crossing it in the air (falling through
+;;; a hole, jumping up through a gap), the entry is PROVISIONAL: it stays the
+;;; last grounded body (in the room you came from) until the body first
+;;; stands in the new room, and that becomes the entry. Without this, a hole
+;;; that drops into a hazard returned you to the fall itself, over and over
+;;; (a softlock; found by the A1 review with a two-room world).
 ;;;
 ;;; The soft return (ruling D4): touching a hazard dims the screen for half
 ;;; a second and puts you back at the current room's entry. No lives, no
@@ -61,7 +68,9 @@
       (timer default: 0)
       (ticks default: 0)
       (returns default: 0)
-      (entered default: 0))
+      (entered default: 0)
+      (ground default: #f)          ; the last body that stood on ground
+      (provisional default: #f))    ; the entry is waiting for the first standing tick
 
     (define (world-map w) (world-wm w))
     (define (world-tiles w) (worldmap-tiles (world-wm w)))
@@ -87,22 +96,42 @@
              (wm (make-worldmap (list p) (tilemap-cols (room-tiles r)) (tilemap-rows (room-tiles r))
                                 (tilemap-size (room-tiles r))))
              (b (entry-body r HARKFELL-FEEL)))
-        (world wm: wm room: (worldmap-room wm 0 0) body: b entry: b)))
+        (world wm: wm room: (worldmap-room wm 0 0) body: b entry: b ground: b)))
 
     ;; A world on map wm with the body b (global pixels) as the entry.
     (define (world-at wm b)
       (let ((c (body-center b HARKFELL-FEEL)))
-        (world wm: wm room: (worldmap-room-at-px wm (car c) (cdr c)) body: b entry: b)))
+        (world wm: wm room: (worldmap-room-at-px wm (car c) (cdr c)) body: b entry: b ground: b)))
 
     (define (same-room? a b)
       (and a b (= (placed-x a) (placed-x b)) (= (placed-y a) (placed-y b))))
 
-    ;; After a play tick: a room change makes the body the new room's entry.
+    (define (grounded? b) (eq? (body-mode b) 'ground))
+
+    ;; A body kept to return to is kept at rest (A0's entry always was): a
+    ;; return to a lip while still running would carry the body straight
+    ;; back over it.
+    (define (at-rest b)
+      (body b vx: 0.0 vy: 0.0 jumping: #f cut: #f coyote: 0 buffer: 0 lock: 0 events: '()))
+
+    ;; After a play tick: a room change sets the new room's entry (the body,
+    ;; on foot; else the last grounded body, provisionally), and a standing
+    ;; tick settles a provisional entry and is remembered.
     (define (follow-room w)
-      (let* ((c (body-center (world-body w) HARKFELL-FEEL))
-             (p (worldmap-room-at-px (world-wm w) (car c) (cdr c))))
-        (if (and p (not (same-room? p (world-room w))))
-            (world w room: p entry: (world-body w) entered: (+ (world-entered w) 1))
+      (let* ((b (world-body w))
+             (c (body-center b HARKFELL-FEEL))
+             (p (worldmap-room-at-px (world-wm w) (car c) (cdr c)))
+             (w (if (and p (not (same-room? p (world-room w))))
+                    (if (grounded? b)
+                        (world w room: p entry: (at-rest b) provisional: #f entered: (+ (world-entered w) 1))
+                        (world w room: p entry: (or (world-ground w) (world-entry w)) provisional: #t
+                               entered: (+ (world-entered w) 1)))
+                    w)))
+        (if (grounded? b)
+            (let ((r (at-rest b)))
+              (world w ground: r
+                     entry: (if (world-provisional w) r (world-entry w))
+                     provisional: #f))
             w)))
 
     (define (world-tick w in)
@@ -130,8 +159,10 @@
     (define (world-reset w)
       (world w body: (world-entry w) phase: 'play timer: 0))
 
+    ;; In rock or in a hazard: not a place to leave a body after a reload.
     (define (inside-rock? tm b)
-      (box-any? tm (body-x b) (body-y b) (feel-box-w HARKFELL-FEEL) (feel-box-h HARKFELL-FEEL) kind-solid?))
+      (box-any? tm (body-x b) (body-y b) (feel-box-w HARKFELL-FEEL) (feel-box-h HARKFELL-FEEL)
+                (lambda (k) (or (kind-solid? k) (kind-hazard? k)))))
 
     ;; The world on a new map (a room file changed). fallback: a body to use
     ;; when both the body and the entry are inside rock now.
@@ -141,7 +172,8 @@
                         (worldmap-room wm (placed-x (world-room w)) (placed-y (world-room w)))))
              (entry (if (inside-rock? tm (world-entry w)) fallback (world-entry w)))
              (b (if (inside-rock? tm (world-body w)) entry (world-body w))))
-        (world w wm: wm room: (or room (world-room w)) body: b entry: entry)))
+        (world w wm: wm room: (or room (world-room w)) body: b entry: entry
+               ground: (if (inside-rock? tm (or (world-ground w) entry)) entry (world-ground w)))))
 
     ;; How dark the screen is, 0 (clear) to 1 (black), eased.
     (define (world-dim w)

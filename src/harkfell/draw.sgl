@@ -355,9 +355,21 @@
                 ((and (= (room-x (car rs)) rx) (= (room-y (car rs)) ry)) (car rs))
                 (else (find (cdr rs)))))))
 
-    ;; Every room at its place, scale k, gap px apart on a dark ground, each
-    ;; labelled with its coordinate and, if labels?, its title's first word
-    ;; (lower case: the mini font's letters).
+    ;; A music note (section 8's atlas mark for a room with a fixed moment),
+    ;; 5x7 with its top-left at (x, y).
+    (define (draw-note-mark x y)
+      (set-color 0.0 0.0 0.0 0.6)
+      (draw-filled-rect (- x 1) (- y 1) 7 9)
+      (set-color 0.95 0.9 0.6)
+      (draw-filled-rect (+ x 2) y 1 5)
+      (draw-filled-rect (+ x 3) y 2 1)
+      (draw-filled-rect (+ x 4) (+ y 1) 1 1)
+      (draw-filled-rect x (+ y 5) 3 2))
+
+    ;; Every room at its place, scale k, gap px apart on a dark ground; with
+    ;; labels?, each labelled with its coordinate, and a note mark on a room
+    ;; with a fixed moment (the atlas's mark, section 8; overtones get their
+    ;; dots when there are overtones to find, A3).
     (define (draw-overview rooms k gap labels?)
       (let* ((sz (overview-size rooms k gap))
              (x0 (caddr sz)) (y0 (cadddr sz))
@@ -375,7 +387,9 @@
                   (set-color 0.0 0.0 0.0 0.6)
                   (draw-filled-rect (+ ox 1) (+ oy 1) (+ 2 (text-width-mini label 1)) 7)
                   (set-color 0.95 0.95 0.9)
-                  (draw-text-mini label (+ ox 2) (+ oy 2) 1)))))
+                  (draw-text-mini label (+ ox 2) (+ oy 2) 1)
+                  (when (room-moment rm)
+                    (draw-note-mark (- (+ ox (floor-int (* k VIEW-W))) 8) (+ oy 2)))))))
           rooms)))
 
     ;; Lines of text at the top right of the rectangle x y w, cells of
