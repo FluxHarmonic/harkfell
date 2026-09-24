@@ -1,0 +1,269 @@
+;;; (harkfell title) - What stands before the world: the start screen
+;;; (ruling D32), the Flux Harmonic card (D33), in IM Fell (D34).
+;;;
+;;; Both are drawn as the room is: a pixel view of palette slots through
+;;; (harkfell render)'s pass, put on the window at the room's whole scale;
+;;; and then the words, which are images (scripts/art/type, one per whole
+;;; scale) drawn at the window's own resolution over the pixel view, never
+;;; scaled up from it.
+;;;
+;;; The start screen: black; the name, and D32's two lines; a few lantern
+;;; moths drifting slowly round the words, drawn a little toward the
+;;; pointer (a cursor, a touch) and glowing. Quiet: no menu, no motion but
+;;; theirs.
+;;;
+;;; The card: black; the Flux Harmonic mark (assets/art/mark.txt, the mark in
+;;; Harkfell's slots) fading in and out by the dither, no motion graphics.
+;;;
+;;; The palette is the Hollow's (the world begins there at dawn), or
+;;; Reedfen's until the Hollow exists.
+;;;
+;;; What calls these (the frame sequence, CONTENT's (harkfell frame)) owns
+;;; the timing; both draw on the window, after begin-frame:
+;;;   (draw-start! w h alpha t px py web? kind)
+;;;       w h: the window in pixels; alpha 0..1: how far it is faded in; t:
+;;;       the caller's 60 Hz tick (the moths are stepped up to it); px py:
+;;;       the pointer in window pixels, or #f; web?: the web build (the second
+;;;       line names touch); kind: 'touch on a touch-only device
+;;;   (draw-card! w h alpha t)    the Flux Harmonic card at alpha 0..1
+;;;   (card-fade s)               D33's envelope at s seconds (in over 1.2 s,
+;;;                               held, out by CARD-SECONDS), for a caller
+;;;                               that wants it
+;;;   (title-set-content! ct)     the world, for its palette (the Hollow's)
+;;;   (start-reset!)              the moths anew
+;;; The words' images come through (harkfell images), whose fetcher the
+;;; shells install.
+
+(define-library (harkfell title)
+  (import (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (engine view)
+          (harkfell palette)
+          (harkfell render)
+          (harkfell atlas)
+          (harkfell content)
+          (harkfell draw)
+          (harkfell images))
+
+  (export title-set-content! start-reset! draw-start! draw-card!
+          card-fade CARD-SECONDS start-moths TEXT-LAYOUT type-scale)
+
+  (begin
+    (define (floor-int x) (exact (floor x)))
+
+    ;; --- the images of the words ----------------------------------------------------
+
+
+    ;; The whole scale an image is made at for a view drawn s device pixels
+    ;; per view pixel: the nearest of 1..8.
+    (define (type-scale s) (max 1 (min 8 (floor-int (+ s 0.5)))))
+
+    (define (type-path id k) (string-append "assets/type/" id "@" (number->string k) ".png"))
+
+    ;; Where each line of words stands, its centre in view pixels:
+    ;; (id x y slot-name).
+    (define TEXT-LAYOUT
+      (list (list "wordmark" 200 60 'sky-4)
+            (list "listen" 200 104 'fur-2)
+            (list "step" 200 121 'fur-2)))
+
+    ;; --- the palette ------------------------------------------------------------------------
+
+    (define *content* #f)
+    (define *strips* #f)
+    (define (title-set-content! ct) (set! *content* ct) (set! *strips* #f))
+
+    (define (palette-region)
+      (let ((names (if *content* (map region-name (content-regions *content*)) '())))
+        (cond ((memq 'hollow names) 'hollow)
+              ((memq 'reedfen names) 'reedfen)
+              ((pair? names) (car names))
+              (else 'none))))
+
+    (define (rgb) (region-colours (palette-region)))
+
+    (define (ensure-strips!)
+      (unless *strips* (set! *strips* (make-strips (rgb)))))
+
+    ;; --- the moths --------------------------------------------------------------------------
+
+    ;; A moth: #(x y vx vy phase speed)
+    (define N-MOTHS 5)
+    (define CX 200.0)
+    (define CY 92.0)
+    (define *moths* '())
+    (define *tick* 0)
+
+    (define (start-reset!)
+      (set! *tick* 0)
+      (set! *moths*
+            (let loop ((i 0) (acc '()))
+              (if (= i N-MOTHS)
+                  (reverse acc)
+                  (let* ((a (+ (* i 1.2566) 0.4))
+                         (x (+ CX (* 150.0 (cos a))))
+                         (y (+ CY (* 60.0 (sin a)))))
+                    (loop (+ i 1)
+                          (cons (vector x y 0.0 0.0 a (+ 0.0021 (* 0.0006 (modulo (* i 3) 5)))) acc)))))))
+
+    (define (start-moths) *moths*)
+
+    ;; One tick: each moth follows a point that goes slowly round an ellipse
+    ;; about the words, wandering off it a little, and is drawn a little
+    ;; toward the pointer when it is near (within REACH px).
+    (define REACH 120.0)
+    (define (start-tick! pointer)
+      (when (null? *moths*) (start-reset!))
+      (set! *tick* (+ *tick* 1))
+      (let ((t *tick*))
+        (for-each
+          (lambda (m)
+            (let* ((a (+ (vector-ref m 4) (vector-ref m 5)))
+                   (i (vector-ref m 5))
+                   (wx (* 12.0 (sin (+ (* t 0.011) (* 900.0 i)))))
+                   (wy (* 7.0 (cos (+ (* t 0.017) (* 700.0 i)))))
+                   (tx (+ CX (* 152.0 (cos a)) wx))
+                   (ty (+ CY (* 62.0 (sin a)) wy))
+                   (x (vector-ref m 0)) (y (vector-ref m 1))
+                   (pull (if pointer
+                             (let* ((dx (- (car pointer) x)) (dy (- (cdr pointer) y))
+                                    (d (sqrt (+ (* dx dx) (* dy dy)))))
+                               (if (< d REACH) (* 0.45 (- 1.0 (/ d REACH))) 0.0))
+                             0.0))
+                   (tx (if pointer (+ tx (* pull (- (car pointer) tx))) tx))
+                   (ty (if pointer (+ ty (* pull (- (cdr pointer) ty))) ty))
+                   (vx (* 0.955 (+ (vector-ref m 2) (* 0.0022 (- tx x)))))
+                   (vy (* 0.955 (+ (vector-ref m 3) (* 0.0022 (- ty y))))))
+              (vector-set! m 4 a)
+              (vector-set! m 2 vx)
+              (vector-set! m 3 vy)
+              (vector-set! m 0 (+ x vx))
+              (vector-set! m 1 (+ y vy))))
+          *moths*)))
+
+    ;; --- drawing ---------------------------------------------------------------------------
+
+    (define (cell name) (atlas-index name))
+
+    (define (draw-cell-centred! i x y face)
+      (when i
+        (let ((sz (atlas-size i)))
+          (set-color 1.0 1.0 1.0 1.0)
+          (atlas-draw! i (- (floor-int x) (floor-int (/ (car sz) 2))) (- (floor-int y) (floor-int (/ (cdr sz) 2))) face))))
+
+    (define (disc! cx cy r)
+      (let* ((x0 (floor-int cx)) (y0 (floor-int cy)) (ri (floor-int r)))
+        (let loop ((dy (- ri)))
+          (when (<= dy ri)
+            (let ((w (floor-int (sqrt (max 0.0 (- (* r r) (* dy dy)))))))
+              (draw-filled-rect (- x0 w) (+ y0 dy) (+ 1 (* 2 w)) 1))
+            (loop (+ dy 1))))))
+
+    ;; The pixel view (black, moths or the mark) into the colour target.
+    (define (pixel-pass! draw-things! black)
+      (ensure-render!)
+      (atlas-ensure!)
+      (ensure-strips!)
+      (with-render-target (room-index-rt)
+        (set-blend-mode 'normal)
+        (paint-slot! (slot-of 'black))
+        (draw-filled-rect 0 0 VIEW-W VIEW-H)
+        (draw-things!)
+        (draw-strips! *strips*))
+      (resolve! *tick* black (slot-of 'h2)))
+
+    ;; The colour target onto the window at the fit, opaque.
+    (define (present-view! f)
+      (with-blend-mode 'none
+        (set-color 1.0 1.0 1.0 1.0)
+        (draw-render-target (room-color-rt) (fit-x f) (fit-y f) (fit-w f) (fit-h f))))
+
+    ;; A line of words centred on view (vx, vy), at the window's resolution.
+    (define (draw-words! f id vx vy rgb alpha)
+      (let* ((s (/ (fit-w f) (* 1.0 VIEW-W)))
+             (k (type-scale s))
+             (tex (image-texture (type-path id k))))
+        (when tex
+          (let* ((z (/ s k))
+                 (w (* z (texture-width tex))) (h (* z (texture-height tex)))
+                 (cx (+ (fit-x f) (* vx s))) (cy (+ (fit-y f) (* vy s))))
+            (set-color (car rgb) (cadr rgb) (caddr rgb) alpha)
+            (draw-texture tex (floor-int (- cx (/ w 2))) (floor-int (- cy (/ h 2))) w h)))))
+
+    ;; Which second line: D32's "Press any key, or touch, to step in.", less
+    ;; "or touch" on a native build and less "any key" on a touch-only
+    ;; device. kind: 'touch for a touch-only device, anything else keys (and
+    ;; touch too on the web).
+    (define (step-id web? kind)
+      (cond ((not web?) "step-keys")
+            ((eq? kind 'touch) "step-touch")
+            (else "step-both")))
+
+    ;; The moths are stepped up to tick t (the caller's clock, 60 Hz); a
+    ;; clock that went back, or leapt more than a few seconds, starts them
+    ;; anew rather than running them through the gap.
+    (define (advance-moths! t pointer)
+      (when (or (null? *moths*) (< t *tick*) (> (- t *tick*) 600))
+        (start-reset!)
+        (set! *tick* t))
+      (let loop ()
+        (when (< *tick* t)
+          (start-tick! pointer)
+          (loop))))
+
+    (define (fit-of w h) (view-fit w h VIEW-W VIEW-H))
+
+    ;; The start screen on a window of w x h pixels, after begin-frame.
+    ;; alpha: 0..1, how far it has faded in (the words and the moths); t: the
+    ;; caller's tick; px py: the pointer in window pixels, or #f; web?: the
+    ;; web build; kind: 'touch on a touch-only device.
+    (define (draw-start! w h alpha t px py web? kind)
+      (let* ((f (fit-of w h))
+             (pointer (and px py (window->view f px py VIEW-W VIEW-H))))
+        (advance-moths! t pointer)
+        (pixel-pass!
+          (lambda ()
+            (for-each
+              (lambda (m)
+                (let* ((up (< (modulo (+ t (floor-int (* 1000 (vector-ref m 5)))) 8) 4))
+                       (face (if (< (vector-ref m 2) 0.0) -1 1)))
+                  (draw-cell-centred! (cell (if up "creatures/moth-up" "creatures/moth-down"))
+                                      (vector-ref m 0) (vector-ref m 1) face)))
+              *moths*)
+            (with-additive-blend
+              (for-each
+                (lambda (m)
+                  (let ((p (+ 0.8 (* 0.2 (sin (+ (* t 0.09) (* 40.0 (vector-ref m 5))))))))
+                    (paint-light! (* 0.34 p)) (disc! (vector-ref m 0) (vector-ref m 1) 7.0)
+                    (paint-light! (* 0.42 p)) (disc! (vector-ref m 0) (vector-ref m 1) 3.5)))
+                *moths*)))
+          (- 1.0 alpha))
+        (present-view! f)
+        (set-blend-mode 'normal)
+        (let ((colours (rgb)))
+          (for-each (lambda (l)
+                      (draw-words! f (if (string=? (car l) "step") (step-id web? kind) (car l))
+                                   (cadr l) (caddr l) (vector-ref colours (slot-of (cadddr l))) alpha))
+                    TEXT-LAYOUT))))
+
+    ;; --- the card --------------------------------------------------------------------------
+
+    (define CARD-SECONDS 4.0)
+    (define (card-fade s)
+      (cond ((< s 0.0) 0.0)
+            ((< s 1.2) (/ s 1.2))
+            ((< s 2.8) 1.0)
+            ((< s CARD-SECONDS) (- 1.0 (/ (- s 2.8) 1.2)))
+            (else 0.0)))
+
+    ;; The card on a window of w x h pixels at alpha 0..1 (the mark comes and
+    ;; goes by the dither, never by a translucency), after begin-frame.
+    (define (draw-card! w h alpha t)
+      (let ((f (fit-of w h)))
+        (set! *tick* t)
+        (pixel-pass!
+          (lambda () (draw-cell-centred! (cell "mark/flux-harmonic") 200 88 1))
+          (- 1.0 alpha))
+        (present-view! f)))))

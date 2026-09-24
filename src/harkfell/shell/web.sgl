@@ -88,7 +88,9 @@
           (harkfell tunes)
           (harkfell audio)
           (harkfell save)
-          (engine store))
+          (engine store)
+          (harkfell images)
+          (harkfell shell web-images))
 
   (export web-main web-dispatch)
 
@@ -154,6 +156,8 @@
       (set-letterbox-color 0.0 0.0 0.0)
       (shell-boot!)
       (shell-add-frame-listener! (lambda (ev) (say "frame" (symbol->string ev))))
+      ;; A4: images by path ((harkfell images)): fetched by the page, decoded here
+      (set-image-fetcher! web-fetcher)
       ;; A2: the sound. A tune the wasm lacks is asked of the page
       ;; ("harkfell: fetch NAME"; it answers with tune-chunk and tune-done).
       (tunes-set-want! (lambda (name) (say "fetch" name)))

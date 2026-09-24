@@ -1,0 +1,52 @@
+;;; (harkfell images) - An image file as a texture, on either target.
+;;;
+;;; The web has no filesystem: the page fetches a file and the wasm decodes
+;;; it; natively the file is read from the repository's root (where the
+;;; game runs, as scripts/dev does). Each shell installs how (a FETCHER);
+;;; everything else asks by path and gets a texture, or #f while it loads
+;;; (and for good once it has failed). A texture is made once per path.
+;;;
+;;;   (image-texture path)          the texture, or #f (not yet, or never)
+;;;   (set-image-fetcher! proc)     (proc path) -> a texture, #f (not yet) or
+;;;                                 'failed; asked again each call until it
+;;;                                 answers a texture or 'failed
+;;;   (image-state path)            'ready 'pending 'failed or #f (never asked)
+;;;
+;;; Linear-filtered (load-texture's): meant for images drawn 1:1 at the
+;;; window's resolution, like (harkfell title)'s words.
+
+(define-library (harkfell images)
+  (import (sigil core)
+          (sigil fs)
+          (sigil graphics))
+
+  (export image-texture set-image-fetcher! image-state native-fetcher)
+
+  (begin
+    (define *fetcher* (lambda (path) 'failed))
+    (define *images* '())       ; ((path . texture | 'failed) ...)
+
+    (define (set-image-fetcher! proc) (set! *fetcher* proc))
+
+    (define (image-texture path)
+      (let ((e (assoc path *images*)))
+        (cond ((and e (eq? (cdr e) 'failed)) #f)
+              (e (cdr e))
+              (else
+               (let ((r (*fetcher* path)))
+                 (cond ((not r) #f)
+                       (else (set! *images* (cons (cons path r) *images*))
+                             (and (not (eq? r 'failed)) r))))))))
+
+    (define (image-state path)
+      (let ((e (assoc path *images*)))
+        (cond ((not e) #f)
+              ((eq? (cdr e) 'failed) 'failed)
+              (else 'ready))))
+
+    ;; The native shell's fetcher: the file at path, from the working
+    ;; directory (the repository's root, where the game runs).
+    (define (native-fetcher path)
+      (if (file-exists? path)
+          (or (load-texture path) 'failed)
+          'failed))))

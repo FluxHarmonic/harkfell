@@ -51,7 +51,7 @@
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
-          slot player-frame set-look-sound!)
+          slot player-frame set-look-sound! region-colours)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -76,6 +76,8 @@
                         (list 'h2 "#e8a84c") (list 'h3 "#b4dc9a") (list 'h4 "#8fb4e6") (list 'h5 "#e6a0b4")
                         (list 'h7 "#a47ce0") (list 'black "#000000")))
         v))
+
+    (define (region-colours name) (region-rgb name))
 
     (define (region-rgb name)
       (let ((e (assq name *rgb*))) (if e (cdr e) FALLBACK)))

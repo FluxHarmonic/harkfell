@@ -66,9 +66,9 @@ for f in "$@"; do
       if ($0 !~ /^[._abcd1234567wxFfkh0]+$/) fail("cell " name ": a character outside the key in: " $0)
       if (width < 0) width = length($0)
       else if (length($0) != width) fail("cell " name " row " nrows + 1 " is " length($0) " wide, the cell is " width)
-      if (width > 64) fail("cell " name " is wider than 64")
+      if (width > 400) fail("cell " name " is wider than 400")
       row[++nrows] = $0
-      if (nrows > 64) fail("cell " name " is taller than 64")
+      if (nrows > 176) fail("cell " name " is taller than 176")
     }
     END { if (!bad) close_cell() }
   ' "$f" >> "$tmp.rows" || exit 1

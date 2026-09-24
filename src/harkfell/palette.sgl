@@ -120,7 +120,9 @@
             (cons 'ground-1 'ground-2) (cons 'ground-2 'ground-3) (cons 'ground-3 'ground-4) (cons 'ground-4 'sky-4)
             (cons 'leaf-1 'leaf-2) (cons 'leaf-2 'leaf-3) (cons 'leaf-3 'sky-4)
             (cons 'water 'sky-2)
-            (cons 'fur-2 'fur-1) (cons 'ink 'ground-2)))
+            (cons 'fur-2 'fur-1) (cons 'ink 'ground-2)
+            ;; on the black of the start screen and the card a glow shows warm
+            (cons 'black 'accent)))
 
     ;; The slot a lookup table sends slot i to.
     (define (lookup table i)

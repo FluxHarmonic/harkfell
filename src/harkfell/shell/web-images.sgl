@@ -1,0 +1,40 @@
+;;; (harkfell shell web-images) - (harkfell images)'s fetcher on the web.
+;;;
+;;; The page has no filesystem: the gles3 bridge fetches the file (relative
+;;; to the page, so "assets/type/..." is served beside it), the wasm decodes
+;;; it (stb_image, load-image-from-memory) and makes a texture. Crash's web
+;;; shell's route (its ensure-texture!), for any number of paths at once. A
+;;; fetch that has not landed after GIVE-UP asks (about ten seconds at one
+;;; ask a frame) is failed for good: (harkfell images) stops asking.
+
+(define-library (harkfell shell web-images)
+  (import (sigil core)
+          (sigil graphics)
+          (sigil graphics image)
+          (sigil list)
+          (sigil browser gles3))
+
+  (export web-fetcher)
+
+  (begin
+    (define GIVE-UP 600)
+    (define *pending* '())      ; ((path handle . asks) ...)
+
+    (define (drop! path)
+      (set! *pending* (filter (lambda (e) (not (string=? (car e) path))) *pending*)))
+
+    (define (web-fetcher path)
+      (let ((e (assoc path *pending*)))
+        (cond ((not e)
+               (set! *pending* (cons (cons path (cons (gles3-fetch-image path) 0)) *pending*))
+               #f)
+              ((gles3-image-ready? (cadr e))
+               (drop! path)
+               (let ((img (load-image-from-memory (gles3-image-ptr (cadr e)) (gles3-image-size (cadr e)))))
+                 (if img
+                     (let ((tex (load-texture img)))
+                       (image-free! img)
+                       (or tex 'failed))
+                     'failed)))
+              ((> (cddr e) GIVE-UP) (drop! path) 'failed)
+              (else (set-cdr! (cdr e) (+ 1 (cddr e))) #f))))))

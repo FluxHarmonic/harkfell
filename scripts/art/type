@@ -1,0 +1,50 @@
+#!/bin/sh
+# The words Harkfell shows, set in IM Fell (ruling D34) and rendered to
+# images, one per whole view scale, so the game draws each at the screen's
+# own resolution over the pixel view (a serif scaled up from 400x176 turns
+# to mush) and never scales text.
+#
+#   scripts/art/type        assets/fonts/*.ttf -> assets/type/ID@K.png, K = 1..8
+#
+# ImageMagick sets the text (FreeType, with the fonts' kerning); every image
+# is white on transparent, trimmed, with a 2 px clear margin; the game tints
+# it. A size is given in view pixels at K = 1 (the font's pixel size), so
+# the image at K is K times that: the words keep their place against the
+# pixel world whatever the window.
+#
+# The items (ID FONT SIZE TRACKING TEXT):
+#   wordmark     IM Fell English SC, the name, hand-spaced (tracking in
+#                em/100 between letters)
+#   listen       IM Fell English: D32's first line
+#   step-both    IM Fell English italic: D32's second line, keys and touch
+#   step-keys    ... keys only (the desktop build)
+#   step-touch   ... touch only
+set -eu
+export LC_ALL=C
+cd "$(dirname "$0")/../.." || exit 1
+mkdir -p assets/type
+for f in IMFeENrm28P IMFeENit28P IMFeENsc28P; do
+  [ -f "assets/fonts/$f.ttf" ] || { echo "type: no assets/fonts/$f.ttf"; exit 1; }
+done
+n=0
+item() {
+  id="$1"; font="assets/fonts/$2.ttf"; size="$3"; track="$4"; text="$5"
+  for k in 1 2 3 4 5 6 7 8; do
+    px=$(awk -v s="$size" -v k="$k" 'BEGIN { printf "%.2f", s * k }')
+    kern=$(awk -v t="$track" -v p="$px" 'BEGIN { printf "%.2f", t * p / 100 }')
+    out="assets/type/$id@$k.png"
+    convert -background none -fill white -font "$font" -pointsize "$px" -density 72 \
+      -kerning "$kern" label:"$text" -trim +repage -bordercolor none -border 2 \
+      +set date:create +set date:modify -define png:exclude-chunks=date,time,tIME,tEXt,zTXt \
+      "PNG32:$out"
+    [ -s "$out" ] || { echo "type: $out was not made"; exit 1; }
+    n=$((n + 1))
+  done
+}
+item wordmark   IMFeENsc28P 30 12 "Harkfell"
+item listen     IMFeENrm28P 9.5 0 "Harkfell is a game of listening. Headphones bring it closest."
+item step-both  IMFeENit28P 9.5 0 "Press any key, or touch, to step in."
+item step-keys  IMFeENit28P 9.5 0 "Press any key to step in."
+item step-touch IMFeENit28P 9.5 0 "Touch to step in."
+[ "$n" -eq 40 ] || { echo "type: made $n images, want 40"; exit 1; }
+echo "type: $n images -> assets/type/"

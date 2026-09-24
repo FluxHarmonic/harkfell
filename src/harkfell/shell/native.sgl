@@ -63,7 +63,8 @@
           (harkfell audio)
           (harkfell save)
           (harkfell check)
-          (engine store))
+          (engine store)
+          (harkfell images))
 
   (export native-main)
 
@@ -209,6 +210,8 @@
               (else
                (shell-boot!)
                (shell-add-frame-listener! (lambda (ev) (say "harkfell: frame " (symbol->string ev))))
+               ;; A4: images by path ((harkfell images)), read from the repository root
+               (set-image-fetcher! native-fetcher)
                (shell-set-ms! (and (member "--ms" args) #t))
                ;; A2: the sound; --bench runs the phone measurement natively
                (audio-boot! (lambda parts (say (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts)))))
