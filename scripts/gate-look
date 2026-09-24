@@ -136,10 +136,12 @@ run_green() {
 
 # --- sabotage ------------------------------------------------------------------
 
-# plant NAME FILE AWK-PROGRAM LEG: the plant must change FILE (hash moves),
-# the leg must go RED, and FILE must come back to its pre-plant hash.
+# plant NAME FILE AWK-PROGRAM LEG EXPECT: the plant must change FILE (hash
+# moves), the leg must go RED naming EXPECT (the failure the plant is for: a
+# red for another reason is a gate that caught the wrong thing), and FILE
+# must come back to its pre-plant hash.
 plant() {
-  name="$1"; file="$2"; prog="$3"; leg="$4"
+  name="$1"; file="$2"; prog="$3"; leg="$4"; expect="$5"
   git diff --quiet HEAD -- "$file" || { say "sabotage $name: SETUP-FAILED ($file has uncommitted changes)"; return 2; }
   before="$(sha256sum "$file" | cut -d' ' -f1)"
   cp "$file" "$S/restore"
@@ -151,7 +153,8 @@ plant() {
   case "$file" in assets/art/*) scripts/art/cells > /dev/null 2>&1 ;; esac
   back="$(sha256sum "$file" | cut -d' ' -f1)"
   [ "$back" = "$before" ] || { say "sabotage $name: NOT RESTORED ($file)"; exit 2; }
-  if [ "$rc" -eq 1 ]; then say "sabotage $name: RED (good) :: $(grep -m1 'RED' "$S/leg.log")"; return 0; fi
+  if [ "$rc" -eq 1 ] && grep -qF -- "$expect" "$S/leg.log"; then say "sabotage $name: RED on its own test (good) :: $expect"; return 0; fi
+  if [ "$rc" -eq 1 ]; then say "sabotage $name: RED, but not naming: $expect"; sed "s/^/    /" "$S/leg.log" | head -8; return 1; fi
   say "sabotage $name: NOT RED (rc $rc)"; cat "$S/leg.log" | head -5; return 1
 }
 
@@ -160,15 +163,15 @@ leg_art_regen() { scripts/art/cells > /dev/null 2>&1 || { say "art: RED (cells r
 
 run_sabotage() {
   fail=0
-  plant fifteen-roles world/world.sgl '{ sub(/ fen-water fen-brack fur-1 fur-2 ink\)/, " fen-water fur-1 fur-2 ink)"); print }' leg_art || fail=1
-  plant smooth-holds assets/art/reedfen.txt '/^= rough-fill-/ { on = 1 } /^= rough-top/ { on = 0 } on && /^[0-9]+$/ { gsub(/1/, "3") } { print }' leg_art_regen || fail=1
-  plant lost-frame assets/art/player.txt '/^= run-c$/ { print "= run-cc"; next } { print }' leg_art_regen || fail=1
-  plant player-in-peat assets/art/player.txt '/^= idle-a$/ { on = 1 } on && /^\.FFFFFFkFF$/ && !d { print ".FFFF2FkFF"; d = 1; next } { print }' leg_art_regen || fail=1
-  plant lookup-off-palette src/harkfell/palette.sgl "{ sub(/\\(cons 'sky-4 'sky-1\\)/, \"(cons 'sky-4 'sky-9)\"); print }" leg_art || fail=1
-  plant ragged-cell assets/art/creatures.txt '/^= moth-up$/ { print; getline; print $0 "."; next } { print }' leg_cells_regen || fail=1
-  plant stale-module src/harkfell/art/cells.sgl '/^    \(define CELL-COUNT/ { print "    ;; planted"; } { print }' leg_cells || fail=1
+  plant fifteen-roles world/world.sgl '{ sub(/ fen-water fen-brack fur-1 fur-2 ink\)/, " fen-water fur-1 fur-2 ink)"); print }' leg_art "every region lists sixteen roles" || fail=1
+  plant smooth-holds assets/art/reedfen.txt '/^= rough-fill-/ { on = 1 } /^= rough-top/ { on = 0 } on && /^[0-9]+$/ { gsub(/1/, "3") } { print }' leg_art_regen "climbable rock has holds" || fail=1
+  plant lost-frame assets/art/player.txt '/^= run-c$/ { print "= run-cc"; next } { print }' leg_art_regen "every frame player-frame can name exists" || fail=1
+  plant player-in-peat assets/art/player.txt '/^= idle-a$/ { on = 1 } on && /^\.FFFFFFkFF$/ && !d { print ".FFFF2FkFF"; d = 1; next } { print }' leg_art_regen "slots only" || fail=1
+  plant lookup-off-palette src/harkfell/palette.sgl "{ sub(/\\(cons 'sky-4 'sky-1\\)/, \"(cons 'sky-4 'sky-9)\"); print }" leg_art "a lookup names only slots" || fail=1
+  plant ragged-cell assets/art/creatures.txt '/^= moth-up$/ { print; getline; print $0 "."; next } { print }' leg_cells_regen "row 2 is 5 wide" || fail=1
+  plant stale-module src/harkfell/art/cells.sgl '/^    \(define CELL-COUNT/ { print "    ;; planted"; } { print }' leg_cells "is not what assets/art makes" || fail=1
   # the product layer: the resolve lets a colour off the palette
-  plant resolve-tint src/harkfell/render.sgl '{ sub(/"    fragColor = vec4\(c, 1.0\);\\n"/, "\"    fragColor = vec4(mix(c, vec3(1.0, 0.0, 1.0), 0.03), 1.0);\\n\""); print }' leg_palette_rebuilt || fail=1
+  plant resolve-tint src/harkfell/render.sgl '{ sub(/"    fragColor = vec4\(c, 1.0\);\\n"/, "\"    fragColor = vec4(mix(c, vec3(1.0, 0.0, 1.0), 0.03), 1.0);\\n\""); print }' leg_palette_rebuilt "palette: RED" || fail=1
   return $fail
 }
 
