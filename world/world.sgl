@@ -13,35 +13,53 @@
 ;; (the design's section 4: you wake over the hum).
 (start region: hollow room: (4 3) cell: (15 8))
 
-;; The world palette: (role "#rrggbb" note). PLACEHOLDER colours for A1, so
-;; the rooms read; A4 replaces them with the real, dithered palettes. A
-;; region uses at most 16 roles.
+;; The world palette: (role "#rrggbb" note). A4's palettes (the look track;
+;; (harkfell palette) explains the slots). A region lists exactly sixteen
+;; roles in SLOT order in its palette:, sky-1..4 ground-1..4 leaf-1..3 water
+;; accent fur-1 fur-2 ink; the last three are the player's and the same in
+;; every region. Low saturation, one warm accent per region (section 7).
 (palette
-  (sky-1 "#9fb3bf" "high sky, pale blue-grey")
-  (sky-2 "#b8c6c4" "middle sky")
-  (sky-3 "#d3d6c8" "sky near the horizon, a little warm")
-  (fog "#c9ccbf" "low mist over the water")
-  (reed-1 "#6f7a4c" "reed stalks, shade")
-  (reed-2 "#8a8f55" "reed stalks, lit")
-  (reed-3 "#b0a868" "seed heads, moss on rock")
-  (mud-1 "#4f4a3e" "peat and rough rock")
-  (mud-2 "#6b6250" "rough rock's grain, planks")
-  (water-1 "#4d6a72" "still water")
-  (water-2 "#9fb8ba" "the water's skin")
-  (stone-1 "#6e6f68" "smooth rock")
-  (stone-2 "#8e8f86" "rock's lit edge, the ring-stones")
-  (ember "#b8784a" "Reedfen's one warm accent: the brackish water")
-  (fur-1 "#e8e0cf" "the creature")
-  (fur-2 "#2a2a2e" "its eye")
+  ;; Reedfen: low, wide, wet; the sky is most of the screen
+  (fen-sky-1 "#7b92a1" "high sky, grey-blue")
+  (fen-sky-2 "#99adb4" "middle sky; far hills")
+  (fen-sky-3 "#b9c7c2" "low sky")
+  (fen-sky-4 "#d8dbcb" "the horizon, a little warm; mist; the water's skin")
+  (fen-peat-1 "#2c2b27" "deep peat, shadow")
+  (fen-peat-2 "#4a453b" "peat")
+  (fen-peat-3 "#6c6552" "mud, old stone")
+  (fen-peat-4 "#968e76" "lit stone, dry mud")
+  (fen-reed-1 "#4d5a3d" "reeds in shade")
+  (fen-reed-2 "#75794b" "reeds")
+  (fen-reed-3 "#aea267" "seed heads, lit blades")
+  (fen-water "#46616b" "still water")
+  (fen-brack "#b9754a" "Reedfen's one warm accent: the brackish water")
+  ;; the Hollow: a meadow ring of mute stones round a shallow bowl, at dawn
+  (hol-sky-1 "#65718e" "high sky, slate")
+  (hol-sky-2 "#9298ad" "middle sky; far fells")
+  (hol-sky-3 "#c6b7b2" "low sky, rose-grey")
+  (hol-sky-4 "#e8d1ac" "dawn at the horizon")
+  (hol-stone-1 "#2d2b2c" "shadow")
+  (hol-stone-2 "#4d4a48" "limestone in shade")
+  (hol-stone-3 "#767470" "limestone")
+  (hol-stone-4 "#a7a59b" "limestone lit")
+  (hol-turf-1 "#435234" "turf in shade")
+  (hol-turf-2 "#66763f" "turf")
+  (hol-turf-3 "#9aa25e" "grass lit")
+  (hol-tarn "#465a6b" "the tarn")
+  (hol-bracken "#b0643a" "the Hollow's one warm accent: bracken")
+  ;; the player, the same everywhere
+  (fur-1 "#ede5d3" "the creature's fur")
+  (fur-2 "#b8ab95" "its fur in shade")
+  (ink "#26252b" "its eye")
   ;; A3: each harmonic has one colour, used everywhere (section 3, "How the
   ;; player learns a gate"): the glyph on a ring-stone, the harmonic when you
-  ;; find it, the moths drawn to it. World-wide roles, not a region's: every
-  ;; region shows them. PLACEHOLDERS like the rest until A4.
-  (h2 "#e8a84c" "H2, amber")
+  ;; find it, the moths drawn to it. World-wide roles, not a region's.
+  (h2 "#eaa648" "H2, amber")
   (h3 "#b4dc9a" "H3, pale green")
   (h4 "#8fb4e6" "H4, cold blue")
   (h5 "#e6a0b4" "H5, rose")
-  (h7 "#a47ce0" "H7, a violet no region uses"))
+  (h7 "#a47ce0" "H7, a violet no region uses")
+  (black "#000000" "fades"))
 
 ;; The Hollow (A4): the start, a bowl on the fell above the fen; seven rooms
 ;; wide and two high, west of Reedfen (topics/harkfell-a4-region-maps). It
@@ -69,8 +87,8 @@
   bed: "reedfen-bed"
   bed-channels: (wind water reeds drone)
   mode: dorian
-  palette: (sky-1 sky-2 sky-3 fog reed-1 reed-2 reed-3 mud-1 mud-2
-            water-1 water-2 stone-1 stone-2 ember fur-1 fur-2)
+  palette: (fen-sky-1 fen-sky-2 fen-sky-3 fen-sky-4 fen-peat-1 fen-peat-2 fen-peat-3 fen-peat-4
+            fen-reed-1 fen-reed-2 fen-reed-3 fen-water fen-brack fur-1 fur-2 ink)
   hazard: brackish
   tiles: reedfen
   roster: (reedling bellfrog lantern-moth fen-vole pike heron-shape)

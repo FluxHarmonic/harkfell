@@ -10,8 +10,10 @@
 ;;; (below). In the colour of the world palette's fur-1 (A1's placeholder
 ;;; #e8e0cf), so they read as the same ears grown, not a marker.
 ;;;
-;;;   (draw-ears b ox oy dir)   b: the body; ox oy: the room's origin in world
+;;;   (draw-ears b ox oy dir [paint])   b: the body; ox oy: the room's origin in world
 ;;;                             pixels; dir: up | left | right | below | #f
+;;;                             paint: a thunk that sets the colour (the palette
+;;;                             pass sets the fur-1 slot); by default fur-1's colour
 
 (define-library (harkfell ears)
   (import (sigil core)
@@ -24,11 +26,11 @@
   (begin
     (define (px x y) (draw-filled-rect x y 1 1))
 
-    (define (draw-ears b ox oy dir)
+    (define (draw-ears b ox oy dir . paint)
       (when dir
         (let ((x (- (exact (floor (- (body-x b) ox))) 1))
               (y (exact (floor (- (body-y b) oy)))))
-          (set-color 0.910 0.878 0.812 1.0)
+          (if (pair? paint) ((car paint)) (set-color 0.910 0.878 0.812 1.0))
           (case dir
             ((up)
              (draw-filled-rect (+ x 2) (- y 2) 1 5)

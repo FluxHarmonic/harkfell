@@ -1,0 +1,144 @@
+;;; (harkfell palette) - The palette as SLOTS, and what each slot becomes
+;;; under water, lit, reflected and at night (harkfell-design section 7).
+;;;
+;;; The room is drawn as palette slots, not colours ((harkfell render)
+;;; turns slots into colours in one pass), so every tile, sprite and effect
+;;; names a slot, and a region's palette decides what the slot looks like.
+;;; A region has exactly sixteen roles, listed in world/world.sgl's
+;;; (region ... palette: (...)) in this order:
+;;;
+;;;   slot  name       what it is for
+;;;   0-3   sky-1..4   the sky, high to the horizon (sky-4 is also mist)
+;;;   4-7   ground-1..4  rock, peat, earth, dark to lit
+;;;   8-10  leaf-1..3  reeds, grass, moss, shade to lit
+;;;   11    water      the body of still water
+;;;   12    accent     the region's one warm accent (Reedfen's brackish
+;;;                    water, the Hollow's bracken)
+;;;   13-15 fur-1 fur-2 ink   the player's: the same colours in every
+;;;                    region, so the creature is the same creature
+;;;
+;;; and after them the world-wide slots every region shows:
+;;;
+;;;   16-20 h2 h3 h4 h5 h7   the harmonics, one colour each (section 3)
+;;;   21    black      fades
+;;;
+;;; Nothing that matters is carried by colour alone (Crash 0.1.2's
+;;; lesson): a climbable wall differs from a smooth one by its texture, a
+;;; harmonic by its glyph, a hazard by its surface.
+;;;
+;;; The LOOKUPS are slot to slot, so an effect stays inside the palette by
+;;; construction:
+;;;   WATER     a slot seen through still water
+;;;   DEEP      the same, a tile or more down
+;;;   REFLECT   a slot seen mirrored in the water's skin
+;;;   LIT       a slot in light (a moth, a stone ringing)
+;;;
+;;; Pure: no drawing. (harkfell render) turns a region's colours and these
+;;; lookups into the strips its shader reads.
+
+(define-library (harkfell palette)
+  (import (sigil list)
+          (sigil string)
+          (sigil math))
+
+  (export SLOTS REGION-SLOT-COUNT SLOT-COUNT WORLD-SLOTS
+          slot-of slot-name hex->rgb
+          WATER DEEP REFLECT LIT lookup
+          region-rgb-vector MAGENTA)
+
+  (begin
+    (define SLOTS
+      (list 'sky-1 'sky-2 'sky-3 'sky-4
+            'ground-1 'ground-2 'ground-3 'ground-4
+            'leaf-1 'leaf-2 'leaf-3
+            'water 'accent
+            'fur-1 'fur-2 'ink
+            'h2 'h3 'h4 'h5 'h7 'black))
+
+    (define REGION-SLOT-COUNT 16)
+    (define SLOT-COUNT 22)
+
+    ;; The world-wide slots: the role of the same name in the world palette.
+    (define WORLD-SLOTS (list 'h2 'h3 'h4 'h5 'h7 'black))
+
+    (define (index-of x l)
+      (let loop ((l l) (i 0))
+        (cond ((null? l) #f)
+              ((eq? (car l) x) i)
+              (else (loop (cdr l) (+ i 1))))))
+
+    ;; A slot's number, or 0 (sky-1) for a name that is not a slot: a wrong
+    ;; name shows as sky rather than stopping the frame, and the art gate
+    ;; (test/test-art.sgl) refuses it before it ships.
+    (define (slot-of name) (or (index-of name SLOTS) 0))
+    (define (slot-name i) (list-ref SLOTS i))
+
+    (define MAGENTA (list 1.0 0.0 1.0))
+
+    (define (hex-digit c)
+      (let ((i (char->integer (char-downcase c))))
+        (if (<= 48 i 57) (- i 48) (+ 10 (- i 97)))))
+
+    ;; "#rrggbb" -> (r g b) in 0..1; magenta for anything else.
+    (define (hex->rgb s)
+      (if (and (string? s) (= (string-length s) 7))
+          (map (lambda (k) (/ (+ (* 16 (hex-digit (string-ref s k))) (hex-digit (string-ref s (+ k 1)))) 255.0))
+               (list 1 3 5))
+          MAGENTA))
+
+    ;; --- the lookups: (from . to) by slot name; a slot not listed maps to itself.
+
+    ;; Through still water: the sky behind goes to the water's own colour,
+    ;; everything else a step darker and toward the ground.
+    (define WATER
+      (list (cons 'sky-1 'water) (cons 'sky-2 'water) (cons 'sky-3 'water) (cons 'sky-4 'sky-1)
+            (cons 'ground-2 'ground-1) (cons 'ground-3 'ground-2) (cons 'ground-4 'ground-3)
+            (cons 'leaf-1 'ground-1) (cons 'leaf-2 'leaf-1) (cons 'leaf-3 'leaf-2)
+            (cons 'accent 'ground-2)
+            (cons 'fur-1 'fur-2) (cons 'fur-2 'ground-3)))
+
+    ;; Deeper than a tile: darker again.
+    (define DEEP
+      (list (cons 'sky-1 'water) (cons 'sky-2 'water) (cons 'sky-3 'water) (cons 'sky-4 'water)
+            (cons 'ground-2 'ground-1) (cons 'ground-3 'ground-1) (cons 'ground-4 'ground-2)
+            (cons 'leaf-1 'ground-1) (cons 'leaf-2 'ground-1) (cons 'leaf-3 'leaf-1)
+            (cons 'water 'ground-1)
+            (cons 'accent 'ground-1)
+            (cons 'fur-1 'ground-3) (cons 'fur-2 'ground-2)))
+
+    ;; Mirrored in the skin: the sky's own light, dimmed a step.
+    (define REFLECT
+      (list (cons 'sky-1 'water) (cons 'sky-2 'sky-1) (cons 'sky-3 'sky-2) (cons 'sky-4 'sky-3)
+            (cons 'ground-1 'ground-1) (cons 'ground-2 'ground-1) (cons 'ground-3 'ground-2) (cons 'ground-4 'ground-3)
+            (cons 'leaf-1 'ground-1) (cons 'leaf-2 'leaf-1) (cons 'leaf-3 'leaf-2)
+            (cons 'accent 'ground-3)
+            (cons 'fur-1 'sky-3) (cons 'fur-2 'sky-1) (cons 'ink 'ground-1)))
+
+    ;; In light: a step up its own ramp.
+    (define LIT
+      (list (cons 'sky-1 'sky-2) (cons 'sky-2 'sky-3) (cons 'sky-3 'sky-4)
+            (cons 'ground-1 'ground-2) (cons 'ground-2 'ground-3) (cons 'ground-3 'ground-4) (cons 'ground-4 'sky-4)
+            (cons 'leaf-1 'leaf-2) (cons 'leaf-2 'leaf-3) (cons 'leaf-3 'sky-4)
+            (cons 'water 'sky-2)
+            (cons 'fur-2 'fur-1) (cons 'ink 'ground-2)))
+
+    ;; The slot a lookup table sends slot i to.
+    (define (lookup table i)
+      (let ((e (assq (slot-name i) table)))
+        (if e (slot-of (cdr e)) i)))
+
+    ;; A region's colours as a vector of SLOT-COUNT (r g b): its sixteen
+    ;; roles in slot order, then the world-wide ones. roles: the region's
+    ;; palette: list; world: the world palette ((role "#hex" note) ...). A
+    ;; missing role is MAGENTA (it shows).
+    (define (region-rgb-vector roles world)
+      (let ((v (make-vector SLOT-COUNT MAGENTA))
+            (hex (lambda (role)
+                   (let ((e (assq role world)))
+                     (if (and e (pair? (cdr e))) (hex->rgb (cadr e)) MAGENTA)))))
+        (let loop ((rs roles) (i 0))
+          (when (and (pair? rs) (< i REGION-SLOT-COUNT))
+            (vector-set! v i (hex (car rs)))
+            (loop (cdr rs) (+ i 1))))
+        (for-each (lambda (w) (vector-set! v (slot-of w) (hex w))) WORLD-SLOTS)
+        v))))

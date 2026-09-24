@@ -1,0 +1,256 @@
+;;; (harkfell atlas) - The text-authored cells baked into one texture.
+;;;
+;;; (harkfell art cells) holds every cell as rows of characters (the key is
+;;; scripts/art/cells's). At boot the atlas
+;;;   1. composes each region material's sixteen AUTOTILE shapes (section 7,
+;;;      "Autotiling") from a few authored parts: a fill (one per variant,
+;;;      "-fill-a", "-fill-b", ...) and overlays laid on it for each side
+;;;      with no neighbour of the same material ("-top", "-right",
+;;;      "-bottom", "-left") and each outer corner ("-top-left", ...); in an
+;;;      overlay "." keeps what is under it and "_" erases it, so a corner
+;;;      can be rounded off. The shape for mask m, variant v is
+;;;      "SHEET/MAT@m<m>v<v>" ((engine autotile)'s mask: up 1, right 2,
+;;;      down 4, left 8).
+;;;   2. bakes every cell with an "h" (the harmonic's colour) once per
+;;;      harmonic, as "NAME@h2" ... "NAME@h7"; plain NAME is the h2 one.
+;;;   3. packs everything into one 'nearest texture whose texels are SLOTS
+;;;      ((harkfell render)'s R channel), transparent where the cell has
+;;;      ".".
+;;; A cell is then one draw-texture-region, mirrored for facing left.
+;;;
+;;;   (atlas-ensure!)                 build it once (needs the graphics context)
+;;;   (atlas-index NAME)              the cell's number, or #f
+;;;   (atlas-draw! i x y face)        cell i with its top-left at (x, y); face -1 mirrors
+;;;   (atlas-size i) -> (w . h)
+;;;   (compose-rows base overlay)     one overlay on a cell's rows (pure; tested)
+;;;   (autotile-rows fills parts m v) the shape for mask m, variant v (pure; tested)
+;;;   (char-slot c)                   the key: a character's slot, #f for "." and "_"
+
+(define-library (harkfell atlas)
+  (import (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (engine autotile)
+          (harkfell palette)
+          (harkfell art cells))
+
+  (export atlas-ensure! atlas-ready? atlas-index atlas-draw! atlas-draw-scaled! atlas-size atlas-texture
+          compose-rows autotile-rows char-slot KEY-CHARS
+          MATERIALS PART-NAMES material-cell-name atlas-names)
+
+  (begin
+    ;; --- the key ------------------------------------------------------------------
+
+    (define KEY-CHARS "abcd1234567wxFfkh0")
+
+    (define (char-slot c)
+      (case c
+        ((#\a) 0) ((#\b) 1) ((#\c) 2) ((#\d) 3)
+        ((#\1) 4) ((#\2) 5) ((#\3) 6) ((#\4) 7)
+        ((#\5) 8) ((#\6) 9) ((#\7) 10)
+        ((#\w) 11) ((#\x) 12)
+        ((#\F) 13) ((#\f) 14) ((#\k) 15)
+        ((#\h) 16)
+        ((#\0) 21)
+        (else #f)))
+
+    ;; --- composing ------------------------------------------------------------------
+
+    ;; overlay over base, row by row: "." keeps, "_" erases to ".", anything
+    ;; else replaces. Rows beyond either's size are kept from base; an
+    ;; overlay narrower than base covers its left part.
+    (define (compose-row b o)
+      (let* ((n (string-length b)) (m (string-length o)) (out (string-copy b)))
+        (let loop ((i 0))
+          (when (and (< i n) (< i m))
+            (let ((c (string-ref o i)))
+              (cond ((char=? c #\.) #f)
+                    ((char=? c #\_) (string-set! out i #\.))
+                    (else (string-set! out i c))))
+            (loop (+ i 1))))
+        out))
+
+    (define (compose-rows base overlay)
+      (let loop ((bs base) (os overlay) (acc '()))
+        (cond ((null? bs) (reverse acc))
+              ((null? os) (loop (cdr bs) '() (cons (car bs) acc)))
+              (else (loop (cdr bs) (cdr os) (cons (compose-row (car bs) (car os)) acc))))))
+
+    ;; The autotile parts, in the order they are laid on (sides, then corners).
+    (define PART-NAMES
+      (list "top" "right" "bottom" "left" "top-left" "top-right" "bottom-right" "bottom-left"))
+
+    ;; Which parts a mask takes: a side with no neighbour, a corner with
+    ;; neither of its sides.
+    (define (parts-for m)
+      (let ((up (mask-has? m MASK-UP)) (rt (mask-has? m MASK-RIGHT))
+            (dn (mask-has? m MASK-DOWN)) (lf (mask-has? m MASK-LEFT)))
+        (filter (lambda (x) x)
+                (list (and (not up) "top") (and (not rt) "right")
+                      (and (not dn) "bottom") (and (not lf) "left")
+                      (and (not up) (not lf) "top-left") (and (not up) (not rt) "top-right")
+                      (and (not dn) (not rt) "bottom-right") (and (not dn) (not lf) "bottom-left")))))
+
+    ;; fills: a list of row lists (the variants); parts: ((part . rows) ...).
+    (define (autotile-rows fills parts m v)
+      (let ((base (list-ref fills (modulo v (length fills)))))
+        (fold-left (lambda (rows p)
+                     (let ((e (assoc p parts)))
+                       (if e (compose-rows rows (cdr e)) rows)))
+                   base
+                   (parts-for m))))
+
+    ;; The materials a region sheet may author with fills and parts.
+    (define MATERIALS (list "rock" "rough" "ledge" "hazard"))
+
+    (define (material-cell-name sheet mat m v)
+      (string-append sheet "/" mat "@m" (number->string m) "v" (number->string v)))
+
+    ;; --- the cells: authored, composed, harmonic -------------------------------------
+
+    (define (prefix? p s) (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
+    (define (suffix? p s)
+      (let ((n (string-length s)) (m (string-length p)))
+        (and (>= n m) (string=? p (substring s (- n m) n)))))
+
+    (define (uniq l)
+      (let loop ((l l) (acc (list)))
+        (cond ((null? l) (reverse acc))
+              ((member (car l) acc) (loop (cdr l) acc))
+              (else (loop (cdr l) (cons (car l) acc))))))
+
+    (define (sheet-of name)
+      (let loop ((i 0))
+        (cond ((= i (string-length name)) "")
+              ((char=? (string-ref name i) #\/) (substring name 0 i))
+              (else (loop (+ i 1))))))
+
+    ;; ((name . rows) ...) for the composed autotile shapes of every
+    ;; sheet's materials: where SHEET/MAT-fill-a exists.
+    (define (composed-cells authored)
+      (let* ((sheets (uniq (map (lambda (c) (sheet-of (car c))) authored))))
+        (apply append
+               (map (lambda (sheet)
+                      (apply append
+                             (map (lambda (mat)
+                                    (let* ((stem (string-append sheet "/" mat "-"))
+                                           (fills (filter-map (lambda (c)
+                                                                (and (prefix? (string-append stem "fill-") (car c)) (cdr c)))
+                                                              authored))
+                                           (parts (filter-map (lambda (p)
+                                                                (let ((e (assoc (string-append stem p) authored)))
+                                                                  (and e (cons p (cdr e)))))
+                                                              PART-NAMES)))
+                                      (if (null? fills)
+                                          '()
+                                          (let masks ((m 0) (acc '()))
+                                            (if (= m 16)
+                                                (reverse acc)
+                                                (masks (+ m 1)
+                                                       (let vars ((v 0) (acc acc))
+                                                         (if (= v (length fills))
+                                                             acc
+                                                             (vars (+ v 1)
+                                                                   (cons (cons (material-cell-name sheet mat m v)
+                                                                               (autotile-rows fills parts m v))
+                                                                         acc))))))))))
+                                  MATERIALS)))
+                    sheets))))
+
+    (define (has-h? rows)
+      (any (lambda (r) (let loop ((i 0)) (and (< i (string-length r)) (or (char=? (string-ref r i) #\h) (loop (+ i 1)))))) rows))
+
+    (define HARMONIC-SLOTS (list (cons "h2" 16) (cons "h3" 17) (cons "h4" 18) (cons "h5" 19) (cons "h7" 20)))
+
+    ;; ((name rows hslot) ...): every cell, with the slot its "h" takes.
+    (define (all-cells)
+      (let* ((authored (map (lambda (c) (cons (car c) (cdr c))) CELLS))
+             (cells (append authored (composed-cells authored))))
+        (apply append
+               (map (lambda (c)
+                      (if (has-h? (cdr c))
+                          (cons (list (car c) (cdr c) 16)
+                                (map (lambda (h) (list (string-append (car c) "@" (car h)) (cdr c) (cdr h)))
+                                     HARMONIC-SLOTS))
+                          (list (list (car c) (cdr c) 16))))
+                    cells))))
+
+    ;; --- packing and baking -------------------------------------------------------------
+
+    (define ATLAS-W 1024)
+
+    (define *tex* #f)
+    (define *names* '())         ; ((name . i) ...)
+    (define *rects* (vector))    ; i -> (x y w h)
+
+    (define (atlas-ready?) (and *tex* #t))
+    (define (atlas-texture) *tex*)
+    (define (atlas-names) (map car *names*))
+
+    ;; Shelf packing, tallest first: -> ((cell x y) ...) and the height.
+    (define (pack cells)
+      (let* ((sorted (list-sort (lambda (a b) (> (length (cadr a)) (length (cadr b)))) cells)))
+        (let loop ((cs sorted) (x 0) (y 0) (shelf 0) (acc '()))
+          (if (null? cs)
+              (cons (reverse acc) (+ y shelf))
+              (let* ((c (car cs)) (w (string-length (car (cadr c)))) (h (length (cadr c))))
+                (if (> (+ x w) ATLAS-W)
+                    (loop cs 0 (+ y shelf 1) 0 acc)
+                    (loop (cdr cs) (+ x w 1) y (max shelf h) (cons (list c x y) acc))))))))
+
+    (define (pow2-at-least n) (let loop ((p 16)) (if (>= p n) p (loop (* 2 p)))))
+
+    (define (atlas-ensure!)
+      (unless *tex*
+        (let* ((cells (all-cells))
+               (packed (pack cells))
+               (placed (car packed))
+               (h (pow2-at-least (cdr packed)))
+               (bv (make-bytevector (* 4 ATLAS-W h) 0))
+               (rects (make-vector (length placed) #f)))
+          (let loop ((ps placed) (i 0) (names '()))
+            (if (null? ps)
+                (set! *names* names)
+                (let* ((p (car ps)) (c (car p)) (x0 (cadr p)) (y0 (caddr p))
+                       (rows (cadr c)) (hslot (caddr c))
+                       (w (string-length (car rows))))
+                  (vector-set! rects i (list x0 y0 w (length rows)))
+                  (let rloop ((rs rows) (y y0))
+                    (unless (null? rs)
+                      (let ((row (car rs)))
+                        (let cloop ((cx 0))
+                          (when (< cx w)
+                            (let* ((ch (string-ref row cx))
+                                   (s (if (char=? ch #\h) hslot (char-slot ch))))
+                              (when s
+                                (let ((o (* 4 (+ x0 cx (* y ATLAS-W)))))
+                                  (bytevector-u8-set! bv o s)
+                                  (bytevector-u8-set! bv (+ o 3) 255))))
+                            (cloop (+ cx 1)))))
+                      (rloop (cdr rs) (+ y 1))))
+                  (loop (cdr ps) (+ i 1) (cons (cons (car c) i) names)))))
+          (set! *rects* rects)
+          (set! *tex* (make-texture-from-pixels ATLAS-W h bv 'nearest)))))
+
+    (define (atlas-index name)
+      (let ((e (assoc name *names*)))
+        (and e (cdr e))))
+
+    (define (atlas-size i)
+      (let ((r (vector-ref *rects* i))) (cons (caddr r) (cadddr r))))
+
+    ;; Cell i with its top-left at (x, y), in the current colour (white:
+    ;; the slots as they are). face -1 mirrors it.
+    (define (atlas-draw! i x y face)
+      (let* ((r (vector-ref *rects* i))
+             (sx (car r)) (sy (cadr r)) (w (caddr r)) (h (cadddr r)))
+        (if (< face 0)
+            (draw-texture-region *tex* x y w h (+ sx w) sy (- w) h)
+            (draw-texture-region *tex* x y w h sx sy w h))))
+
+    ;; Cell i drawn into the rectangle (x y w h) (the overview's quarter
+    ;; scale, the weight strips).
+    (define (atlas-draw-scaled! i x y w h)
+      (let* ((r (vector-ref *rects* i)))
+        (draw-texture-region *tex* x y w h (car r) (cadr r) (caddr r) (cadddr r))))))

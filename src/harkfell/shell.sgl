@@ -63,7 +63,8 @@
           (harkfell save)
           (harkfell frame)
           (harkfell front)
-          (harkfell reveal))
+          (harkfell reveal)
+          (harkfell render))
 
   (export shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
           shell-add-frame-listener! shell-set-save-extras! shell-set-input-kind!
@@ -641,7 +642,7 @@
 
     (define (ensure-targets! f)
       (unless *room-rt*
-        (set! *room-rt* (make-render-target VIEW-W VIEW-H 'nearest)))
+        (set! *room-rt* #t))
       (when (and (eq? (fit-mode f) 'sharp) (not (= (fit-up f) *sharp-up*)))
         (when *sharp-rt* (render-target-free! *sharp-rt*))
         (set! *sharp-up* (fit-up f))
@@ -678,6 +679,7 @@
           (set! *view-w* (car sz))
           (set! *view-h* (cadr sz))
           (set! *view-rt* (make-render-target *view-w* *view-h* 'nearest)))
+        (present-overview! rooms)
         (let ((f (view-fit win-w win-h *view-w* *view-h*)))
           (set! *last-fit* f)
           (begin-frame)
@@ -695,16 +697,15 @@
         (set! *last-fit* f)
         (begin-frame)
         (set-blend-mode 'normal)
-        (with-render-target *room-rt*
-          ;; a target pass starts with no blending (sokol_gp's sgp_begin resets
-          ;; its state): without this every translucent draw in the room
-          ;; (water, A3's light) was written unblended
-          (set-blend-mode 'normal)
-          (draw-play *world*)
-          ;; A2: the listening ears, over the body while you stand still
-          (when (and (world-room *world*) (sound-ears) (not (sound-ears-flick)))
-            (let ((o (world-origin *world*)))
-              (draw-ears (world-body *world*) (car o) (cdr o) (sound-ears)))))
+        ;; the room as palette slots, resolved into (harkfell render)'s colour
+        ;; target ((harkfell draw)'s present-play!); the ears in the same pass,
+        ;; in the fur-1 slot
+        (present-play! *world*
+                       (lambda ()
+                         (when (and (world-room *world*) (sound-ears) (not (sound-ears-flick)))
+                           (let ((o (world-origin *world*)))
+                             (draw-ears (world-body *world*) (car o) (cdr o) (sound-ears)
+                                        (lambda () (paint-slot! (slot 'fur-1))))))))
         ;; The room's target is copied OPAQUE (blend none): a translucent draw
         ;; into it (water, A3's light) lowers the target's own alpha, and
         ;; blended over the black window those pixels came out dark (seen in
@@ -712,10 +713,10 @@
         ;; since A1).
         (with-blend-mode 'none
           (if (eq? (fit-mode f) 'integer)
-              (draw-render-target *room-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
+              (draw-render-target (room-color-rt) (fit-x f) (fit-y f) (fit-w f) (fit-h f))
               (begin
                 (with-render-target *sharp-rt*
-                  (draw-render-target *room-rt* 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
+                  (draw-render-target (room-color-rt) 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
                 (draw-render-target *sharp-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f)))))
         ;; A4: the dawn, the world coming in from black (D15)
         (when (and *frame* (> (frame-black-alpha *frame*) 0.0))

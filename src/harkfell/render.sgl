@@ -1,0 +1,281 @@
+;;; (harkfell render) - The palette pass: the room drawn as palette slots,
+;;; then turned into colours in one shader pass (harkfell-design section 7,
+;;; "Shader effects", and the palette rule that every effect stays inside
+;;; the palette).
+;;;
+;;; The room target is SLOTS, not colours. Each pixel's channels:
+;;;   R  the slot, 0-255 exactly (set-color with slot/255; a texel of the
+;;;      atlas carries its slot the same way)
+;;;   G  water: 1 where water lies over the pixel (drawn after the scene,
+;;;      additively; anything drawn after it with ordinary blending clears
+;;;      it, which is how a frog's eyes sit above the surface)
+;;;   B  light, added (a moth, a ringing stone, a harmonic)
+;;; Under the 176 view rows sit STRIP-ROWS rows of lookup strips, one pixel
+;;; per slot: the region's colour for each slot, and its colour under
+;;; water, deeper, mirrored in the skin, lit, lit twice. sigil-graphics
+;;; binds one texture per shader and caps its uniform block at 512 bytes,
+;;; so the strips ride in the same target the shader reads.
+;;;
+;;; The RESOLVE shader, per view pixel: the slot's colour, or under water
+;;; its water colour (a refraction wobble of a pixel, the mirror of the
+;;; world above within a few rows of the skin, darker deeper down, the
+;;; skin itself a broken line of light), then light (a Bayer 4x4 threshold
+;;; against B picks lit, lit twice, or the light's own colour at the core),
+;;; then a dithered fade to black. Every output is a strip colour, so the
+;;; frame has only palette colours.
+;;;
+;;; The SWAY shader composites a foliage layer (drawn once per room into
+;;; its own target, with a sway weight in G: 0 at a stalk's root, 1 at its
+;;; tip) onto the room target, each pixel taking the layer's pixel a whole
+;;; number of pixels upwind; reeds and grass bend with a wind the bed also
+;;; hears.
+;;;
+;;; Orientation: a render target's memory is bottom-up (sokol_gfx), so pass
+;;; row y is memory row H-1-y; the shaders read by texelFetch in memory
+;;; rows and convert.
+;;;
+;;;   (render-begin-room!)            the room target, cleared, as the current pass
+;;;   (render-resolve! into strips-tex t black hue)   the room target, resolved into
+;;;                                   the colour target (call inside no pass)
+;;;   (paint-slot! s) (paint-slot-a! s a)   set-color for slot s
+;;;   (paint-water!) (paint-light! amount)  set-color for the water and light passes
+;;;   (make-strips region-rgb) / (strips-update! tex region-rgb)
+
+(define-library (harkfell render)
+  (import (sigil math)
+          (sigil list)
+          (sigil graphics)
+          (harkfell palette))
+
+  (export VIEW-W VIEW-H STRIP-ROWS INDEX-H
+          paint-slot! paint-slot-a! paint-water! paint-light!
+          strip-bytes make-strips strips-update! draw-strips!
+          ensure-render! room-index-rt room-color-rt
+          resolve! sway-composite! GLSL-PREFIX VERT-SOURCE)
+
+  (begin
+    (define VIEW-W 400)
+    (define VIEW-H 176)
+    (define STRIP-ROWS 6)                 ; base water deep reflect lit lit2
+    (define STRIP-W 32)                   ; slots per strip (SLOT-COUNT fits)
+    (define INDEX-H (+ VIEW-H STRIP-ROWS))
+
+    ;; --- painting slots -----------------------------------------------------
+
+    (define (paint-slot! s) (set-color (/ s 255.0) 0.0 0.0 1.0))
+    ;; a slot drawn with alpha a (0 or 1 in practice: a slot cannot be half
+    ;; drawn; used to skip)
+    (define (paint-slot-a! s a) (set-color (/ s 255.0) 0.0 0.0 a))
+    ;; the water pass, additive: G to 1 over the water
+    (define (paint-water!) (set-color 0.0 1.0 0.0 1.0))
+    ;; the light pass, additive: B up by amount
+    (define (paint-light! amount) (set-color 0.0 0.0 amount 1.0))
+
+    ;; --- the strips -------------------------------------------------------------
+
+    (define (byte v) (exact (max 0 (min 255 (round (* 255.0 v))))))
+
+    ;; rgb: a vector of SLOT-COUNT (r g b), a region's colours. The strips
+    ;; as RGBA bytes, STRIP-W x STRIP-ROWS, top row first: base, water,
+    ;; deep, reflect, lit, lit twice.
+    (define (strip-bytes rgb)
+      (let ((bv (make-bytevector (* 4 STRIP-W STRIP-ROWS) 0))
+            (rows (list (lambda (i) i)
+                        (lambda (i) (lookup WATER i))
+                        (lambda (i) (lookup DEEP i))
+                        (lambda (i) (lookup REFLECT i))
+                        (lambda (i) (lookup LIT i))
+                        (lambda (i) (lookup LIT (lookup LIT i))))))
+        (let loop ((rs rows) (r 0))
+          (unless (null? rs)
+            (let slots ((i 0))
+              (when (< i STRIP-W)
+                (let* ((j (if (< i SLOT-COUNT) ((car rs) i) 0))
+                       (c (if (< j SLOT-COUNT) (vector-ref rgb j) MAGENTA))
+                       (o (* 4 (+ i (* r STRIP-W)))))
+                  (bytevector-u8-set! bv o (byte (car c)))
+                  (bytevector-u8-set! bv (+ o 1) (byte (cadr c)))
+                  (bytevector-u8-set! bv (+ o 2) (byte (caddr c)))
+                  (bytevector-u8-set! bv (+ o 3) 255))
+                (slots (+ i 1))))
+            (loop (cdr rs) (+ r 1))))
+        bv))
+
+    (define (make-strips rgb) (make-texture-from-pixels STRIP-W STRIP-ROWS (strip-bytes rgb) 'nearest))
+    (define (strips-update! tex rgb) (update-texture tex (strip-bytes rgb)))
+
+    ;; The strips under the view, in the current (index) pass, overwriting.
+    (define (draw-strips! tex)
+      (with-blend-mode 'none
+        (set-color 1.0 1.0 1.0 1.0)
+        (draw-texture tex 0 VIEW-H STRIP-W STRIP-ROWS)))
+
+    ;; --- the shaders ----------------------------------------------------------------
+
+    ;; One source, two dialects ((crash gpu glsl)'s shape): the desktop core
+    ;; profile natively, GLSL ES 3.00 on the web.
+    (cond-expand
+      (wasm
+       (define GLSL-PREFIX
+         "#version 300 es\nprecision highp float;\nprecision highp int;\nprecision mediump sampler2D;\n"))
+      (else
+       (define GLSL-PREFIX "#version 410\n")))
+
+    (define VERT-SOURCE
+      (string-append
+       GLSL-PREFIX
+       "layout(location = 0) in vec4 coord;\n"
+       "layout(location = 1) in vec4 color;\n"
+       "out vec2 texUV;\n"
+       "out vec4 iColor;\n"
+       "void main() {\n"
+       "    gl_Position = vec4(coord.xy, 0.0, 1.0);\n"
+       "    texUV = coord.zw;\n"
+       "    iColor = color;\n"
+       "}\n"))
+
+    ;; Shared by both fragment shaders: pass coordinates to memory, the
+    ;; Bayer 4x4 threshold.
+    (define FRAG-COMMON
+      (string-append
+       "uniform sampler2D iTexChannel0_iSmpChannel0;\n"
+       "uniform vec2 u_size;\n"
+       "uniform float u_t;\n"
+       "in vec2 texUV;\n"
+       "in vec4 iColor;\n"
+       "out vec4 fragColor;\n"
+       "vec4 px(int x, int y) {\n"
+       "    x = clamp(x, 0, int(u_size.x) - 1);\n"
+       "    return texelFetch(iTexChannel0_iSmpChannel0, ivec2(x, int(u_size.y) - 1 - y), 0);\n"
+       "}\n"
+       "int slotof(vec4 p) { return int(p.r * 255.0 + 0.5); }\n"
+       "float bayer(int x, int y) {\n"
+       "    int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);\n"
+       "    return (float(m[(y & 3) * 4 + (x & 3)]) + 0.5) / 16.0;\n"
+       "}\n"))
+
+    (define RESOLVE-FRAGMENT
+      (string-append
+       GLSL-PREFIX
+       FRAG-COMMON
+       "uniform float u_view_h;\n"
+       "uniform float u_black;\n"
+       "uniform float u_hue;\n"
+       "vec3 strip(int row, int slot) {\n"
+       "    return texelFetch(iTexChannel0_iSmpChannel0, ivec2(slot, int(u_size.y) - 1 - (int(u_view_h) + row)), 0).rgb;\n"
+       "}\n"
+       "void main() {\n"
+       "    ivec2 m = ivec2(floor(texUV * u_size));\n"
+       "    int x = m.x;\n"
+       "    int y = int(u_size.y) - 1 - m.y;\n"
+       "    if (y >= int(u_view_h)) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }\n"
+       "    vec4 s = px(x, y);\n"
+       "    int slot = slotof(s);\n"
+       "    float th = bayer(x, y);\n"
+       "    vec3 c;\n"
+       "    int lslot = slot;\n"
+       "    if (s.g > 0.5) {\n"
+       ;; depth below the skin, in rows (0 is the skin)
+       "        int d = 0;\n"
+       "        for (int k = 1; k <= 40; k++) { if (px(x, y - k).g < 0.5) break; d = k; }\n"
+       "        if (d == 0) {\n"
+       ;; the skin: a broken line of the horizon's light, the breaks drifting
+       "            int ph = int(floor(u_t / 9.0));\n"
+       "            int k = (x + ph + (x / 23) * 5) % 11;\n"
+       "            c = (k == 0 || k == 6) ? strip(1, slot) : strip(0, 3);\n"
+       "        } else {\n"
+       ;; refraction: a pixel's wobble, rows drifting with time
+       "            int w = int(floor(sin(float(y) * 0.9 + u_t * 0.045) * 1.3 + 0.5));\n"
+       "            vec4 r = px(x + w, y);\n"
+       "            if (r.g < 0.5) r = s;\n"
+       "            int rs = slotof(r);\n"
+       "            lslot = rs;\n"
+       "            c = (d > 20 || (d > 12 && th < float(d - 12) / 8.0)) ? strip(2, rs) : strip(1, rs);\n"
+       ;; the water's own colour dithered through everything under the skin,
+       ;; thicker with depth, so water reads over a dark wall as over sky
+       "            if (th < min(0.3 + float(d) * 0.012, 0.55)) c = strip(0, 11);\n"
+       ;; the mirror of the world above: streaks on alternate rows, fading
+       ;; out over seven, each row drifting sideways on its own
+       "            if (d <= 7 && (d & 1) == 1 && th < 0.95 - float(d) * 0.11) {\n"
+       "                int mw = int(floor(sin(float(y) * 1.3 + u_t * 0.05) * 1.6 + 0.5));\n"
+       "                vec4 mp = px(x + mw, y - 2 * d);\n"
+       "                if (mp.g < 0.5) c = strip(3, slotof(mp));\n"
+       "            }\n"
+       "        }\n"
+       "    } else {\n"
+       "        c = strip(0, slot);\n"
+       "    }\n"
+       ;; light: B against the threshold: lit, lit twice, the light's colour
+       "    float L = s.b;\n"
+       "    if (L > 0.0) {\n"
+       "        if (L > 0.72 + th * 0.28) c = strip(0, int(u_hue));\n"
+       "        else if (L > 0.36 + th * 0.36) c = strip(5, lslot);\n"
+       "        else if (L > th * 0.36) c = strip(4, lslot);\n"
+       "    }\n"
+       "    if (u_black > th) c = vec3(0.0);\n"
+       "    fragColor = vec4(c, 1.0);\n"
+       "}\n"))
+
+    (define SWAY-FRAGMENT
+      (string-append
+       GLSL-PREFIX
+       FRAG-COMMON
+       "uniform float u_wind;\n"
+       "void main() {\n"
+       "    ivec2 m = ivec2(floor(texUV * u_size));\n"
+       "    int x = m.x;\n"
+       "    int y = int(u_size.y) - 1 - m.y;\n"
+       "    float w = px(x, y).g;\n"
+       ;; a gust travelling east across the room, and each stalk's own sway
+       "    float gust = 0.55 + 0.45 * sin(u_t * 0.021 - float(x) * 0.018);\n"
+       "    float own = sin(u_t * 0.047 + float(x) * 0.61) * 0.35;\n"
+       "    int d = int(floor(u_wind * 2.4 * w * w * (gust + own) + 0.5));\n"
+       "    vec4 p = px(x - d, y);\n"
+       "    if (p.a < 0.5) discard;\n"
+       "    fragColor = vec4(p.r, 0.0, 0.0, 1.0);\n"
+       "}\n"))
+
+    ;; --- the targets ------------------------------------------------------------------
+
+    (define *index-rt* #f)
+    (define *color-rt* #f)
+    (define *resolve* #f)
+    (define *sway* #f)
+
+    (define (ensure-render!)
+      (unless *index-rt*
+        (set! *index-rt* (make-render-target VIEW-W INDEX-H 'nearest))
+        (set! *color-rt* (make-render-target VIEW-W VIEW-H 'nearest)))
+      (unless *resolve*
+        (set! *resolve* (load-shader VERT-SOURCE RESOLVE-FRAGMENT 'none))
+        (set! *sway* (load-shader VERT-SOURCE SWAY-FRAGMENT 'normal))))
+
+    (define (room-index-rt) *index-rt*)
+    (define (room-color-rt) *color-rt*)
+
+    ;; The index target resolved into the colour target. t: the world's
+    ;; ticks; black: 0..1, the dithered fade; hue: the slot of the light's
+    ;; own colour (the harmonic lighting the room). Outside any pass.
+    (define (resolve! t black hue)
+      (ensure-render!)
+      (set-shader-uniform *resolve* 'u_size (list (inexact VIEW-W) (inexact INDEX-H)))
+      (set-shader-uniform *resolve* 'u_view_h (inexact VIEW-H))
+      (set-shader-uniform *resolve* 'u_t (inexact t))
+      (set-shader-uniform *resolve* 'u_black (inexact black))
+      (set-shader-uniform *resolve* 'u_hue (inexact hue))
+      (with-render-target *color-rt*
+        (set-blend-mode 'none)
+        (set-color 1.0 1.0 1.0 1.0)
+        (with-shader *resolve*
+          (draw-render-target *index-rt* 0.0 0.0 (inexact VIEW-W) (inexact INDEX-H)))))
+
+    ;; A foliage layer (a VIEW-W x VIEW-H target of slots, the sway weight in
+    ;; G) composited onto the current (index) pass, bent by wind 0..1.
+    (define (sway-composite! layer t wind)
+      (ensure-render!)
+      (set-shader-uniform *sway* 'u_size (list (inexact VIEW-W) (inexact VIEW-H)))
+      (set-shader-uniform *sway* 'u_t (inexact t))
+      (set-shader-uniform *sway* 'u_wind (inexact wind))
+      (set-color 1.0 1.0 1.0 1.0)
+      (with-shader *sway*
+        (draw-render-target layer 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))))))
