@@ -1,0 +1,205 @@
+;;; (harkfell gates) - The harmonics you find and carry, and the ring-stones
+;;; that open to them (harkfell-design section 3, "Gates: sympathetic
+;;; resonance"; phase A3).
+;;;
+;;; A PICKUP is a harmonic lying in the world where a room's things: put it
+;;; ((harmonic at: (C R) overtone: N)). The body touching it takes it: N
+;;; joins the CARRY, the harmonics carried, for good (nothing is ever lost).
+;;;
+;;; A STONE is a ring-stone ((ring-stone at: (C R) overtone: N), an o in the
+;;; grid: solid rock to the physics while it is shut). Each tick, with the
+;;; body's centre within RADIUS pixels of the stone's centre:
+;;;
+;;;   carrying N           a shut stone RINGS (RING-TICKS: it sings), then
+;;;                        SINKS into the floor (SINK-TICKS), then is OPEN:
+;;;                        its cell becomes air in the world's tilemap and
+;;;                        stays so. An open stone rings again each time you
+;;;                        come back within RADIUS carrying N (the ending's
+;;;                        "every stone you passed rings").
+;;;   carrying others      a shut stone SHIVERS: it rings a moment, off-key,
+;;;                        and falls silent (the near miss: it answers sound,
+;;;                        not this sound). Once per approach.
+;;;   carrying nothing     it stays mute (its quiet hum is the sound
+;;;                        layer's, from the distance: (harkfell sound)).
+;;;
+;;; An approach ends when the body goes further than RADIUS + LEAVE pixels,
+;;; so walking back and forth at the edge does not ring it every tick.
+;;;
+;;; Every change is also a NEWS item for the sound layer, in the world map's
+;;; pixels (the stone's or the pickup's centre):
+;;;   (pickup N x y)   (ring N x y)   (sink N x y)   (open N x y)
+;;;   (near-miss N x y)
+;;;
+;;; Pure: a step takes the stones, the pickups, the carry, the body's box and
+;;; the tilemap and returns new ones (a GSTATE) and the news.
+
+(define-library (harkfell gates)
+  (import (sigil struct)
+          (sigil list)
+          (sigil math)
+          (engine tilemap)
+          (engine worldmap)
+          (harkfell content)
+          (harkfell check))
+
+  (export RADIUS LEAVE RING-TICKS SINK-TICKS TOUCH
+          stone stone? stone-cell stone-overtone stone-state stone-t stone-near stone-shiver
+          pickup pickup? pickup-cell pickup-overtone
+          gstate gstate? gstate-stones gstate-pickups gstate-carry gstate-tiles gstate-news
+          content-stones content-pickups
+          gates-step stone-sink stone-open? open-stone-tiles cell-centre
+          carry-normal)
+
+  (begin
+    (define RADIUS 64.0)        ; 4 tiles: "within four tiles carrying H3" (section 3)
+    (define LEAVE 16.0)         ; an approach ends a tile further out
+    (define RING-TICKS 40)      ; it rings first ...
+    (define SINK-TICKS 48)      ; ... then sinks, over 0.8 s
+    (define SHIVER-TICKS 36)
+    (define TOUCH 6.0)          ; a pickup's reach around its cell's centre, px
+
+    ;; cell: a global (c . r). state: shut | ringing | sinking | open.
+    ;; t: ticks in the state. near: the body is inside this approach.
+    ;; shiver: ticks of the near miss left.
+    (define-struct stone
+      (cell default: #f)
+      (overtone default: 2)
+      (state default: 'shut)
+      (t default: 0)
+      (near default: #f)
+      (shiver default: 0))
+
+    (define-struct pickup
+      (cell default: #f)
+      (overtone default: 2))
+
+    (define-struct gstate
+      (stones default: '())
+      (pickups default: '())
+      (carry default: '())
+      (tiles default: #f)
+      (news default: '()))
+
+    ;; A carry list sorted, without repeats.
+    (define (carry-normal l)
+      (let loop ((l (list-sort < l)) (acc '()))
+        (cond ((null? l) (reverse acc))
+              ((and (pair? acc) (= (car acc) (car l))) (loop (cdr l) acc))
+              (else (loop (cdr l) (cons (car l) acc))))))
+
+    ;; The world's stones and pickups, in global cells.
+    (define (things-of ct kind make)
+      (apply append
+             (map (lambda (p)
+                    (let ((rm (placed-data p)))
+                      (filter-map* (lambda (t)
+                                     (let ((a (thing-at t)) (o (thing-kw t "overtone")))
+                                       (and a (integer? o)
+                                            (make (local->global ct rm (car a) (cdr a)) o))))
+                                   (room-things-of rm kind))))
+                  (content-rooms ct))))
+
+    (define (content-stones ct)
+      (things-of ct 'ring-stone (lambda (cell o) (stone cell: cell overtone: o))))
+
+    (define (content-pickups ct)
+      (things-of ct 'harmonic (lambda (cell o) (pickup cell: cell overtone: o))))
+
+    (define (filter-map* f l)
+      (let loop ((l l) (acc '()))
+        (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+    ;; The centre of a cell, in the tilemap's pixels.
+    (define (cell-centre tm cell)
+      (let ((s (tilemap-size tm)))
+        (cons (+ (* s (car cell)) (/ s 2.0)) (+ (* s (cdr cell)) (/ s 2.0)))))
+
+    (define (stone-open? s) (eq? (stone-state s) 'open))
+
+    ;; How far a stone has sunk, 0 (standing) to 1 (gone into the floor).
+    (define (stone-sink s)
+      (case (stone-state s)
+        ((sinking) (/ (* 1.0 (stone-t s)) SINK-TICKS))
+        ((open) 1.0)
+        (else 0.0)))
+
+    ;; A tilemap with every open stone's cell made air.
+    (define (open-stone-tiles tm stones)
+      (let loop ((ss stones) (tm tm))
+        (cond ((null? ss) tm)
+              ((stone-open? (car ss))
+               (loop (cdr ss) (tilemap-set tm (car (stone-cell (car ss))) (cdr (stone-cell (car ss))) 'air)))
+              (else (loop (cdr ss) tm)))))
+
+    (define (dist a b)
+      (let ((dx (- (car a) (car b))) (dy (- (cdr a) (cdr b))))
+        (sqrt (+ (* dx dx) (* dy dy)))))
+
+    ;; One tick. centre: the body's centre; box: (x y w h), both in the
+    ;; tilemap's pixels. playing: #f while the screen is dark (a soft
+    ;; return): nothing is taken or rung then.
+    (define (gates-step g centre box playing)
+      (let* ((tm (gstate-tiles g))
+             (news '())
+             (say! (lambda (item) (set! news (cons item news))))
+             ;; pickups first: a stone keyed to what you just took rings this tick
+             (taken (if playing
+                        (filter (lambda (p) (touching? tm p box)) (gstate-pickups g))
+                        '()))
+             (carry (carry-normal (append (gstate-carry g) (map pickup-overtone taken))))
+             (_ (for-each (lambda (p)
+                            (let ((c (cell-centre tm (pickup-cell p))))
+                              (say! (list 'pickup (pickup-overtone p) (car c) (cdr c)))))
+                          taken))
+             (stones (map (lambda (s) (stone-tick s tm centre carry playing say!)) (gstate-stones g)))
+             (opened (filter (lambda (s) (and (stone-open? s)
+                                              (not (stone-open? (find-stone (gstate-stones g) (stone-cell s))))))
+                             stones)))
+        (gstate g
+                stones: stones
+                pickups: (filter (lambda (p) (not (memq p taken))) (gstate-pickups g))
+                carry: carry
+                tiles: (if (null? opened) tm (open-stone-tiles tm opened))
+                news: (append (gstate-news g) (reverse news)))))
+
+    (define (find-stone ss cell)
+      (let loop ((ss ss))
+        (cond ((null? ss) #f)
+              ((equal? (stone-cell (car ss)) cell) (car ss))
+              (else (loop (cdr ss))))))
+
+    (define (touching? tm p box)
+      (let* ((c (cell-centre tm (pickup-cell p)))
+             (x (car box)) (y (cadr box)) (w (caddr box)) (h (cadddr box)))
+        (and (< (- (car c) TOUCH) (+ x w)) (< x (+ (car c) TOUCH))
+             (< (- (cdr c) TOUCH) (+ y h)) (< y (+ (cdr c) TOUCH)))))
+
+    (define (stone-tick s tm centre carry playing say!)
+      (let* ((c (cell-centre tm (stone-cell s)))
+             (d (dist c centre))
+             (n (stone-overtone s))
+             (keyed (and (memv n carry) #t))
+             (arrive (and playing (<= d RADIUS) (not (stone-near s))))
+             (near (cond ((<= d RADIUS) (or (stone-near s) playing))
+                         ((> d (+ RADIUS LEAVE)) #f)
+                         (else (stone-near s))))
+             (s (stone s near: near t: (+ (stone-t s) 1)
+                       shiver: (max 0 (- (stone-shiver s) 1))))
+             (item (lambda (what) (say! (list what n (car c) (cdr c))))))
+        (case (stone-state s)
+          ((shut)
+           ;; carrying the key inside the radius always rings a shut stone,
+           ;; approach or not (review, A3: a key taken while already near it
+           ;; waited for you to leave and come back)
+           (cond ((and keyed playing (<= d RADIUS)) (item 'ring) (stone s state: 'ringing t: 0 shiver: 0 near: #t))
+                 ((and arrive (pair? carry)) (item 'near-miss) (stone s shiver: SHIVER-TICKS))
+                 (else s)))
+          ((ringing)
+           (if (>= (stone-t s) RING-TICKS) (begin (item 'sink) (stone s state: 'sinking t: 0)) s))
+          ((sinking)
+           (if (>= (stone-t s) SINK-TICKS)
+               (begin (item 'open) (stone s state: 'open t: 0))
+               s))
+          (else
+           (when (and arrive keyed) (item 'ring))
+           (if (and arrive keyed) (stone s t: 0) s)))))))

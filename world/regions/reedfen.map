@@ -11,6 +11,9 @@
 ;;;   |                               |
 ;;;   D Root Hollow - E Drowned Channel - F Climb Back
 ;;;
+;;; A3 adds G Behind the Stone (x11y3), east of the Old Stone through its
+;;; ring-stone (keyed to H2, which waits in the Drowned Channel).
+;;;
 ;;; The loop: A to B to C, down the hole in C to F, west through E (a swim)
 ;;; to D, and up the shaft from D to A; or the other way round. Breaths: B
 ;;; and D (two of six).
@@ -18,13 +21,14 @@
   region: reedfen
   origin: (8 3)
   layout:
-  ("A-B-C"
-   "|   |"
-   "D-E-F")
+  ("A-B-C-G"
+   "|   |  "
+   "D-E-F  ")
   rooms:
   ((A "Fen Edge" "you step off the Hollow's rim and the land opens into reeds and sky")
    (B "Reed Bridge" "the first open water; a breath after the Hollow's climbs")
    (C "Old Stone" "a mute stone seen before it can matter, across a gap that needs a run")
    (D "Root Hollow" "a breath under the reeds: low, dark and still, found by falling")
    (E "Drowned Channel" "too wide to jump: the first swim, bank to bank")
-   (F "Climb Back" "rough rock taught where a fall costs nothing, then the climb home to the stone")))
+   (F "Climb Back" "rough rock taught where a fall costs nothing, then the climb home to the stone")
+   (G "Behind the Stone" "the first place a harmonic opens: a sheltered hollow where moths come to what you carry")))

@@ -29,6 +29,8 @@ And the rules the gates enforce, so nobody has to remember them:
 - **Exits are open edges and must match their neighbour's edge cell for cell.** An edge with no room beyond it is closed, except the top: **a top edge with no room above is open sky** (D28, David, 2026-09-24: "Definitely open sky"). Nothing leaves through it: above the world there is no room, and the body meets the map's edge there. Keep the sky out of a jump's reach anyway (a held jump is 3.25 tiles), so nobody bumps the top of the picture.
 - **The region map's joins are the seams.** Two neighbouring rooms are joined in the map (`-` or `|`) exactly when their shared edge has an open cell.
 - **Every ring-stone (`o`) is in the room's `things:`** as `(ring-stone at: (C R) overtone: N)`.
+- **Every harmonic is reachable, and reachable without itself.** The reach checker searches every set of harmonics a player can carry (A3): a harmonic must be reached with some set, and from where it lies the start must be reachable carrying what you then hold. A cell reached only carrying a harmonic is marked with its digit in the report (gated), and that is fine; a cell reached with no set is red.
+- **A harmonic lies on a place to stand** (`(harmonic at: (C R) overtone: N)`, open with rock or a ledge under it), is one its region `gives:`, and lies in one place in the world.
 - **Creatures come from the region's roster**, and a room's bed levels name the region's bed channels.
 
 ## Authoring notes (what the checker taught while writing Reedfen's first six)
@@ -39,6 +41,7 @@ And the rules the gates enforce, so nobody has to remember them:
 - Rough rock (`%`) is held and climbed; smooth rock (`#`) is not. A single smooth wall cannot be climbed by kicking off it. Two smooth walls two tiles apart make a chimney, climbed by kicking between them. Four tiles apart they do not.
 - A rough column reaching the floor blocks a walk along that floor; stop it a few rows up and the body jumps to grab it.
 - Water deeper than a jump can clear has to be swum; the body leaps out when its head is above the surface, about two tiles.
+- **Place a ring-stone as a door, never as a platform.** Put rock directly above it, and a standing place within 4 tiles of it on each side it is approached from. The checker treats a stone keyed to a harmonic you carry as open for the whole search; in play it opens only after you stand or pass within 4 tiles for about a second and a half. A stone you could stand on, or reach only mid-jump, would make the two disagree (A3's review; the Old Stone's door has rock above it).
 - A ceiling made of rock hanging down from the top must hang from the top (each rock cell with rock above it), or its underside's tops become standable ledges that the checker will ask you to make reachable.
 
 ## Reedfen
@@ -49,11 +52,11 @@ And the rules the gates enforce, so nobody has to remember them:
 
 **Light.** Pale and cool, low-saturation greens and greys, one warm accent (`ember`): the brackish water, a rusty brown that reads as not to be touched. The palette in `world.sgl` is a placeholder until A4.
 
-**Life.** Reedlings (flocks), bellfrogs (hop, a bell-croak), fen voles (burrow), pike (swim), and the heron-shape (a giant, rare, far off). None moves until A3; rooms name them so placement can be reviewed.
+**Life.** Reedlings (flocks), bellfrogs (hop, a bell-croak), lantern moths (follow), fen voles (burrow), pike (swim), and the heron-shape (a giant, rare, far off). A3 brings reedlings, bellfrogs and lantern moths to life: reedlings perch on reed tips and lift off when you walk into them, bellfrogs croak and hop away, moths drawn to H2 come to you when you carry it (`drawn: 2`). Voles, pike and the heron are placed but not yet drawn. Carrying H2, reedlings sing back a phrase on D and bellfrogs croak in D.
 
 **Harm.** Brackish water (`x`): touch it and you are back where you entered the room.
 
-**Gives.** H2, found at the region's far end, and the cattail down (the glide) after it.
+**Gives.** H2, found at the region's far end, and the cattail down (the glide) after it. In A3's block, H2 lies on the Drowned Channel's east bank (x9y4), and the Old Stone's ring-stone (x10y3), keyed to H2, is the door to Behind the Stone (x11y3).
 
 ### The first block (A1)
 

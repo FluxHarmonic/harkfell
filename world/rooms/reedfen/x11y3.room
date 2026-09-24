@@ -1,0 +1,24 @@
+;; world/rooms/reedfen/x11y3.room
+(room
+  region: reedfen
+  at: (11 3)
+  title: "Behind the Stone"
+  intent: "the first place a harmonic opens: a sheltered hollow where moths come to what you carry"
+  bed: (wind 0.2 reeds 0.3 drone 0.8)
+  grid:
+  ("######              #####"
+   "#####                ####"
+   "#####                 ###"
+   "####                   ##"
+   "####                   ##"
+   "####                    #"
+   "####                    #"
+   "####       |  |   |     #"
+   "     |    |||||| |||    #"
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (14 5) count: 5 drawn: 2))
+  decor: auto)
+;; Reached only through the Old Stone's ring-stone (the passage along row
+;; 8). A breath: nothing to do but stand among the moths. The rock leans
+;; over it from the west, and the sky opens above.

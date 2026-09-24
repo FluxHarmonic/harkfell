@@ -58,7 +58,8 @@
           (harkfell check)
           (harkfell legend)
           (harkfell sound)
-          (harkfell ears))
+          (harkfell ears)
+          (harkfell gates))
 
   (export shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
@@ -69,7 +70,7 @@
           shell-load-content! shell-content shell-goto! shell-goto-start!
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
           shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-view-size
-          shell-set-extra-lines!
+          shell-set-extra-lines! shell-set-carry! shell-take-news!
           VIEW-W VIEW-H)
 
   (begin
@@ -154,6 +155,38 @@
         (set-draw-content! ct)
         (map problem->string (content-problems ct))))
 
+    ;; A3: what the body carries at a door (?carry=, --carry): a
+    ;; listening and testing door, like ?room=.
+    (define *carry0* '())
+
+    ;; A world entered anew (a door, the start, a reload) keeps what the
+    ;; session has done: the harmonics carried and the stones opened (by cell
+    ;; and overtone). The pickups are the content's, less what is carried.
+    (define (kept-stones old)
+      (let ((old-stones (if old (world-stones old) '())))
+        (map (lambda (s)
+               (let ((o (find (lambda (o) (and (equal? (stone-cell o) (stone-cell s))
+                                               (= (stone-overtone o) (stone-overtone s))
+                                               (stone-open? o)))
+                              old-stones)))
+                 (if o (stone s state: 'open) s)))
+             (content-stones *content*))))
+
+    (define (populate w old carry)
+      (world-populate w (kept-stones old) (content-pickups *content*)
+                      (append carry (if old (world-carry old) '()))))
+
+    ;; ?carry=: from now on the body carries hs (and whatever it has found).
+    (define (shell-set-carry! hs)
+      (set! *carry0* hs)
+      (when (and *world* *content* (world-gates *world*))
+        (set! *world* (populate *world* *world* hs))))
+
+    ;; The news of this frame's ticks, taken off the world by shell-frame!
+    ;; (the sound plays it, the draw flashes it).
+    (define *frame-news* '())
+    (define (shell-take-news!) *frame-news*)
+
     (define (body-in-cell cell)
       (cell-body (worldmap-tiles (content-map *content*)) HARKFELL-FEEL (car cell) (cdr cell)))
 
@@ -174,7 +207,7 @@
                             (room-start-cell *content* rm)))))
         (and cell
              (begin
-               (set! *world* (world-at (content-map *content*) (body-in-cell cell)))
+               (set! *world* (populate (world-at (content-map *content*) (body-in-cell cell)) *world* *carry0*))
                (set! *mode* 'play)
                #t))))
 
@@ -183,7 +216,7 @@
       (let ((cell (and *content* (start-cell *content*))))
         (and cell
              (begin
-               (set! *world* (world-at (content-map *content*) (body-in-cell cell)))
+               (set! *world* (populate (world-at (content-map *content*) (body-in-cell cell)) *world* *carry0*))
                (set! *mode* 'play)
                #t))))
 
@@ -255,7 +288,12 @@
                        (fallback (if cell
                                      (cell-body (worldmap-tiles (content-map ct)) HARKFELL-FEEL (car cell) (cdr cell))
                                      (world-entry *world*))))
-                  (set! *world* (world-reload *world* (content-map ct) fallback)))))
+                  ;; the stones opened so far are opened in the new map BEFORE the
+                  ;; reload looks for rock under the body (review, A3: standing
+                  ;; in an opened stone's cell, a reload sent you to the entry)
+                  (let* ((wm (content-map ct))
+                         (wm (worldmap wm tiles: (open-stone-tiles (worldmap-tiles wm) (kept-stones *world*)))))
+                    (set! *world* (populate (world-reload *world* wm fallback) *world* *carry0*))))))
             ps)))
 
     (define (shell-stick-form) (settings-value *settings* 'stick))
@@ -348,6 +386,10 @@
               (when (or (memq 'jump ev) (memq 'wall-jump ev))
                 (set! *launched* #t))))
           (loop (+ i 1))))
+      (let ((p (world-take-news *world*)))
+        (set! *world* (cdr p))
+        (set! *frame-news* (car p))
+        (draw-news! (car p) (world-ticks *world*)))
       (set! *step-ms* (- (now-ms) *frame-start*))
       (clock-steps *clock*))
 
@@ -450,8 +492,9 @@
           (begin-frame)
           (set-blend-mode 'normal)
           (with-render-target *view-rt*
+            (set-blend-mode 'normal)
             (draw-overview rooms (overview-k) (overview-gap) #t))
-          (draw-render-target *view-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
+          (with-blend-mode 'none (draw-render-target *view-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f)))
           (end-frame))))
 
     (define (present-room! win-w win-h ticks)
@@ -462,17 +505,27 @@
         (begin-frame)
         (set-blend-mode 'normal)
         (with-render-target *room-rt*
+          ;; a target pass starts with no blending (sokol_gp's sgp_begin resets
+          ;; its state): without this every translucent draw in the room
+          ;; (water, A3's light) was written unblended
+          (set-blend-mode 'normal)
           (draw-play *world*)
           ;; A2: the listening ears, over the body while you stand still
           (when (and (world-room *world*) (sound-ears) (not (sound-ears-flick)))
             (let ((o (world-origin *world*)))
               (draw-ears (world-body *world*) (car o) (cdr o) (sound-ears)))))
-        (if (eq? (fit-mode f) 'integer)
-            (draw-render-target *room-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
-            (begin
-              (with-render-target *sharp-rt*
-                (draw-render-target *room-rt* 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
-              (draw-render-target *sharp-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))))
+        ;; The room's target is copied OPAQUE (blend none): a translucent draw
+        ;; into it (water, A3's light) lowers the target's own alpha, and
+        ;; blended over the black window those pixels came out dark (seen in
+        ;; A3's first native shots: every glow a dark disc; the water had it
+        ;; since A1).
+        (with-blend-mode 'none
+          (if (eq? (fit-mode f) 'integer)
+              (draw-render-target *room-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f))
+              (begin
+                (with-render-target *sharp-rt*
+                  (draw-render-target *room-rt* 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
+                (draw-render-target *sharp-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f)))))
         (when *ms*
           (draw-readout (append (list (string-append "frame " (tenths *frame-ms*)
                                                      " step " (tenths *step-ms*)

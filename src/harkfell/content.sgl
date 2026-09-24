@@ -65,7 +65,8 @@
           room-char world-char
           read-room-source room-placed
           region-map region-map? region-map-region region-map-rooms region-map-origin
-          region-rooms)
+          region-rooms
+          thing-kw thing-at room-things-of grid-standable?)
 
   (begin
     (define ROOM-COLS 25)
@@ -164,6 +165,34 @@
     (define (sym-list? v) (and (list? v) (every symbol? v)))
 
     (define (every pred l) (or (null? l) (and (pred (car l)) (every pred (cdr l)))))
+
+    ;; A thing's keyword field: (KIND at: (3 4) overtone: 2) "overtone" -> 2, or #f.
+    (define (thing-kw t name)
+      (let find ((l (if (pair? t) (cdr t) '())))
+        (cond ((or (null? l) (not (pair? l)) (null? (cdr l))) #f)
+              ((and (keyword? (car l)) (string=? (keyword->string (car l)) name)) (cadr l))
+              (else (find (cdr l))))))
+
+    ;; A thing's at: as (c . r), or #f.
+    (define (thing-at t)
+      (let ((a (thing-kw t "at")))
+        (and (int-pair? a) (cons (car a) (cadr a)))))
+
+    ;; A grid cell a body stands in: open (not solid, a ledge, water or a
+    ;; hazard) with rock or a ledge under it, inside the room (the row under
+    ;; the last one belongs to the next room, so the last row never is).
+    (define (grid-standable? grid c r)
+      (let ((ch (lambda (c r) (if (and (< -1 r (length grid)) (< -1 c (string-length (list-ref grid r))))
+                                   (string-ref (list-ref grid r) c)
+                                   #\#))))
+        (and (< (+ r 1) ROOM-ROWS)
+             (memq (char-kind (ch c r)) (list 'air))
+             (memq (char-kind (ch c (+ r 1))) (list 'solid 'climbable 'ledge))
+             #t)))
+
+    ;; The room's things of one kind.
+    (define (room-things-of rm kind)
+      (filter (lambda (t) (and (pair? t) (eq? (car t) kind))) (room-things rm)))
 
     (define (ends-with? s suffix)
       (let ((n (string-length s)) (m (string-length suffix)))
@@ -344,6 +373,21 @@
                       (cond ((not (and (pair? t) (symbol? (car t))))
                              (add! (string-append "things: " (datum->string t) " is not (KIND ...)") "things"))
                             ((eq? (car t) 'ring-stone) #f)   ; checked against the grid below
+                            ((eq? (car t) 'harmonic)          ; A3: a pickup
+                             (let ((a (thing-kw t "at")) (o (thing-kw t "overtone")))
+                               (cond ((not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
+                                      (add! (string-append "things: harmonic at: " (datum->string a) " is not a cell of the grid") "things"))
+                                     ((not (grid-standable? (roomfile-grid rf) (car a) (cadr a)))
+                                      (add! (string-append "things: harmonic at: " (datum->string a)
+                                                           " is not a place to stand (open, with rock or a ledge under it)")
+                                            "things")))
+                               (unless (and (integer? o) (<= 2 o 7))
+                                 (add! (string-append "things: harmonic at: " (datum->string a) " has no overtone: 2 to 7") "things"))
+                               (when (and reg (integer? o)
+                                          (not (member (list 'overtone o) (or (region-field reg 'gives) '()))))
+                                 (add! (string-append "things: harmonic overtone: " (number->string o) " is not one "
+                                                      (symbol->string region-sym) " gives: (gives: in world/world.sgl)")
+                                       "things"))))
                             ((and reg (not (memq (car t) (or (region-field reg 'roster) '()))))
                              (add! (string-append "things: " (symbol->string (car t)) " is not on "
                                                   (symbol->string region-sym) "'s roster")
@@ -356,7 +400,23 @@
                                (when (and a (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS))))
                                  (add! (string-append "things: " (symbol->string (car t)) " at: "
                                                       (datum->string a) " is not a cell of the grid")
-                                       "things"))))))
+                                       "things"))
+                               ;; A3: count: (how many at one place) and drawn: (the
+                               ;; harmonic a follower is drawn to)
+                               (let ((n (thing-kw t "count")) (d (thing-kw t "drawn")) (fl (thing-kw t "flock")))
+                                 (when (and n (not (and (integer? n) (<= 1 n 12))))
+                                   (add! (string-append "things: " (symbol->string (car t)) " count: "
+                                                        (datum->string n) " is not 1 to 12")
+                                         "things"))
+                                 ;; (review, A3: flock: -1 passed and hung the room's making)
+                                 (when (and fl (not (and (integer? fl) (<= 1 fl 12))))
+                                   (add! (string-append "things: " (symbol->string (car t)) " flock: "
+                                                        (datum->string fl) " is not 1 to 12")
+                                         "things"))
+                                 (when (and d (not (and (integer? d) (<= 2 d 7))))
+                                   (add! (string-append "things: " (symbol->string (car t)) " drawn: "
+                                                        (datum->string d) " is not a harmonic, 2 to 7")
+                                         "things")))))))
                     things)))
             ;; bed: (CHANNEL LEVEL ...) with the region's channels, levels 0..1
             (let ((bed (roomfile-field rf 'bed '())))
@@ -635,6 +695,25 @@
                                                      (string-append "shares " (room-key (room-x (car rs)) (room-y (car rs)))
                                                                     " with " (room-path (car dup))))
                                                  acc))))))))
+             ;; A3: each harmonic is found in one place in the world
+             (ps (append ps
+                         (let loop ((hs (apply append
+                                               (map (lambda (rm)
+                                                      (map (lambda (t) (cons (thing-kw t "overtone") rm))
+                                                           (room-things-of rm 'harmonic)))
+                                                    rooms)))
+                                    (acc '()))
+                           (if (null? hs)
+                               (reverse acc)
+                               (let ((dup (find (lambda (h) (equal? (car h) (car (car hs)))) (cdr hs))))
+                                 (loop (cdr hs)
+                                       (if (and dup (integer? (car dup)))
+                                           (cons (pb (room-path (cdr (car hs))) #f
+                                                     (string-append "harmonic overtone: " (number->string (car dup))
+                                                                    " is also in " (room-path (cdr dup))
+                                                                    ": a harmonic is found in one place"))
+                                                 acc)
+                                           acc)))))))
              (whole (filter grid-whole? rooms))
              (placed-rooms (map room-placed whole))
              (wm (make-worldmap placed-rooms ROOM-COLS ROOM-ROWS TILE))

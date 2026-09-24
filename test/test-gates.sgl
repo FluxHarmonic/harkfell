@@ -1,0 +1,136 @@
+;;; A3's gate (harkfell-design section 10, A3), on the real world (world/),
+;;; ticking the real world ((harkfell world)) with the real physics:
+;;;
+;;;   - without H2 the Old Stone's ring-stone stays shut: its cell is rock,
+;;;     and a body pushing east into it stays in the Old Stone;
+;;;   - carrying something else (H3), it shivers once (the near miss) and
+;;;     stays shut;
+;;;   - the harmonic the WORLD'S PICKUP gives, taken by touching it in the
+;;;     Drowned Channel, opens the stone within its radius: it rings, sinks,
+;;;     its cell is air, and the body walks through into Behind the Stone.
+;;;
+;;; The last is the chain the brief's first sabotage breaks: key the stone to
+;;; H3 while the pickup gives H2 and the stone must stay shut (red here).
+;;; Nothing is assumed about which harmonic the pickup gives: the test takes
+;;; it by touch and uses whatever it gave.
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine roomfile)
+        (engine tilemap)
+        (engine worldmap)
+        (engine body)
+        (engine reach)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+
+;; A world standing in cell (c, r) of room (x, y), carrying carry, the
+;; content's stones and pickups (as the shell populates it).
+(define (world-standing x y c r carry . from)
+  (let* ((rm (content-room CT x y))
+         (g (local->global CT rm c r))
+         (w (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g)))))
+    (if (pair? from)
+        (world-populate w (world-stones (car from)) (world-pickups (car from)) (world-carry (car from)))
+        (world-populate w (content-stones CT) (content-pickups CT) carry))))
+
+(define (ticks w in n news)
+  (if (= n 0)
+      (cons w news)
+      (let* ((w (world-tick w in))
+             (p (world-take-news w)))
+        (ticks (cdr p) in (- n 1) (append news (car p))))))
+
+(define RIGHT (intent h: 1 v: 0 jump: #f press: #f))
+
+(define (the-stone w) (car (world-stones w)))
+(define (stone-cell-kind w)
+  (let ((c (stone-cell (the-stone w)))) (tilemap-ref (world-tiles w) (car c) (cdr c))))
+(define (kinds news) (map car news))
+(define (room-at w) (let ((p (world-room w))) (list (placed-x p) (placed-y p))))
+
+(test-group "gates: the world has one stone and one harmonic"
+  (test "the world loads clean"
+    (assert-equal '() (content-problems CT)))
+  (test "one ring-stone, in the Old Stone, keyed to 2"
+    (assert-equal 1 (length (content-stones CT)))
+    (assert-equal 2 (stone-overtone (car (content-stones CT)))))
+  (test "one pickup, in the Drowned Channel"
+    (assert-equal 1 (length (content-pickups CT)))
+    (assert-equal (local->global CT (content-room CT 9 4) 18 7) (pickup-cell (car (content-pickups CT))))))
+
+;; Standing three tiles west of the stone, then pushing east into it.
+(define SHUT (ticks (world-standing 10 3 18 8 '()) RIGHT 240 '()))
+(define MISS (ticks (world-standing 10 3 18 8 '(3)) RIGHT 240 '()))
+
+(test-group "gates: without the key the stone stays shut"
+  (test "carrying nothing: no news, still shut, its cell rock, the body still in the Old Stone"
+    (assert-equal '() (kinds (cdr SHUT)))
+    (assert-equal 'shut (stone-state (the-stone (car SHUT))))
+    (assert-true (kind-solid? (stone-cell-kind (car SHUT))))
+    (assert-equal '(10 3) (room-at (car SHUT))))
+  (test "carrying H3: one near miss, still shut, the body still in the Old Stone"
+    (assert-equal '(near-miss) (kinds (cdr MISS)))
+    (assert-equal 'shut (stone-state (the-stone (car MISS))))
+    (assert-true (kind-solid? (stone-cell-kind (car MISS))))
+    (assert-equal '(10 3) (room-at (car MISS)))))
+
+;; The pickup, by touch: standing on it in the Drowned Channel.
+(define TAKEN (ticks (world-standing 9 4 18 7 '()) NOTHING 2 '()))
+(define GIVEN (world-carry (car TAKEN)))
+;; Then, with what it gave, at the stone.
+(define AT-STONE (ticks (world-standing 10 3 18 8 '() (car TAKEN)) NOTHING 150 '()))
+(define THROUGH (ticks (car AT-STONE) RIGHT 150 '()))
+
+(test-group "gates: the harmonic found opens the stone"
+  (test "touching the pickup takes it: the carry is its harmonic, the pickup is gone"
+    (assert-equal '(pickup) (kinds (cdr TAKEN)))
+    (assert-equal 1 (length GIVEN))
+    (assert-equal '() (world-pickups (car TAKEN))))
+  (test "at the stone with it: it rings, sinks, then opens, within 150 ticks"
+    (assert-equal '(ring sink open) (kinds (cdr AT-STONE)))
+    (assert-equal 'open (stone-state (the-stone (car AT-STONE)))))
+  (test "its cell is air"
+    (assert-equal 'air (stone-cell-kind (car AT-STONE))))
+  (test "and the body walks east through it into Behind the Stone"
+    (assert-equal '(11 3) (room-at (car THROUGH)))))
+
+;; The key arriving while the body is already inside the radius (a pickup
+;; beside a stone, a ?carry= door): the stone rings and opens without the
+;; body having to leave and come back (the review's finding 6).
+(define NEAR-FIRST (ticks (world-standing 10 3 18 8 '()) NOTHING 20 '()))
+(define KEY-ARRIVES
+  (ticks (world-populate (car NEAR-FIRST) (world-stones (car NEAR-FIRST)) (world-pickups (car NEAR-FIRST)) '(2))
+         NOTHING 150 '()))
+
+(test-group "gates: the key arriving while near"
+  (test "standing near without it: shut, and the approach is under way"
+    (assert-equal 'shut (stone-state (the-stone (car NEAR-FIRST))))
+    (assert-true (stone-near (the-stone (car NEAR-FIRST)))))
+  (test "then carrying it, without moving: it rings, sinks and opens"
+    (assert-equal '(ring sink open) (kinds (cdr KEY-ARRIVES)))))
+
+;; A flock: that is not 1 to 12 is a content problem (the review's finding
+;; 3: flock: -1 passed the gate and hung the room's making).
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a) (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+(test-group "gates: creature counts are checked"
+  (test "flock: -1 is a problem naming the Fen Edge"
+    (let* ((src (map (lambda (e) (if (string=? (car e) "world/rooms/reedfen/x8y3.room")
+                                     (cons (car e) (swap (cdr e) "flock: 5" "flock: -1"))
+                                     e))
+                     (read-world-source "world")))
+           (ps (map problem->string (content-problems (load-content src)))))
+      (assert-true (find (lambda (p) (and (string-contains? p "x8y3.room") (string-contains? p "flock: -1"))) ps)))))

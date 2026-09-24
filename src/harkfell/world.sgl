@@ -43,14 +43,18 @@
           (engine worldmap)
           (engine reach)
           (engine tween)
-          (harkfell feel))
+          (harkfell feel)
+          (harkfell gates)
+          (harkfell creatures))
 
   (export world world? world-new world-at
           world-room world-body world-entry world-phase world-timer
           world-ticks world-returns world-tiles world-map world-entered
           world-tick world-dim DIM-TICKS world-reload world-reset
           world-origin
-          entry-body cell-body)
+          entry-body cell-body
+          world-gates world-carry world-news world-still world-take-news world-populate
+          world-stones world-pickups world-critters)
 
   (begin
     (define DIM-TICKS 15)
@@ -70,7 +74,35 @@
       (returns default: 0)
       (entered default: 0)
       (ground default: #f)          ; the last body that stood on ground
-      (provisional default: #f))    ; the entry is waiting for the first standing tick
+      (provisional default: #f)     ; the entry is waiting for the first standing tick
+      ;; A3: the harmonics carried, the pickups left, the ring-stones ((harkfell
+      ;; gates)); #f in A0's room. still: ticks the body has stood at rest.
+      ;; news: what happened since the shell last took it (the sound's cues).
+      (gates default: #f)
+      (critters default: #f)        ; the current room's creatures ((harkfell creatures)), with gates
+      (still default: 0)
+      (news default: '()))
+
+    (define (world-carry w) (if (world-gates w) (gstate-carry (world-gates w)) '()))
+    (define (world-stones w) (if (world-gates w) (gstate-stones (world-gates w)) '()))
+    (define (world-pickups w) (if (world-gates w) (gstate-pickups (world-gates w)) '()))
+
+    ;; The world with its gates: stones and pickups (global cells) and the
+    ;; carry. Pickups of a harmonic already carried are gone, and open stones
+    ;; open the tilemap.
+    (define (world-populate w stones pickups carry)
+      (let* ((carry (carry-normal carry))
+             (tm (open-stone-tiles (world-tiles w) stones)))
+        (world w
+               wm: (worldmap (world-wm w) tiles: tm)
+               critters: (room-critters (world-wm w) (world-room w))
+               gates: (gstate stones: stones
+                              pickups: (filter (lambda (p) (not (memv (pickup-overtone p) carry))) pickups)
+                              carry: carry
+                              tiles: tm))))
+
+    ;; The news, and the world without it.
+    (define (world-take-news w) (cons (world-news w) (world w news: '())))
 
     (define (world-map w) (world-wm w))
     (define (world-tiles w) (worldmap-tiles (world-wm w)))
@@ -134,7 +166,59 @@
                      provisional: #f))
             w)))
 
+    ;; The gates after a tick: the pickups the body touched, the stones it
+    ;; came near; an opened stone opens the world's tilemap.
+    (define (gates-tick w)
+      (let ((g (world-gates w)))
+        (if (not g)
+            w
+            (let* ((b (world-body w))
+                   (f HARKFELL-FEEL)
+                   (g2 (gates-step (gstate g tiles: (world-tiles w) news: '())
+                                   (body-center b f)
+                                   (list (body-x b) (body-y b) (feel-box-w f) (feel-box-h f))
+                                   (eq? (world-phase w) 'play)))
+                   (tm (gstate-tiles g2)))
+              (world w
+                     wm: (if (eq? tm (world-tiles w)) (world-wm w) (worldmap (world-wm w) tiles: tm))
+                     gates: (gstate g2 news: '())
+                     news: (append (world-news w) (gstate-news g2)))))))
+
+    (define (still-tick w)
+      (let ((b (world-body w)))
+        (world w still: (if (and (eq? (world-phase w) 'play) (eq? (body-mode b) 'ground)
+                                 (< (abs (body-vx b)) 0.01) (< (abs (body-vy b)) 0.01))
+                            (+ (world-still w) 1)
+                            0))))
+
+    ;; The creatures of the room p (a placed room whose data is a content
+    ;; room), or #f outside the written world.
+    (define (room-critters wm p)
+      (and p (placed-data p)
+           (let ((o (worldmap-origin wm p)))
+             (critters-new (placed-data p) (car o) (cdr o)))))
+
+    ;; The creatures after a tick; the room changed: the new room's.
+    (define (critters-tick w before)
+      (if (not (world-gates w))
+          w
+          (let* ((cs (if (eq? (world-room w) (world-room before))
+                         (world-critters w)
+                         (room-critters (world-wm w) (world-room w)))))
+            (if (not cs)
+                (world w critters: #f)
+                (let* ((c (body-center (world-body w) HARKFELL-FEEL))
+                       (b (world-body w))
+                       (cs2 (critters-step cs (car c) (cdr c) (world-still w) (world-carry w)
+                                           (eq? (world-phase w) 'play)
+                                           (sqrt (+ (* (body-vx b) (body-vx b)) (* (body-vy b) (body-vy b)))))))
+                  (world w critters: (critters cs2 news: '())
+                         news: (append (world-news w) (critters-news cs2))))))))
+
     (define (world-tick w in)
+      (critters-tick (still-tick (gates-tick (world-tick-body w in))) w))
+
+    (define (world-tick-body w in)
       (let ((w (world w ticks: (+ (world-ticks w) 1))))
         (case (world-phase w)
           ((play)
@@ -172,7 +256,7 @@
                         (worldmap-room wm (placed-x (world-room w)) (placed-y (world-room w)))))
              (entry (if (inside-rock? tm (world-entry w)) fallback (world-entry w)))
              (b (if (inside-rock? tm (world-body w)) entry (world-body w))))
-        (world w wm: wm room: (or room (world-room w)) body: b entry: entry
+        (world w wm: wm room: (or room (world-room w)) body: b entry: entry gates: #f
                ground: (if (inside-rock? tm (or (world-ground w) entry)) entry (world-ground w)))))
 
     ;; How dark the screen is, 0 (clear) to 1 (black), eased.

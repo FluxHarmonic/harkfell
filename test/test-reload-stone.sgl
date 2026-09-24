@@ -1,0 +1,47 @@
+;;; Live reload while standing in an opened ring-stone's cell keeps the body
+;;; where it is (the A3 review's finding 5: the reload looked for rock in the
+;;; content's map, where the stone is still solid, and sent the body to the
+;;; room's entry). Driven through the shell, as live reload runs it.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine body)
+        (harkfell world)
+        (harkfell source)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell shell))
+
+(define SRC (read-world-source "world"))
+(shell-boot!)
+(shell-load-content! SRC)
+(shell-set-carry! '(2))
+(shell-goto! "reedfen:10,3" (cons 18 8))
+
+(define (frames n) (let loop ((k 0)) (when (< k n) (shell-frame! (/ 1 60.0)) (loop (+ k 1)))))
+(define (body-col) (exact (floor (/ (car (body-center (world-body (shell-world)) HARKFELL-FEEL)) 16))))
+(define (stone-col) (car (stone-cell (car (world-stones (shell-world))))))
+
+;; the stone rings and opens with the body standing three tiles off
+(frames 150)
+(define OPENED (stone-state (car (world-stones (shell-world)))))
+;; then walk right until the body's centre is in the stone's column, and stop
+(shell-key-down! 'right)
+(let loop ((k 0)) (when (and (< k 120) (< (body-col) (stone-col))) (frames 1) (loop (+ k 1))))
+(shell-key-up! 'right)
+(frames 30)
+(define BEFORE (world-body (shell-world)))
+(define IN-CELL (= (body-col) (stone-col)))
+;; a reload of the Old Stone's own file, unchanged
+(define PS (shell-replace-file! "world/rooms/reedfen/x10y3.room" (cdr (assoc "world/rooms/reedfen/x10y3.room" SRC))))
+(define AFTER (world-body (shell-world)))
+
+(test-group "reload: standing in an opened stone's cell"
+  (test "the stone opened, and the body stands in its column"
+    (assert-equal 'open OPENED)
+    (assert-true IN-CELL))
+  (test "a clean reload leaves the body where it was, and the stone open"
+    (assert-equal '() PS)
+    (assert-true (< (abs (- (body-x AFTER) (body-x BEFORE))) 0.01))
+    (assert-equal 'open (stone-state (car (world-stones (shell-world)))))))

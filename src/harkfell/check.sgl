@@ -44,7 +44,9 @@
 
   (export start-cell content-reach reach-problems room-report
           room-cells-global global->local local->global room-standable-cells
-          room-start-cell reach-summary)
+          room-start-cell reach-summary
+          content-reach-carrying sets-bare room-gated carry-label
+          content-pickup-cells content-stone-cells tiles-carrying)
 
   (begin
     (define (room-tile-origin ct rm)
@@ -102,93 +104,234 @@
       (let ((dx (- (car a) (car b))) (dy (- (cdr a) (cdr b))))
         (+ (* dx dx) (* dy dy))))
 
-    ;; The reach graph from the start (#f with no start).
+    ;; --- harmonics: the carry sets a player can hold (A3) -------------------------
+    ;;
+    ;; A ring-stone keyed to a harmonic you carry opens (harkfell gates), so
+    ;; what is reachable depends on what you carry. The checker searches each
+    ;; CARRY SET a player can actually hold: the empty set first, then every
+    ;; set the harmonics reachable with a set lead to (the set plus the one
+    ;; picked up), until no new set appears (at most 2^6). For each it builds
+    ;; the world's tilemap with the stones of the carried harmonics open.
+
+    (define (things-global ct kind)
+      (apply append
+             (map (lambda (p)
+                    (let ((rm (placed-data p)))
+                      (filter (lambda (x) x)
+                              (map (lambda (t)
+                                     (let ((a (thing-at t)) (o (thing-kw t "overtone")))
+                                       (and a (integer? o) (cons o (local->global ct rm (car a) (cdr a))))))
+                                   (room-things-of rm kind)))))
+                  (content-rooms ct))))
+
+    ;; ((overtone . cell) ...), global cells.
+    (define (content-pickup-cells ct) (things-global ct 'harmonic))
+    (define (content-stone-cells ct) (things-global ct 'ring-stone))
+
+    ;; The world's tilemap with the stones keyed to carry open (air).
+    (define (tiles-carrying ct carry)
+      (let loop ((ss (content-stone-cells ct)) (tm (worldmap-tiles (content-map ct))))
+        (cond ((null? ss) tm)
+              ((memv (car (car ss)) carry)
+               (loop (cdr ss) (tilemap-set tm (car (cdr (car ss))) (cdr (cdr (car ss))) 'air)))
+              (else (loop (cdr ss) tm)))))
+
+    (define (carry-label carry)
+      (if (null? carry)
+          "carrying nothing"
+          (string-append "carrying " (string-join (map (lambda (h) (string-append "H" (number->string h))) carry) " "))))
+
+    (define (sorted-carry l) (list-sort < l))
+
+    ;; The reach graph from the start, carrying carry (#f with no start).
     ;; log: optional, (expanded steps kind cell) after each anchor.
-    (define (content-reach ct . log)
+    (define (content-reach-carrying ct carry . log)
       (let ((s (start-cell ct)))
         (and s
-             (apply reach-search (worldmap-tiles (content-map ct)) HARKFELL-FEEL (list s) witness-lands? log))))
+             (apply reach-search (tiles-carrying ct carry) HARKFELL-FEEL (list s) witness-lands? log))))
+
+    ;; Every carry set a player can hold, each with its graph: ((carry . g) ...),
+    ;; the empty set first; #f with no start.
+    (define (content-reach ct . log)
+      (and (start-cell ct)
+           (let ((pickups (content-pickup-cells ct)))
+             (let loop ((todo (list '())) (done '()))
+               (cond ((null? todo) (reverse done))
+                     ((assoc (car todo) done) (loop (cdr todo) done))
+                     (else
+                      (let* ((carry (car todo))
+                             (g (apply content-reach-carrying ct carry log))
+                             (fwd (reach-forward g (list (start-cell ct))))
+                             (tm (graph-tm g))
+                             (next (map (lambda (p) (sorted-carry (cons (car p) carry)))
+                                        (filter (lambda (p) (and (not (memv (car p) carry))
+                                                                 (vector-ref fwd (cell-index tm (car (cdr p)) (cdr (cdr p))))))
+                                                pickups))))
+                        (loop (append (cdr todo) next) (cons (cons carry g) done)))))))))
+
+    ;; The graph searched with no harmonics (for --path).
+    (define (sets-bare sets) (cdr (car sets)))
 
     (define (cell-str c) (string-append "(" (number->string (car c)) "," (number->string (cdr c)) ")"))
 
-    ;; ((room unreachable traps stale) ...), cells room-local.
-    (define (classify ct g)
-      (let* ((tm (graph-tm g))
-             (s (start-cell ct))
-             (fwd (reach-forward g (list s)))
-             (back (reach-backward g (list s))))
+    ;; Per room: (room unreached traps stale wet gated), cells room-local.
+    ;;   unreached  reached with NO carry set a player can hold (less declared)
+    ;;   traps      ((carry . cells) ...): reached carrying that, no way back carrying it
+    ;;   stale      declared unreached, but reached with some set
+    ;;   wet        ((carry . cells) ...): water traps, per set
+    ;;   gated      ((cell . carry) ...): reached, but not carrying nothing; carry
+    ;;              is the first set (in search order) that reaches it
+    (define (classify ct sets)
+      (let* ((s (start-cell ct))
+             (per (map (lambda (e)
+                         (list (car e) (cdr e)
+                               (reach-forward (cdr e) (list s))
+                               (reach-backward (cdr e) (list s))))
+                       sets))
+             (tm (graph-tm (cdr (car sets)))))
         (map (lambda (p)
                (let* ((rm (placed-data p))
                       (cells (room-standable-cells ct rm))
                       (idx (lambda (c) (cell-index tm (car c) (cdr c))))
                       (declared (room-unreached rm))
                       (local (lambda (c) (global->local ct rm c)))
-                      (unreached (filter (lambda (c) (not (vector-ref fwd (idx c)))) cells))
-                      (traps (filter (lambda (c) (and (vector-ref fwd (idx c)) (not (vector-ref back (idx c))))) cells))
+                      (fwd-any (lambda (c) (find (lambda (e) (vector-ref (caddr e) (idx c))) per)))
                       (o (let ((g (global->local ct rm (cons 0 0)))) (cons (- (car g)) (- (cdr g)))))
                       (in-room? (lambda (c) (and (<= (car o) (car c) (+ (car o) ROOM-COLS -1))
                                                  (<= (cdr o) (cdr c) (+ (cdr o) ROOM-ROWS -1)))))
-                      (wet (filter (lambda (w)
-                                     (and (in-room? (car w))
-                                          (not (find (lambda (c) (vector-ref back (idx c))) (cdr w)))))
-                                   (graph-waters g))))
+                      (unreached (filter (lambda (c) (not (fwd-any c))) cells))
+                      (traps (filter (lambda (x) (pair? (cdr x)))
+                                     (map (lambda (e)
+                                            (cons (car e)
+                                                  (map local (filter (lambda (c) (and (vector-ref (caddr e) (idx c))
+                                                                                      (not (vector-ref (cadddr e) (idx c)))))
+                                                                     cells))))
+                                          per)))
+                      (wet (filter (lambda (x) (pair? (cdr x)))
+                                   (map (lambda (e)
+                                          (cons (car e)
+                                                (map (lambda (w) (local (car w)))
+                                                     (filter (lambda (w)
+                                                               (and (in-room? (car w))
+                                                                    (not (find (lambda (c) (vector-ref (cadddr e) (idx c))) (cdr w)))))
+                                                             (graph-waters (cadr e))))))
+                                        per)))
+                      (bare (car per))
+                      (gated (filter-map* (lambda (c)
+                                            (and (not (vector-ref (caddr bare) (idx c)))
+                                                 (let ((e (fwd-any c))) (and e (cons (local c) (car e))))))
+                                          cells)))
                  (list rm
                        (filter (lambda (c) (not (member c declared))) (map local unreached))
-                       (map local traps)
+                       traps
                        (filter (lambda (c) (member c declared))
-                               (map local (filter (lambda (c) (vector-ref fwd (idx c))) cells)))
-                       (map (lambda (w) (local (car w))) wet))))
+                               (map local (filter (lambda (c) (fwd-any c)) cells)))
+                       wet
+                       gated)))
              (content-rooms ct))))
 
+    (define (filter-map* f l)
+      (let loop ((l l) (acc '()))
+        (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+    ;; The harmonics: every pickup is reached with some set, and from where it
+    ;; lies the start is reachable carrying what you then hold (picking it up
+    ;; never strands you).
+    (define (pickup-problems ct sets)
+      (let ((s (start-cell ct)))
+        (apply append
+               (map (lambda (p)
+                      (let* ((h (car p)) (cell (cdr p))
+                             (where (lambda () (let* ((wm (content-map ct))
+                                                      (rx (+ (worldmap-x0 wm) (exact (floor (/ (car cell) ROOM-COLS)))))
+                                                      (ry (+ (worldmap-y0 wm) (exact (floor (/ (cdr cell) ROOM-ROWS)))))
+                                                      (rm (content-room ct rx ry)))
+                                                 (if rm (string-append (room-label rm) " " (cell-str (global->local ct rm cell))) "?"))))
+                             (reached-in (filter (lambda (e)
+                                                   (and (not (memv h (car e)))
+                                                        (vector-ref (reach-forward (cdr e) (list s))
+                                                                    (cell-index (graph-tm (cdr e)) (car cell) (cdr cell)))))
+                                                 sets)))
+                        (if (null? reached-in)
+                            (list (problem path: "world/world.sgl" line: #f
+                                           message: (string-append "harmonic H" (number->string h) " at " (where)
+                                                                   " is not reachable with any harmonics a player can carry")))
+                            (filter-map*
+                              (lambda (e)
+                                (let* ((after (assoc (sorted-carry (cons h (car e))) sets))
+                                       (back (and after (reach-backward (cdr after) (list s)))))
+                                  (and (not (and back (vector-ref back (cell-index (graph-tm (cdr after)) (car cell) (cdr cell)))))
+                                       (problem path: "world/world.sgl" line: #f
+                                                message: (string-append "harmonic H" (number->string h) " at " (where)
+                                                                        ": picked up " (carry-label (car e))
+                                                                        ", there is no way back to the start")))))
+                              reached-in))))
+                    (content-pickup-cells ct)))))
+
+    (define (carried-cells l)
+      (string-join (map (lambda (x) (string-append (carry-label (car x)) ": " (string-join (map cell-str (cdr x)) " "))) l) "; "))
+
     ;; Problems ((engine roomfile) problems, one per room and kind).
-    (define (reach-problems ct g)
-      (if (not g)
+    (define (reach-problems ct sets)
+      (if (not sets)
           (list (problem path: "world/world.sgl" line: #f message: "no start: nothing to search from"))
-          (apply append
-                 (map (lambda (e)
-                        (let ((rm (car e)))
-                          (append
-                            (if (null? (cadr e)) '()
-                                (list (problem path: (room-path rm) line: #f
-                                               message: (string-append (room-label rm) ": cells "
-                                                                       (string-join (map cell-str (cadr e)) " ")
-                                                                       " are not reachable from the start"))))
-                            (if (null? (caddr e)) '()
-                                (list (problem path: (room-path rm) line: #f
-                                               message: (string-append (room-label rm) ": cells "
-                                                                       (string-join (map cell-str (caddr e)) " ")
-                                                                       " are traps: no way back to the start from them"))))
-                            (if (null? (list-ref e 4)) '()
-                                (list (problem path: (room-path rm) line: #f
-                                               message: (string-append (room-label rm) ": water at "
-                                                                       (string-join (map cell-str (list-ref e 4)) " ")
-                                                                       " is a trap: swimming there reaches no standing place that leads back to the start"))))
-                            (if (null? (cadddr e)) '()
-                                (list (problem path: (room-path rm) line: (field-line (roomfile-text (room-file rm)) "unreached")
-                                               message: (string-append (room-label rm) ": unreached: lists "
-                                                                       (string-join (map cell-str (cadddr e)) " ")
-                                                                       ", which the start does reach")))))))
-                      (classify ct g)))))
+          (append
+            (apply append
+                   (map (lambda (e)
+                          (let ((rm (car e)))
+                            (append
+                              (if (null? (cadr e)) '()
+                                  (list (problem path: (room-path rm) line: #f
+                                                 message: (string-append (room-label rm) ": cells "
+                                                                         (string-join (map cell-str (cadr e)) " ")
+                                                                         " are not reachable from the start, carrying anything a player can"))))
+                              (if (null? (caddr e)) '()
+                                  (list (problem path: (room-path rm) line: #f
+                                                 message: (string-append (room-label rm) ": traps, no way back to the start from them ("
+                                                                         (carried-cells (caddr e)) ")"))))
+                              (if (null? (list-ref e 4)) '()
+                                  (list (problem path: (room-path rm) line: #f
+                                                 message: (string-append (room-label rm) ": water traps, swimming there reaches no standing place that leads back to the start ("
+                                                                         (carried-cells (list-ref e 4)) ")"))))
+                              (if (null? (cadddr e)) '()
+                                  (list (problem path: (room-path rm) line: (field-line (roomfile-text (room-file rm)) "unreached")
+                                                 message: (string-append (room-label rm) ": unreached: lists "
+                                                                         (string-join (map cell-str (cadddr e)) " ")
+                                                                         ", which the start does reach")))))))
+                        (classify ct sets)))
+            (pickup-problems ct sets))))
+
+    ;; A room's gated cells: ((c . r) . carry) for each cell reached only
+    ;; carrying something (the gate tests read it).
+    (define (room-gated ct sets rm)
+      (let find ((es (classify ct sets)))
+        (cond ((null? es) '())
+              ((eq? (car (car es)) rm) (list-ref (car es) 5))
+              (else (find (cdr es))))))
 
     ;; The room's grid with its standable cells marked, then a line each for
-    ;; what is wrong. Lines, for printing.
-    (define (room-report ct g rm)
-      (let* ((e (let find ((es (classify ct g)))
+    ;; what is wrong. Lines, for printing. A gated cell is marked with the
+    ;; digit of the highest harmonic in the first set that reaches it.
+    (define (room-report ct sets rm)
+      (let* ((e (let find ((es (classify ct sets)))
                   (cond ((null? es) #f)
                         ((eq? (car (car es)) rm) (car es))
                         (else (find (cdr es))))))
-             (tm (graph-tm g))
              (s (start-cell ct))
-             (fwd (reach-forward g (list s)))
              (cells (map (lambda (c) (global->local ct rm c)) (room-standable-cells ct rm)))
              (start-local (and s (global->local ct rm s)))
+             (trap-cells (apply append (map cdr (caddr e))))
+             (gated (list-ref e 5))
              (mark (lambda (c r)
                      (let ((cell (cons c r)))
                        (cond ((and start-local (equal? cell start-local)) #\@)
                              ((not (member cell cells)) #f)
-                             ((member cell (caddr e)) #\?)
+                             ((member cell trap-cells) #\?)
                              ((member cell (cadr e)) #\!)
                              ((member cell (room-unreached rm)) #\-)
+                             ((assoc cell gated)
+                              (let ((carry (cdr (assoc cell gated))))
+                                (string-ref (number->string (apply max carry)) 0)))
                              (else #\*))))))
         (append
           (list (string-append (room-label rm) "  \"" (room-title rm) "\"")
@@ -200,13 +343,23 @@
                (iota ROOM-ROWS))
           (list (string-append "  standable " (number->string (length cells))
                                ", unreachable " (number->string (length (cadr e)))
-                               ", traps " (number->string (length (caddr e)))))
+                               ", traps " (number->string (length trap-cells))
+                               ", gated " (number->string (length gated))))
+          (if (null? gated) '()
+              (list (string-append "  GATED (reached only carrying): "
+                                   (string-join (map (lambda (g) (string-append (cell-str (car g)) " " (carry-label (cdr g)))) gated) ", "))))
           (if (null? (cadr e)) '() (list (string-append "  UNREACHABLE " (string-join (map cell-str (cadr e)) " "))))
-          (if (null? (caddr e)) '() (list (string-append "  TRAP " (string-join (map cell-str (caddr e)) " "))))
-          (if (null? (list-ref e 4)) '() (list (string-append "  WATER TRAP " (string-join (map cell-str (list-ref e 4)) " "))))
+          (if (null? (caddr e)) '() (list (string-append "  TRAP " (carried-cells (caddr e)))))
+          (if (null? (list-ref e 4)) '() (list (string-append "  WATER TRAP " (carried-cells (list-ref e 4)))))
           (if (null? (cadddr e)) '() (list (string-append "  STALE unreached: " (string-join (map cell-str (cadddr e)) " ")))))))
 
-    (define (reach-summary g)
-      (string-join (map (lambda (p) (string-append (symbol->string (car p)) " " (number->string (cdr p))))
-                        (graph-stats g))
-                   ", "))))
+    ;; One line per carry set searched.
+    (define (reach-summary sets)
+      (string-join
+        (map (lambda (e)
+               (string-append (carry-label (car e)) ": "
+                              (string-join (map (lambda (p) (string-append (symbol->string (car p)) " " (number->string (cdr p))))
+                                                (graph-stats (cdr e)))
+                                           ", ")))
+             sets)
+        (string-append (string #\newline) "       ")))))

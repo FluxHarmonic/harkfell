@@ -17,7 +17,8 @@
    "#   |    |      |        "
    "#  ||   |||    |||       "
    "#########################")
-  things: ((fen-vole at: (6 9)))
+  things: ((fen-vole at: (6 9))
+           (lantern-moth at: (10 6) count: 4 drawn: 2))
   decor: auto)
 ;; The shaft from the Fen Edge lands at columns 20-21. The rough column
 ;; beside it (22) is the way back up: jump and hold it.

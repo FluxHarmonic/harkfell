@@ -4,8 +4,10 @@
 ;;;
 ;;; --parse-only stops before reach (gates 1 and 2 only): quick, and says so.
 ;;;
-;;;   harkfell --room-check --path REGION:X,Y C,R
+;;;   harkfell --room-check --path REGION:X,Y C,R [--have 2,3]
 ;;;
+;;; (A3) The search runs once per carry set a player can hold ((harkfell
+;;; check)); --have names the set whose graph --path walks (default: none).
 ;;; How the checker says a cell is reached: the shortest chain of accepted
 ;;; edges from the start to cell (C, R) of that room, each edge's witness as
 ;;; run-length input (R right, L left, U up, D down, J jump held, * the press;
@@ -144,7 +146,7 @@
                                     (say "  rejected by the replay: ("
                                          (number->string (caar e)) "," (number->string (cdar e)) ") -> ("
                                          (number->string (cadr e)) "," (number->string (cddr e)) ")"))
-                                  (graph-rejected g))))
+                                  (apply append (map (lambda (e) (graph-rejected (cdr e))) g)))))
                     (for-each (lambda (p) (say (problem->string p))) rps)
                     (let ((pk (arg-value args "--path"))
                           (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
@@ -155,7 +157,12 @@
                           (if (and rm (= (length xy) 2) (car xy) (cadr xy))
                               (begin
                                 (say "path to " pk " (" pc "):")
-                                (print-path ct g (local->global ct rm (car xy) (cadr xy))))
+                                (let* ((hv (arg-value args "--have"))
+                                       (carry (if hv (list-sort < (filter integer? (map string->number (string-split hv ",")))) '()))
+                                       (e (assoc carry g)))
+                                  (if e
+                                      (print-path ct (cdr e) (local->global ct rm (car xy) (cadr xy)))
+                                      (say "--have: no carry set " (carry-label carry) " is one a player can hold"))))
                               (say "--path: no room " pk " or no cell " pc)))))
                     (when (and g (not (member "--path" args)))
                       (for-each (lambda (rm)

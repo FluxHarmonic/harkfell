@@ -6,20 +6,24 @@
   intent: "a mute stone seen before it can matter, across a gap that needs a run"
   bed: (wind 0.6 reeds 0.3 drone 0.4)
   grid:
-  ("                        #"
-   "                        #"
-   "                        #"
-   "                        #"
-   "                        #"
-   "                        #"
-   "                        #"
-   "                        #"
-   "  |  ||       |   o ||  #"
+  ("                     ####"
+   "                     ####"
+   "                     ####"
+   "                     ####"
+   "                     ####"
+   "                     ####"
+   "                     ####"
+   "                     ####"
+   "  |  ||       |   |||o   "
    "###  %####   ############"
    "###  %####xxx############")
-  things: ((ring-stone at: (18 8) overtone: 2)
-           (fen-vole at: (21 8)))
+  things: ((ring-stone at: (21 8) overtone: 2)
+           (fen-vole at: (8 8)))
   decor: auto)
 ;; The gap (columns 10-12) is three tiles over brackish water: the
 ;; envelope's edge, taken at a run from the runway (columns 5-9). The hole
 ;; at columns 3-4 drops to the Climb Back; its right side is rough.
+;; A3: the ring-stone is the door of a one-tile passage under the east
+;; wall, keyed to H2: it rings and sinks into the floor when you come near
+;; carrying H2, and the passage leads to Behind the Stone (x11y3). The wall
+;; hangs from the top of the picture, so nothing goes over it.
