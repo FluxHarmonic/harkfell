@@ -1,0 +1,62 @@
+;;; The look track's fixture world (A4): the Hollow drawn before its rooms
+;;; exist, two demonstration rooms that use every material the Hollow's
+;;; sheet draws. Not the Hollow the player walks (that is CONTENT's): a
+;;; place to see the art. Its palette block is world/world.sgl's, copied;
+;;; test/test-art.sgl holds the two equal.
+(start region: hollow room: (0 0) cell: (6 7))
+
+(palette
+  ;; Reedfen: low, wide, wet; the sky is most of the screen
+  (fen-sky-1 "#7b92a1" "high sky, grey-blue")
+  (fen-sky-2 "#99adb4" "middle sky; far hills")
+  (fen-sky-3 "#b9c7c2" "low sky")
+  (fen-sky-4 "#d8dbcb" "the horizon, a little warm; mist; the water's skin")
+  (fen-peat-1 "#2c2b27" "deep peat, shadow")
+  (fen-peat-2 "#4a453b" "peat")
+  (fen-peat-3 "#6c6552" "mud, old stone")
+  (fen-peat-4 "#968e76" "lit stone, dry mud")
+  (fen-reed-1 "#4d5a3d" "reeds in shade")
+  (fen-reed-2 "#75794b" "reeds")
+  (fen-reed-3 "#aea267" "seed heads, lit blades")
+  (fen-water "#46616b" "still water")
+  (fen-brack "#b9754a" "Reedfen's one warm accent: the brackish water")
+  ;; the Hollow: a meadow ring of mute stones round a shallow bowl, at dawn
+  (hol-sky-1 "#65718e" "high sky, slate")
+  (hol-sky-2 "#9298ad" "middle sky; far fells")
+  (hol-sky-3 "#c6b7b2" "low sky, rose-grey")
+  (hol-sky-4 "#e8d1ac" "dawn at the horizon")
+  (hol-stone-1 "#2d2b2c" "shadow")
+  (hol-stone-2 "#4d4a48" "limestone in shade")
+  (hol-stone-3 "#767470" "limestone")
+  (hol-stone-4 "#a7a59b" "limestone lit")
+  (hol-turf-1 "#435234" "turf in shade")
+  (hol-turf-2 "#66763f" "turf")
+  (hol-turf-3 "#9aa25e" "grass lit")
+  (hol-tarn "#465a6b" "the tarn")
+  (hol-bracken "#b0643a" "the Hollow's one warm accent: bracken")
+  ;; the player, the same everywhere
+  (fur-1 "#ede5d3" "the creature's fur")
+  (fur-2 "#b8ab95" "its fur in shade")
+  (ink "#26252b" "its eye")
+  ;; A3: each harmonic has one colour, used everywhere (section 3, "How the
+  ;; player learns a gate"): the glyph on a ring-stone, the harmonic when you
+  ;; find it, the moths drawn to it. World-wide roles, not a region's.
+  (h2 "#eaa648" "H2, amber")
+  (h3 "#b4dc9a" "H3, pale green")
+  (h4 "#8fb4e6" "H4, cold blue")
+  (h5 "#e6a0b4" "H5, rose")
+  (h7 "#a47ce0" "H7, a violet no region uses")
+  (black "#000000" "fades"))
+
+(region hollow
+  name: "The Hollow (look fixture)"
+  bounds: ((0 0) (1 0))
+  bed: "bed-hollow"
+  bed-channels: (wind water texture drone)
+  palette: (hol-sky-1 hol-sky-2 hol-sky-3 hol-sky-4 hol-stone-1 hol-stone-2 hol-stone-3 hol-stone-4
+            hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
+  tiles: hollow
+  roster: (frog)
+  moments: ())
+
+(creature frog behaviour: hop)

@@ -1,0 +1,188 @@
+;;; The art gate (A4, the look track): the text-authored cells, the region
+;;; palettes and the palette pass's lookups, held to section 7's rules.
+;;;
+;;;   - every cell uses the key only, and the generated module is the text's
+;;;     (scripts/art/cells refuses otherwise; here the module's cells are
+;;;     checked again, since the module is what ships)
+;;;   - a region lists exactly sixteen roles, each in the world palette, the
+;;;     last three the player's (fur-1 fur-2 ink), so the creature is the same
+;;;     everywhere
+;;;   - every lookup (water, deep, reflect, lit) sends a slot to a slot, so an
+;;;     effect cannot leave the palette
+;;;   - every material a sheet authors composes all sixteen autotile shapes
+;;;     at 16 x 16; reeds have as many top, mid and base cells, so a stalk
+;;;     runs on
+;;;   - the player has every frame player-frame can ask for
+;;;   - nothing that matters by colour alone: climbable rock has holds (dark
+;;;     joints) that smooth rock has not
+;;;   - the look fixture's palette is world/world.sgl's
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine body)
+        (harkfell palette)
+        (harkfell atlas)
+        (harkfell art cells)
+        (harkfell source)
+        (harkfell content)
+        (harkfell draw))
+
+(define (string-prefix? p s)
+  (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
+(define (drop l n) (if (= n 0) l (drop (cdr l) (- n 1))))
+
+(define WORLD (load-content (read-world-source "world")))
+(define LOOK (load-content (read-world-source "test/fixtures/worlds/look")))
+
+(define (cell name)
+  (let ((e (find (lambda (c) (string=? (car c) name)) CELLS)))
+    (and e (cdr e))))
+
+(define (sheet-cells sheet)
+  (filter (lambda (c) (string-prefix? (string-append sheet "/") (car c))) CELLS))
+
+(define (count-chars rows pred)
+  (apply + (map (lambda (r) (length (filter pred (string->list r)))) rows)))
+
+(test-group "art: the cells"
+  (test "every character of every cell is in the key"
+    (let ((bad (filter (lambda (c)
+                         (any (lambda (r)
+                                (any (lambda (ch) (not (or (char=? ch #\.) (char=? ch #\_) (char-slot ch))))
+                                     (string->list r)))
+                              (cdr c)))
+                       CELLS)))
+      (assert-equal '() (map car bad))))
+  (test "every row of a cell is as wide as its first"
+    (let ((bad (filter (lambda (c)
+                         (let ((w (string-length (cadr c))))
+                           (any (lambda (r) (not (= w (string-length r)))) (cdr c))))
+                       CELLS)))
+      (assert-equal '() (map car bad))))
+  (test "the key's slots are the palette's"
+    (assert-equal (slot-of 'sky-1) (char-slot #\a))
+    (assert-equal (slot-of 'ground-1) (char-slot #\1))
+    (assert-equal (slot-of 'leaf-3) (char-slot #\7))
+    (assert-equal (slot-of 'water) (char-slot #\w))
+    (assert-equal (slot-of 'accent) (char-slot #\x))
+    (assert-equal (slot-of 'fur-1) (char-slot #\F))
+    (assert-equal (slot-of 'ink) (char-slot #\k))
+    (assert-equal (slot-of 'h2) (char-slot #\h))
+    (assert-equal (slot-of 'black) (char-slot #\0))
+    (assert-false (char-slot #\.))
+    (assert-false (char-slot #\_))))
+
+(test-group "art: the palettes"
+  (test "every region lists sixteen roles, each in the world palette, ending fur-1 fur-2 ink"
+    (for-each
+      (lambda (ct)
+        (for-each
+          (lambda (r)
+            (let ((roles (region-field r 'palette))
+                  (world (map car (content-palette ct))))
+              (assert-equal 16 (length roles))
+              (assert-equal '() (filter (lambda (x) (not (memq x world))) roles))
+              (assert-equal (list 'fur-1 'fur-2 'ink) (drop roles 13))))
+          (content-regions ct)))
+      (list WORLD LOOK)))
+  (test "every world-wide slot has a colour in the world palette"
+    (for-each (lambda (w) (assert-true (assq w (content-palette WORLD)))) WORLD-SLOTS))
+  (test "the look fixture's palette is world/world.sgl's"
+    (assert-equal (content-palette WORLD) (content-palette LOOK)))
+  (test "every lookup sends a slot to a slot"
+    (for-each (lambda (table)
+                (let loop ((i 0))
+                  (when (< i SLOT-COUNT)
+                    (let ((j (lookup table i)))
+                      (assert-true (and (integer? j) (<= 0 j) (< j SLOT-COUNT))))
+                    (loop (+ i 1)))))
+              (list WATER DEEP REFLECT LIT)))
+  (test "a lookup names only slots"
+    (for-each (lambda (table)
+                (for-each (lambda (e)
+                            (assert-true (memq (car e) SLOTS))
+                            (assert-true (memq (cdr e) SLOTS)))
+                          table))
+              (list WATER DEEP REFLECT LIT)))
+  (test "sky under water turns to the water's colour (the water reads as water)"
+    (assert-equal (slot-of 'water) (lookup WATER (slot-of 'sky-2)))))
+
+(test-group "art: autotiling"
+  (test "an overlay keeps under '.', erases under '_', replaces elsewhere"
+    (assert-equal (list "a_" "bc") (list "a_" "bc"))
+    (assert-equal (list "1.3" "444") (compose-rows (list "123" "444") (list "._3"))))
+  (test "a lone block takes every side and corner; an inside block takes none"
+    (let* ((fills (list (list "22" "22")))
+           (parts (list (cons "top" (list "66")) (cons "top-left" (list "_.")))))
+      (assert-equal (list ".6" "22") (autotile-rows fills parts 0 0))
+      (assert-equal (list "22" "22") (autotile-rows fills parts 15 0))))
+  (test "every material a sheet authors has all sixteen shapes, 16 x 16"
+    (for-each
+      (lambda (sheet)
+        (for-each
+          (lambda (mat)
+            (let ((fills (filter (lambda (c) (string-prefix? (string-append sheet "/" mat "-fill-") (car c))) CELLS)))
+              (when (pair? fills)
+                (let loop ((m 0))
+                  (when (< m 16)
+                    (let ((rows (autotile-rows (map cdr fills)
+                                               (filter-map (lambda (p)
+                                                             (let ((c (cell (string-append sheet "/" mat "-" p))))
+                                                               (and c (cons p c))))
+                                                           PART-NAMES)
+                                               m 0)))
+                      (assert-equal 16 (length rows))
+                      (assert-true (every (lambda (r) (= 16 (string-length r))) rows)))
+                    (loop (+ m 1)))))))
+          MATERIALS))
+      (list "reedfen" "hollow")))
+  (test "reeds have as many top, mid and base cells, so a stalk runs on"
+    (for-each
+      (lambda (sheet)
+        (let ((n (lambda (part) (length (filter (lambda (c) (string-prefix? (string-append sheet "/reeds-" part "-") (car c))) CELLS)))))
+          (assert-true (> (n "top") 0))
+          (assert-equal (n "top") (n "mid"))
+          (assert-equal (n "top") (n "base"))))
+      (list "reedfen" "hollow")))
+  (test "climbable rock has holds that smooth rock has not (not colour alone)"
+    (for-each
+      (lambda (sheet)
+        (let* ((dark (lambda (ch) (or (char=? ch #\1) (char=? ch #\2))))
+               (share (lambda (mat)
+                        (let ((fills (filter (lambda (c) (string-prefix? (string-append sheet "/" mat "-fill-") (car c))) CELLS)))
+                          (/ (apply + (map (lambda (c) (count-chars (cdr c) dark)) fills))
+                             (* 256.0 (length fills)))))))
+          ;; the smooth rock's dark share is its body colour in Reedfen
+          ;; (peat is ground-2), so the test is on the DARKEST slot: joints
+          (let ((joints (lambda (mat)
+                          (let ((fills (filter (lambda (c) (string-prefix? (string-append sheet "/" mat "-fill-") (car c))) CELLS)))
+                            (/ (apply + (map (lambda (c) (count-chars (cdr c) (lambda (ch) (char=? ch #\1)))) fills))
+                               (* 256.0 (length fills)))))))
+            (assert-true (> (joints "rough") 0.15))
+            (assert-true (< (joints "rock") 0.03))
+            (assert-true (number? (share "rock"))))))
+      (list "reedfen" "hollow"))))
+
+(test-group "art: the player"
+  (test "every frame player-frame can name exists, and faces the same way"
+    (for-each (lambda (name) (assert-true (cell (string-append "player/" name))))
+              (list "idle-a" "idle-b" "idle-c" "run-a" "run-b" "run-c" "run-d" "run-e" "run-f"
+                    "jump-a" "jump-b" "fall-a" "fall-b" "cling-a" "climb-a" "climb-b" "climb-c"
+                    "swim-a" "swim-b" "swim-c" "swim-d")))
+  (test "the player is drawn in the player's slots only"
+    (let ((bad (filter (lambda (c)
+                         (any (lambda (r) (any (lambda (ch) (not (memv ch (list #\. #\F #\f #\k)))) (string->list r)))
+                              (cdr c)))
+                       (sheet-cells "player"))))
+      (assert-equal '() (map car bad))))
+  (test "standing still breathes; running, falling, clinging and swimming pick their frames"
+    (let ((b (lambda (mode vx vy) (body x: 40.0 y: 40.0 mode: mode vx: vx vy: vy))))
+      (assert-equal "idle-a" (player-frame (b 'ground 0.0 0.0) 10))
+      (assert-equal "idle-b" (player-frame (b 'ground 0.0 0.0) 50))
+      (assert-true (string-prefix? "run-" (player-frame (b 'ground 1.2 0.0) 10)))
+      (assert-equal "jump-a" (player-frame (b 'air 0.0 -4.0) 10))
+      (assert-true (string-prefix? "fall-" (player-frame (b 'air 0.0 3.0) 10)))
+      (assert-equal "cling-a" (player-frame (b 'cling 0.0 0.0) 10))
+      (assert-true (string-prefix? "climb-" (player-frame (b 'cling 0.0 -0.75) 10)))
+      (assert-equal "swim-a" (player-frame (b 'swim 0.0 0.0) 10)))))

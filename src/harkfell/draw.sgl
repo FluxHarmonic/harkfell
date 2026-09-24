@@ -50,7 +50,7 @@
 
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
-          draw-overview present-overview! overview-size overview-room-at draw-news!
+          draw-overview prepare-overview! overview-size overview-room-at draw-news!
           slot player-frame)
 
   (begin
@@ -631,7 +631,7 @@
       (draw-water! rm))
 
     ;; Outside any pass: every room of the overview resolved, once.
-    (define (present-overview! rooms)
+    (define (prepare-overview! rooms)
       (ensure-render!)
       (for-each
         (lambda (rm)
@@ -662,7 +662,7 @@
       (draw-filled-rect (+ x 4) (+ y 1) 1 1)
       (draw-filled-rect x (+ y 5) 3 2))
 
-    ;; Every room at its place (present-overview! first), scale k, gap px
+    ;; Every room at its place (prepare-overview! first), scale k, gap px
     ;; apart on a dark ground; with labels?, each labelled with its
     ;; coordinate, and a note mark on a room with a fixed moment. In colours:
     ;; the overview's pass is not a palette pass.

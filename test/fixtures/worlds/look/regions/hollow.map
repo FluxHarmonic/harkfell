@@ -1,0 +1,8 @@
+(map
+  region: hollow
+  origin: (0 0)
+  layout:
+  ("A-B")
+  rooms:
+  ((A "Tarn" "limestone, scree, a slab and a tarn")
+   (B "Tor" "a limestone tor over meadow grass")))

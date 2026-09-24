@@ -1,0 +1,144 @@
+# The creatures (harkfell-design section 6). CC BY 4.0.
+#
+# Drawn in the region's slots, so a creature takes on the light of where it
+# lives; each faces right and stands with its bottom row on its feet (the
+# game centres it on its x and mirrors it for left). Key as in
+# scripts/art/cells; "h" is the harmonic a moth is drawn to (the atlas
+# bakes one of each).
+
+# reedling: a small reed bird, warm brown with a pale breast, a long tail
+# and a dark moustache. Perches on reed tips; lifts off in a flurry.
+= reedling-perch-a
+.....33..
+....3k3x.
+2..3333..
+.2233377.
+..22377..
+....k.k..
+
+= reedling-perch-b
+.....33..
+....3k3x.
+...3333..
+2223333..
+..22377..
+....k.k..
+
+= reedling-peck
+.........
+.........
+2........
+.2233333.
+..2237k3x
+....k.k..
+
+= reedling-sing
+......x..
+.....3x..
+.....k3..
+2...333..
+.223377..
+..2237...
+....k.k..
+
+= reedling-fly-a
+...22....
+...222...
+2.3333k3x
+.2233777.
+....33...
+
+= reedling-fly-b
+..........
+2..3333k3x
+.2233777..
+...222....
+...22.....
+
+= reedling-glide
+..........
+22223333kx
+..2237777.
+
+# bellfrog: a round green frog whose throat is a small pale bell; it swells
+# the bell to croak. Sits on banks, hops away and comes home.
+= frog-sit
+....7k7..
+...55555.
+.1557755.
+15555dd5.
+1155ddd5.
+.1.11.11.
+
+= frog-blink
+....111..
+...55555.
+.1557755.
+15555dd5.
+1155ddd5.
+.1.11.11.
+
+= frog-croak-a
+....7k7..
+...55555.
+.155775d.
+15555ddd.
+1155dddd.
+.1.11.11.
+
+= frog-croak-b
+....7k7...
+...55555..
+.15577ddd.
+1555ddddd.
+115dddddd.
+.1.11ddd..
+
+= frog-crouch
+.........
+....7k7..
+..555555.
+.15577555
+1155555dd
+11.1111..
+
+= frog-leap
+....7k7..
+..5555d..
+.1557dd..
+.55..1...
+55.......
+1........
+
+= frog-fall
+...7k7...
+.555555..
+15577dd..
+555..5...
+1.....1..
+
+= frog-eyes
+.7k7k.
+551555
+
+# lantern moth: a small pale moth that glows (its light is drawn by the
+# game); drawn to a harmonic you carry, its wings take the harmonic's colour.
+= moth-up
+d...d
+cddc.
+..k..
+
+= moth-down
+.....
+cdkdc
+d...d
+
+= moth-drawn-up
+h...h
+7hh7.
+..k..
+
+= moth-drawn-down
+.....
+7hkh7
+h...h

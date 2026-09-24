@@ -30,11 +30,12 @@
           (sigil string)
           (sigil graphics)
           (harkfell render)
+          (harkfell atlas)
           (harkfell gates)
           (harkfell creatures))
 
   (export draw-critter draw-critter-glow draw-stone draw-stone-light draw-pickup draw-pickup-light
-          draw-flash draw-flash-light harmonic-role FRAMES)
+          draw-flash draw-flash-light harmonic-role)
 
   (begin
     (define (harmonic-role n)
@@ -58,136 +59,59 @@
         (paint-light! a)
         (disc! cx cy r)))
 
-    ;; rows: the frame; key: ((char . slot-name) ...); slot: name -> number
-    (define (sprite! rows key x y face slot)
-      (let* ((h (length rows))
-             (w (apply max (map string-length rows)))
-             (x0 (- (floor-int x) (quotient* w 2)))
-             (y0 (- (floor-int y) h)))
-        (let loop ((rs rows) (r 0))
-          (unless (null? rs)
-            (let* ((row (car rs)) (n (string-length row)))
-              (let run ((c 0))
-                (when (< c n)
-                  (let ((ch (string-ref row c)))
-                    (if (char=? ch #\.)
-                        (run (+ c 1))
-                        (let ((end (let more ((e (+ c 1)))
-                                     (if (and (< e n) (char=? (string-ref row e) ch)) (more (+ e 1)) e))))
-                          (let ((k (assv ch key)))
-                            (when k
-                              (paint-slot! (slot (cdr k)))
-                              (if (> face 0)
-                                  (draw-filled-rect (+ x0 c) (+ y0 r) (- end c) 1)
-                                  (draw-filled-rect (+ x0 (- w end)) (+ y0 r) (- end c) 1))))
-                          (run end)))))))
-            (loop (cdr rs) (+ r 1))))))
+    ;; --- the frames: assets/art/creatures.txt, through the atlas ---------------------------
+    (define *cells* '())            ; ((name . atlas index or #f) ...)
+    (define (cell-index name)
+      (let ((e (assoc name *cells*)))
+        (if e
+            (cdr e)
+            (let ((i (atlas-index (string-append "creatures/" name))))
+              (set! *cells* (cons (cons name i) *cells*))
+              i))))
 
-    ;; --- the frames ------------------------------------------------------------------------
-    (define REEDLING-KEY
-      (list (cons #\h 'ground-3) (cons #\b 'ground-3) (cons #\w 'ground-2) (cons #\c 'leaf-3)
-            (cons #\e 'ink) (cons #\k 'accent) (cons #\l 'ink)))
-
-    (define REEDLING
-      (list
-        (cons 'perch (list "....hh."
-                           "...hhek"
-                           "wbbbbb."
-                           ".wbcc.."
-                           "...l.l."))
-        (cons 'peck (list "......."
-                          "w......"
-                          "wbbbbh."
-                          ".bccbek"
-                          "...l.l."))
-        (cons 'sing (list ".....k."
-                          "....hk."
-                          "....he."
-                          "wbbbbb."
-                          ".wbcc.."
-                          "...l.l."))
-        (cons 'fly (list "..w...."
-                         "..ww..."
-                         "wbbbbek"
-                         "..bcc.."))
-        (cons 'fly2 (list "wbbbbek"
-                          "..wcc.."
-                          "...w..."))
-        (cons 'glide (list "wwbbbek"
-                           "..bcc.."))))
-
-    (define FROG-KEY
-      (list (cons #\g 'leaf-2) (cons #\d 'ground-2) (cons #\t 'sky-3) (cons #\p 'ink)
-            (cons #\f 'leaf-1) (cons #\s 'leaf-1)))
-
-    (define FROG
-      (list
-        (cons 'sit (list "....sp.."
-                         "..ggggg."
-                         ".gdgggtt"
-                         "ggggttt."
-                         ".f..ff.."))
-        (cons 'blink (list "....ss.."
-                           "..ggggg."
-                           ".gdgggtt"
-                           "ggggttt."
-                           ".f..ff.."))
-        (cons 'croak (list "....sp..."
-                           "..ggggg.."
-                           ".gdggtttt"
-                           "ggggttttt"
-                           ".f..fttt."))
-        (cons 'crouch (list "....ss.."
-                            "..gggpg."
-                            "gdgggggg"
-                            "fgtttff."))
-        (cons 'leap (list "....sp."
-                          "..gggg."
-                          ".gdgt.."
-                          "gg....."
-                          "f......"))
-        (cons 'fall (list "...ssp.."
-                          ".gdgggg."
-                          "ggttt..."
-                          ".f...f.."))
-        (cons 'eyes (list "..ss"
-                          "gpgg"))))
-
-    (define MOTH
-      (list
-        (cons 'up (list "w...w"
-                        ".wbw."
-                        "..b.."))
-        (cons 'down (list "....."
-                          "wwbww"
-                          "..b.."))))
-
-    (define FRAMES (list (cons 'reedling REEDLING) (cons 'bellfrog FROG) (cons 'moth MOTH)))
-
-    (define (frame-of table name) (let ((e (assq name table))) (if e (cdr e) (cdr (car table)))))
+    ;; A cell standing with its bottom row on y, centred on x, mirrored for
+    ;; face -1. Draws nothing for a cell the sheet lacks.
+    (define (cell! name x y face)
+      (let ((i (and (atlas-ready?) (cell-index name))))
+        (when i
+          (let ((sz (atlas-size i)))
+            (set-color 1.0 1.0 1.0 1.0)
+            (atlas-draw! i (- (floor-int x) (quotient* (car sz) 2)) (- (floor-int y) (cdr sz)) face)))))
 
     ;; --- creatures ---------------------------------------------------------------------------
     (define (draw-critter c ox oy t slot)
-      (let ((x (- (critter-x c) ox)) (y (- (critter-y c) oy)) (face (critter-facing c)))
+      (let ((x (- (critter-x c) ox)) (y (- (critter-y c) oy)) (face (critter-facing c))
+            (a (critter-anim c)))
         (case (critter-kind c)
           ((reedling)
            (let* ((f (critter-frame c))
-                  (name (cond ((eq? f 'fly) (if (< (modulo (+ t (critter-anim c)) 8) 4) 'fly 'fly2))
-                              ((memq f (list 'perch 'peck 'sing 'glide)) f)
-                              (else 'perch)))
-                  ;; a perched bird breathes: up a pixel now and then
-                  (bob (if (and (eq? name 'perch) (< (modulo (+ t (* 3 (critter-anim c))) 90) 8)) -1 0)))
-             (sprite! (frame-of REEDLING name) REEDLING-KEY x (+ y bob) face slot)))
+                  (name (cond ((eq? f 'fly) (if (< (modulo (+ t a) 8) 4) "reedling-fly-a" "reedling-fly-b"))
+                              ((eq? f 'peck) "reedling-peck")
+                              ((eq? f 'sing) "reedling-sing")
+                              ((eq? f 'glide) "reedling-glide")
+                              ;; perched: breathing, the tail flicking now and then
+                              ((< (modulo (+ t (* 3 a)) 90) 8) "reedling-perch-b")
+                              (else "reedling-perch-a"))))
+             (cell! name x y face)))
           ((bellfrog)
            (let* ((f (critter-frame c))
-                  (name (if (memq f (list 'sit 'blink 'croak 'crouch 'leap 'fall 'eyes)) f 'sit)))
-             (sprite! (frame-of FROG name) FROG-KEY x y face slot)))
+                  (name (case f
+                          ((blink) "frog-blink")
+                          ;; the bell swells and holds
+                          ((croak) (if (< (modulo (+ t a) 24) 8) "frog-croak-a" "frog-croak-b"))
+                          ((crouch) "frog-crouch")
+                          ((leap) "frog-leap")
+                          ((fall) "frog-fall")
+                          ((eyes) "frog-eyes")
+                          (else "frog-sit"))))
+             (cell! name x y face)))
           ((moth)
-           (let* ((drawn (eq? (critter-state c) 'drawn))
-                  (wing (if drawn (harmonic-role (or (critter-drawn c) 2)) 'sky-4))
-                  (name (if (< (modulo (+ t (critter-anim c)) 6) 3) 'up 'down)))
-             (sprite! (frame-of MOTH name) (list (cons #\w wing) (cons #\b 'fur-1))
-                      x (+ y 2) face slot)))
+           (let* ((up (< (modulo (+ t a) 6) 3))
+                  (name (if (eq? (critter-state c) 'drawn)
+                            (string-append (if up "moth-drawn-up@" "moth-drawn-down@")
+                                           (symbol->string (harmonic-role (or (critter-drawn c) 2))))
+                            (if up "moth-up" "moth-down"))))
+             (cell! name x (+ y 2) face)))
           (else #f))))
 
     ;; A moth's light: a soft disc, pulsing; stronger when it is drawn to a

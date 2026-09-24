@@ -679,11 +679,12 @@
           (set! *view-w* (car sz))
           (set! *view-h* (cadr sz))
           (set! *view-rt* (make-render-target *view-w* *view-h* 'nearest)))
-        (present-overview! rooms)
         (let ((f (view-fit win-w win-h *view-w* *view-h*)))
           (set! *last-fit* f)
           (begin-frame)
           (set-blend-mode 'normal)
+          ;; each room drawn and resolved in the palette pass, once ((harkfell draw))
+          (prepare-overview! rooms)
           (with-render-target *view-rt*
             (set-blend-mode 'normal)
             (draw-overview rooms (overview-k) (overview-gap) #t))
