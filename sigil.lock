@@ -23,11 +23,16 @@
            ref: "^0.13.0"
            sha: "a1e672622304a8e33a81d111e393b1a858a9d0c1"
            version: "0.13.0")
+  (package name: "substratic"
+           url: "github:substratic/substratic"
+           ref: "^0.2.0"
+           sha: "76f997151c4751420fe02eae6a19b4efd78dcd52"
+           version: "0.2.0")
   (package name: "sigil-graphics"
            url: "codeberg:sigil/sigil-graphics"
-           ref: "^0.11.4"
-           sha: "12dc802637129ca9f27832c9b41c3af6f90e0c7c"
-           version: "0.11.4")
+           ref: "^0.12.0"
+           sha: "bfcd31eb33a14ee65cffb17430a326caec4acb84"
+           version: "0.12.0")
   (package name: "sigil-wasm-runtime"
            url: "codeberg:sigil/sigil"
            ref: ">=0.22.6"
