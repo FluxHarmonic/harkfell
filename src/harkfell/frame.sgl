@@ -53,6 +53,7 @@
     (define HOLD-S 1.5)
     (define DAWN-S 3.0)
     (define OVER-HOLD-S 1.5)    ; D40: the start-over hold
+    (define OVER-STEP-MAX-S 0.25) ; the most one step adds to it (a stall is not a hold)
 
     ;; phase: a symbol above. t: seconds in the phase. web?: the start waits
     ;; for a gesture. events: phases entered, not yet taken by the shell.
@@ -92,8 +93,12 @@
     ;; D40: the start-over control held. The words go on fading in, but
     ;; nothing steps in and the native time-out stands still; held for
     ;; OVER-HOLD-S, the frame says start-over and leaves the start screen.
+    ;; A step's dt counts toward the hold only up to OVER-STEP-MAX-S: the
+    ;; step that first sees the key down carries the whole gap since the last
+    ;; frame, and after a stall (a slow phone loading the start screen) that
+    ;; gap alone could complete the hold, so a tap would wipe the save.
     (define (hold-step f dt)
-      (let* ((h (+ (frame-hold f) dt))
+      (let* ((h (+ (frame-hold f) (min dt OVER-STEP-MAX-S)))
              (in? (eq? (frame-phase f) 'start-in))
              (f (frame f hold: (min h OVER-HOLD-S) t: (if in? (+ (frame-t f) dt) (frame-t f)))))
         (cond ((>= h OVER-HOLD-S)

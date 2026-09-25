@@ -351,6 +351,11 @@
              (kind-water? (tile-at tm px edge))
              edge)))
 
+    ;; The point (px py) is in the water within a pixel of its surface.
+    (define (on-surface? tm px py)
+      (and (kind-water? (tile-at tm px py))
+           (not (kind-water? (tile-at tm px (- py 1.0))))))
+
     ;; In the water.
     (define (swim-step b in tm f)
       (let* ((h (intent-h in))
@@ -363,7 +368,14 @@
              (vx (approach (body-vx b) tx (feel-swim-accel f)))
              (vy (approach (body-vy b) ty (feel-swim-accel f)))
              (leap (and (> (body-buffer b) 0) (head-out? tm x y f)))
-             (vy (if leap (- (feel-water-jump-v f)) vy))
+             ;; treading water (up held, the center on the surface): a press
+             ;; is the full jump, as it was when holding up bobbed the body
+             ;; out into the air (the head-out jump there); elsewhere, the
+             ;; water's smaller leap
+             (tread (and leap (< v 0) (on-surface? tm (+ x (/ (feel-box-w f) 2.0)) (+ y (/ (feel-box-h f) 2.0)))))
+             (vy (cond (tread (- (feel-jump-v f)))
+                       (leap (- (feel-water-jump-v f)))
+                       (else vy)))
              (w (feel-box-w f))
              (bh (feel-box-h f))
              (mx (move-x tm x y w bh vx))

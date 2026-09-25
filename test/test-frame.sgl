@@ -153,6 +153,15 @@
       (assert-equal 'start (frame-phase (car held)))
       (assert-equal 'start (frame-phase (car a)))
       (assert-equal 'start-out (frame-phase (car b)))))
+  (test "a stall is not a hold: one 2 s step with it held adds only 0.25 s"
+    ;; the step that first sees the key down carries the whole gap since the
+    ;; last frame; before the cap a tap across a stall wiped the save
+    (let* ((f (car (run (frame-new #t #t) (secs 2.0) #f #f)))
+           (stalled (frame-step f 2.0 #f #f #t))
+           (p (frame-take-events stalled)))
+      (assert-equal '() (car p))
+      (assert-true (near? (/ 0.25 1.5) (frame-over-progress (cdr p))))
+      (assert-false (frame-over-done? (cdr p)))))
   (test "after the start screen, holding is ignored"
     (let* ((f (to-phase (frame-new #f #t) 'card))
            (r (run-h f (secs 2.0) #f #f #t)))

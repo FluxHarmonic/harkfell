@@ -278,7 +278,7 @@
          (up (history bottom tm (lambda (tick b) (intent v: -1)) 300))
          (late (drop-n up 150))
          (leap (history (last up) tm
-                        (lambda (tick b) (intent v: -1 jump: (< tick 4) press: (= tick 0))) 30)))
+                        (lambda (tick b) (intent v: -1 jump: (< tick 30) press: (= tick 0))) 40)))
     (test "the rise starts on the pool's floor"
       (assert-true (> (body-y bottom) (* 16 7.0))))
     (test "holding up reaches the surface and stays: swimming, head out, no splash"
@@ -289,9 +289,11 @@
       (let ((diag (drop-n (history (last up) tm (lambda (tick b) (intent h: -1 v: -1)) 40) 10)))
         (assert-false (any-event? diag 'splash))
         (assert-true (every (lambda (b) (eq? (body-mode b) 'swim)) diag))))
-    (test "treading water, a press leaps out"
-      (assert-true (memq 'jump (body-events (car leap))))
-      (assert-true (< (min-y leap) 60.0)))))
+    (test "treading water, a press is the full jump (as from the old bob into the air), not the smaller leap"
+      ;; the full jump rises about 52 px (the box top from 73 to about 21);
+      ;; the water leap about 29 px (to about 44)
+      (assert-true (memq (quote jump) (body-events (car leap))))
+      (assert-true (< (min-y leap) 30.0)))))
 
 ;; --- soft return -------------------------------------------------------------------
 
