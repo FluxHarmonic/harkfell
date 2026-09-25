@@ -11,10 +11,10 @@
 # (?room=REGION:X,Y&still, the room held still), and optionally a world
 # directory to draw instead of the baked one.
 #
-# The 2026-09-24 pictures were taken from LOOK's A4 build 4e59577 before the
-# A4 merge; the two Hollow ones came from LOOK's fixture world
-# (test/fixtures/worlds/look). Once CONTENT's Hollow is merged, change those
-# two rows to real Hollow rooms and drop the world column.
+# The 0.1 pictures (2026-09-25) are all from the release world, taken from a
+# build of the site rebased on master 0cbb306 ("Version 0.1.0"). The Hollow
+# rows are CONTENT's rooms: 5,3 (the ring of standing stones) and 4,3 (the
+# bowl and its two ring-stones).
 #
 # A room that fails to load (shot.mjs exits non-zero) stops the run; nothing
 # in site/shots/ changes unless every picture was taken. Review the result
@@ -26,10 +26,10 @@ BUILD="${1:-}"; DRY=0; [ "${2:-}" = --dry-run ] && DRY=1
 [ -n "$BUILD" ] && [ -f "$BUILD/index.html" ] || { echo "site-shots: give a built web tree (build/web, build/remote-web-<sha>)"; exit 1; }
 
 SHOTS='
-hollow-tarn.png|room=hollow:0,0&still|test/fixtures/worlds/look
+hollow-stones.png|room=hollow:5,3&still|
 reedfen-bridge.png|room=reedfen:9,3&still|
 reedfen-reeds.png|room=reedfen:12,3&still|
-hollow-tor.png|room=hollow:1,0&still|test/fixtures/worlds/look
+hollow-bowl.png|room=hollow:4,3&still|
 under-the-fen.png|room=reedfen:17,4&still|
 '
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/harkfell-site-shots-XXXXXX")"
