@@ -614,3 +614,75 @@
   (test "during a moment the movement is quieter"
     (display "  jump gain alone ") (display JUMP-ALONE) (display ", in a moment ") (display JUMP-IN-MOMENT) (newline)
     (assert-true (< JUMP-IN-MOMENT (* 0.6 JUMP-ALONE)))))
+
+;; one splash per SPLASH-GAP-S (playtest 1, #6: bobbing at the surface)
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+(define (splashes-at ts)
+  (let loop ((ts ts) (n 0))
+    (if (null? ts)
+        n
+        (begin
+          (sound-frame! (car ts) (/ 1.0 60.0) (runner 'reedfen 'water 'swim 0.0 50.0 '((splash . 2.0))))
+          (loop (cdr ts) (+ n (length (filter (lambda (m) (eq? (car m) 'splash)) (sound-moved)))))))))
+(define SPLASHES (splashes-at '(0.0 0.2 0.4 0.6 1.2)))
+
+(test-group "a4 sound: 10, the splash's limit"
+  (test "entering the water at 0, 0.2, 0.4, 0.6 and 1.2 s splashes at 0, 0.6 and 1.2 only"
+    (assert-equal 3 SPLASHES)))
+
+;; --- 11. the pause (D40): the game loses focus, the sound holds ----------------------
+;; A hold at 5 s, then 10 s held with the mixer's clock RUNNING (the director
+;; not called): (harkfell audio) also stills the sound's clock, but a real
+;; sink's device keeps draining, so the hold itself must stop the pulls and
+;; the release must not catch up the time held. (A first version stilled the
+;; clock here too; headless pulls only follow the clock, so its "nothing is
+;; pulled" and "no burst" passed with the hold and the release's shift both
+;; planted out: vacuous. The gate's hold-pulls and release-burst legs.)
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+(define PAUSE-ROOM (fen 'pause WET 'bed "reedfen-bed"))
+(frames! 0.0 1.0 (/ 1.0 30.0) (lambda (t) PAUSE-ROOM) #t)
+(sound-audition! "seed-wind")
+(frames! 1.0 5.0 (/ 1.0 30.0) (lambda (t) PAUSE-ROOM) #t)
+(define (bed-src) (mixer-find BED-ID))
+(define (moment-src) (mixer-find MOMENT-ID))
+(mixer-hold! 5.0)
+(let loop ((t 5.0)) (when (< t 5.12) (mixer-pump! t) (loop (+ t (/ 1.0 30.0)))))
+(mixer-pump! 5.12)
+(define HOLD-GAIN (source-factor (bed-src) 'hold 5.12))
+(define BED-R0 (source-rendered (bed-src)))
+(define MOM-R0 (source-rendered (moment-src)))
+(let loop ((i 0)) (when (< i 600) (mixer-pump! (+ 5.12 (/ i 60.0))) (loop (+ i 1))))
+(define HELD-TO (+ 5.12 (/ 600 60.0)))
+(define BED-R1 (source-rendered (bed-src)))
+(define MOM-R1 (source-rendered (moment-src)))
+(mixer-release! HELD-TO)
+(mixer-pump! (+ HELD-TO (/ 1.0 30.0)))
+(define BED-R2 (source-rendered (bed-src)))
+(define GAIN-MID (source-factor (bed-src) 'hold (+ HELD-TO 0.15)))
+(define GAIN-END (source-factor (bed-src) 'hold (+ HELD-TO 0.31)))
+(define STILL-PLAYING (sound-moment-playing))
+;; seed-wind is about 22 s with its ring-out and motif's tail: started at 1 s
+;; and held 10 s, it ends near 33 s of the mixer's clock, not 23
+(frames! (+ HELD-TO (/ 1.0 30.0)) 28.0 (/ 1.0 10.0) (lambda (t) PAUSE-ROOM) #t)
+(define PLAYING-AT-28 (sound-moment-playing))
+(frames! 28.0 40.0 (/ 1.0 10.0) (lambda (t) PAUSE-ROOM) #t)
+(define ENDED-BY-40 (not (sound-moment-playing)))
+
+(test-group "a4 sound: 11, the pause (D40)"
+  (test "held: every source fades to nothing over the hold's fade"
+    (assert-equal 0.0 HOLD-GAIN))
+  (test "held: nothing is pulled, so the bed and the moment do not move on"
+    (assert-equal BED-R0 BED-R1)
+    (assert-equal MOM-R0 MOM-R1))
+  (test "released: no burst, the next pump pulls about a frame, not the pause"
+    (display "  frames pulled on release: ") (display (- BED-R2 BED-R1)) (newline)
+    (assert-true (<= (- BED-R2 BED-R1) (* 2 (/ RATE 30)))))
+  (test "released: the gain comes back over the release's fade"
+    (assert-true (< 0.3 GAIN-MID 0.7))
+    (assert-equal 1.0 GAIN-END))
+  (test "the moment playing when paused resumes where it was, and ends"
+    (assert-equal "seed-wind" STILL-PLAYING)
+    (assert-equal "seed-wind" PLAYING-AT-28)
+    (assert-true ENDED-BY-40)))

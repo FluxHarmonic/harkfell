@@ -46,9 +46,11 @@
 #   steps-unlocked    a step on every change of the run cycle's frame
 #   moment-loud       movement at full level during a moment
 #   default-through   the border's default back to 'through (the phone ruled 'cross)
+#   hold-pulls        a pause that keeps pulling (the music would move on)
+#   release-burst     a resume that catches up the pause's frames at once
 # UNDER THE WORLD: every movement cue, in play (its loudest 400 ms times its
 # gain in (harkfell sound)'s SPOTS), is quieter than the quietest bed
-# (-33 LUFS), and a step quieter than -40. A cue that names no gain fails.
+# (-33 LUFS), and a step quieter than -44 (playtest 1, #3). A cue that names no gain fails.
 #
 # Exit: 0 all as expected, 1 a check or a leg went the wrong way, 2 SETUP-FAILED.
 # Scratch goes under /tmp; nothing is written in the tree but the plants.
@@ -128,7 +130,7 @@ under_world() {
     [ -n "$g" ] || { echo "UNDER-WORLD FAIL $c: no gain in SPOTS"; bad=$((bad + 1)); continue; }
     "$TOOL" render-tune "assets/tunes/$c.cts" "$TMP/uw-$c.wav" > /dev/null 2>&1 || { echo "UNDER-WORLD FAIL $c: does not render"; bad=$((bad + 1)); continue; }
     m=$(ffmpeg -hide_banner -nostats -i "$TMP/uw-$c.wav" -af "apad=pad_dur=1,ebur128" -f null - 2>&1 | grep -o 'M: *-\?[0-9.]*' | awk '{print $2}' | sort -g | tail -1)
-    lim=-33; case $c in step-*) lim=-40;; esac
+    lim=-33; case $c in step-*) lim=-44;; esac
     v=$(awk -v m="$m" -v g="$g" 'BEGIN{printf "%.1f", m + 20*log(g)/log(10)}')
     n=$((n + 1))
     if [ -n "$m" ] && awk -v v="$v" -v l="$lim" 'BEGIN{exit !(v <= l)}'; then echo "under-world $c: $v LUFS in play (limit $lim)"
@@ -199,7 +201,7 @@ plant() {
 A4T=test/test-a4-sound.sgl
 green_all() {
   tunes
-  green "$A4T" 54
+  green "$A4T" 60
   green test/test-a4-web-opening.sgl 3
   under_world
   green test/test-tunes.sgl 5
@@ -245,6 +247,8 @@ passes test/test-a4-web-opening.sgl "a second without it: still waiting"
 passes "$A4T" "running on the fen: a step where each foot comes down"
 passes "$A4T" "during a moment the movement is quieter"
 passes "$A4T" "the default is the 4 s crossfade"
+passes "$A4T" "held: nothing is pulled"
+passes "$A4T" "released: no burst"
 
 plant wander-no-hush "$S" \
   "      (when (hush-wander-ok? *hush*)
@@ -330,5 +334,14 @@ plant default-through "$S" \
   "    (define BORDER-DEFAULT 'through)" \
   "$A4T" "the default is the 4 s crossfade"
 
-if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all nineteen RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+plant hold-pulls src/engine/mixer.sgl \
+  "        ((and (holding? now) (source-live? s))" \
+  "        ((and #f (holding? now) (source-live? s))" \
+  "$A4T" "held: nothing is pulled"
+plant release-burst src/engine/mixer.sgl \
+  "                    (set-source-t-start! s (and (source-t-start s) (- now (/ (source-rendered s) (* 1.0 *rate*)))))" \
+  "                    #f" \
+  "$A4T" "released: no burst"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all twenty-one RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
 exit $FAIL
