@@ -342,6 +342,15 @@
                        (else
                         (add-event (body b mode: 'air) 'let-go))))))))
 
+    ;; The water's surface just below the point (px py), which is out of the
+    ;; water: the top edge of a water tile directly under py's tile, or #f.
+    (define (surface-below tm px py)
+      (let* ((s (tilemap-size tm))
+             (edge (* s (+ 1.0 (floor (/ py s))))))
+        (and (not (kind-water? (tile-at tm px py)))
+             (kind-water? (tile-at tm px edge))
+             edge)))
+
     ;; In the water.
     (define (swim-step b in tm f)
       (let* ((h (intent-h in))
@@ -363,6 +372,17 @@
              (my (move-y tm x y w bh vy))
              (y (car my))
              (vy (if (= (cdr my) 0) vy 0.0))
+             ;; treading water: a stroke up (at swimming speed, not a leap's)
+             ;; that would lift the centre out of the water stops with the
+             ;; centre on the surface and the head out. Without it the body
+             ;; popped out, fell back in and splashed, over and over, while
+             ;; up was held (playtest #6).
+             (surface (and (not leap)
+                           (< vy 0.0)
+                           (>= vy (- (* 1.01 (feel-swim f))))
+                           (surface-below tm (+ x (/ w 2.0)) (+ y (/ bh 2.0)))))
+             (y (if surface (- surface (/ bh 2.0)) y))
+             (vy (if surface 0.0 vy))
              (b (body b
                       x: x
                       y: y
