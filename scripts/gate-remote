@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Run one gate job on HEAD on an azoth runner, and fetch its logs.
+#
+#   scripts/gate-remote suite       dev build, then the whole suite in one call
+#   scripts/gate-remote release     release build (its --replay trace kept as
+#                                   out/replay-native.txt); gate-replay, gate-sound,
+#                                   gate-a4-sound, gate-look, the reach
+#                                   fixtures, and the native-helper audit of
+#                                   the release build's generated C
+#   scripts/gate-remote reach       release build; gate-a3 with the full
+#                                   reach check (ROOM_CHECK_TIMEOUT 10800)
+#   scripts/gate-remote web         web build (the served tree is fetched to
+#                                   build/remote-web-<sha>/) and verify.mjs
+#
+# Each job leases its own runner (procedures/azoth-remote-builds), so the
+# four can run at once. Generalised from Crash The Stack's scripts/build-remote:
+#   - a tree with tracked changes is refused before anything is leased;
+#   - the source travels as a git bundle of HEAD, so the runner builds and
+#     tests exactly that commit, with this box's sigil CLI version;
+#   - every job ends with the lines it prints and a "=== JOB-RESULT rc=N"
+#     line per step; the logs land in build/remote-<job>-<sha>.logs/.
+#
+# Exit: 0 every step green; 1 a step failed; 125 refused or SETUP-FAILED;
+# 126/127 from azoth-remote (results incomplete / runner not released).
+# Environment: AZOTH_REMOTE (path to azoth.works bin/azoth-remote),
+# GATE_TIMEOUT (seconds, default 14400).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+say() { printf 'gate-remote: %s\n' "$*" >&2; }
+
+JOB=${1:-}
+case "$JOB" in suite|release|reach|web) ;; *) say "usage: scripts/gate-remote suite|release|reach|web"; exit 125 ;; esac
+
+REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
+[ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
+
+dirty=$(git status --porcelain --untracked-files=no)
+if [ -n "$dirty" ]; then
+  say "REFUSED: the tree has tracked changes; the job would not test HEAD. Commit first."
+  printf '%s\n' "$dirty" | head -5 >&2
+  exit 125
+fi
+SHA=$(git rev-parse --short=12 HEAD)
+FULL=$(git rev-parse HEAD)
+SIGIL_V=$(sed -n 's/^  sigil: "\([0-9.]*\)"$/\1/p' package.sgl | head -1)
+case "$SIGIL_V" in [0-9]*.[0-9]*.[0-9]*) ;; *) say "cannot read package.sgl's sigil version ('$SIGIL_V')"; exit 125 ;; esac
+say "job $JOB on HEAD $SHA ($FULL), sigil $SIGIL_V"
+
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/gate-remote.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
+git bundle create "$STAGE/src.bundle" HEAD 2>/dev/null
+
+cat > "$STAGE/remote.sh" <<'EOF'
+#!/usr/bin/env bash
+# Runs ON THE RUNNER, in ~/work. Args: <job> <full sha> <short sha> <sigil version>
+set -uo pipefail
+cd "$HOME/work"
+JOB=$1; FULL=$2; SHA=$3; SIGIL_V=$4
+mkdir -p out
+t() { date +%s; }
+T0=$(t)
+echo "remote: job $JOB, runner $(ip -4 -br addr show eth0 | awk '{print $3}') nproc=$(nproc) load=$(cut -d' ' -f1-3 /proc/loadavg)"
+git clone --quiet src.bundle checkout || { echo "SETUP-FAILED: clone"; exit 125; }
+git -C checkout checkout --quiet "$FULL" || { echo "SETUP-FAILED: checkout $FULL"; exit 125; }
+"$HOME/.sigil/bin/sigil" cli use "$SIGIL_V" >/dev/null 2>&1 || { echo "SETUP-FAILED: sigil cli use $SIGIL_V"; exit 125; }
+export PATH="$HOME/.sigil/bin:$PATH"
+echo "remote: sigil $(sigil --version 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+cd checkout
+sigil deps install > ../out/deps.log 2>&1 || { echo "SETUP-FAILED: deps install"; tail -20 ../out/deps.log; exit 125; }
+guix shell -m manifest.scm -- true > ../out/guix.log 2>&1 || { echo "SETUP-FAILED: guix environment"; tail -20 ../out/guix.log; exit 125; }
+# arms and gate-look drive a browser: chromium, as google-chrome
+mkdir -p ../shim
+CHROME=$(command -v chromium || true)
+[ -n "$CHROME" ] && { printf '#!/bin/sh\nexec %s "$@"\n' "$CHROME" > ../shim/google-chrome; chmod +x ../shim/google-chrome; }
+export PATH="$HOME/work/shim:$PATH"
+echo "remote: setup $(( $(t) - T0 ))s"
+RC=0
+# step NAME CMD...: run it, log to out/NAME.log, print its tail and result
+step() {
+  local name=$1; shift
+  local ts; ts=$(t)
+  echo "=== STEP $name: $*"
+  env -u DISPLAY -u WAYLAND_DISPLAY "$@" > "../out/$name.log" 2>&1 < /dev/null; local r=$?
+  sed 's/\x1b\[[0-9;]*m//g' "../out/$name.log" | grep -a 'Tests:\|PASS\|FAIL\|GREEN\|RED\|TIMED\|SETUP-FAILED\|RESULT\|^reach:\|carrying\|✗' | tail -25
+  echo "=== JOB-RESULT rc=$r $(( $(t) - ts ))s $name"
+  [ $r -eq 0 ] || RC=1
+  return $r
+}
+case "$JOB" in
+  suite)
+    step build-dev scripts/dev sigil build && step suite scripts/dev sigil test --report ;;
+  release)
+    if step build-release scripts/dev sigil build --config release; then
+      awk -f ../audit-helpers.awk build/release/native/mod_*.c > ../out/audit-release.txt
+      echo "=== AUDIT release: $(wc -l < ../out/audit-release.txt) substitutions: $(sed 's/^[^:]*: //' ../out/audit-release.txt | awk '{print $1}' | sort | uniq -c | tr '\n' ' ')"
+      tar -C build/release/native -czf ../out/release-native-c.tgz $(cd build/release/native && ls mod_*.c)
+      ./build/release/bin/harkfell --replay > ../out/replay-native.txt 2>/dev/null; echo "=== REPLAY recorded $(wc -l < ../out/replay-native.txt) lines, sha256 $(sha256sum ../out/replay-native.txt | cut -c1-16)"
+      step gate-replay scripts/gate-replay
+      step gate-sound scripts/gate-sound
+      step gate-a4-sound scripts/gate-a4-sound
+      step gate-look scripts/gate-look
+      step fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures
+    fi ;;
+  reach)
+    step build-release scripts/dev sigil build --config release && \
+      step gate-a3 env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3 ;;
+  web)
+    if step build-web scripts/dev sigil build --config web; then
+      STAMP=$(grep -o 'version: "[^"]*"' build/web/index.html | head -1 | cut -d'"' -f2)
+      [ "$STAMP" = "$SHA" ] || { echo "REFUSED: the page is stamped '$STAMP', not $SHA"; git status --porcelain --untracked-files=no; exit 125; }
+      step verify node verify.mjs build/web
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi ;;
+esac
+echo "remote: total $(( $(t) - T0 ))s, rc=$RC"
+exit $RC
+EOF
+
+AUDIT=scripts/audit-native-helpers.awk
+[ -f "$AUDIT" ] || { say "SETUP-FAILED: $AUDIT missing"; exit 125; }
+T0=$(date +%s)
+set +e
+"$REMOTE" --label "harkfell $JOB $SHA" --timeout "${GATE_TIMEOUT:-14400}" --detach \
+  --put "$STAGE/src.bundle:src.bundle" --put "$STAGE/remote.sh:remote.sh" --put "$AUDIT:audit-helpers.awk" \
+  --get "out:$STAGE/fetched" -- bash remote.sh "$JOB" "$FULL" "$SHA" "$SIGIL_V"
+rc=$?
+set -e
+say "remote job $JOB rc=$rc in $(( $(date +%s) - T0 ))s"
+
+if [ -d "$STAGE/fetched" ]; then
+  LOGS="build/remote-$JOB-$SHA.logs"
+  rm -rf "$LOGS"; mkdir -p "$LOGS"
+  find "$STAGE/fetched" -maxdepth 1 -type f -exec cp {} "$LOGS/" \;
+  if [ "$JOB" = web ] && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
+    STAMP=$(grep -o 'version: "[^"]*"' "$STAGE/fetched/web/index.html" | head -1 | cut -d'"' -f2)
+    if [ "$STAMP" = "$SHA" ] && [ ! -e "build/remote-web-$SHA" ]; then
+      mv "$STAGE/fetched/web" "build/remote-web-$SHA"; printf '%s\n' "$FULL" > "build/remote-web-$SHA/BUILD-SHA"
+      say "fetched the web build of $SHA to build/remote-web-$SHA (stamp verified here)"
+    fi
+  fi
+  say "runner logs in $LOGS"
+fi
+exit $rc
