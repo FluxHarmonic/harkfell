@@ -104,7 +104,7 @@
 
 (package
   name: "harkfell"
-  version: "0.0.1"
+  version: "0.1.0"
   sigil: "0.22.6"
   description: "A quiet exploration platformer about carrying lost harmonics home"
   license: "GPL-3.0-or-later"
