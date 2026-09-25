@@ -87,9 +87,9 @@
 
     (define *opened-k* 2)           ; the whole scale the window was opened at
     (define *stored-k* #f)          ; the whole scale last remembered
-    (define *sizes-ok* #f)          ; the first frame came back at the size asked for
-    (define *last-size* #f)         ; (w . h), the framebuffer last seen
-    (define *stable* 0)             ; frames the framebuffer has held that size
+    (define *placed-ok* #f)         ; the first frame's window was the size asked for
+    (define *last-size* #f)         ; (w . h), the window last seen, in screen units
+    (define *stable* 0)             ; frames the window has held that size
     (define *snapped-from* '())     ; sizes a snap has been asked from (never asked again)
     (define *fullscreen-asked* #f)  ; the stored scale is fullscreen: go there on the first frame
     (define SETTLE-FRAMES 20)       ; a resize settles before it snaps (a drag is not fought)
@@ -97,18 +97,29 @@
     (define (scale-symbol k) (string->symbol (string-append "x" (number->string k))))
     (define (fit-k w h) (max 1 (exact (floor (min (/ w (* 1.0 VIEW-W)) (/ h (* 1.0 VIEW-H)))))))
 
+    ;; The window's size in screen units, the units window-open and
+    ;; window-set-size! take. The framebuffer (frame-width, what the view is
+    ;; drawn into) is the device pixel ratio times that: 2x on a HiDPI output,
+    ;; 1.25x or 1.5x under fractional scaling. So a scale here is screen
+    ;; units per view pixel, as the window manager counts them, and x2 is the
+    ;; same size on the screen at any ratio; the view is drawn at the largest
+    ;; whole scale that fits the framebuffer (x4 at a ratio of 2).
+    (define (window-size)
+      (let ((w (window-width)) (h (window-height)))
+        (if (and w h (> w 0) (> h 0))
+            (cons w h)
+            (cons (frame-width) (frame-height)))))
+
     ;; Once a frame. F11 or Alt+Enter: fullscreen (the largest whole scale
     ;; that fits the monitor, black around it: (engine view)'s integer-only
     ;; fit does the placing) and back, remembered.
     ;;
     ;; A window resized by hand, once the size has settled for SETTLE-FRAMES,
-    ;; snaps to the whole scale it fits and remembers it. Two guards, from
-    ;; the A4 review:
-    ;;   - only when the first frame came back at exactly the size asked for.
-    ;;     Otherwise the framebuffer is not in screen units (a HiDPI output,
-    ;;     where it is the scale times larger) or the window manager chose
-    ;;     the size (sway's tiling), and a snap would double the window or
-    ;;     fight the manager. The view is still drawn at the largest whole
+    ;; snaps to the whole scale it fits and remembers it, all in screen
+    ;; units. Two guards, from the A4 review:
+    ;;   - only when the first frame's window was the size asked for.
+    ;;     Otherwise the window manager chose the size (sway's tiling) and a
+    ;;     snap would fight it. The view is still drawn at the largest whole
     ;;     scale that fits, whatever the size.
     ;;   - never twice from the same size, so a refusing manager, a maximize
     ;;     or a compositor that sends its own size back is not fought.
@@ -120,16 +131,16 @@
           (cond (on (store-write-datum! "scale" (quote fullscreen)))
                 (*stored-k* (store-write-datum! "scale" (scale-symbol *stored-k*)))
                 (else (store-write-datum! "scale" (scale-symbol *opened-k*))))))
-      (let ((w (frame-width)) (h (frame-height)))
+      (let* ((size (window-size)) (w (car size)) (h (cdr size)))
         (unless *last-size*
-          (set! *sizes-ok* (and (= w (* *opened-k* VIEW-W)) (= h (* *opened-k* VIEW-H)))))
+          (set! *placed-ok* (and (= w (* *opened-k* VIEW-W)) (= h (* *opened-k* VIEW-H)))))
         (if (and *last-size* (= w (car *last-size*)) (= h (cdr *last-size*)))
             (set! *stable* (+ *stable* 1))
             (begin (set! *last-size* (cons w h)) (set! *stable* 0)))
         (when *fullscreen-asked*
           (set! *fullscreen-asked* #f)
           (set-fullscreen! #t))
-        (when (and *sizes-ok* (= *stable* SETTLE-FRAMES) (not (fullscreen?)))
+        (when (and *placed-ok* (= *stable* SETTLE-FRAMES) (not (fullscreen?)))
           (let ((k (fit-k w h)))
             (when (and (<= 2 k 8) (not (eqv? k *stored-k*)))
               (store-write-datum! "scale" (scale-symbol k))

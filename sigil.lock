@@ -20,9 +20,9 @@
            version: "0.22.6")
   (package name: "sigil-desktop"
            url: "codeberg:sigil/sigil-desktop"
-           ref: "^0.11.0"
-           sha: "66938b496090935c1066e37cc5abd17962da1842"
-           version: "0.11.0")
+           ref: "^0.13.0"
+           sha: "a1e672622304a8e33a81d111e393b1a858a9d0c1"
+           version: "0.13.0")
   (package name: "sigil-graphics"
            url: "codeberg:sigil/sigil-graphics"
            ref: "^0.11.4"
