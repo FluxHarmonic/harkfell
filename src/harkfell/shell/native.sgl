@@ -306,7 +306,9 @@
                      (let ((lk (arg-value args "--look")))
                        (when lk
                          (shell-set-look! (string->symbol lk) (string->symbol (or (arg-value args "--kind") "keys")))
-                         (let ((a (arg-value args "--look-alpha"))) (when a (shell-set-look-alpha! (string->number a))))))
+                         (let ((a (arg-value args "--look-alpha"))) (when a (shell-set-look-alpha! (string->number a))))
+                         ;; --over X: D40's hold-to-start-over line, pinned at progress X
+                         (let ((o (arg-value args "--over"))) (when o (shell-set-look-over! (string->number o))))))
                      (view-set-integer-only! #t)
                      (let ((k (stored-scale)))
                        (set! *opened-k* k)
