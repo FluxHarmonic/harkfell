@@ -167,6 +167,8 @@
       (set-letterbox-color 0.0 0.0 0.0)
       (shell-boot!)
       (shell-add-frame-listener! (lambda (ev) (say "frame" (symbol->string ev))))
+      ;; D40: the sound pauses and resumes with the game (SOUND's fade and hold)
+      (shell-add-pause-listener! (lambda (ev) (if (eq? ev 'pause) (audio-pause!) (audio-resume!))))
       ;; A4: images by path ((harkfell images)): fetched by the page, decoded here
       (set-image-fetcher! web-fetcher)
       ;; A2: the sound. A tune the wasm lacks is asked of the page

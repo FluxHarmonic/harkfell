@@ -590,8 +590,10 @@ if (LEGS.includes("pause")) {
   await sleep(500);
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   const c = await where();
-  (b.x === a.x && b.y === a.y && c.x > b.x + 8 ? pass : fail)("pause",
-    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}`);
+  // SOUND's hold and release (the page suspends and resumes its audio on them)
+  const held = lines.includes("harkfell: audio hold"), released = lines.includes("harkfell: audio release");
+  (b.x === a.x && b.y === a.y && c.x > b.x + 8 && held && released ? pass : fail)("pause",
+    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}; audio hold ${held}, release ${released}`);
 }
 
 // D40: with a save, the start screen's R held 1.5 s wipes it and begins a

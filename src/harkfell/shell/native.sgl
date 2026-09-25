@@ -286,6 +286,9 @@
               (else
                (shell-boot!)
                (shell-add-frame-listener! (lambda (ev) (say "harkfell: frame " (symbol->string ev))))
+               ;; D40: the sound pauses and resumes with the game (ready for the
+               ;; focus pause, which waits for sigil-desktop to report focus)
+               (shell-add-pause-listener! (lambda (ev) (if (eq? ev 'pause) (audio-pause!) (audio-resume!))))
                ;; A4: images by path ((harkfell images)), read from the repository root
                (set-image-fetcher! native-fetcher)
                (shell-set-ms! (and (member "--ms" args) #t))
