@@ -210,7 +210,14 @@
             (window-frame!)
             ;; the mouse, for the start screen's moths (drawn toward the pointer, D32)
             (shell-pointer! (mouse-x) (mouse-y))
-            (when (key-pressed? 'r) (shell-reset-world!))
+            ;; D40: while the start screen offers starting over, R held is
+            ;; the hold (1.5 s wipes the save); otherwise R resets the world.
+            ;; (The focus pause waits for sigil-desktop to report focus: then
+            ;; shell-pause! on a loss and shell-resume! on its return.)
+            (cond ((shell-over-offered?)
+                   (when (key-pressed? 'r) (shell-over-key! #t))
+                   (when (key-released? 'r) (shell-over-key! #f)))
+                  ((key-pressed? 'r) (shell-reset-world!)))
             (when (key-pressed? 'escape) (shell-save-now!) (request-quit))
             ;; nothing a reload meets may take the frame down: an error is
             ;; reported and the game plays on with the last good world

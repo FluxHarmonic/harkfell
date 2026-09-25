@@ -79,6 +79,8 @@
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
           shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-view-size
           shell-set-extra-lines! shell-set-carry! shell-take-news! shell-take-body-events!
+          shell-over-offered? shell-over-progress shell-over-key! shell-start-press! shell-start-release!
+          shell-set-over-hit! shell-pause! shell-resume! shell-paused? shell-add-pause-listener!
           VIEW-W VIEW-H)
 
   (begin
@@ -132,6 +134,15 @@
     (define *pointer* #f)            ; (x . y) in window pixels, for the start screen's moths
     (define *wall* 0.0)              ; seconds since the frame began: its drawing clock
     (define *input-kind* 'keys)      ; keys, touch or both: which words the start screen says
+    (define *over-key* #f)           ; D40: the start-over key (R) is held
+    (define *over-touch* #f)         ; D40: a press on the start-over line is held
+    (define *win* (cons 0 0))        ; the last presented window size (a press maps through it)
+    ;; D40: is (x, y), in window pixels, on the start-over line of a w x h
+    ;; window? LOOK's drawing owns the line and sets this; until it does,
+    ;; the lower fifth of the window stands in for it.
+    (define *over-hit* (lambda (w h x y) (> y (* 0.8 h))))
+    (define *paused* #f)             ; D40: the tab hidden or the window's focus lost
+    (define *pause-listeners* '())   ; each is called with 'pause or 'resume
     (define *saving* #f)             ; this game writes its save
     (define *save-sig* #f)           ; what the last save held (a new one is written on a change)
     (define *waking* #f)             ; the creature has not been moved yet (D15)
@@ -152,6 +163,60 @@
     (define (shell-add-frame-listener! f) (set! *frame-listeners* (append *frame-listeners* (list f))))
     (define (shell-set-save-extras! get set) (set! *save-get* get) (set! *save-set* set))
     (define (shell-set-input-kind! k) (set! *input-kind* k))
+    (define (shell-set-over-hit! f) (set! *over-hit* f))
+    (define (shell-add-pause-listener! f) (set! *pause-listeners* (append *pause-listeners* (list f))))
+
+    ;; --- D40: starting over, and the pause ------------------------------------------
+
+    ;; The start screen offers starting over now (a save, before it fades).
+    (define (shell-over-offered?) (and *frame* (frame-over-offered? *frame*)))
+    ;; For the line's drawing: #f (no save, no line), else the hold's progress 0..1.
+    (define (shell-over-progress) (and *frame* (frame-over-progress *frame*)))
+    ;; The start-over key (R) went down or up.
+    (define (shell-over-key! down?) (set! *over-key* (and down? #t)))
+    ;; A press on the start screen at (x, y), window pixels (the web's stage),
+    ;; while starting over is offered: on the line it starts the hold,
+    ;; anywhere else it is the gesture that steps in. The release ends the
+    ;; hold; unfinished, that cancels it (a short tap on the line does nothing).
+    (define (shell-start-press! x y)
+      (when (shell-over-offered?)
+        (if (*over-hit* (car *win*) (cdr *win*) x y)
+            (set! *over-touch* #t)
+            (set! *gesture* #t))))
+    (define (shell-start-release!) (set! *over-touch* #f))
+
+    ;; The hold completed: the save is wiped, and a new game begins from the
+    ;; start behind the frame (the card and the opening are still to come).
+    (define (start-over!)
+      (store-remove! SAVE-KEY)
+      (set! *over-key* #f)
+      (set! *over-touch* #f)
+      (set! *revealed* #f)
+      (set! *reveal-t* #f)
+      (set! *save-sig* #f)
+      (set! *waking* #t)
+      (*save-set* '() 0.0)
+      (set! *world* #f)
+      (shell-goto-start!))
+
+    ;; The tab hidden or the window's focus lost: nothing steps (the frame,
+    ;; the world, the wordmark), the keys are let go, and the listeners (the
+    ;; sound) hear 'pause. #t if this paused it (a second pause does nothing).
+    (define (shell-pause!)
+      (and (not *paused*)
+           (begin
+             (set! *paused* #t)
+             (shell-keys-clear!)
+             (for-each (lambda (f) (f 'pause)) *pause-listeners*)
+             #t)))
+    ;; Back: everything goes on where it stopped. #t if this resumed it.
+    (define (shell-resume!)
+      (and *paused*
+           (begin
+             (set! *paused* #f)
+             (for-each (lambda (f) (f 'resume)) *pause-listeners*)
+             #t)))
+    (define (shell-paused?) *paused*)
     (define (shell-gesture!) (set! *gesture* #t))
     (define (shell-pointer! x y) (set! *pointer* (cons x y)))
     (define (shell-frame-phase) (if *frame* (frame-phase *frame*) 'play))
@@ -304,6 +369,8 @@
     ;; Returns what the restore forgave (strings), or #f for a new game.
     (define (shell-begin! web? d)
       (set! *frame* (frame-new web?))
+      (set! *over-key* #f)
+      (set! *over-touch* #f)
       (set! *wall* 0.0)
       (set! *saving* #t)
       (set! *save-sig* #f)
@@ -323,6 +390,8 @@
                  (set! *world* (world-populate w stones (content-pickups *content*) (restored-carry r)))
                  (set! *mode* 'play)
                  (*save-set* (restored-moments r) (restored-played r))
+                 ;; D40: a save to continue, so the start screen offers starting over
+                 (set! *frame* (frame-new web? #t))
                  (restored-notes r)))
               (else (shell-goto-start!) #f))))
 
@@ -459,7 +528,9 @@
       (set! *keys* '())
       (set! *sector* 'none)
       (set! *touch-jump* #f)
-      (set! *press* #f))
+      (set! *press* #f)
+      (set! *over-key* #f)
+      (set! *over-touch* #f))
 
     (define (drawn-pos)
       (let ((b (world-body *world*)))
@@ -535,7 +606,9 @@
                        #t *input-kind*))
       (end-frame))
 
-    (define (shell-frame! dt)
+    (define (shell-frame! dt0)
+      ;; D40: paused, no time passes for anything here
+      (define dt (if *paused* 0.0 dt0))
       (set! *frame-start* (now-ms))
       (set! *frame-ms* (* 1000.0 dt))
       (set! *clock* (clock-advance *clock* dt))
@@ -546,8 +619,8 @@
       ;; A4: the frame steps in wall time until it plays; each phase entered
       ;; goes to the listeners (the sound, the page's trace)
       (when *frame*
-        (unless (frame-playing? *frame*)
-          (set! *frame* (frame-step *frame* dt *key-edge* *gesture*))
+        (unless (or (frame-playing? *frame*) *paused*)
+          (set! *frame* (frame-step *frame* dt *key-edge* *gesture* (or *over-key* *over-touch*)))
           (set! *wall* (+ *wall* dt)))
         (let ((p (frame-take-events *frame*)))
           (set! *frame* (cdr p))
@@ -556,6 +629,8 @@
                       ;; screen or skip the card must not move the creature on the
                       ;; dawn's first tick (D15: the first input in the world is yours)
                       (when (eq? ev 'dawn) (shell-keys-clear!))
+                      ;; D40: the hold completed: wipe the save, begin anew
+                      (when (eq? ev 'start-over) (start-over!))
                       (for-each (lambda (f) (f ev)) *frame-listeners*))
                     (car p))))
       (set! *key-edge* #f)
@@ -681,6 +756,7 @@
     ;; Draw the frame onto a window of win-w x win-h pixels. ticks: what
     ;; shell-frame! ran (for the latency record).
     (define (shell-present! win-w win-h ticks)
+      (set! *win* (cons win-w win-h))
       (cond ((memq *look* (list (quote start) (quote card))) (present-look! win-w win-h))
             ((and *frame* (not (frame-world-visible? *frame*))) (present-front! win-w win-h))
             ((and *content* (not (eq? *mode* 'play))) (present-overview! win-w win-h))

@@ -313,6 +313,20 @@
       send("pointer", ((e.clientX - r.left) * e.target.width / r.width).toFixed(1) + "," +
                       ((e.clientY - r.top) * e.target.height / r.height).toFixed(1));
     });
+    // D40: a press and its end during the frame. With a save, the start
+    // screen's start-over line is held by a long press on it; a press
+    // elsewhere steps in (the game decides which, by where it landed).
+    document.getElementById("stage").addEventListener("pointerdown", function (e) {
+      if (!inFrame) return;
+      var r = e.target.getBoundingClientRect();
+      send("press", ((e.clientX - r.left) * e.target.width / r.width).toFixed(1) + "," +
+                    ((e.clientY - r.top) * e.target.height / r.height).toFixed(1));
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(function (n) {
+      document.getElementById("stage").addEventListener(n, function () {
+        if (inFrame) send("release", "");
+      });
+    });
     function setView(v) {
       view = v;
       send("view", v);
@@ -332,6 +346,8 @@
     // and the touch controls too: a keyup that goes to another window would
     // otherwise hold the key forever.
     window.addEventListener("blur", function () { send("visibility", "blur"); releaseAll(); });
+    // D40: the game pauses on blur or hidden and resumes on focus or visible.
+    window.addEventListener("focus", function () { send("visibility", "focus"); });
     document.addEventListener("visibilitychange", function () {
       send("visibility", document.visibilityState);
       if (document.visibilityState === "hidden") releaseAll();

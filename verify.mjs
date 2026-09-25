@@ -89,7 +89,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "pause", "over", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -570,6 +570,60 @@ if (LEGS.includes("save")) {
   (saved && saved.startsWith("(harkfell-save 1") && cont && cont.startsWith("harkfell: save continue") &&
    atDoor && place(after) === place(atDoor) && walked.x < 9 * 400 ? pass : fail)("save",
     `saved: ${saved ? saved.slice(0, 60) : saved}; reload: ${cont}; after a door and a walk west to x ${walked.x}: the place is unchanged ${place(after) === place(atDoor)}`);
+}
+
+// D40: a lost focus pauses the game and its return resumes it. A key held
+// through the pause moves nothing; after the focus is back, the same key
+// walks. (The page lets every key go on a blur, so the walk after is a
+// fresh press.)
+if (LEGS.includes("pause")) {
+  ran.add("pause");
+  await open("trace&test-room");
+  await evaluate(`window.dispatchEvent(new Event("blur"))`);
+  const a = await where();
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await sleep(600);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  const b = await where();
+  await evaluate(`window.dispatchEvent(new Event("focus"))`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await sleep(500);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  const c = await where();
+  (b.x === a.x && b.y === a.y && c.x > b.x + 8 ? pass : fail)("pause",
+    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}`);
+}
+
+// D40: with a save, the start screen's R held 1.5 s wipes it and begins a
+// new game (through the card to play, a new save at the start); a short R
+// first does nothing, not even step in.
+if (LEGS.includes("over")) {
+  ran.add("over");
+  await open("trace&room=reedfen:9,3");
+  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "over: door");
+  await evaluate(`localStorage.setItem("save", "(harkfell-save 1 (room reedfen 9 3) (cell 4 7) (carry 2) (stones) (moments) (played 100) (revealed #f))")`);
+  await open("trace&frame=on");
+  const cont = await waitFor(() => lines.find((l) => l.startsWith("harkfell: save ")), 10000, "over: continue");
+  await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 10000, "over: frame start");
+  await sleep(1500);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "r", code: "KeyR" });
+  await sleep(500);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "r", code: "KeyR" });
+  await sleep(1500);
+  const shortKept = await evaluate("localStorage.getItem('save')");
+  const shortStayed = !lines.find((l) => l === "harkfell: frame start-out");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "r", code: "KeyR" });
+  await sleep(2200);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "r", code: "KeyR" });
+  const wiped = lines.find((l) => l === "harkfell: frame start-over") ? await evaluate("localStorage.getItem('save')") : "no start-over";
+  await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 30000, "over: frame play");
+  await sleep(1000);
+  const fresh = await evaluate("localStorage.getItem('save')");
+  const order = lines.filter((l) => l.startsWith("harkfell: frame ")).map((l) => l.slice(16)).join(" ");
+  (cont && cont.startsWith("harkfell: save continue") && shortKept && shortStayed && wiped === null &&
+   order === "start start-over start-out card hold dawn play" &&
+   fresh && fresh.includes("(room hollow 4 3)") && fresh.includes("(carry)") ? pass : fail)("over",
+    `continue: ${cont}; a short R kept the save ${!!shortKept} and stayed ${shortStayed}; held: wiped ${wiped === null}; phases: ${order}; the new save: ${fresh ? fresh.slice(0, 80) : fresh}`);
 }
 
 if (LEGS.includes("errors")) {

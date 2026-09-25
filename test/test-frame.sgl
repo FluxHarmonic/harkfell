@@ -8,6 +8,9 @@
 ;;;   skipping   a key skips the native start screen and the card, never the
 ;;;              opening's dawn
 ;;;   the world  steps (and takes input) from the dawn on, never before
+;;;   start over (D40) with a save, holding the control 1.5 s gives start-over
+;;;              then start-out; letting go early cancels; while it is held
+;;;              nothing steps in and the native time-out stands still
 ;;;
 ;;; The sabotage the web test is for: let the web's start screen time out as
 ;;; the native one does, and "it waits a minute" goes red.
@@ -91,3 +94,68 @@
            (mid (car (run c (secs 2.0) #f #f))))
       (assert-equal 1.0 (frame-card-alpha mid))
       (assert-equal 0.0 (frame-card-alpha (to-phase (frame-new #f) 'hold))))))
+
+;; --- D40: starting over --------------------------------------------------------------
+
+;; As run, with the start-over control held (or not) every step.
+(define (run-h f n key? gesture? holding?)
+  (let loop ((f f) (n n) (evs '()))
+    (if (= n 0)
+        (cons f evs)
+        (let* ((f (frame-step f DT key? gesture? holding?))
+               (p (frame-take-events f)))
+          (loop (cdr p) (- n 1) (append evs (car p)))))))
+
+(define (near? a b) (< (abs (- a b)) 0.02))
+
+(test-group "frame: starting over (D40)"
+  (test "with no save there is no line, and holding does nothing"
+    (let ((r (run-h (frame-new #t) (secs 3.0) #f #f #t)))
+      (assert-false (frame-over-progress (car r)))
+      (assert-equal 'start (frame-phase (car r)))
+      (assert-false (memq 'start-over (cdr r)))))
+  (test "with a save the line is offered, and its progress follows the hold"
+    (let* ((f (car (run (frame-new #t #t) (secs 2.0) #f #f)))
+           (half (run-h f (secs 0.75) #f #f #t)))
+      (assert-true (frame-over-offered? f))
+      (assert-equal 0.0 (frame-over-progress f))
+      (assert-true (near? 0.5 (frame-over-progress (car half))))
+      (assert-equal 'start (frame-phase (car half)))
+      (assert-equal '() (cdr half))))
+  (test "held 1.5 s: start-over, then out through the card to play"
+    (let* ((f (car (run (frame-new #t #t) (secs 2.0) #f #f)))
+           (held (run-h f (secs 1.6) #f #f #t))
+           (rest (run (car held) (secs 20.0) #f #f)))
+      (assert-equal (list 'start-over 'start-out) (cdr held))
+      (assert-true (frame-over-done? (car held)))
+      (assert-equal 1.0 (frame-over-progress (car held)))
+      (assert-equal (list 'card 'hold 'dawn 'play) (cdr rest))))
+  (test "1.4 s is not enough: letting go cancels, the progress drops to 0, nothing is wiped"
+    (let* ((f (car (run (frame-new #t #t) (secs 2.0) #f #f)))
+           (held (run-h f (secs 1.4) #f #f #t))
+           (let-go (run-h (car held) 1 #f #f #f)))
+      (assert-false (memq 'start-over (cdr held)))
+      (assert-equal 0.0 (frame-over-progress (car let-go)))
+      (assert-false (frame-over-done? (car let-go)))
+      (assert-equal 'start (frame-phase (car let-go)))))
+  (test "while it is held a gesture (web) or a key (native) does not step in"
+    (let ((w (run-h (car (run (frame-new #t #t) (secs 2.0) #f #f)) 10 #t #t #t))
+          (n (run-h (car (run (frame-new #f #t) (secs 2.0) #f #f)) 10 #t #t #t)))
+      (assert-equal 'start (frame-phase (car w)))
+      (assert-equal 'start (frame-phase (car n)))))
+  (test "natively the hold stops the 4 s time-out, which resumes on letting go"
+    ;; 3 s shown, 1.4 s held (past 4 s of wall time), then let go: still on
+    ;; the start screen; it times out 1 s later, at 4 s of time not held
+    (let* ((f (car (run (frame-new #f #t) (secs 3.0) #f #f)))
+           (held (run-h f (secs 1.4) #f #f #t))
+           (a (run (car held) (secs 0.9) #f #f))
+           (b (run (car a) (secs 0.2) #f #f)))
+      (assert-equal 'start (frame-phase (car held)))
+      (assert-equal 'start (frame-phase (car a)))
+      (assert-equal 'start-out (frame-phase (car b)))))
+  (test "after the start screen, holding is ignored"
+    (let* ((f (to-phase (frame-new #f #t) 'card))
+           (r (run-h f (secs 2.0) #f #f #t)))
+      (assert-false (frame-over-offered? f))
+      (assert-false (memq 'start-over (cdr r)))
+      (assert-false (frame-over-done? (car r))))))

@@ -9,6 +9,11 @@
 ;;;   a door       after a goto the save on disk is left as it was, however
 ;;;                far the body walks
 ;;;
+;;;   start over   (D40) a continue offers it: R held 1.6 s, or a long press on
+;;;                the line, wipes the save for a new game; a shorter hold,
+;;;                or a tap, does not
+;;;   the pause    (D40) paused, the world does not step; resumed, it does
+;;;
 ;;; The store is pointed at a scratch directory, so no real save is touched.
 
 (import (sigil test)
@@ -177,5 +182,150 @@
     (assert-true (restored-revealed REST)))
   (test "and a continue from that save does not show it again"
     (assert-equal 0.0 SHOWN-AGAIN)))
+
+;; --- D40: starting over ------------------------------------------------------------------
+;; A continue (the Reed Bridge save, carrying H2, the Old Stone open) offers
+;; starting over. R held 1.6 s on the start screen wipes the save and begins
+;; a new game from the start: nothing carried, the stone shut, and the save
+;; written anew only once the new game plays. A shorter hold cancels.
+(define (cell-now)
+  (let ((c (body-center (body-now) HARKFELL-FEEL)))
+    (cons (exact (floor (/ (car c) 16))) (exact (floor (/ (cdr c) 16))))))
+(define (stone-open-now?)
+  (and (find (lambda (s) (and (equal? (stone-cell s) STONE-G) (stone-open? s))) (world-stones (shell-world))) #t))
+
+(store-write-datum! SAVE-KEY CONT)
+(shell-begin! #f CONT)
+(define OFFERED (shell-over-offered?))
+(frames 30)
+(shell-over-key! #t)
+(frames 60)                                     ; 1 s held
+(define HALF (shell-over-progress))
+(define MID-SAVED (store-get SAVE-KEY))
+(frames 36)                                     ; 1.6 s held
+(shell-over-key! #f)
+(define PHASE-OVER (shell-frame-phase))
+(define WIPED (store-get SAVE-KEY))
+(define CELL-OVER (cell-now))
+(define CARRY-OVER (world-carry (shell-world)))
+(define STONE-OVER (stone-open-now?))
+(frames 1200)                                   ; into the new game's play
+(define PHASE-NEW (shell-frame-phase))
+(define NEW-SAVE (save-restore CT (store-read-datum SAVE-KEY)))
+
+;; a hold let go at 1.2 s
+(store-write-datum! SAVE-KEY CONT)
+(shell-begin! #f CONT)
+(frames 30)
+(shell-over-key! #t)
+(frames 72)
+(shell-over-key! #f)
+(frames 1)
+(define PHASE-CANCEL (shell-frame-phase))
+(define PROGRESS-CANCEL (shell-over-progress))
+(define KEPT (store-get SAVE-KEY))
+(define CARRY-CANCEL (world-carry (shell-world)))
+
+;; with no save there is nothing to start over
+(store-remove! SAVE-KEY)
+(shell-begin! #f #f)
+(define OFFERED-NONE (shell-over-offered?))
+(define PROGRESS-NONE (shell-over-progress))
+
+(test-group "begin: starting over (D40)"
+  (test "a continue offers it; a new game does not"
+    (assert-true OFFERED)
+    (assert-false OFFERED-NONE)
+    (assert-false PROGRESS-NONE))
+  (test "a second into the hold: two thirds of the way, and the save still there"
+    (assert-true (< 0.6 HALF 0.73))
+    (assert-true (string? MID-SAVED)))
+  (test "held 1.6 s: the save is wiped and the frame goes on"
+    (assert-equal 'start-out PHASE-OVER)
+    (assert-false WIPED))
+  (test "the new game is at the start, carrying nothing, the Old Stone shut"
+    (assert-equal (start-cell CT) CELL-OVER)
+    (assert-equal '() CARRY-OVER)
+    (assert-false STONE-OVER))
+  (test "once it plays, the new game's save is written at the start"
+    (assert-equal 'play PHASE-NEW)
+    (assert-true (restored? NEW-SAVE))
+    (assert-equal (start-cell CT) (restored-cell NEW-SAVE))
+    (assert-equal '() (restored-carry NEW-SAVE)))
+  (test "let go at 1.2 s: nothing wiped, the progress back to 0, the continue kept"
+    (assert-true (memq PHASE-CANCEL (list 'start-in 'start)))
+    (assert-equal 0.0 PROGRESS-CANCEL)
+    (assert-true (string? KEPT))
+    (assert-equal '(2) CARRY-CANCEL)))
+
+;; --- D40: a press on the web's start screen --------------------------------------------
+;; The line is where the hit test says (here: below y 500). A short press on
+;; it does nothing; a press elsewhere steps in; a long press on it starts over.
+(shell-set-over-hit! (lambda (w h x y) (> y 500)))
+(store-write-datum! SAVE-KEY CONT)
+(shell-begin! #t CONT)
+(frames 30)
+(shell-start-press! 100 600)
+(frames 30)
+(shell-start-release!)
+(frames 5)
+(define PHASE-TAP-LINE (shell-frame-phase))
+(shell-start-press! 100 100)
+(shell-start-release!)
+(frames 2)
+(define PHASE-TAP-ELSEWHERE (shell-frame-phase))
+(define KEPT-TAP (store-get SAVE-KEY))
+
+(store-write-datum! SAVE-KEY CONT)
+(shell-begin! #t CONT)
+(frames 30)
+(shell-start-press! 100 600)
+(frames 96)
+(shell-start-release!)
+(define PHASE-LONG (shell-frame-phase))
+(define WIPED-LONG (store-get SAVE-KEY))
+
+(test-group "begin: a press on the web's start screen (D40)"
+  (test "a short press on the line does nothing"
+    (assert-true (memq PHASE-TAP-LINE (list 'start-in 'start))))
+  (test "a press elsewhere steps in, and the continue is kept"
+    (assert-equal 'start-out PHASE-TAP-ELSEWHERE)
+    (assert-true (string? KEPT-TAP)))
+  (test "a 1.6 s press on the line starts over"
+    (assert-equal 'start-out PHASE-LONG)
+    (assert-false WIPED-LONG)))
+
+;; --- D40: the pause ---------------------------------------------------------------------
+;; In play, a pause stops the world (no tick in a second of frames) and the
+;; listeners hear it; a resume goes on. A second pause or resume is nothing.
+(define HEARD '())
+(shell-add-pause-listener! (lambda (ev) (set! HEARD (append HEARD (list ev)))))
+(store-remove! SAVE-KEY)
+(shell-begin! #f #f)
+(frames 1200)
+(define PHASE-P (shell-frame-phase))
+(define FIRST-PAUSE (shell-pause!))
+(define SECOND-PAUSE (shell-pause!))
+(define T0 (world-ticks (shell-world)))
+(frames 60)
+(define T1 (world-ticks (shell-world)))
+(define FIRST-RESUME (shell-resume!))
+(define SECOND-RESUME (shell-resume!))
+(frames 60)
+(define T2 (world-ticks (shell-world)))
+
+(test-group "begin: the pause (D40)"
+  (test "in play (the premise)"
+    (assert-equal 'play PHASE-P))
+  (test "paused, a second of frames steps the world not at all"
+    (assert-equal T0 T1))
+  (test "resumed, it steps again"
+    (assert-true (>= (- T2 T1) 55)))
+  (test "each change is heard once, in order; a repeat does nothing"
+    (assert-true FIRST-PAUSE)
+    (assert-false SECOND-PAUSE)
+    (assert-true FIRST-RESUME)
+    (assert-false SECOND-RESUME)
+    (assert-equal '(pause resume) HEARD)))
 
 (store-remove! SAVE-KEY)
