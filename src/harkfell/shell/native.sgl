@@ -77,7 +77,9 @@
     ;; x2 .. x8; x2, 800x352, the first time), and the view is always drawn
     ;; at the largest whole scale that fits the window, centred, black around
     ;; it ((engine view)'s integer-only fit), whatever size the window manager
-    ;; gives it. A resize remembers the whole scale it now fits.
+    ;; gives it. A resize remembers the whole scale it now fits, never below
+    ;; x2 (David on a HiDPI screen, 2026-09-25: 1x, 400x176 in screen units,
+    ;; "is very small").
     (define (stored-scale)
       (let* ((st (setting-ref (quote scale)))
              (d (store-read-datum (setting-key st)))
@@ -93,6 +95,7 @@
     (define *snapped-from* '())     ; sizes a snap has been asked from (never asked again)
     (define *fullscreen-asked* #f)  ; the stored scale is fullscreen: go there on the first frame
     (define SETTLE-FRAMES 20)       ; a resize settles before it snaps (a drag is not fought)
+    (define MIN-SCALE 2)            ; the smallest window scale, in screen units (D37)
 
     (define (scale-symbol k) (string->symbol (string-append "x" (number->string k))))
     (define (fit-k w h) (max 1 (exact (floor (min (/ w (* 1.0 VIEW-W)) (/ h (* 1.0 VIEW-H)))))))
@@ -115,8 +118,9 @@
     ;; fit does the placing) and back, remembered.
     ;;
     ;; A window resized by hand, once the size has settled for SETTLE-FRAMES,
-    ;; snaps to the whole scale it fits and remembers it, all in screen
-    ;; units. Two guards, from the A4 review:
+    ;; snaps to the whole scale it fits, x2 at the least (MIN-SCALE: a
+    ;; window dragged smaller than 800x352 comes back up to it), and
+    ;; remembers it, all in screen units. Two guards, from the A4 review:
     ;;   - only when the first frame's window was the size asked for.
     ;;     Otherwise the window manager chose the size (sway's tiling) and a
     ;;     snap would fight it. The view is still drawn at the largest whole
@@ -141,8 +145,8 @@
           (set! *fullscreen-asked* #f)
           (set-fullscreen! #t))
         (when (and *placed-ok* (= *stable* SETTLE-FRAMES) (not (fullscreen?)))
-          (let ((k (fit-k w h)))
-            (when (and (<= 2 k 8) (not (eqv? k *stored-k*)))
+          (let ((k (max MIN-SCALE (fit-k w h))))
+            (when (and (<= k 8) (not (eqv? k *stored-k*)))
               (store-write-datum! "scale" (scale-symbol k))
               (set! *stored-k* k))
             (unless (or (and (= w (* k VIEW-W)) (= h (* k VIEW-H))) (member (cons w h) *snapped-from*))
