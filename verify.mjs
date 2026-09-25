@@ -66,10 +66,16 @@
 //   save       (A4) after the frame leg: the save is in localStorage, and a
 //              reload with no ?new continues from it ("harkfell: save continue
 //              ..."); then a door (?room=) walked elsewhere leaves it unchanged
+//   fullscreen (D39) the corner button: shown on the start screen and not
+//              faded; a click asks for fullscreen and the game container
+//              (#game) takes it without stepping in; F leaves it; in play it
+//              fades after 2.5 s and a mouse move brings it back; with the
+//              Fullscreen API removed (iPhone Safari) it is hidden and F asks
+//              for nothing
 //   errors     no console error and no exception in any leg
 //
-// Every leg but frame and save boots with &frame=off (open() adds it): the
-// frame is theirs to skip, and a door skips it anyway.
+// Every leg but frame, save and fullscreen boots with &frame=off (open()
+// adds it): the frame is theirs to skip, and a door skips it anyway.
 //
 // A0's control legs (keys, float, fixed, jump, two, timing) run in A0's test
 // room (&test-room): they measure the controls, and their geometry (the
@@ -89,7 +95,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -570,6 +576,66 @@ if (LEGS.includes("save")) {
   (saved && saved.startsWith("(harkfell-save 1") && cont && cont.startsWith("harkfell: save continue") &&
    atDoor && place(after) === place(atDoor) && walked.x < 9 * 400 ? pass : fail)("save",
     `saved: ${saved ? saved.slice(0, 60) : saved}; reload: ${cont}; after a door and a walk west to x ${walked.x}: the place is unchanged ${place(after) === place(atDoor)}`);
+}
+
+// D39: the fullscreen button. On the start screen it shows and stays; a
+// click on it asks for fullscreen and goes there, without stepping in (not a
+// gesture to the game); F goes back. In play it fades after 2.5 s and a mouse
+// move brings it back. With the Fullscreen API taken away (as on iPhone
+// Safari) it is hidden and F asks for nothing.
+async function fsState() {
+  return await evaluate(`(() => { const b = document.getElementById("fs"); const r = b.getBoundingClientRect();
+    return { hidden: b.hidden, faded: b.classList.contains("faded"), on: b.classList.contains("on"),
+             x: r.left + r.width / 2, y: r.top + r.height / 2, full: !!document.fullscreenElement,
+             el: document.fullscreenElement ? document.fullscreenElement.id : "" }; })()`);
+}
+if (LEGS.includes("fullscreen")) {
+  ran.add("fullscreen");
+  await open("trace&frame=on&new");
+  await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 10000, "fullscreen: frame start");
+  await sleep(3200);
+  const start = await fsState();
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: start.x, y: start.y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: start.x, y: start.y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: start.x, y: start.y, button: "left", clickCount: 1 });
+  const onLine = await waitFor(() => lines.find((l) => l === "harkfell: page fullscreen on" || l.startsWith("harkfell: page fullscreen refused")), 10000, "fullscreen: on");
+  const asked = !!lines.find((l) => l === "harkfell: page fullscreen request");
+  await sleep(300);
+  const full = await fsState();
+  await sleep(700);
+  const stayed = !lines.find((l) => l === "harkfell: frame start-out");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "f", code: "KeyF", text: "f" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "f", code: "KeyF" });
+  const offLine = await waitFor(() => lines.find((l) => l === "harkfell: page fullscreen off"), 10000, "fullscreen: off");
+  const left = await fsState();
+  const stayed2 = !lines.find((l) => l === "harkfell: frame start-out");
+  // step in; in play the button fades, and the mouse brings it back
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", code: "KeyX" });
+  await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 30000, "fullscreen: frame play");
+  await sleep(3300);
+  const idle = await fsState();
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 200, y: 200 });
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 210, y: 205 });
+  await sleep(200);
+  const woken = await fsState();
+  // no Fullscreen API
+  const { identifier } = await send("Page.addScriptToEvaluateOnNewDocument", { source:
+    "delete Element.prototype.requestFullscreen; delete Element.prototype.webkitRequestFullscreen;" });
+  await open("trace&frame=on&new");
+  await sleep(500);
+  const none = await fsState();
+  const n0 = lines.length;
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "f", code: "KeyF", text: "f" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "f", code: "KeyF" });
+  await sleep(500);
+  const noAsk = !lines.slice(n0).find((l) => l.startsWith("harkfell: page fullscreen"));
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  (!start.hidden && !start.faded && asked && onLine === "harkfell: page fullscreen on" && full.full && full.el === "game" && full.on &&
+   stayed && offLine && !left.full && !left.on && stayed2 && idle.faded && !woken.faded && none.hidden && noAsk ? pass : fail)("fullscreen",
+    `start screen: shown ${!start.hidden}, not faded after 3 s ${!start.faded}; click: asked ${asked}, ${onLine}, fullscreen element #${full.el}; ` +
+    `start screen kept ${stayed}; F: ${offLine}, fullscreen ${left.full}; kept ${stayed2}; play: faded after 3.3 s ${idle.faded}, back on a mouse move ${!woken.faded}; ` +
+    `no API: hidden ${none.hidden}, F asks nothing ${noAsk}`);
 }
 
 if (LEGS.includes("errors")) {

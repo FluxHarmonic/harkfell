@@ -66,18 +66,47 @@
              margin: 0; padding: 8px; background: rgba(0, 0, 0, 0.78); color: #cfe; font: 11px/1.35 ui-monospace, monospace;
              white-space: pre-wrap; word-break: break-all; }
     #bench[hidden] { display: none; }
+
+    /* D39: the fullscreen button. A small, quiet mark in the top-right
+       corner, drawn by the page (not the game): on the start screen it
+       stays; in play it fades after FS_IDLE_MS without the mouse moving
+       (or a touch in the top quarter of the screen) and comes back when it
+       moves. Hidden where the Fullscreen API is missing (iPhone Safari).
+       Above the touch controls, under the page guard's card. */
+    #game { position: fixed; inset: 0; background: #000; }
+    #fs { position: fixed; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right));
+          z-index: 3; box-sizing: border-box; width: 34px; height: 34px; padding: 7px; margin: 0; border: 0; border-radius: 6px;
+          background: transparent; color: rgb(235, 230, 215); opacity: 0.45; cursor: pointer;
+          transition: opacity 0.6s ease; -webkit-tap-highlight-color: transparent; }
+    #fs:hover, #fs:focus-visible { opacity: 0.85; }
+    #fs:focus { outline: none; }
+    #fs:focus-visible { outline: 1px solid rgba(235, 230, 215, 0.5); }
+    #fs.faded { opacity: 0; pointer-events: none; }
+    #fs[hidden] { display: none; }
+    #fs svg { display: block; width: 20px; height: 20px; }
+    #fs .exit { display: none; }
+    #fs.on .enter { display: none; }
+    #fs.on .exit { display: block; }
   </style>
 </head>
 <body>
+  <!-- D39: the game's container, what fullscreen takes: the canvas and
+       everything the page draws over it -->
+  <div id="game">
   <canvas id="stage" width="800" height="352"></canvas>
   <div id="touch">
     <div id="ring"></div>
     <div id="knob"></div>
     <div id="jumpbtn"></div>
   </div>
+  <button id="fs" type="button" aria-label="Fullscreen" hidden>
+    <svg class="enter" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"><path d="M2 7V2h5M13 2h5v5M18 13v5h-5M7 18H2v-5"/></svg>
+    <svg class="exit" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"><path d="M7 2v5H2M18 7h-5V2M13 18v-5h5M2 13h5v5"/></svg>
+  </button>
   <div id="dead" hidden>&#x21bb;</div>
   <pre id="bench" hidden></pre>
   <div id="status"></div>
+  </div>
 
   <script>
   // The world's files (world/*.sgl, regions/*.map, rooms/*/*.room) as
@@ -89,7 +118,8 @@
   // Harkfell's page. The generic loader (sigil-web-app.js) boots the wasm,
   // forwards keydown/keyup, and publishes SigilWebApp; the gles3 shell
   // runs one frame per requestAnimationFrame. This page adds the touch
-  // controls, the parameters, the visibility word and a small guard.
+  // controls, the parameters, the visibility word, the fullscreen button
+  // (D39: the top-right corner, or F) and a small guard.
   //
   // Parameters:
   //   ?stick=fixed|float   the joystick form (D25; fixed by default, David's
@@ -192,9 +222,77 @@
     };
     // Every gesture may resume the audio context (the autoplay policy); the
     // capture phase sees the touch controls' events before they stop them.
+    // D39: the fullscreen button and the F key are not gestures to the game:
+    // on the start screen they go fullscreen without stepping in.
     ["pointerdown", "pointerup", "touchend", "click", "keydown"].forEach(function (n) {
-      document.addEventListener(n, function () { send("gesture", n); }, true);
+      document.addEventListener(n, function (e) {
+        if (fsEl.contains(e.target) || (n === "keydown" && fsKey(e))) return;
+        send("gesture", n);
+      }, true);
     });
+
+    // ---- D39: fullscreen ---------------------------------------------------
+    // The button (#fs) or the F key takes the game's container (#game) to
+    // fullscreen with the Fullscreen API, and back (Escape also leaves, the
+    // browser's own). The view is placed as ever: the largest whole scale
+    // that fits the canvas, centred on black ((engine view), D37's rule).
+    // Where the API is missing (iPhone Safari) the button stays hidden and
+    // F is an ordinary key. Lines: "harkfell: page fullscreen request",
+    // then "... on" / "... off" as the browser changes it, or "... refused
+    // NAME" if it says no.
+    var FS_IDLE_MS = 2500;             // in play, the button fades after this long without the mouse moving
+    var gameEl = document.getElementById("game");
+    var fsEl = document.getElementById("fs");
+    var fsRequest = gameEl.requestFullscreen || gameEl.webkitRequestFullscreen;
+    var fsExit = document.exitFullscreen || document.webkitExitFullscreen;
+    var fsOK = !!(fsRequest && fsExit && (document.fullscreenEnabled || document.webkitFullscreenEnabled));
+    var fsTimer = null;
+    function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+    function fsKey(e) {
+      return fsOK && (e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey && !e.altKey;
+    }
+    function fsToggle() {
+      var p;
+      if (fsElement()) p = fsExit.call(document);
+      else { console.log("harkfell: page fullscreen request"); p = fsRequest.call(gameEl, { navigationUI: "hide" }); }
+      if (p && p.catch) p.catch(function (err) { console.log("harkfell: page fullscreen refused " + (err && err.name)); });
+    }
+    // Shown now; in play (not the start screen, the card or the opening) it
+    // fades after FS_IDLE_MS unless woken again.
+    function fsWake() {
+      fsEl.classList.remove("faded");
+      clearTimeout(fsTimer);
+      fsTimer = setTimeout(function () {
+        if (inFrame) fsWake();
+        else fsEl.classList.add("faded");
+      }, FS_IDLE_MS);
+    }
+    function fsChanged() {
+      var on = !!fsElement();
+      fsEl.classList.toggle("on", on);
+      fsEl.setAttribute("aria-label", on ? "Leave fullscreen" : "Fullscreen");
+      console.log("harkfell: page fullscreen " + (on ? "on" : "off"));
+      fsWake();
+    }
+    if (fsOK) {
+      fsEl.hidden = false;
+      // no focus on a click, so Space (jump) never presses the button
+      fsEl.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      fsEl.addEventListener("click", function (e) { e.stopPropagation(); fsEl.blur(); fsToggle(); });
+      document.addEventListener("keydown", function (e) {
+        if (!fsKey(e) || e.repeat) return;
+        e.preventDefault();
+        fsToggle();
+      });
+      document.addEventListener("fullscreenchange", fsChanged);
+      document.addEventListener("webkitfullscreenchange", fsChanged);
+      // the mouse moving wakes it; with no mouse, a touch in the top quarter
+      document.addEventListener("pointermove", function (e) { if (e.pointerType === "mouse") fsWake(); }, true);
+      document.addEventListener("pointerdown", function (e) {
+        if (e.pointerType !== "mouse" && e.clientY < window.innerHeight / 4) fsWake();
+      }, true);
+      fsWake();
+    }
     var benchOn = params.has("bench");
     if (benchOn) {
       benchEl.hidden = false;
@@ -305,6 +403,7 @@
     var inFrame = false;
     function framePlaying() {
       inFrame = false;
+      if (fsOK) fsWake();             // D39: the fade's count starts with play
       if (view === "play" && (coarse || params.has("touch"))) touchLayer.classList.add("on");
     }
     document.getElementById("stage").addEventListener("pointermove", function (e) {
