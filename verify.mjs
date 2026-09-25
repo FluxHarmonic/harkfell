@@ -267,16 +267,16 @@ if (LEGS.includes("door")) {
   // reedfen:10,4 is the tenth room across (the map starts at x 1) and the third down (at y 2)
   const inside = at.x >= 9 * 400 && at.x < 10 * 400 && at.y >= 2 * 176 && at.y < 3 * 176;
   await open("trace&room=reedfen:40,40");
-  await sleep(500);
-  const none = lines.find((l) => l.startsWith("harkfell: no-room"));
+  // wait for the answer (a fixed 500 ms missed it on a loaded box: the
+  // integration run at b7b0944)
+  const none = await waitFor(() => lines.find((l) => l.startsWith("harkfell: no-room")), 10000, "door no-room");
   // &at: cell (4,7) of reedfen:9,3 (the ninth room across, the second down)
   await open("trace&room=reedfen:9,3&at=4,7");
   await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door at");
   const a2 = await where();
   const inCell = Math.floor((a2.x + 4) / 16) === 8 * 25 + 4 && Math.floor((a2.y + 7) / 16) === 11 + 7;
   await open("trace&room=reedfen:9,3&at=4,9");
-  await sleep(500);
-  const rock = lines.find((l) => l.startsWith("harkfell: no-room"));
+  const rock = await waitFor(() => lines.find((l) => l.startsWith("harkfell: no-room")), 10000, "door rock");
   (r === "harkfell: room reedfen:10,4" && inside && none === "harkfell: no-room reedfen:40,40" && inCell && rock === "harkfell: no-room reedfen:9,3@4,9" ? pass : fail)("door", `${r}; body at ${at.x},${at.y} inside the room's slot: ${inside}; ${none}; &at=4,7 body at ${a2.x},${a2.y} in cell (4,7): ${inCell}; &at=4,9 (rock): ${rock}`);
 }
 
