@@ -68,7 +68,7 @@
 
   (export shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
           shell-add-frame-listener! shell-set-save-extras! shell-set-input-kind!
-          shell-save-now! shell-saving? shell-reveal-alpha shell-revealed? shell-set-moment-clock! shell-set-look! shell-set-look-alpha!
+          shell-save-now! shell-saving? shell-reveal-alpha shell-revealed? shell-set-moment-clock! shell-set-look! shell-set-look-alpha! shell-set-look-over!
           shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
           shell-stick! shell-jump! shell-sector
@@ -518,6 +518,10 @@
     (define *look-s* 0.0)         ; seconds since the look began
     (define *look-alpha* #f)      ; a pinned alpha for the card or the reveal (review shots)
     (define (shell-set-look-alpha! a) (set! *look-alpha* a))
+    ;; D40, to study it: the hold-to-start-over line on the look's start
+    ;; screen at a pinned progress (?look=start&over=X, --over X); #f, none
+    (define *look-over* #f)
+    (define (shell-set-look-over! v) (set! *look-over* v))
 
     (define (shell-set-look! look kind)
       (set! *look* look)
@@ -532,7 +536,7 @@
             (draw-card! win-w win-h (or *look-alpha* (card-fade s)) *look-s*))
           (draw-start! win-w win-h (min 1.0 (/ *look-s* 1.5)) *look-s*
                        (and *pointer* (car *pointer*)) (and *pointer* (cdr *pointer*))
-                       #t *input-kind*))
+                       #t *input-kind* *look-over*))
       (end-frame))
 
     (define (shell-frame! dt)

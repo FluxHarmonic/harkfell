@@ -20,17 +20,26 @@
 ;;;
 ;;; What calls these (the frame sequence, CONTENT's (harkfell frame)) owns
 ;;; the timing; both draw on the window, after begin-frame:
-;;;   (draw-start! w h alpha t px py web? kind)
+;;;   (draw-start! w h alpha t px py web? kind [over])
 ;;;       w h: the window in pixels; alpha 0..1: how far it is faded in; t:
 ;;;       seconds of wall time (the moths are stepped at 60 Hz up to it); px py:
 ;;;       the pointer in window pixels, or #f; web?: the web build; kind:
-;;;       'keys, 'touch or 'both, which second line (D32)
+;;;       'keys, 'touch or 'both, which second line (D32); over (optional,
+;;;       #f when left out): #f (no save: no third line) or 0..1, D40's hold
+;;;       to start over (a save exists; the line brightens as the hold
+;;;       fills: half strength at 0, full at 1)
+;;;   (start-over-hit? w h x y)   D40: is window pixel (x, y) on the hold
+;;;                               line, on a w x h window (draw-start!'s w
+;;;                               and h), padded as a touch target; #f
+;;;                               while its image has not landed
 ;;;   (draw-card! w h alpha t)    the Flux Harmonic card at alpha 0..1, t seconds
 ;;;   (card-fade s)               D33's envelope at s seconds (in over 1.2 s,
 ;;;                               held, out by CARD-SECONDS), for a caller
 ;;;                               that wants it
 ;;;   (title-set-content! ct)     the world, for its palette (the Hollow's)
 ;;;   (start-reset!)              the moths anew
+;;;   (start-words-landed?)       every line of the start screen has landed
+;;;                               and they have begun to fade in
 ;;; The words' images come through (harkfell images), whose fetcher the
 ;;; shells install.
 
@@ -48,7 +57,8 @@
           (harkfell images))
 
   (export title-set-content! start-reset! draw-start! draw-card! draw-reveal!
-          card-fade CARD-SECONDS start-moths TEXT-LAYOUT type-scale)
+          card-fade CARD-SECONDS start-moths TEXT-LAYOUT type-scale
+          start-over-hit? over-id WORDS-FADE-S WORDS-STAGGER-S start-words-landed?)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -65,9 +75,11 @@
     ;; Where each line of words stands, its centre in view pixels:
     ;; (id x y slot-name). D35 (David, 2026-09-24): the name is not on the
     ;; start screen; it comes at the first homecoming (draw-reveal!).
+    ;; D40: "over", the hold to start over, only when a save exists; last.
     (define TEXT-LAYOUT
       (list (list "listen" 200 84 (quote fur-2))
-            (list "step" 200 101 (quote fur-2))))
+            (list "step" 200 101 (quote fur-2))
+            (list "over" 200 122 (quote fur-2))))
     ;; --- the palette ------------------------------------------------------------------------
 
     (define *content* #f)
@@ -239,9 +251,11 @@
     ;; caller's seconds of wall time; px py: the pointer in window pixels, or
     ;; #f; web?: the web build (unused: kind decides the line); kind: 'keys,
     ;; 'touch or 'both.
-    (define (draw-start! w h alpha t px py web? kind)
-      (let* ((f (fit-of w h))
+    (define (draw-start! w h alpha t px py web? kind . more)
+      (let* ((over (and (pair? more) (car more)))
+             (f (fit-of w h))
              (pointer (and px py (window->view f px py VIEW-W VIEW-H)))
+             (secs t)
              (t (floor-int (* 60.0 t))))
         (advance-moths! t pointer)
         (pixel-pass!
@@ -264,11 +278,79 @@
           (- 1.0 alpha))
         (present-view! f)
         (set-blend-mode 'normal)
-        (let ((colours (rgb)))
-          (for-each (lambda (l)
-                      (draw-words! f (if (string=? (car l) "step") (step-id kind) (car l))
-                                   (cadr l) (caddr l) (vector-ref colours (slot-of (cadddr l))) alpha))
-                    TEXT-LAYOUT))))
+        (draw-start-words! f alpha secs kind over)))
+
+    ;; The start screen's words (playtest 1, #1: on the phone the second
+    ;; line came before the first, each drawn as its image landed). Every
+    ;; line's image is asked for each frame, so all of them fetch at once,
+    ;; and so are the card's (the mark, "presents"), so the card has them
+    ;; when it comes; no line is drawn until every line has landed. Then
+    ;; they fade in over WORDS-FADE-S, in order, each WORDS-STAGGER-S after
+    ;; the one above. Natively the images are there at once, and the fade
+    ;; starts with the start screen.
+    (define WORDS-FADE-S 0.9)
+    (define WORDS-STAGGER-S 0.35)
+    (define *words-since* #f)       ; the caller's seconds when every line had landed
+    (define *start-kind* 'both)    ; the kind draw-start! was last given (for the hit test)
+
+    ;; D40: the third line, when a save exists (the words are CONTENT's).
+    (define (over-id kind)
+      (case kind
+        ((keys) "over-keys")
+        ((touch) "over-touch")
+        (else "over-both")))
+
+    ;; D40's line on a window of w x h (as draw-start! gets): its image's
+    ;; rectangle in window pixels, padded by OVER-PAD view pixels as a touch
+    ;; target, or #f while the image has not landed.
+    (define OVER-PAD 8.0)
+    (define (over-rect w h)
+      (let* ((f (fit-of w h))
+             (s (/ (fit-w f) (* 1.0 VIEW-W)))
+             (k (type-scale s))
+             (l (assoc "over" TEXT-LAYOUT))
+             (tex (image-texture (type-path (over-id *start-kind*) k))))
+        (and tex
+             (let* ((z (/ s k))
+                    (iw (* z (texture-width tex))) (ih (* z (texture-height tex)))
+                    (cx (+ (fit-x f) (* (cadr l) s))) (cy (+ (fit-y f) (* (caddr l) s)))
+                    (pad (* OVER-PAD s)))
+               (list (- cx (/ iw 2) pad) (- cy (/ ih 2) pad) (+ iw pad pad) (+ ih pad pad))))))
+
+    ;; Is window pixel (x, y) on D40's line? CONTENT's touch hold asks.
+    (define (start-over-hit? w h x y)
+      (let ((r (over-rect w h)))
+        (and r (>= x (car r)) (< x (+ (car r) (caddr r)))
+             (>= y (cadr r)) (< y (+ (cadr r) (cadddr r))))))
+    ;; every line has landed and the words have begun to show
+    (define (start-words-landed?) (and *words-since* #t))
+
+    (define (ramp x) (max 0.0 (min 1.0 x)))
+
+    (define (draw-start-words! f alpha secs kind over)
+      (let* ((s (/ (fit-w f) (* 1.0 VIEW-W)))
+             (k (type-scale s))
+             (lines (map (lambda (l) (if (string=? (car l) "step") (cons (step-id kind) (cdr l)) l))
+                         (if over TEXT-LAYOUT (reverse (cdr (reverse TEXT-LAYOUT))))))
+             (lines (map (lambda (l) (if (string=? (car l) "over") (cons (over-id kind) (cdr l)) l)) lines))
+             (landed (map (lambda (l) (image-texture (type-path (car l) k))) lines)))
+        ;; the card's images, asked for now so they are here when it comes
+        (image-texture (string-append "assets/mark/mark@" (number->string k) ".png"))
+        (image-texture (type-path "presents" k))
+        (when (and *words-since* (< secs *words-since*)) (set! *words-since* #f))
+        (when (and (not *words-since*) (not (memq #f landed))) (set! *words-since* secs))
+        (set! *start-kind* kind)
+        (when *words-since*
+          (let ((colours (rgb)))
+            (let loop ((ls lines) (i 0))
+              (when (pair? ls)
+                (let* ((l (car ls))
+                       (a (* alpha (ramp (/ (- secs *words-since* (* i WORDS-STAGGER-S)) WORDS-FADE-S))))
+                       (over? (string=? (car l) (over-id kind)))
+                       ;; D40's line: dimmer than the prompt, brightening as the hold fills
+                       (a (if over? (* a (+ 0.5 (* 0.5 (ramp over)))) a)))
+                  (draw-words! f (car l) (cadr l) (caddr l) (vector-ref colours (slot-of (cadddr l))) a)
+                  (loop (cdr ls) (+ i 1)))))))))
 
     ;; --- the card --------------------------------------------------------------------------
 

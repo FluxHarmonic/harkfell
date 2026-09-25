@@ -16,6 +16,8 @@
 ;;;   - nothing that matters by colour alone: climbable rock has holds (dark
 ;;;     joints) that smooth rock has not
 ;;;   - the look fixture's palette is world/world.sgl's
+;;;   - reeds stand on something: no reed cell of the world hangs over air
+;;;     or an updraft (playtest 1, #4, "grass floating in the sky")
 
 (import (sigil test)
         (sigil list)
@@ -190,7 +192,14 @@
                   (when (<= k 8)
                     (assert-true (file-exists? (string-append "assets/type/" id "@" (number->string k) ".png")))
                     (loop (+ k 1)))))
-              (list "wordmark" "listen" "step-both" "step-keys" "step-touch" "presents")))
+              (list "wordmark" "listen" "step-both" "step-keys" "step-touch" "presents"
+                    "over-both" "over-keys" "over-touch")))
+  (test "D40's line: one per input kind, last in the layout, and no hit before its image lands"
+    (assert-equal "over-keys" (over-id 'keys))
+    (assert-equal "over-touch" (over-id 'touch))
+    (assert-equal "over-both" (over-id 'both))
+    (assert-equal "over" (car (list-ref TEXT-LAYOUT (- (length TEXT-LAYOUT) 1))))
+    (assert-false (start-over-hit? 800 352 400 244)))
   (test "a scale picks the nearest image, 1 to 8"
     (assert-equal 2 (type-scale 2.0))
     (assert-equal 3 (type-scale 2.6))
@@ -239,3 +248,12 @@
         (assert-true (file-exists? (string-append "assets/type/wordmark-halo@" (number->string k) ".png")))
         (assert-true (file-exists? (string-append "assets/type/wordmark@" (number->string k) ".png")))
         (loop (+ k 1))))))
+
+(test-group "art: reeds stand on something (playtest 1, #4)"
+  (test "no reed cell in the world hangs over air or an updraft"
+    ;; as text, so a red run names each floating cell: "ROOM (C,R)"
+    (assert-equal ""
+                  (string-join (map (lambda (e) (string-append (car e) " (" (number->string (cadr e)) ","
+                                                               (number->string (caddr e)) ")"))
+                                    (floating-reeds WORLD))
+                               " "))))

@@ -60,8 +60,9 @@
 //   sheet      (A1) ?sheet=reedfen: the region's rooms at full scale ("harkfell:
 //              view sheet:reedfen 4044 544": x 8..17, y 3..5)
 //   frame      (A4) a plain boot (?frame=on&new) runs the frame: the start
-//              screen waits for a gesture (no "frame start-out" in 5 s), then a
-//              key goes on, and start-out, card, hold, dawn and play follow in
+//              screen waits for a gesture (no "frame start-out" in 5 s) and its
+//              words land together ("frame words", playtest 1 #1), then a key
+//              goes on, and start-out, card, hold, dawn and play follow in
 //              that order; the played room draws in at least four colour bins
 //   save       (A4) after the frame leg: the save is in localStorage, and a
 //              reload with no ?new continues from it ("harkfell: save continue
@@ -543,7 +544,7 @@ if (LEGS.includes("frame")) {
   const order = lines.filter((l) => l.startsWith("harkfell: frame ")).map((l) => l.slice(16)).join(" ");
   await sleep(500);
   const bins = await colourBins();
-  (waited && order === "start start-out card hold dawn play" && bins >= 4 ? pass : fail)("frame",
+  (waited && order === "start words start-out card hold dawn play" && bins >= 4 ? pass : fail)("frame",
     `waited for the gesture: ${waited}; phases: ${order}; ${bins} colour bins in play`);
 }
 

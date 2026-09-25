@@ -25,6 +25,55 @@
         if (window.webkitAudioContext) window.webkitAudioContext = Wrapped;
       }
     })();
+    // Playtest 1, #1 (a slow load on the phone; the start screen's second
+    // line came before the first): the start screen's words and the card's
+    // mark are fetched now, while the wasm downloads, and held in memory.
+    // The game asks for them later, through the gles3 bridge's fetch (once
+    // its frames are steady: (harkfell shell web-images)), and gets these
+    // bytes at once, with no network and nothing a long boot frame can
+    // cancel. The scale is the game's: the largest whole scale of the
+    // 400x176 view that fits the device pixels (and the rounded one, in
+    // case), 1..8; the kind is the page's (touch, keys or both); D40's line
+    // too when a save is stored. Anything not preloaded, or a preload that
+    // failed, goes to the network as before. ?trace: one line of what.
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var dpr = Math.max(1, window.devicePixelRatio || 1);
+      var s = Math.min(window.innerWidth * dpr / 400, window.innerHeight * dpr / 176);
+      var clamp = function (k) { return Math.max(1, Math.min(8, k)); };
+      var ks = [clamp(Math.floor(s)), clamp(Math.round(s))].filter(function (k, i, a) { return a.indexOf(k) === i; });
+      var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+      var kind = params.get("kind") || (coarse ? "touch" : ((navigator.maxTouchPoints || 0) > 0 ? "both" : "keys"));
+      var saved = false;
+      try { saved = !!localStorage.getItem("save") && !params.has("new"); } catch (err) { /* private mode */ }
+      var urls = [];
+      ks.forEach(function (k) {
+        ["listen", "step-" + kind, "presents"].concat(saved ? ["over-" + kind] : []).forEach(function (id) {
+          urls.push("assets/type/" + id + "@" + k + ".png");
+        });
+        urls.push("assets/mark/mark@" + k + ".png");
+      });
+      var held = {};
+      var baseFetch = window.fetch.bind(window);
+      urls.forEach(function (u) {
+        held[u] = baseFetch(u, { cache: "no-store" }).then(function (r) {
+          if (!r.ok) throw new Error(u + " " + r.status);
+          return r.arrayBuffer();
+        });
+        held[u].catch(function () { delete held[u]; });
+      });
+      window.fetch = function (input, init) {
+        var u = typeof input === "string" ? input : "";
+        if (held[u]) {
+          var p = held[u];
+          delete held[u];                      // once: a later ask goes to the network
+          return p.then(function (buf) { return new Response(buf, { status: 200, headers: { "content-type": "image/png" } }); },
+                        function () { return baseFetch(input, init); });
+        }
+        return baseFetch(input, init);
+      };
+      if (params.has("trace")) console.log("harkfell: page preload " + urls.length + " images at x" + ks.join(",x") + " " + kind);
+    })();
   </script>
   <!-- version: "__VERSION__" -->
   <style>
@@ -366,12 +415,15 @@
       // A4 look: ?look=start|card shows the start screen or the card alone,
       // to look at (the frame itself is the plain boot's); like a door, it
       // begins no game. The pointer is handed over as in the frame.
+      // &over=X (0..1): D40's hold-to-start-over line, as if a save existed
+      // and the hold were X of the way (&kind=keys|touch|both, the lines).
       var look = params.get("look");
       if (look === "start" || look === "card") {
         var lookTouchy = (navigator.maxTouchPoints || 0) > 0;
         inFrame = true;
         touchLayer.classList.remove("on");
-        send("look", look + " " + (params.get("kind") || (coarse ? "touch" : (lookTouchy ? "both" : "keys"))));
+        send("look", look + " " + (params.get("kind") || (coarse ? "touch" : (lookTouchy ? "both" : "keys"))) +
+             (params.get("over") !== null ? " over=" + params.get("over") : ""));
       }
       // ?look=reveal: play as a door does, with D35's reveal of the name over
       // the room once, as the game will (a key or a tap plays it again; &hold
