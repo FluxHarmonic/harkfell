@@ -1,0 +1,57 @@
+;;; Headroom (playtest #7): in Standing Stones (hollow 5,3), the pillar room
+;;; that teaches the hop, a held jump from any standing place peaks with the
+;;; body's center inside the room, so the view never flips to the Wind Gap
+;;; above. Before the fix, a jump from the three tall stones flipped it.
+;;;
+;;; Each standing cell of the room is tried on the real world's tilemap:
+;;; the body stands there, presses jump and holds it for 30 ticks without
+;;; moving sideways; the highest its center reaches is compared with the
+;;; room's top edge.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine body)
+        (engine worldmap)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell world)
+        (harkfell feel))
+
+(define F HARKFELL-FEEL)
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+(define TILE 16)
+
+;; ((c . r) . highest center y, relative to the room's top) for every
+;; standing cell of room (x, y).
+(define (jump-peaks x y)
+  (let* ((rm (content-room CT x y))
+         (grid (room-grid rm))
+         (top (* TILE (cdr (local->global CT rm 0 0)))))
+    (let each ((c 0) (r 0) (acc '()))
+      (cond ((= r ROOM-ROWS) (reverse acc))
+            ((= c ROOM-COLS) (each 0 (+ r 1) acc))
+            ((grid-standable? grid c r)
+             (let* ((g (local->global CT rm c r))
+                    (b0 (cell-body TM F (car g) (cdr g)))
+                    (peak (let run ((b b0) (t 0) (low (body-y b0)))
+                            (if (= t 40)
+                                low
+                                (let ((b (body-step b (intent jump: (< t 30) press: (= t 0)) TM F)))
+                                  (run b (+ t 1) (min low (body-y b))))))))
+               (each (+ c 1) r (cons (cons (cons c r) (- (+ peak (/ (feel-box-h F) 2.0)) top)) acc))))
+            (else (each (+ c 1) r acc))))))
+
+(test-group "headroom: Standing Stones"
+  (let ((peaks (jump-peaks 5 3)))
+    (test "the room has standing places on the stones and in the ditch"
+      (assert-true (> (length peaks) 10)))
+    (test "a held jump from every one peaks with the center inside the room"
+      (let ((out (filter (lambda (p) (< (cdr p) 0.0)) peaks)))
+        (unless (null? out)
+          (display "  out of the room: ") (write out) (newline))
+        (assert-equal '() out)))
+    (test "the tallest stones leave at least 16 px of headroom"
+      (assert-true (every (lambda (p) (>= (cdr p) 16.0)) peaks)))))
