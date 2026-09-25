@@ -12,7 +12,9 @@
 // proves the Function, the binding and the upload together. Then:
 //   wasm-headers  the Function's response: application/wasm, immutable cache,
 //                 CORP same-origin, COEP require-corp (an isolated page refuses
-//                 the wasm without them), and whether the wire was compressed
+//                 the wasm without them)
+//   wasm-wire     the wasm arrives br- or gzip-encoded, measured on the raw
+//                 bytes, and they decompress to the wasm its name promises
 //   isolation     /play/ carries COOP same-origin + COEP require-corp; / does not
 //   missing       a missing page, an unpublished wasm hash and /_headers are 404
 //
@@ -20,6 +22,9 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
+import http from "node:http";
+import https from "node:https";
+import zlib from "node:zlib";
 
 // --wrangler-dev: the target is `wrangler pages dev` (scripts/pages-dev-check),
 // whose local asset server answers /_headers with 502 (it looks for
@@ -90,7 +95,41 @@ else {
   if (h("cross-origin-resource-policy") !== "same-origin") detail.push(`CORP "${h("cross-origin-resource-policy")}"`);
   if (h("cross-origin-embedder-policy") !== "require-corp") detail.push(`COEP "${h("cross-origin-embedder-policy")}"`);
   if (detail.length) fail("wasm-headers", detail.join("; "));
-  else pass("wasm-headers", `${h("content-type")}, ${h("cache-control")}, CORP same-origin, COEP require-corp, wire ${h("content-encoding") || "identity (uncompressed: worth a look)"}`);
+  else pass("wasm-headers", `${h("content-type")}, ${h("cache-control")}, CORP same-origin, COEP require-corp,`);
+}
+
+// ---- the wasm on the wire -----------------------------------------------------------
+// A phone must not download the raw wasm (30.9 MB on the A4 builds; about 2 MB
+// with brotli). fetch() decodes bodies and hides the wire, so this asks with a
+// raw request that does NOT decompress, as a browser asks (Accept-Encoding:
+// br, gzip), counts the bytes that actually arrived, requires br or gzip, and
+// then decompresses them and checks they hash to the wasm's name: compressed
+// AND the right wasm. Identity encoding is a FAIL, not a note.
+if (wasm) {
+  const url = new URL(`${base}/${wasm.file}`);
+  const raw = await new Promise((resolve, reject) => {
+    const lib = url.protocol === "https:" ? https : http;
+    const req = lib.get(url, { headers: { "accept-encoding": "br, gzip" } }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve({ status: res.statusCode, enc: res.headers["content-encoding"] || "identity", body: Buffer.concat(chunks) }));
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.setTimeout(120000, () => req.destroy(new Error("timed out after 120 s")));
+  }).catch((e) => ({ error: e.message }));
+  if (raw.error) fail("wasm-wire", `${url}: ${raw.error}`);
+  else if (raw.status !== 200) fail("wasm-wire", `${url} answered ${raw.status}`);
+  else if (raw.enc !== "br" && raw.enc !== "gzip") fail("wasm-wire", `${url} arrived ${raw.enc}-encoded: ${raw.body.length} bytes on the wire. Cloudflare is not compressing it; a phone would download all of it`);
+  else {
+    let decoded = null;
+    try { decoded = raw.enc === "br" ? zlib.brotliDecompressSync(raw.body) : zlib.gunzipSync(raw.body); } catch (e) { fail("wasm-wire", `the ${raw.enc} body does not decompress: ${e.message}`); }
+    if (decoded) {
+      const want = wasm.file.split("/")[2];
+      if (sha256(decoded).slice(0, 16) !== want) fail("wasm-wire", `the ${raw.enc} body decompresses to ${decoded.length} bytes hashing ${sha256(decoded).slice(0, 16)}, not ${want}`);
+      else pass("wasm-wire", `${raw.enc}: ${raw.body.length} bytes on the wire for ${decoded.length} decoded (${(100 * raw.body.length / decoded.length).toFixed(1)}%), and they decompress to the wasm its name promises`);
+    }
+  }
 }
 
 // ---- isolation ----------------------------------------------------------------------
