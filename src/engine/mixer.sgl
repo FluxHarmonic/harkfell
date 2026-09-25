@@ -54,6 +54,7 @@
 
   (export mixer-open! mixer-open-headless! mixer-resume! mixer-rate mixer-open? mixer-state
           mixer-add! mixer-find mixer-remove! mixer-rename! mixer-sources
+          mixer-hold! mixer-release! mixer-held? HOLD-FADE-S RELEASE-FADE-S source-rendered
           source? source-id source-live? source-ended? source-started?
           source-start! source-factor! source-factor source-gain source-on-end!
           mixer-at! mixer-pump! mixer-now
@@ -338,8 +339,41 @@
                     (let ((f (source-on-end s)))
                       (when f (mixer-at! now (lambda () (f now))))))))))))
 
+    ;; --- the hold (D40: the game pauses when it loses focus) -----------------------------
+    ;; (mixer-hold! now) fades every source to nothing over HOLD-FADE-S at the
+    ;; output (the 'hold factor), then stops pulling them, so no music moves on
+    ;; while the game is paused; cue voices are dropped. (mixer-release! now)
+    ;; pulls again and fades back over RELEASE-FADE-S: the sinks, run dry while
+    ;; held, refill from silence under a rising gain, so nothing bursts. Starved
+    ;; frames while held are not counted as dry. The caller keeps its clock
+    ;; still while held (after the fade), so ramps and events wait too.
+    (define HOLD-FADE-S 0.12)
+    (define RELEASE-FADE-S 0.3)
+    (define *hold* #f)             ; #f, or the time the hold began
+    (define *hold-dry* 0)          ; the live sinks' starved frames when it began
+    (define (mixer-held?) (and *hold* #t))
+    (define (holding? now) (and *hold* (>= now (+ *hold* HOLD-FADE-S))))
+
+    (define (mixer-hold! now)
+      (unless *hold*
+        (set! *hold* now)
+        (set! *hold-dry* (live-dry))
+        (set! *voices* '())
+        (for-each (lambda (s) (source-factor! s 'hold 0.0 HOLD-FADE-S now)) *sources*)))
+
+    (define (mixer-release! now)
+      (when *hold*
+        (set! *dry-sounding* (- *dry-sounding* (max 0 (- (live-dry) *hold-dry*))))
+        (set! *hold* #f)
+        (for-each (lambda (s)
+                    (set-source-t-start! s (and (source-t-start s) (- now (/ (source-rendered s) (* 1.0 *rate*)))))
+                    (source-factor! s 'hold 1.0 RELEASE-FADE-S now))
+                  *sources*)))
+
     (define (pump-source! s now)
       (cond
+        ((and (holding? now) (source-live? s))
+         (when (source-stream s) (set-audio-stream-volume! (source-stream s) 0.0)))
         ((and *headless* (source-live? s)) (pump-headless! s now))
         ((source-live? s)
          (let ((st (stream-for! s)))
@@ -394,7 +428,8 @@
 
     ;; pan -1 (left) .. 1 (right), equal-power
     (define (mixer-cue! c gain pan)
-      (when (and *cue-stream* c)
+      ;; none while held (D40)
+      (when (and *cue-stream* c (not *hold*))
         (let* ((p (max -1.0 (min 1.0 pan)))
                (a (* 0.25 3.14159265 (+ p 1.0))))
           (set! *voices* (cons (vector c 0 (* gain (cos a) 1.41421356) (* gain (sin a) 1.41421356)) *voices*)))))
@@ -402,7 +437,7 @@
     (define ZERO (make-bytevector (* 8 PUSH-MAX) 0))
 
     (define (pump-cues!)
-      (when *cue-stream*
+      (when (and *cue-stream* (not *hold*))
         (let* ((u (guard (e (#t 0)) (audio-stream-underruns *cue-stream*)))
                (du (- u *cue-under-last*)))
           (set! *cue-under-last* u)

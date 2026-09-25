@@ -18,8 +18,14 @@
       var p = new URLSearchParams(location.search).get("rate");
       var want = p === "device" ? 0 : Number(p || 32000);
       var Base = window.AudioContext || window.webkitAudioContext;
-      if (want > 0 && Base) {
-        var Wrapped = function (opts) { return new Base(Object.assign({ sampleRate: want }, opts || {})); };
+      // D40: every context is kept, so a pause can suspend it (below)
+      window.HARKFELL_CONTEXTS = [];
+      if (Base) {
+        var Wrapped = function (opts) {
+          var c = new Base(want > 0 ? Object.assign({ sampleRate: want }, opts || {}) : opts);
+          window.HARKFELL_CONTEXTS.push(c);
+          return c;
+        };
         Wrapped.prototype = Base.prototype;
         window.AudioContext = Wrapped;
         if (window.webkitAudioContext) window.webkitAudioContext = Wrapped;
@@ -182,9 +188,32 @@
       benchEl.scrollTop = benchEl.scrollHeight;
       try { fetch("bench-report?" + encodeURIComponent(line), { cache: "no-store" }).catch(function () {}); } catch (err) { /* offline */ }
     }
+    // D40: the game paused (it lost focus). The sound fades out over 0.12 s
+    // ((harkfell audio) audio-pause!) and says "audio hold"; the contexts are
+    // suspended once the fade has played, so the device stops asking for
+    // audio. "audio release" resumes them at once; the sound fades back in.
+    var suspendTimer = null;
+    function holdAudio() {
+      clearTimeout(suspendTimer);
+      suspendTimer = setTimeout(function () {
+        suspendTimer = null;
+        (window.HARKFELL_CONTEXTS || []).forEach(function (c) {
+          if (c.state === "running") c.suspend().catch(function () {});
+        });
+      }, 150);
+    }
+    function releaseAudio() {
+      clearTimeout(suspendTimer);
+      suspendTimer = null;
+      (window.HARKFELL_CONTEXTS || []).forEach(function (c) {
+        if (c.state === "suspended") c.resume().catch(function () {});
+      });
+    }
     var log = console.log;
     console.log = function () {
       var line = String(arguments[0] || "");
+      if (line === "harkfell: audio hold") holdAudio();
+      else if (line === "harkfell: audio release") releaseAudio();
       if (line.indexOf("harkfell: fetch ") === 0) fetchTune(line.slice(16).trim());
       else if (line === "harkfell: frame play") framePlaying();
       else if (line.indexOf("harkfell: bench ") === 0 || (benchOn && line.indexOf("harkfell: audio ") === 0)) report(line);

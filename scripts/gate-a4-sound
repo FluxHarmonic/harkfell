@@ -46,6 +46,8 @@
 #   steps-unlocked    a step on every change of the run cycle's frame
 #   moment-loud       movement at full level during a moment
 #   default-through   the border's default back to 'through (the phone ruled 'cross)
+#   hold-pulls        a pause that keeps pulling (the music would move on)
+#   release-burst     a resume that catches up the pause's frames at once
 # UNDER THE WORLD: every movement cue, in play (its loudest 400 ms times its
 # gain in (harkfell sound)'s SPOTS), is quieter than the quietest bed
 # (-33 LUFS), and a step quieter than -44 (playtest 1, #3). A cue that names no gain fails.
@@ -199,7 +201,7 @@ plant() {
 A4T=test/test-a4-sound.sgl
 green_all() {
   tunes
-  green "$A4T" 55
+  green "$A4T" 60
   green test/test-a4-web-opening.sgl 3
   under_world
   green test/test-tunes.sgl 5
@@ -245,6 +247,8 @@ passes test/test-a4-web-opening.sgl "a second without it: still waiting"
 passes "$A4T" "running on the fen: a step where each foot comes down"
 passes "$A4T" "during a moment the movement is quieter"
 passes "$A4T" "the default is the 4 s crossfade"
+passes "$A4T" "held: nothing is pulled"
+passes "$A4T" "released: no burst"
 
 plant wander-no-hush "$S" \
   "      (when (hush-wander-ok? *hush*)
@@ -330,5 +334,14 @@ plant default-through "$S" \
   "    (define BORDER-DEFAULT 'through)" \
   "$A4T" "the default is the 4 s crossfade"
 
-if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all nineteen RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+plant hold-pulls src/engine/mixer.sgl \
+  "        ((and (holding? now) (source-live? s))" \
+  "        ((and #f (holding? now) (source-live? s))" \
+  "$A4T" "held: nothing is pulled"
+plant release-burst src/engine/mixer.sgl \
+  "                    (set-source-t-start! s (and (source-t-start s) (- now (/ (source-rendered s) (* 1.0 *rate*)))))" \
+  "                    #f" \
+  "$A4T" "released: no burst"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all twenty-one RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
 exit $FAIL

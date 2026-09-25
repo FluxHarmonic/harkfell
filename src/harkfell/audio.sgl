@@ -31,6 +31,7 @@
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
+          audio-pause! audio-resume! audio-paused?
           audio-carry! audio-tone-room! audio-lines world-place room-moment-name
           audio-sound-door! frame-event! save-extras restore-extras!)
 
@@ -38,7 +39,37 @@
     (define *say* (lambda parts #f))
     (define *last* #f)
 
-    (define (audio-now) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+    (define (wall-now) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+
+    ;; D40: the game pauses when it loses focus, and the sound with it. The
+    ;; sound's clock (audio-now) leaves out the time paused, from the end of
+    ;; the hold's fade to the resume, so every ramp, the hush, the moments'
+    ;; timers and the mixer's events wait; the mixer stops pulling, so the bed
+    ;; and a moment mid-play resume exactly where they were; cue voices are
+    ;; dropped. The page suspends its AudioContext on the "audio hold" line
+    ;; (after the fade has played) and resumes it on "audio release".
+    ;;   (audio-pause!)    fade out over HOLD-FADE-S, then hold
+    ;;   (audio-resume!)   pull again, fade in over RELEASE-FADE-S
+    ;; Both are safe to call twice.
+    (define *paused-at* #f)       ; the wall clock at the pause, or #f
+    (define *paused-total* 0.0)   ; seconds left out of the sound's clock
+    (define (held-for w) (if *paused-at* (max 0.0 (- w *paused-at* HOLD-FADE-S)) 0.0))
+    (define (audio-now) (let ((w (wall-now))) (- w *paused-total* (held-for w))))
+    (define (audio-paused?) (and *paused-at* #t))
+
+    (define (audio-pause!)
+      (unless *paused-at*
+        (mixer-hold! (audio-now))
+        (set! *paused-at* (wall-now))
+        (*say* "audio" "hold")))
+
+    (define (audio-resume!)
+      (when *paused-at*
+        (let ((w (wall-now)))
+          (set! *paused-total* (+ *paused-total* (held-for w)))
+          (set! *paused-at* #f)
+          (mixer-release! (audio-now))
+          (*say* "audio" "release"))))
 
     (define (audio-boot! say)
       (set! *say* say)
@@ -272,13 +303,17 @@
 
     (define (audio-frame! frame-ms work-ms)
       (let ((now (audio-now)))
-        (if (or (bench-running?) (bench-done?))
-            (begin (shell-take-news!) (shell-take-body-events!) (when (bench-running?) (bench-frame! now frame-ms work-ms)))
+        (cond
+          ((or (bench-running?) (bench-done?))
+            (begin (shell-take-news!) (shell-take-body-events!) (when (bench-running?) (bench-frame! now frame-ms work-ms))))
+          ;; paused (D40): the director waits; the frame's news is let go
+          (*paused-at* (shell-take-news!) (shell-take-body-events!))
+          (else
             (let ((dt (if *last* (min 0.25 (- now *last*)) 0.0)))
               (moment-door-frame! now)
               (let ((moves (shell-take-body-events!))
                     (pl (world-place (shell-world) (shell-content) (shell-take-news!))))
-                (sound-frame! now dt (and pl (place pl moves: moves))))))
+                (sound-frame! now dt (and pl (place pl moves: moves)))))))
         (set! *last* now)
         (mixer-pump! now)))
 
