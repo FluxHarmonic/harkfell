@@ -18,7 +18,10 @@
 ;;;   ("trace", "on")        the harkfell: lines below
 ;;;   ("replay", "")         print the replay trace (the gate's web leg)
 ;;;   ("envelope", "")       print the measured envelope
-;;;   ("visibility", ...)    the tab hidden or shown: keys up, clock restarts
+;;;   ("visibility", ...)    the tab hidden or shown, the window's focus lost
+;;;                          or back: keys up, clock restarts. D40: "hidden"
+;;;                          or "blur" pauses the game, "visible" or "focus"
+;;;                          resumes it
 ;;;   ("reset", "")          back to the entry
 ;;;   ("where", "")          print "harkfell: at X Y MODE" (the arm's probe)
 ;;;   ("latency", "")        print the latency lines of the ?ms readout
@@ -44,13 +47,21 @@
 ;;;                          keys, touch or both: which words the start screen
 ;;;                          says. "new" ignores the save (?new). The page sends
 ;;;                          it only when no door (?room=, ?atlas, ...) is asked
-;;;   ("look", "start|card|reveal KIND [hold]")  (A4) ?look=: the start screen or the card
+;;;   ("look", "start|card|reveal KIND [hold] [over=X]")  (A4) ?look=: the start screen or the card
 ;;;                          alone, or the name's reveal over play (&hold at full)
 ;;;   ("pointer", "X,Y")     (A4) the pointer in canvas pixels, for the start
 ;;;                          screen's moths
+;;;   ("press", "X,Y")       (D40) a press on the stage during the frame, in
+;;;   ("release", "")        canvas pixels, and its end. While the start
+;;;                          screen offers starting over (a save), a press on
+;;;                          its line is the hold, a press elsewhere steps in,
+;;;                          and the "gesture" messages only wake the audio.
+;;;                          R held is the hold too (no world reset then)
 ;;;
 ;;; (A4) Every phase of the frame prints "harkfell: frame PHASE" (always):
-;;; start, start-out, card, hold, dawn, play. The page shows the touch
+;;; start, start-out, card, hold, dawn, play; and "harkfell: frame words"
+;;; once the start screen's lines have all landed and begun to show
+;;; (playtest 1, #1). The page shows the touch
 ;;; controls on "frame play". "harkfell: save ..." says what a continue
 ;;; restored or forgave.
 ;;;
@@ -92,7 +103,8 @@
           (harkfell save)
           (engine store)
           (harkfell images)
-          (harkfell shell web-images))
+          (harkfell shell web-images)
+          (only (harkfell title) start-words-landed?))
 
   (export web-main web-dispatch)
 
@@ -103,6 +115,7 @@
     (define *world-files* '())      ; the page's files, until world-done
     (define *room* #f)              ; the last room label traced
     (define *work-ms* 0.0)          ; A2: the last frame's work (the bench reads it)
+    (define *words-said* #f)        ; "frame words" has been said (playtest 1, #1)
 
     (define (say . parts)
       (println "~a" (apply string-append "harkfell:" (map (lambda (p) (string-append " " p)) parts))))
@@ -141,6 +154,11 @@
           (when (and *trace* (not (equal? (shell-room-label) *room*)))
             (set! *room* (shell-room-label))
             (say "room" *room*))
+          ;; the start screen's words have all landed and begun to show: once,
+          ;; always (as the frame's phases are): "harkfell: frame words"
+          (when (and (not *words-said*) (start-words-landed?))
+            (set! *words-said* #t)
+            (say "frame" "words"))
           (gles3-resize-to-display)
           (shell-present! (gles3-canvas-width) (gles3-canvas-height) ticks)
           (set! *work-ms* (- (now-ms) w0)))))
@@ -158,6 +176,8 @@
       (set-letterbox-color 0.0 0.0 0.0)
       (shell-boot!)
       (shell-add-frame-listener! (lambda (ev) (say "frame" (symbol->string ev))))
+      ;; D40: the sound pauses and resumes with the game (SOUND's fade and hold)
+      (shell-add-pause-listener! (lambda (ev) (if (eq? ev 'pause) (audio-pause!) (audio-resume!))))
       ;; A4: images by path ((harkfell images)): fetched by the page, decoded here
       (set-image-fetcher! web-fetcher)
       ;; A2: the sound. A tune the wasm lacks is asked of the page
@@ -171,12 +191,17 @@
       (cond ((string=? type "frame") (web-tick payload) 0)
             ((string=? type "keydown")
              (let ((k (dom-key->sym payload)))
-               (cond ((eq? k 'r) (shell-reset-world!))
-                     (k (shell-key-down! k))))
+               (cond ((and (eq? k 'r) (shell-over-offered?)) (shell-over-key! #t))
+                     ((eq? k 'r) (shell-reset-world!))
+                     (k (shell-key-down! k))
+                     ;; D40: any other key still steps in (the gesture
+                     ;; message does not while starting over is offered)
+                     ((shell-over-offered?) (shell-gesture!))))
              0)
             ((string=? type "keyup")
              (let ((k (dom-key->sym payload)))
-               (when k (shell-key-up! k)))
+               (cond ((eq? k 'r) (shell-over-key! #f))
+                     (k (shell-key-up! k))))
              0)
             ((string=? type "stick")
              (let ((f (fields payload))
@@ -215,6 +240,9 @@
             ((string=? type "visibility")
              (set! *last-ms* #f)
              (shell-keys-clear!)
+             ;; D40: the game pauses while it cannot be seen or played
+             (cond ((member payload (list "hidden" "blur")) (shell-pause!))
+                   ((member payload (list "visible" "focus")) (shell-resume!)))
              ;; a hidden tab may never come back: keep the save current
              (when (string=? payload "hidden") (shell-save-now!))
              0)
@@ -273,7 +301,14 @@
                (if r 1 0)))
             ((string=? type "test-room") (shell-test-room!) 0)
             ;; A2
-            ((string=? type "gesture") (audio-gesture!) (shell-gesture!) 0)
+            ;; D40: while starting over is offered, a gesture only wakes the
+            ;; audio; the stage's press (and a key) decides what it means
+            ((string=? type "gesture") (audio-gesture!) (unless (shell-over-offered?) (shell-gesture!)) 0)
+            ((string=? type "press")
+             (let ((f (fields payload)))
+               (when (and (= (length f) 2) (car f) (cadr f)) (shell-start-press! (car f) (cadr f))))
+             0)
+            ((string=? type "release") (shell-start-release!) 0)
             ;; A4: the game begins (no door): the frame, then the save's place or the start
             ((string=? type "begin")
              (let* ((parts (string-split payload " "))
@@ -295,6 +330,11 @@
                ;; &hold: the reveal held at full strength
                (when (and (pair? (cdr w)) (pair? (cddr w)) (string=? (caddr w) "hold"))
                  (shell-set-look-alpha! 1.0))
+               ;; &over=X: D40's hold-to-start-over line, pinned at progress X
+               (for-each (lambda (tok)
+                           (when (and (> (string-length tok) 5) (string=? (substring tok 0 5) "over="))
+                             (shell-set-look-over! (string->number (substring tok 5 (string-length tok))))))
+                         w)
                (say "look" payload))
              0)
             ((string=? type "pointer")

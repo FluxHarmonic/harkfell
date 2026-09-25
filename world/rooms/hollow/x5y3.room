@@ -9,15 +9,20 @@
   ("                         "
    "                         "
    "                         "
+   "                         "
+   "                         "
    "       #  #     #        "
-   "    #  #  #  #  #  #     "
-   " |  #| #  # |# |#  #|  | "
-   "#########################"
-   "#########################"
+   "##  #  #  # |#  #  #  ###"
+   "##| #| #  #||# |#  #| ###"
    "#########################"
    "#########################"
    "#########################")
   things: ((reedling flock: 5 zone: reeds))
   decor: auto)
 ;; Six stones two and three tiles tall, two tiles apart: hop along their
-;; tops. The Wind Gap's notch is overhead.
+;; tops. They stand in a ditch two tiles deep, so the tallest top is row 5
+;; and a held jump from it peaks with the body's center 21 px under the
+;; room's top: the view stays here (playtest #7; before, the stones stood
+;; on the edge ground and a jump from the tall ones flipped to the Wind Gap).
+;; The Wind Gap's notch is overhead; the edges meet the Hollow and the
+;; Chimney at their row-6 ground.

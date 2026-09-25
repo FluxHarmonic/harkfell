@@ -9,9 +9,10 @@
 ;;;
 ;;;   Keyed to hollow-answers (SOUND's timing, its tune time tt as heard):
 ;;;   the fade starts at tt 13.3 and is full at 15.0 (the arrival: flute and
-;;;   bell on D5 over the full chord), holds to 24.0, and fades out over 2 s
-;;;   with the ring-out. A ring before 13.3 waits for it; a ring after it
-;;;   starts at once (and still holds to 24.0, or 1.7 s, whichever is later).
+;;;   bell on D5 over the full chord), holds to 19.0 (4 s full, as the
+;;;   fallback; it held to 24.0 until playtest #9 found that too long), and
+;;;   fades out over 2 s. A ring before 13.3 waits for it; a ring after it
+;;;   starts at once (and still holds to 19.0, or 1.7 s, whichever is later).
 ;;;
 ;;;   With no moment playing (the fallback): REVEAL-DELAY-S, then 2 s in, 4 s
 ;;;   held, 2 s out.
@@ -32,7 +33,7 @@
     (define REVEAL-OUT-S 2.0)
     (define TUNE-FADE-AT 13.3)
     (define TUNE-FULL-AT 15.0)
-    (define TUNE-HOLD-TO 24.0)
+    (define TUNE-HOLD-TO 19.0)
     (define TUNE-OUT-S 2.0)
 
     ;; tt: the playing hollow-answers' time as heard at the ring, or #f.

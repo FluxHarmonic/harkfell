@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harkfell</title>
+  <meta name="description" content="Harkfell is a quiet little platformer about listening. Wander, climb, and stand still long enough to hear where the missing notes went.">
+  <meta name="theme-color" content="#000000">
+  <meta property="og:title" content="Harkfell">
+  <meta property="og:description" content="A quiet little platformer about listening.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://harkfell.com/">
+  <meta property="og:image" content="https://harkfell.com/shots/hollow-stones.png">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/im-fell-english-sc.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/im-fell-english-roman.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="alternate" type="application/rss+xml" title="Harkfell news" href="/news/feed.xml">
+  <link rel="alternate" type="application/feed+json" title="Harkfell news" href="/news/feed.json">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Harkfell</h1>
+      <p class="tagline">A quiet little platformer about listening.</p>
+    </header>
+
+    <div class="carousel" data-interval="6000">
+      <div class="frames">
+        <img class="shot shown" src="/shots/hollow-stones.png" width="400" height="176"
+             alt="A small white long-eared creature standing on one of a ring of old standing stones in the Hollow at dawn, with small birds perched on the reeds between them.">
+        <img class="shot" src="/shots/reedfen-bridge.png" width="400" height="176" aria-hidden="true"
+             alt="Reedfen: the creature on a wooden bridge over open water, with reeds and small birds on either bank.">
+        <img class="shot" src="/shots/reedfen-reeds.png" width="400" height="176" aria-hidden="true"
+             alt="Reedfen: tall reeds with small birds perched on them, under a wide grey-blue sky.">
+        <img class="shot" src="/shots/hollow-bowl.png" width="400" height="176" aria-hidden="true"
+             alt="The bowl of the Hollow at dawn: the creature beside two carved ring-stones set into the limestone.">
+        <img class="shot" src="/shots/under-the-fen.png" width="400" height="176" aria-hidden="true"
+             alt="A dark cave under the fen, with a pool of still water and reeds growing in the gloom.">
+      </div>
+      <div class="dots" role="group" aria-label="Pictures of Harkfell">
+        <button type="button" aria-label="The standing stones in the Hollow" aria-current="true"></button>
+        <button type="button" aria-label="The bridge in Reedfen"></button>
+        <button type="button" aria-label="Reeds in Reedfen"></button>
+        <button type="button" aria-label="The bowl of the Hollow"></button>
+        <button type="button" aria-label="Under the fen"></button>
+      </div>
+    </div>
+
+    <div class="pitch">
+      <p>The stones on the fells used to ring, and now only the wind does. Wander, climb, and stand still long enough to hear where the missing notes went.</p>
+      <p>Every note you bring home changes how the whole world sounds, and every so often, in a room you've never seen, the world plays you a song!</p>
+    </div>
+
+    <p class="listen"><em>Harkfell is a game of listening. Headphones bring it closest.</em></p>
+
+    <div class="play">
+      <a href="/play/">Play</a>
+      <span class="how">Free, in your browser, with a keyboard or a touch screen.</span>
+    </div>
+
+    <p class="news-line">Read what's new in each release on the <a href="/news/">news page</a>.</p>
+
+    <!-- data-regions: the regions this paragraph and the carousel show; verify-site.mjs
+         refuses a staged game whose world lacks any of them -->
+    <p class="early" data-regions="hollow reedfen">This is an early slice of Harkfell: the Hollow and Reedfen, the first two regions of the world. Everything you hear is synthesized live while you play, so no two walks through it sound quite the same.</p>
+  </main>
+
+  <footer>
+    <a class="mark" href="https://fluxharmonic.com/"><img src="/mark.png" width="380" height="188" alt="Flux Harmonic"></a>
+    <p>Made by David Wilson at Flux Harmonic. Written in <a href="https://usesigil.org/">Sigil</a>.</p>
+    <p>The source is on <a href="https://github.com/FluxHarmonic/harkfell">GitHub</a> and <a href="https://code.usesigil.org/harkfell/">Sigil Forge</a>.</p>
+    <p>The code is licensed <a href="https://github.com/FluxHarmonic/harkfell/blob/master/LICENSE">GPL-3.0-or-later</a>; the art and music are <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. The Flux Harmonic mark is not covered by either.</p>
+    <p>Set in IM Fell by Igino Marini, under the <a href="/fonts/OFL.txt">SIL Open Font License</a>.</p>
+  </footer>
+  <script>
+    // The hero: one picture at a time, crossfading every data-interval ms.
+    // The dots pick one; the pointer over the pictures pauses them; a
+    // reader who asked for reduced motion gets no automatic change at all.
+    // Without this script the first picture simply stays.
+    (function () {
+      var c = document.querySelector(".carousel");
+      if (!c) return;
+      var imgs = c.querySelectorAll(".frames img");
+      var dots = c.querySelectorAll(".dots button");
+      var every = Number(c.getAttribute("data-interval")) || 6000;
+      var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var at = 0, timer = null;
+      function show(n) {
+        at = (n + imgs.length) % imgs.length;
+        for (var k = 0; k < imgs.length; k++) {
+          imgs[k].classList.toggle("shown", k === at);
+          if (k === at) imgs[k].removeAttribute("aria-hidden"); else imgs[k].setAttribute("aria-hidden", "true");
+          if (dots[k]) { if (k === at) dots[k].setAttribute("aria-current", "true"); else dots[k].removeAttribute("aria-current"); }
+        }
+      }
+      function start() { if (!still && !timer && !document.hidden) timer = setInterval(function () { show(at + 1); }, every); }
+      function stop() { clearInterval(timer); timer = null; }
+      for (var k = 0; k < dots.length; k++) (function (k) {
+        dots[k].addEventListener("click", function () { stop(); show(k); start(); });
+      })(k);
+      c.querySelector(".frames").addEventListener("mouseenter", stop);
+      c.querySelector(".frames").addEventListener("mouseleave", start);
+      document.addEventListener("visibilitychange", function () { document.hidden ? stop() : start(); });
+      c.classList.add("live");
+      start();
+    })();
+  </script>
+</body>
+</html>

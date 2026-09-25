@@ -1,0 +1,25 @@
+{
+  // Cloudflare Pages project harkfell (harkfell.com).
+  //
+  // This file carries the R2 binding the wasm Function needs
+  // (functions/play/w/[[path]].js): declared here, `wrangler pages deploy`
+  // applies it with the deployment, so no dashboard setting is involved. The
+  // project and the bucket are created once, by David:
+  // scripts/cloudflare-setup --create.
+  //
+  // scripts/publish-web deploys the tree verify-site.mjs verified (a temporary
+  // copy of it, with the wasm moved to R2), so the directory below is only
+  // the default for a bare `wrangler pages deploy`, which nothing here runs.
+  "name": "harkfell",
+  "pages_build_output_dir": "build/site",
+  // 2026-07-14 is the newest date the workerd that ships with this box's
+  // wrangler (4.112.0) supports; a later date makes `wrangler pages dev`
+  // refuse to start, and that is the only local run of the Function.
+  "compatibility_date": "2026-07-14",
+  "r2_buckets": [
+    {
+      "binding": "WASM",
+      "bucket_name": "harkfell-wasm"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# harkfell.com's Cloudflare Pages headers. scripts/stage-web copies this to
+# the root of the deploy tree; scripts/serve-site.mjs applies the same rules
+# locally, so the host on wg0 and verify-site.mjs see what Pages sends.
+#
+# The game under /play/ is cross-origin isolated (COOP + COEP), as Crash's
+# /jack-in/ is: the audio bridge needs SharedArrayBuffer for its AudioWorklet
+# path, and without isolation it falls back to the ScriptProcessor path that
+# hitches on a phone. The landing is not isolated: it has no need, and an
+# isolated page would refuse any future embed that does not opt in.
+#
+# _headers does NOT reach a Pages Function's response, so the wasm route
+# (functions/play/w/[[path]].js) sets its own CORP and COEP.
+/play/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
+
+# The game asks for this to learn whether a newer version is out (D38): it
+# must never be answered from a cache.
+/version.json
+  Cache-Control: no-store

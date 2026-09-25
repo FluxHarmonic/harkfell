@@ -1,0 +1,52 @@
+#!/bin/sh
+# Retake the landing's pictures (site/shots/*.png) from a built web tree, so
+# the site shows the game as it is now rather than as it was.
+#
+#   scripts/site-shots BUILD              e.g. build/remote-web-<sha>
+#   scripts/site-shots BUILD --dry-run    take them into a temp dir and list them
+#
+# Each picture is one room, drawn by the game itself through scripts/shot.mjs
+# at 1x (400x176, one PNG pixel per view pixel; the page scales it up crisp).
+# The table below is the whole policy: the file name the page uses, the door
+# (?room=REGION:X,Y&still, the room held still), and optionally a world
+# directory to draw instead of the baked one.
+#
+# The 0.1 pictures (2026-09-25) are all from the release world, taken from a
+# build of the site rebased on master 0cbb306 ("Version 0.1.0"). The Hollow
+# rows are CONTENT's rooms: 5,3 (the ring of standing stones) and 4,3 (the
+# bowl and its two ring-stones).
+#
+# A room that fails to load (shot.mjs exits non-zero) stops the run; nothing
+# in site/shots/ changes unless every picture was taken. Review the result
+# (git diff --stat site/shots; open the PNGs) before committing: a picture is
+# customer-facing.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+BUILD="${1:-}"; DRY=0; [ "${2:-}" = --dry-run ] && DRY=1
+[ -n "$BUILD" ] && [ -f "$BUILD/index.html" ] || { echo "site-shots: give a built web tree (build/web, build/remote-web-<sha>)"; exit 1; }
+
+SHOTS='
+hollow-stones.png|room=hollow:5,3&still|
+reedfen-bridge.png|room=reedfen:9,3&still|
+reedfen-reeds.png|room=reedfen:12,3&still|
+hollow-bowl.png|room=hollow:4,3&still|
+under-the-fen.png|room=reedfen:17,4&still|
+'
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/harkfell-site-shots-XXXXXX")"
+trap 'rm -rf "$OUT"' EXIT
+echo "$SHOTS" | while IFS='|' read -r name query world; do
+  [ -n "$name" ] || continue
+  if [ -n "$world" ]; then
+    [ -d "$world" ] || { echo "site-shots: $name wants the world $world, which this checkout lacks"; exit 1; }
+    node scripts/shot.mjs "$BUILD" "$OUT/$name" --scale 1 --query "$query" --world "$world"
+  else
+    node scripts/shot.mjs "$BUILD" "$OUT/$name" --scale 1 --query "$query" --baked
+  fi
+  [ -s "$OUT/$name" ] || { echo "site-shots: $name was not written"; exit 1; }
+done
+N="$(ls "$OUT" | grep -c '\.png$')"
+[ "$N" = "$(echo "$SHOTS" | grep -c '|')" ] || { echo "site-shots: $N pictures taken, not all of them; site/shots/ unchanged"; exit 1; }
+if [ "$DRY" = 1 ]; then ls -la "$OUT"; echo "site-shots: dry run, site/shots/ unchanged"; exit 0; fi
+cp "$OUT"/*.png site/shots/
+echo "site-shots: $N pictures from $BUILD ($(grep -o 'version: "[^"]*"' "$BUILD/index.html" | head -1 | cut -d'"' -f2)) in site/shots/:"
+git status --short site/shots/

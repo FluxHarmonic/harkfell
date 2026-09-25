@@ -13,7 +13,8 @@
 ;;;               pushing away lets go
 ;;;   swim        a walk off a bank into a pool swims; down sinks to the
 ;;;               floor; up and across reaches the far bank; jump with the
-;;;               head out leaps onto it, from the swim state itself
+;;;               head out leaps onto it, from the swim state itself;
+;;;               up held treads water at the surface (no thrash)
 ;;;   soft return walking into a pit in the test room dims and returns the
 ;;;               body to the entry once; the dark and the light last 15 ticks
 ;;;               each, counted from their first ticks
@@ -57,6 +58,8 @@
   (and (find (lambda (b) (memq e (body-events b))) hist) #t))
 
 (define (min-y hist) (apply min (map body-y hist)))
+
+(define (drop-n l n) (if (= n 0) l (drop-n (cdr l) (- n 1))))
 
 (define (touching-side? b tm s)
   (touching? tm (body-x b) (body-y b) (feel-box-w F) (feel-box-h F) (if (> s 0) 'right 'left) kind-solid?))
@@ -262,6 +265,35 @@
       (assert-true (body-in-water? b tm F))
       (assert-true (memq 'jump (body-events (car hist))))
       (assert-true (< (min-y hist) 60.0)))))
+
+;; Treading water (playtest #6): up held from the pool's floor rises to the
+;; surface and stays there, swimming with the head out (the center on the
+;; surface, y 80, so the box's top at 73), with no splash once it arrives.
+;; Before the fix the body popped out, fell back in and splashed, over and
+;; over, for as long as up was held.
+(test-group "tread water"
+  (let* ((tm (tiles POOL))
+         (bottom (last (history (body (body-at 90.0 100.0) mode: 'swim) tm
+                                (lambda (tick b) (intent v: 1)) 120)))
+         (up (history bottom tm (lambda (tick b) (intent v: -1)) 300))
+         (late (drop-n up 150))
+         (leap (history (last up) tm
+                        (lambda (tick b) (intent v: -1 jump: (< tick 30) press: (= tick 0))) 40)))
+    (test "the rise starts on the pool's floor"
+      (assert-true (> (body-y bottom) (* 16 7.0))))
+    (test "holding up reaches the surface and stays: swimming, head out, no splash"
+      (assert-true (every (lambda (b) (eq? (body-mode b) 'swim)) late))
+      (assert-false (any-event? late 'splash))
+      (assert-true (every (lambda (b) (< (abs (- (body-y b) 73.0)) 0.001)) late)))
+    (test "up and across at the surface treads too (the slower diagonal stroke)"
+      (let ((diag (drop-n (history (last up) tm (lambda (tick b) (intent h: -1 v: -1)) 40) 10)))
+        (assert-false (any-event? diag 'splash))
+        (assert-true (every (lambda (b) (eq? (body-mode b) 'swim)) diag))))
+    (test "treading water, a press is the full jump (as from the old bob into the air), not the smaller leap"
+      ;; the full jump rises about 52 px (the box top from 73 to about 21);
+      ;; the water leap about 29 px (to about 44)
+      (assert-true (memq (quote jump) (body-events (car leap))))
+      (assert-true (< (min-y leap) 30.0)))))
 
 ;; --- soft return -------------------------------------------------------------------
 

@@ -15,25 +15,34 @@
 ;;;              until they do (D15, "the first input is yours")
 ;;;   play       the world, and nothing more from this module
 ;;;
+;;; STARTING OVER (D40). When a save exists, the start screen offers to start
+;;; over: holding the start-over control (R, or a long press on its line)
+;;; for OVER-HOLD-S wipes the save and begins a new game. While it is held
+;;; nothing else steps in (no key, gesture or time-out); letting go early
+;;; cancels, and the native time-out resumes where it stopped. A completed
+;;; hold gives the event start-over, then start-out.
+;;;
 ;;; A continue (a save to restore) runs the same frame; the dawn is then the
 ;;; saved place fading in. A door (?room=, --room, ?atlas, ?sheet=, the test
 ;;; room) skips all of it: those are for looking, not for playing.
 ;;;
 ;;; Every change of phase is an EVENT the shell hands to its listeners (the
 ;;; sound: the card's tune, the wind, the bed): start, start-out, card, hold,
-;;; dawn, play; and card-skip, just before hold, when a key cut the card short.
+;;; dawn, play; card-skip, just before hold, when a key cut the card short;
+;;; and start-over, just before start-out, when a hold completed (D40).
 ;;;
-;;; Pure: (frame-step f dt key? gesture?) -> a new frame. Timing is in seconds
+;;; Pure: (frame-step f dt key? gesture? [holding?]) -> a new frame. Timing is in seconds
 ;;; of wall time, not ticks: the frame is not the world.
 
 (define-library (harkfell frame)
   (import (sigil struct)
           (sigil math))
 
-  (export FADE-S START-S CARD-S HOLD-S DAWN-S
+  (export FADE-S START-S CARD-S HOLD-S DAWN-S OVER-HOLD-S
           frame frame? frame-new frame-step frame-phase frame-t frame-events
           frame-web? frame-playing? frame-world-visible? frame-world-steps?
-          frame-words-alpha frame-card-alpha frame-black-alpha frame-take-events)
+          frame-words-alpha frame-card-alpha frame-black-alpha frame-take-events
+          frame-over? frame-over-offered? frame-over-progress frame-over-done?)
 
   (begin
     (define FADE-S 1.0)
@@ -43,6 +52,8 @@
     (define CARD-OUT-S 1.2)
     (define HOLD-S 1.5)
     (define DAWN-S 3.0)
+    (define OVER-HOLD-S 1.5)    ; D40: the start-over hold
+    (define OVER-STEP-MAX-S 0.25) ; the most one step adds to it (a stall is not a hold)
 
     ;; phase: a symbol above. t: seconds in the phase. web?: the start waits
     ;; for a gesture. events: phases entered, not yet taken by the shell.
@@ -50,9 +61,14 @@
       (phase default: 'start-in)
       (t default: 0.0)
       (web? default: #f)
+      (over default: #f)        ; D40: a save exists, so the start screen offers starting over
+      (hold default: 0.0)       ; seconds the start-over control has been held (0: not held)
+      (over-done default: #f)   ; the hold completed: the save is to be wiped, a new game begun
       (events default: '()))
 
-    (define (frame-new web?) (frame phase: 'start-in t: 0.0 web?: web? events: (list 'start)))
+    ;; over? (optional): a save exists, so the start screen offers starting over.
+    (define (frame-new web? . over?)
+      (frame phase: 'start-in t: 0.0 web?: web? over: (and (pair? over?) (car over?) #t) events: (list 'start)))
 
     (define (enter f phase)
       (frame f phase: phase t: 0.0 events: (append (frame-events f) (list (event-of phase)))))
@@ -64,10 +80,34 @@
 
     (define (frame-take-events f) (cons (frame-events f) (frame f events: '())))
 
-    ;; One step: dt seconds; key? a key went down this step (any key);
-    ;; gesture? a key or a touch (the web's gesture). A step never skips more
-    ;; than one phase, so every event is seen.
-    (define (frame-step f dt key? gesture?)
+    ;; One step: dt seconds; key? a key went down this step (any key but the
+    ;; start-over one); gesture? a key or a touch (the web's gesture), not one
+    ;; on the start-over line; holding? (optional, D40) the start-over control
+    ;; is held now. A step never skips more than one phase, so every event is
+    ;; seen.
+    (define (frame-step f dt key? gesture? . holding)
+      (if (and (pair? holding) (car holding) (frame-over-offered? f))
+          (hold-step f dt)
+          (step (if (frame-over-done f) f (frame f hold: 0.0)) dt key? gesture?)))
+
+    ;; D40: the start-over control held. The words go on fading in, but
+    ;; nothing steps in and the native time-out stands still; held for
+    ;; OVER-HOLD-S, the frame says start-over and leaves the start screen.
+    ;; A step's dt counts toward the hold only up to OVER-STEP-MAX-S: the
+    ;; step that first sees the key down carries the whole gap since the last
+    ;; frame, and after a stall (a slow phone loading the start screen) that
+    ;; gap alone could complete the hold, so a tap would wipe the save.
+    (define (hold-step f dt)
+      (let* ((h (+ (frame-hold f) (min dt OVER-STEP-MAX-S)))
+             (in? (eq? (frame-phase f) 'start-in))
+             (f (frame f hold: (min h OVER-HOLD-S) t: (if in? (+ (frame-t f) dt) (frame-t f)))))
+        (cond ((>= h OVER-HOLD-S)
+               (enter (frame f over-done: #t events: (append (frame-events f) (list 'start-over)))
+                      'start-out))
+              ((and in? (>= (frame-t f) FADE-S)) (frame f phase: 'start t: (- (frame-t f) FADE-S)))
+              (else f))))
+
+    (define (step f dt key? gesture?)
       (let* ((t (+ (frame-t f) dt))
              (f (frame f t: t)))
         (case (frame-phase f)
@@ -89,6 +129,18 @@
           ((hold) (if (>= t HOLD-S) (enter f 'dawn) f))
           ((dawn) (if (>= t DAWN-S) (enter f 'play) f))
           (else f))))
+
+    ;; D40. frame-over?: a save exists (the start screen offers starting over).
+    ;; frame-over-offered?: it is offered now (the start screen, before it
+    ;; fades). frame-over-progress: for the line's drawing, #f with no save,
+    ;; else how far the hold has come, 0..1. frame-over-done?: a hold
+    ;; completed; the save is to be wiped and a new game begun.
+    (define (frame-over? f) (frame-over f))
+    (define (frame-over-offered? f)
+      (and (frame-over f) (not (frame-over-done f)) (memq (frame-phase f) (list 'start-in 'start)) #t))
+    (define (frame-over-progress f)
+      (and (frame-over f) (clamp01 (/ (frame-hold f) OVER-HOLD-S))))
+    (define (frame-over-done? f) (frame-over-done f))
 
     (define (frame-playing? f) (eq? (frame-phase f) 'play))
 

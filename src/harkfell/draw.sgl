@@ -51,7 +51,8 @@
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
-          slot player-frame set-look-sound! region-colours set-look-waking! waking-frame)
+          slot player-frame set-look-sound! region-colours set-look-waking! waking-frame
+          floating-reeds)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -183,6 +184,32 @@
           (loop (+ r 1)))))
 
     (define (solid-mat? m) (memq m (list 'rock 'rough 'ledge 'hazard)))
+
+    ;; Reeds stand on something (playtest 1, #4: "grass floating in the sky
+    ;; one or two tiles above ground"). A reed cell ('|', grass in the
+    ;; Hollow) is drawn where the room puts it; one whose column ends on air
+    ;; or an updraft hangs in the sky. Every such cell, as (label c r):
+    ;; the room's label and the cell, column and row from the top-left. The
+    ;; cell under a room's bottom row is the room below's (rock where there
+    ;; is none). test/test-art.sgl holds the world to none.
+    (define (floating-reeds ct)
+      (let ((wm (content-map ct)))
+        (apply append
+               (map (lambda (rm)
+                      (let ((ox (* ROOM-COLS (- (room-x rm) (worldmap-x0 wm))))
+                            (oy (* ROOM-ROWS (- (room-y rm) (worldmap-y0 wm)))))
+                        (let loop ((i 0) (acc '()))
+                          (if (= i (* ROOM-COLS ROOM-ROWS))
+                              (reverse acc)
+                              (let* ((c (modulo i ROOM-COLS)) (r (quotient* i ROOM-COLS))
+                                     (below (world-char ct (+ ox c) (+ oy r 1))))
+                                (loop (+ i 1)
+                                      (if (and (char=? (room-char rm c r) #\|)
+                                               (memv below (list #\space #\^)))
+                                          (cons (list (room-label rm) c r) acc)
+                                          acc)))))))
+                    (map placed-data (content-rooms ct))))))
+    (define (quotient* a b) (exact (floor (/ a b))))
 
     ;; --- the backdrop -----------------------------------------------------------------------
 

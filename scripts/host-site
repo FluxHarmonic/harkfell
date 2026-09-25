@@ -1,0 +1,92 @@
+#!/bin/sh
+# Host a SNAPSHOT of a staged harkfell.com tree on the WireGuard address, for
+# David's look before anything is published.
+#
+#   scripts/host-site DIR       copy DIR -> build/hosted-site, (re)start both servers
+#   scripts/host-site --stop    stop both servers started from this checkout
+#
+#   https  PORT_TLS (8805)   scripts/serve-site.mjs --tls, the self-signed
+#                            certificate in build/tls/ (made here when missing;
+#                            the phone taps through the warning once). A secure
+#                            context, so /play/ is cross-origin isolated by the
+#                            tree's own _headers, as on Pages
+#   http   PORT_HTTP (8806)  the same server without TLS; /play/ gets the same
+#                            headers but a plain-http page on wg0 is not a
+#                            secure context, so the game takes its non-isolated
+#                            audio path there
+# Both bind to the wg0 address only (read at run time; none, or more than
+# one, is a refusal) and serve through the same handler verify-site.mjs uses,
+# so the preview answers headers and missing paths as the arm saw them.
+#
+# The snapshot rule (host-web's): DIR must be a staged tree with its
+# manifest, and the copy is what is served, so restaging DIR while David looks
+# does not change what he sees. The PIDs go to build/host-site-PORT.pid; a
+# stop kills only a PID whose exe is node, whose cwd is this checkout and
+# whose command line names serve-site.mjs and the port.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+PORT_TLS="${PORT_TLS:-8805}"
+PORT_HTTP="${PORT_HTTP:-8806}"
+DST=build/hosted-site
+HERE="$(pwd)"
+
+live_pid() {   # port -> the PID in its pid file, if it is still our server
+  f="build/host-site-$1.pid"
+  [ -f "$f" ] || return 0
+  pid="$(cat "$f")"
+  [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ] || return 0
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+  cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  [ "$(basename "${exe% (deleted)}")" = node ] || return 0
+  [ "$cwd" = "$HERE" ] || return 0
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -- "serve-site.mjs $DST $1" || return 0
+  echo "$pid"
+}
+stop_port() {
+  pid="$(live_pid "$1")"
+  if [ -n "$pid" ]; then
+    echo "host-site: stopping pid $pid: $(tr '\0' ' ' < "/proc/$pid/cmdline")"
+    kill "$pid"
+  elif [ -f "build/host-site-$1.pid" ]; then
+    echo "host-site: build/host-site-$1.pid names no serve-site.mjs of ours on $1; not killing anything"
+  fi
+  rm -f "build/host-site-$1.pid"
+}
+
+if [ "${1:-}" = "--stop" ]; then
+  stop_port "$PORT_TLS"; stop_port "$PORT_HTTP"; exit 0
+fi
+
+SRC="${1:-}"
+SRC="${SRC%/}"
+[ -n "$SRC" ] || { echo "host-site: give the staged directory (scripts/stage-web DIR first)"; exit 1; }
+[ -f "$SRC/index.html" ] && [ -f "$SRC/play/index.html" ] || { echo "host-site: $SRC is not a staged tree"; exit 1; }
+[ -f "$SRC.manifest" ] || { echo "host-site: $SRC.manifest missing; stage with scripts/stage-web"; exit 1; }
+[ "$(scripts/tree-manifest "$SRC" | grep -v '  @')" = "$(grep -v '^#' "$SRC.manifest" | grep -v '  @')" ] || { echo "host-site: $SRC no longer matches its manifest; restage"; exit 1; }
+HOST="$(ip -4 -o addr show wg0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+[ "$(printf '%s\n' "$HOST" | grep -c .)" = 1 ] || { echo "host-site: wg0 has no single IPv4 address ('$HOST'); refusing to guess"; exit 1; }
+
+if [ ! -s build/tls/cert.pem ] || [ ! -s build/tls/key.pem ]; then
+  mkdir -p build/tls
+  guix shell openssl -- openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+    -keyout build/tls/key.pem -out build/tls/cert.pem \
+    -subj "/CN=$HOST" -addext "subjectAltName=IP:$HOST" 2>/dev/null
+  [ -s build/tls/cert.pem ] || { echo "host-site: the certificate was not made"; exit 1; }
+fi
+
+stop_port "$PORT_TLS"; stop_port "$PORT_HTTP"
+rm -rf "$DST"
+mkdir -p "$DST"
+cp -a "$SRC/." "$DST/"
+cp "$SRC.manifest" "$DST.manifest"
+setsid node scripts/serve-site.mjs "$DST" "$PORT_TLS" --wg0 --tls --log > "build/host-site-$PORT_TLS.log" 2>&1 &
+echo $! > "build/host-site-$PORT_TLS.pid"
+setsid node scripts/serve-site.mjs "$DST" "$PORT_HTTP" --wg0 --log > "build/host-site-$PORT_HTTP.log" 2>&1 &
+echo $! > "build/host-site-$PORT_HTTP.pid"
+sleep 1
+for p in "$PORT_TLS" "$PORT_HTTP"; do
+  [ -n "$(live_pid "$p")" ] || { echo "host-site: the server on $p exited at once; its log:"; cat "build/host-site-$p.log"; exit 1; }
+done
+echo "host-site: serving $DST ($(sed -n 's/^# web-stamp /game /p' "$SRC.manifest"), manifest $(sha256sum "$SRC.manifest" | cut -c1-16))"
+echo "  https://$HOST:$PORT_TLS/   (pid $(cat "build/host-site-$PORT_TLS.pid"); /play/ isolated)"
+echo "  http://$HOST:$PORT_HTTP/    (pid $(cat "build/host-site-$PORT_HTTP.pid"))"

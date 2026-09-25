@@ -18,12 +18,67 @@
       var p = new URLSearchParams(location.search).get("rate");
       var want = p === "device" ? 0 : Number(p || 32000);
       var Base = window.AudioContext || window.webkitAudioContext;
-      if (want > 0 && Base) {
-        var Wrapped = function (opts) { return new Base(Object.assign({ sampleRate: want }, opts || {})); };
+      // D40: every context is kept, so a pause can suspend it (below)
+      window.HARKFELL_CONTEXTS = [];
+      if (Base) {
+        var Wrapped = function (opts) {
+          var c = new Base(want > 0 ? Object.assign({ sampleRate: want }, opts || {}) : opts);
+          window.HARKFELL_CONTEXTS.push(c);
+          return c;
+        };
         Wrapped.prototype = Base.prototype;
         window.AudioContext = Wrapped;
         if (window.webkitAudioContext) window.webkitAudioContext = Wrapped;
       }
+    })();
+    // Playtest 1, #1 (a slow load on the phone; the start screen's second
+    // line came before the first): the start screen's words and the card's
+    // mark are fetched now, while the wasm downloads, and held in memory.
+    // The game asks for them later, through the gles3 bridge's fetch (once
+    // its frames are steady: (harkfell shell web-images)), and gets these
+    // bytes at once, with no network and nothing a long boot frame can
+    // cancel. The scale is the game's: the largest whole scale of the
+    // 400x176 view that fits the device pixels (and the rounded one, in
+    // case), 1..8; the kind is the page's (touch, keys or both); D40's line
+    // too when a save is stored. Anything not preloaded, or a preload that
+    // failed, goes to the network as before. ?trace: one line of what.
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var dpr = Math.max(1, window.devicePixelRatio || 1);
+      var s = Math.min(window.innerWidth * dpr / 400, window.innerHeight * dpr / 176);
+      var clamp = function (k) { return Math.max(1, Math.min(8, k)); };
+      var ks = [clamp(Math.floor(s)), clamp(Math.round(s))].filter(function (k, i, a) { return a.indexOf(k) === i; });
+      var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+      var kind = params.get("kind") || (coarse ? "touch" : ((navigator.maxTouchPoints || 0) > 0 ? "both" : "keys"));
+      var saved = false;
+      try { saved = !!localStorage.getItem("save") && !params.has("new"); } catch (err) { /* private mode */ }
+      var urls = [];
+      ks.forEach(function (k) {
+        ["listen", "step-" + kind, "presents"].concat(saved ? ["over-" + kind] : []).forEach(function (id) {
+          urls.push("assets/type/" + id + "@" + k + ".png");
+        });
+        urls.push("assets/mark/mark@" + k + ".png");
+      });
+      var held = {};
+      var baseFetch = window.fetch.bind(window);
+      urls.forEach(function (u) {
+        held[u] = baseFetch(u, { cache: "no-store" }).then(function (r) {
+          if (!r.ok) throw new Error(u + " " + r.status);
+          return r.arrayBuffer();
+        });
+        held[u].catch(function () { delete held[u]; });
+      });
+      window.fetch = function (input, init) {
+        var u = typeof input === "string" ? input : "";
+        if (held[u]) {
+          var p = held[u];
+          delete held[u];                      // once: a later ask goes to the network
+          return p.then(function (buf) { return new Response(buf, { status: 200, headers: { "content-type": "image/png" } }); },
+                        function () { return baseFetch(input, init); });
+        }
+        return baseFetch(input, init);
+      };
+      if (params.has("trace")) console.log("harkfell: page preload " + urls.length + " images at x" + ks.join(",x") + " " + kind);
     })();
   </script>
   <!-- version: "__VERSION__" -->
@@ -66,18 +121,47 @@
              margin: 0; padding: 8px; background: rgba(0, 0, 0, 0.78); color: #cfe; font: 11px/1.35 ui-monospace, monospace;
              white-space: pre-wrap; word-break: break-all; }
     #bench[hidden] { display: none; }
+
+    /* D39: the fullscreen button. A small, quiet mark in the top-right
+       corner, drawn by the page (not the game): on the start screen it
+       stays; in play it fades after FS_IDLE_MS without the mouse moving
+       (or a touch in the top quarter of the screen) and comes back when it
+       moves. Hidden where the Fullscreen API is missing (iPhone Safari).
+       Above the touch controls, under the page guard's card. */
+    #game { position: fixed; inset: 0; background: #000; }
+    #fs { position: fixed; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right));
+          z-index: 3; box-sizing: border-box; width: 34px; height: 34px; padding: 7px; margin: 0; border: 0; border-radius: 6px;
+          background: transparent; color: rgb(235, 230, 215); opacity: 0.45; cursor: pointer;
+          transition: opacity 0.6s ease; -webkit-tap-highlight-color: transparent; }
+    #fs:hover, #fs:focus-visible { opacity: 0.85; }
+    #fs:focus { outline: none; }
+    #fs:focus-visible { outline: 1px solid rgba(235, 230, 215, 0.5); }
+    #fs.faded { opacity: 0; pointer-events: none; }
+    #fs[hidden] { display: none; }
+    #fs svg { display: block; width: 20px; height: 20px; }
+    #fs .exit { display: none; }
+    #fs.on .enter { display: none; }
+    #fs.on .exit { display: block; }
   </style>
 </head>
 <body>
+  <!-- D39: the game's container, what fullscreen takes: the canvas and
+       everything the page draws over it -->
+  <div id="game">
   <canvas id="stage" width="800" height="352"></canvas>
   <div id="touch">
     <div id="ring"></div>
     <div id="knob"></div>
     <div id="jumpbtn"></div>
   </div>
+  <button id="fs" type="button" aria-label="Fullscreen" hidden>
+    <svg class="enter" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"><path d="M2 7V2h5M13 2h5v5M18 13v5h-5M7 18H2v-5"/></svg>
+    <svg class="exit" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"><path d="M7 2v5H2M18 7h-5V2M13 18v-5h5M2 13h5v5"/></svg>
+  </button>
   <div id="dead" hidden>&#x21bb;</div>
   <pre id="bench" hidden></pre>
   <div id="status"></div>
+  </div>
 
   <script>
   // The world's files (world/*.sgl, regions/*.map, rooms/*/*.room) as
@@ -89,7 +173,8 @@
   // Harkfell's page. The generic loader (sigil-web-app.js) boots the wasm,
   // forwards keydown/keyup, and publishes SigilWebApp; the gles3 shell
   // runs one frame per requestAnimationFrame. This page adds the touch
-  // controls, the parameters, the visibility word and a small guard.
+  // controls, the parameters, the visibility word, the fullscreen button
+  // (D39: the top-right corner, or F) and a small guard.
   //
   // Parameters:
   //   ?stick=fixed|float   the joystick form (D25; fixed by default, David's
@@ -182,9 +267,32 @@
       benchEl.scrollTop = benchEl.scrollHeight;
       try { fetch("bench-report?" + encodeURIComponent(line), { cache: "no-store" }).catch(function () {}); } catch (err) { /* offline */ }
     }
+    // D40: the game paused (it lost focus). The sound fades out over 0.12 s
+    // ((harkfell audio) audio-pause!) and says "audio hold"; the contexts are
+    // suspended once the fade has played, so the device stops asking for
+    // audio. "audio release" resumes them at once; the sound fades back in.
+    var suspendTimer = null;
+    function holdAudio() {
+      clearTimeout(suspendTimer);
+      suspendTimer = setTimeout(function () {
+        suspendTimer = null;
+        (window.HARKFELL_CONTEXTS || []).forEach(function (c) {
+          if (c.state === "running") c.suspend().catch(function () {});
+        });
+      }, 150);
+    }
+    function releaseAudio() {
+      clearTimeout(suspendTimer);
+      suspendTimer = null;
+      (window.HARKFELL_CONTEXTS || []).forEach(function (c) {
+        if (c.state === "suspended") c.resume().catch(function () {});
+      });
+    }
     var log = console.log;
     console.log = function () {
       var line = String(arguments[0] || "");
+      if (line === "harkfell: audio hold") holdAudio();
+      else if (line === "harkfell: audio release") releaseAudio();
       if (line.indexOf("harkfell: fetch ") === 0) fetchTune(line.slice(16).trim());
       else if (line === "harkfell: frame play") framePlaying();
       else if (line.indexOf("harkfell: bench ") === 0 || (benchOn && line.indexOf("harkfell: audio ") === 0)) report(line);
@@ -192,9 +300,77 @@
     };
     // Every gesture may resume the audio context (the autoplay policy); the
     // capture phase sees the touch controls' events before they stop them.
+    // D39: the fullscreen button and the F key are not gestures to the game:
+    // on the start screen they go fullscreen without stepping in.
     ["pointerdown", "pointerup", "touchend", "click", "keydown"].forEach(function (n) {
-      document.addEventListener(n, function () { send("gesture", n); }, true);
+      document.addEventListener(n, function (e) {
+        if (fsEl.contains(e.target) || (n === "keydown" && fsKey(e))) return;
+        send("gesture", n);
+      }, true);
     });
+
+    // ---- D39: fullscreen ---------------------------------------------------
+    // The button (#fs) or the F key takes the game's container (#game) to
+    // fullscreen with the Fullscreen API, and back (Escape also leaves, the
+    // browser's own). The view is placed as ever: the largest whole scale
+    // that fits the canvas, centred on black ((engine view), D37's rule).
+    // Where the API is missing (iPhone Safari) the button stays hidden and
+    // F is an ordinary key. Lines: "harkfell: page fullscreen request",
+    // then "... on" / "... off" as the browser changes it, or "... refused
+    // NAME" if it says no.
+    var FS_IDLE_MS = 2500;             // in play, the button fades after this long without the mouse moving
+    var gameEl = document.getElementById("game");
+    var fsEl = document.getElementById("fs");
+    var fsRequest = gameEl.requestFullscreen || gameEl.webkitRequestFullscreen;
+    var fsExit = document.exitFullscreen || document.webkitExitFullscreen;
+    var fsOK = !!(fsRequest && fsExit && (document.fullscreenEnabled || document.webkitFullscreenEnabled));
+    var fsTimer = null;
+    function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+    function fsKey(e) {
+      return fsOK && (e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey && !e.altKey;
+    }
+    function fsToggle() {
+      var p;
+      if (fsElement()) p = fsExit.call(document);
+      else { console.log("harkfell: page fullscreen request"); p = fsRequest.call(gameEl, { navigationUI: "hide" }); }
+      if (p && p.catch) p.catch(function (err) { console.log("harkfell: page fullscreen refused " + (err && err.name)); });
+    }
+    // Shown now; in play (not the start screen, the card or the opening) it
+    // fades after FS_IDLE_MS unless woken again.
+    function fsWake() {
+      fsEl.classList.remove("faded");
+      clearTimeout(fsTimer);
+      fsTimer = setTimeout(function () {
+        if (inFrame) fsWake();
+        else fsEl.classList.add("faded");
+      }, FS_IDLE_MS);
+    }
+    function fsChanged() {
+      var on = !!fsElement();
+      fsEl.classList.toggle("on", on);
+      fsEl.setAttribute("aria-label", on ? "Leave fullscreen" : "Fullscreen");
+      console.log("harkfell: page fullscreen " + (on ? "on" : "off"));
+      fsWake();
+    }
+    if (fsOK) {
+      fsEl.hidden = false;
+      // no focus on a click, so Space (jump) never presses the button
+      fsEl.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      fsEl.addEventListener("click", function (e) { e.stopPropagation(); fsEl.blur(); fsToggle(); });
+      document.addEventListener("keydown", function (e) {
+        if (!fsKey(e) || e.repeat) return;
+        e.preventDefault();
+        fsToggle();
+      });
+      document.addEventListener("fullscreenchange", fsChanged);
+      document.addEventListener("webkitfullscreenchange", fsChanged);
+      // the mouse moving wakes it; with no mouse, a touch in the top quarter
+      document.addEventListener("pointermove", function (e) { if (e.pointerType === "mouse") fsWake(); }, true);
+      document.addEventListener("pointerdown", function (e) {
+        if (e.pointerType !== "mouse" && e.clientY < window.innerHeight / 4) fsWake();
+      }, true);
+      fsWake();
+    }
     var benchOn = params.has("bench");
     if (benchOn) {
       benchEl.hidden = false;
@@ -268,12 +444,15 @@
       // A4 look: ?look=start|card shows the start screen or the card alone,
       // to look at (the frame itself is the plain boot's); like a door, it
       // begins no game. The pointer is handed over as in the frame.
+      // &over=X (0..1): D40's hold-to-start-over line, as if a save existed
+      // and the hold were X of the way (&kind=keys|touch|both, the lines).
       var look = params.get("look");
       if (look === "start" || look === "card") {
         var lookTouchy = (navigator.maxTouchPoints || 0) > 0;
         inFrame = true;
         touchLayer.classList.remove("on");
-        send("look", look + " " + (params.get("kind") || (coarse ? "touch" : (lookTouchy ? "both" : "keys"))));
+        send("look", look + " " + (params.get("kind") || (coarse ? "touch" : (lookTouchy ? "both" : "keys"))) +
+             (params.get("over") !== null ? " over=" + params.get("over") : ""));
       }
       // ?look=reveal: play as a door does, with D35's reveal of the name over
       // the room once, as the game will (a key or a tap plays it again; &hold
@@ -305,6 +484,7 @@
     var inFrame = false;
     function framePlaying() {
       inFrame = false;
+      if (fsOK) fsWake();             // D39: the fade's count starts with play
       if (view === "play" && (coarse || params.has("touch"))) touchLayer.classList.add("on");
     }
     document.getElementById("stage").addEventListener("pointermove", function (e) {
@@ -312,6 +492,20 @@
       var r = e.target.getBoundingClientRect();
       send("pointer", ((e.clientX - r.left) * e.target.width / r.width).toFixed(1) + "," +
                       ((e.clientY - r.top) * e.target.height / r.height).toFixed(1));
+    });
+    // D40: a press and its end during the frame. With a save, the start
+    // screen's start-over line is held by a long press on it; a press
+    // elsewhere steps in (the game decides which, by where it landed).
+    document.getElementById("stage").addEventListener("pointerdown", function (e) {
+      if (!inFrame) return;
+      var r = e.target.getBoundingClientRect();
+      send("press", ((e.clientX - r.left) * e.target.width / r.width).toFixed(1) + "," +
+                    ((e.clientY - r.top) * e.target.height / r.height).toFixed(1));
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(function (n) {
+      document.getElementById("stage").addEventListener(n, function () {
+        if (inFrame) send("release", "");
+      });
     });
     function setView(v) {
       view = v;
@@ -332,6 +526,8 @@
     // and the touch controls too: a keyup that goes to another window would
     // otherwise hold the key forever.
     window.addEventListener("blur", function () { send("visibility", "blur"); releaseAll(); });
+    // D40: the game pauses on blur or hidden and resumes on focus or visible.
+    window.addEventListener("focus", function () { send("visibility", "focus"); });
     document.addEventListener("visibilitychange", function () {
       send("visibility", document.visibilityState);
       if (document.visibilityState === "hidden") releaseAll();

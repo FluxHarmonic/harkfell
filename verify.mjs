@@ -60,16 +60,23 @@
 //   sheet      (A1) ?sheet=reedfen: the region's rooms at full scale ("harkfell:
 //              view sheet:reedfen 4044 544": x 8..17, y 3..5)
 //   frame      (A4) a plain boot (?frame=on&new) runs the frame: the start
-//              screen waits for a gesture (no "frame start-out" in 5 s), then a
-//              key goes on, and start-out, card, hold, dawn and play follow in
+//              screen waits for a gesture (no "frame start-out" in 5 s) and its
+//              words land together ("frame words", playtest 1 #1), then a key
+//              goes on, and start-out, card, hold, dawn and play follow in
 //              that order; the played room draws in at least four colour bins
 //   save       (A4) after the frame leg: the save is in localStorage, and a
 //              reload with no ?new continues from it ("harkfell: save continue
 //              ..."); then a door (?room=) walked elsewhere leaves it unchanged
+//   fullscreen (D39) the corner button: shown on the start screen and not
+//              faded; a click asks for fullscreen and the game container
+//              (#game) takes it without stepping in; F leaves it; in play it
+//              fades after 2.5 s and a mouse move brings it back; with the
+//              Fullscreen API removed (iPhone Safari) it is hidden and F asks
+//              for nothing
 //   errors     no console error and no exception in any leg
 //
-// Every leg but frame and save boots with &frame=off (open() adds it): the
-// frame is theirs to skip, and a door skips it anyway.
+// Every leg but frame, save and fullscreen boots with &frame=off (open()
+// adds it): the frame is theirs to skip, and a door skips it anyway.
 //
 // A0's control legs (keys, float, fixed, jump, two, timing) run in A0's test
 // room (&test-room): they measure the controls, and their geometry (the
@@ -89,7 +96,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -537,7 +544,7 @@ if (LEGS.includes("frame")) {
   const order = lines.filter((l) => l.startsWith("harkfell: frame ")).map((l) => l.slice(16)).join(" ");
   await sleep(500);
   const bins = await colourBins();
-  (waited && order === "start start-out card hold dawn play" && bins >= 4 ? pass : fail)("frame",
+  (waited && order === "start words start-out card hold dawn play" && bins >= 4 ? pass : fail)("frame",
     `waited for the gesture: ${waited}; phases: ${order}; ${bins} colour bins in play`);
 }
 
@@ -570,6 +577,122 @@ if (LEGS.includes("save")) {
   (saved && saved.startsWith("(harkfell-save 1") && cont && cont.startsWith("harkfell: save continue") &&
    atDoor && place(after) === place(atDoor) && walked.x < 9 * 400 ? pass : fail)("save",
     `saved: ${saved ? saved.slice(0, 60) : saved}; reload: ${cont}; after a door and a walk west to x ${walked.x}: the place is unchanged ${place(after) === place(atDoor)}`);
+}
+
+// D40: a lost focus pauses the game and its return resumes it. A key held
+// through the pause moves nothing; after the focus is back, the same key
+// walks. (The page lets every key go on a blur, so the walk after is a
+// fresh press.)
+if (LEGS.includes("pause")) {
+  ran.add("pause");
+  await open("trace&test-room");
+  await evaluate(`window.dispatchEvent(new Event("blur"))`);
+  const a = await where();
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await sleep(600);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  const b = await where();
+  await evaluate(`window.dispatchEvent(new Event("focus"))`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await sleep(500);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  const c = await where();
+  // SOUND's hold and release (the page suspends and resumes its audio on them)
+  const held = lines.includes("harkfell: audio hold"), released = lines.includes("harkfell: audio release");
+  (b.x === a.x && b.y === a.y && c.x > b.x + 8 && held && released ? pass : fail)("pause",
+    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}; audio hold ${held}, release ${released}`);
+}
+
+// D40: with a save, the start screen's R held 1.5 s wipes it and begins a
+// new game (through the card to play, a new save at the start); a short R
+// first does nothing, not even step in.
+if (LEGS.includes("over")) {
+  ran.add("over");
+  await open("trace&room=reedfen:9,3");
+  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "over: door");
+  await evaluate(`localStorage.setItem("save", "(harkfell-save 1 (room reedfen 9 3) (cell 4 7) (carry 2) (stones) (moments) (played 100) (revealed #f))")`);
+  await open("trace&frame=on");
+  const cont = await waitFor(() => lines.find((l) => l.startsWith("harkfell: save ")), 10000, "over: continue");
+  await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 10000, "over: frame start");
+  await sleep(1500);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "r", code: "KeyR" });
+  await sleep(500);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "r", code: "KeyR" });
+  await sleep(1500);
+  const shortKept = await evaluate("localStorage.getItem('save')");
+  const shortStayed = !lines.find((l) => l === "harkfell: frame start-out");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "r", code: "KeyR" });
+  await sleep(2200);
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "r", code: "KeyR" });
+  const wiped = lines.find((l) => l === "harkfell: frame start-over") ? await evaluate("localStorage.getItem('save')") : "no start-over";
+  await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 30000, "over: frame play");
+  await sleep(1000);
+  const fresh = await evaluate("localStorage.getItem('save')");
+  const order = lines.filter((l) => l.startsWith("harkfell: frame ")).map((l) => l.slice(16)).join(" ");
+  (cont && cont.startsWith("harkfell: save continue") && shortKept && shortStayed && wiped === null &&
+   /^start (words )?start-over start-out card hold dawn play$/.test(order) &&
+   fresh && fresh.includes("(room hollow 4 3)") && fresh.includes("(carry)") ? pass : fail)("over",
+    `continue: ${cont}; a short R kept the save ${!!shortKept} and stayed ${shortStayed}; held: wiped ${wiped === null}; phases: ${order}; the new save: ${fresh ? fresh.slice(0, 80) : fresh}`);
+}
+
+// D39: the fullscreen button. On the start screen it shows and stays; a
+// click on it asks for fullscreen and goes there, without stepping in (not a
+// gesture to the game); F goes back. In play it fades after 2.5 s and a mouse
+// move brings it back. With the Fullscreen API taken away (as on iPhone
+// Safari) it is hidden and F asks for nothing.
+async function fsState() {
+  return await evaluate(`(() => { const b = document.getElementById("fs"); const r = b.getBoundingClientRect();
+    return { hidden: b.hidden, faded: b.classList.contains("faded"), on: b.classList.contains("on"),
+             x: r.left + r.width / 2, y: r.top + r.height / 2, full: !!document.fullscreenElement,
+             el: document.fullscreenElement ? document.fullscreenElement.id : "" }; })()`);
+}
+if (LEGS.includes("fullscreen")) {
+  ran.add("fullscreen");
+  await open("trace&frame=on&new");
+  await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 10000, "fullscreen: frame start");
+  await sleep(3200);
+  const start = await fsState();
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: start.x, y: start.y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: start.x, y: start.y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: start.x, y: start.y, button: "left", clickCount: 1 });
+  const onLine = await waitFor(() => lines.find((l) => l === "harkfell: page fullscreen on" || l.startsWith("harkfell: page fullscreen refused")), 10000, "fullscreen: on");
+  const asked = !!lines.find((l) => l === "harkfell: page fullscreen request");
+  await sleep(300);
+  const full = await fsState();
+  await sleep(700);
+  const stayed = !lines.find((l) => l === "harkfell: frame start-out");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "f", code: "KeyF", text: "f" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "f", code: "KeyF" });
+  const offLine = await waitFor(() => lines.find((l) => l === "harkfell: page fullscreen off"), 10000, "fullscreen: off");
+  const left = await fsState();
+  const stayed2 = !lines.find((l) => l === "harkfell: frame start-out");
+  // step in; in play the button fades, and the mouse brings it back
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", code: "KeyX" });
+  await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 30000, "fullscreen: frame play");
+  await sleep(3300);
+  const idle = await fsState();
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 200, y: 200 });
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 210, y: 205 });
+  await sleep(200);
+  const woken = await fsState();
+  // no Fullscreen API
+  const { identifier } = await send("Page.addScriptToEvaluateOnNewDocument", { source:
+    "delete Element.prototype.requestFullscreen; delete Element.prototype.webkitRequestFullscreen;" });
+  await open("trace&frame=on&new");
+  await sleep(500);
+  const none = await fsState();
+  const n0 = lines.length;
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "f", code: "KeyF", text: "f" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "f", code: "KeyF" });
+  await sleep(500);
+  const noAsk = !lines.slice(n0).find((l) => l.startsWith("harkfell: page fullscreen"));
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  (!start.hidden && !start.faded && asked && onLine === "harkfell: page fullscreen on" && full.full && full.el === "game" && full.on &&
+   stayed && offLine && !left.full && !left.on && stayed2 && idle.faded && !woken.faded && none.hidden && noAsk ? pass : fail)("fullscreen",
+    `start screen: shown ${!start.hidden}, not faded after 3 s ${!start.faded}; click: asked ${asked}, ${onLine}, fullscreen element #${full.el}; ` +
+    `start screen kept ${stayed}; F: ${offLine}, fullscreen ${left.full}; kept ${stayed2}; play: faded after 3.3 s ${idle.faded}, back on a mouse move ${!woken.faded}; ` +
+    `no API: hidden ${none.hidden}, F asks nothing ${noAsk}`);
 }
 
 if (LEGS.includes("errors")) {
