@@ -89,7 +89,8 @@
 
     (define *opened-k* 2)           ; the whole scale the window was opened at
     (define *stored-k* #f)          ; the whole scale last remembered
-    (define *placed-ok* #f)         ; the first frame's window was the size asked for
+    (define *placed-ok* #f)         ; the window, once it first settled, was the size asked for
+    (define *placed-known* #f)      ; ... and it has settled once
     (define *last-size* #f)         ; (w . h), the window last seen, in screen units
     (define *stable* 0)             ; frames the window has held that size
     (define *snapped-from* '())     ; sizes a snap has been asked from (never asked again)
@@ -120,13 +121,30 @@
     ;; A window resized by hand, once the size has settled for SETTLE-FRAMES,
     ;; snaps to the whole scale it fits, x2 at the least (MIN-SCALE: a
     ;; window dragged smaller than 800x352 comes back up to it), and
-    ;; remembers it, all in screen units. Two guards, from the A4 review:
-    ;;   - only when the first frame's window was the size asked for.
-    ;;     Otherwise the window manager chose the size (sway's tiling) and a
-    ;;     snap would fight it. The view is still drawn at the largest whole
-    ;;     scale that fits, whatever the size.
-    ;;   - never twice from the same size, so a refusing manager, a maximize
-    ;;     or a compositor that sends its own size back is not fought.
+    ;; remembers it, all in screen units. The view itself is re-fitted every
+    ;; frame from the framebuffer (shell-present!), whatever the size; the
+    ;; guards are on the snap, because on Wayland a snap the compositor
+    ;; refuses is worse than none: GLFW takes the asked size as the window's
+    ;; at once, the compositor sends no new size back, and the game draws a
+    ;; small picture in the corner of a fullscreen window until the next
+    ;; size change (David on sway, 2026-09-25: the first compositor
+    ;; fullscreen drew at the old size in the top-left; a headless sway at
+    ;; scale 2 showed the framebuffer called back at the snapped 1600x704
+    ;; in a 1920x1080 window). So a snap only when:
+    ;;   - the window, once it first settled, was the size asked for.
+    ;;     Otherwise the window manager chose the size (sway's tiling, whose
+    ;;     size can come a few frames after the first) and a snap would
+    ;;     fight it.
+    ;;   - the framebuffer does not fill the monitor's width or height: the
+    ;;     compositor has it fullscreen or maximized (sway's own toggle, not
+    ;;     the game's F11). Nothing is remembered from such a size either.
+    ;;   - never twice from the same size, so a refusing manager or a
+    ;;     compositor that sends its own size back is not fought.
+    (define (fills-monitor?)
+      (let ((m (monitor-size)))
+        (and (pair? m)
+             (or (>= (frame-width) (car m)) (>= (frame-height) (cadr m))))))
+
     (define (window-frame!)
       (when (or (key-pressed? (quote f11))
                 (and (key-pressed? (quote return)) (or (key-down? (quote alt)) (key-down? (quote right-alt)))))
@@ -136,15 +154,16 @@
                 (*stored-k* (store-write-datum! "scale" (scale-symbol *stored-k*)))
                 (else (store-write-datum! "scale" (scale-symbol *opened-k*))))))
       (let* ((size (window-size)) (w (car size)) (h (cdr size)))
-        (unless *last-size*
-          (set! *placed-ok* (and (= w (* *opened-k* VIEW-W)) (= h (* *opened-k* VIEW-H)))))
         (if (and *last-size* (= w (car *last-size*)) (= h (cdr *last-size*)))
             (set! *stable* (+ *stable* 1))
             (begin (set! *last-size* (cons w h)) (set! *stable* 0)))
+        (when (and (not *placed-known*) (= *stable* SETTLE-FRAMES))
+          (set! *placed-known* #t)
+          (set! *placed-ok* (and (= w (* *opened-k* VIEW-W)) (= h (* *opened-k* VIEW-H)))))
         (when *fullscreen-asked*
           (set! *fullscreen-asked* #f)
           (set-fullscreen! #t))
-        (when (and *placed-ok* (= *stable* SETTLE-FRAMES) (not (fullscreen?)))
+        (when (and *placed-ok* (= *stable* SETTLE-FRAMES) (not (fullscreen?)) (not (fills-monitor?)))
           (let ((k (max MIN-SCALE (fit-k w h))))
             (when (and (<= k 8) (not (eqv? k *stored-k*)))
               (store-write-datum! "scale" (scale-symbol k))
