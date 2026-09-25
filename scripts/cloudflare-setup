@@ -55,7 +55,14 @@
 # which `wrangler pages deploy` applies. Old objects are never deleted by any
 # script: a cached page must keep finding the wasm it was built against.
 set -eu
-cd "$(dirname "$0")/.." || exit 1
+# Every wrangler call runs from an empty scratch directory, never the repo:
+# wrangler 4 edits the wrangler config it finds in its cwd. The 2026-09-24
+# --create run, from the repo root, had `wrangler r2 bucket create` add a
+# second binding (harkfell_wasm) to wrangler.jsonc and reformat it, a change
+# to a file the publish gate hashes.
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/harkfell-cloudflare-setup-XXXXXX")"
+trap 'rm -rf "$SCRATCH"' EXIT
+cd "$SCRATCH" || exit 1
 PROJECT="${HARKFELL_PAGES_PROJECT:-harkfell}"
 BUCKET="${HARKFELL_WASM_BUCKET:-harkfell-wasm}"
 ZONE_NAME=harkfell.com

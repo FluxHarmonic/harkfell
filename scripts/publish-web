@@ -118,6 +118,11 @@ node -e '
   if (keys(out) !== keys(cfg)) throw new Error("config keys changed");
   fs.writeFileSync(process.argv[2], JSON.stringify(out, null, 2) + "\n");
 ' "$D/wrangler.jsonc" "$D/wrangler.json"
+# wrangler.json is derived, so the manifest does not hash it; its own hash is
+# taken now and checked before each deploy (wrangler 4 edits the config it
+# finds in its cwd: `r2 bucket create` added a binding to wrangler.jsonc in the
+# repo on 2026-09-24)
+WJ_SHA="$(sha256sum "$D/wrangler.json" | cut -d' ' -f1)"
 # nothing above the deploy directory may redirect wrangler's config lookup
 p="$WORK"
 while :; do
@@ -171,6 +176,7 @@ rm -rf "$D/.wrangler"   # wrangler's local state from the r2 calls, never deploy
 deploy() {   # branch -> prints the deployment URL on the last line
   got="$(scripts/tree-manifest "$D/tree" "$D")" || { say "REFUSED: tree-manifest refused the deploy directory"; exit 1; }
   [ "$got" = "$WANT_NOWASM" ] || { say "REFUSED: the deploy directory changed after it was checked; nothing deployed to $1"; exit 1; }
+  [ "$(sha256sum "$D/wrangler.json" | cut -d' ' -f1)" = "$WJ_SHA" ] || { say "REFUSED: wrangler.json in the deploy directory changed after it was written; nothing deployed to $1"; exit 1; }
   set +e
   (cd "$D" && wrangler pages deploy tree --project-name "$PROJECT" --branch "$1" \
      --commit-hash "$HEAD_FULL" --commit-message "$MESSAGE") > "$WORK/deploy-$1.log" 2>&1
