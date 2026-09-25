@@ -2,7 +2,8 @@
 ;;;
 ;;;   keyed to hollow-answers   a ring heard at the tune's start waits for
 ;;;                             13.3 s, is full at 15.0 (the arrival), holds to
-;;;                             24.0, and is gone by 26.0; a ring after 13.3
+;;;                             19.0 (4 s full, playtest #9), and is gone by
+;;;                             21.0; a ring after 13.3
 ;;;                             starts at once
 ;;;   the fallback              no moment playing: 2 s in, 4 s held, 2 s out
 ;;;
@@ -20,19 +21,19 @@
       (assert-equal 0.0 (reveal-alpha s 13.2))
       (assert-true (< 0.0 (reveal-alpha s 14.0) 1.0))
       (assert-true (near? 1.0 (reveal-alpha s 15.01))))
-    (test "held to 24.0, gone by 26.0"
-      (assert-true (near? 1.0 (reveal-alpha s 23.9)))
-      (assert-true (< 0.0 (reveal-alpha s 25.0) 1.0))
-      (assert-equal 0.0 (reveal-alpha s 26.01))
-      (assert-true (reveal-done? s 26.01))
-      (assert-false (reveal-done? s 25.9))))
-  (test "a ring at tt 14: it starts at once, and still holds to the tune's 24.0"
+    (test "held 4 s to 19.0, gone by 21.0 (playtest #9: 24.0 held too long)"
+      (assert-true (near? 1.0 (reveal-alpha s 18.9)))
+      (assert-true (< 0.0 (reveal-alpha s 20.0) 1.0))
+      (assert-equal 0.0 (reveal-alpha s 21.01))
+      (assert-true (reveal-done? s 21.01))
+      (assert-false (reveal-done? s 20.9))))
+  (test "a ring at tt 14: it starts at once, and still holds to the tune's 19.0"
     (let ((s (reveal-schedule 14.0)))
       (assert-true (> (reveal-alpha s 0.5) 0.0))
-      (assert-true (near? 1.0 (reveal-alpha s 9.9)))
-      (assert-equal 0.0 (reveal-alpha s 12.1))))
+      (assert-true (near? 1.0 (reveal-alpha s 4.9)))
+      (assert-equal 0.0 (reveal-alpha s 7.1))))
   (test "a ring after the tune's hold: in over 1.7 s and straight out"
-    (let ((s (reveal-schedule 25.0)))
+    (let ((s (reveal-schedule 20.0)))
       (assert-true (near? 1.0 (reveal-alpha s 1.7)))
       (assert-true (reveal-done? s 3.8)))))
 
