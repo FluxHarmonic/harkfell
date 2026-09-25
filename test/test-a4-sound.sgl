@@ -614,3 +614,19 @@
   (test "during a moment the movement is quieter"
     (display "  jump gain alone ") (display JUMP-ALONE) (display ", in a moment ") (display JUMP-IN-MOMENT) (newline)
     (assert-true (< JUMP-IN-MOMENT (* 0.6 JUMP-ALONE)))))
+
+;; one splash per SPLASH-GAP-S (playtest 1, #6: bobbing at the surface)
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+(define (splashes-at ts)
+  (let loop ((ts ts) (n 0))
+    (if (null? ts)
+        n
+        (begin
+          (sound-frame! (car ts) (/ 1.0 60.0) (runner 'reedfen 'water 'swim 0.0 50.0 '((splash . 2.0))))
+          (loop (cdr ts) (+ n (length (filter (lambda (m) (eq? (car m) 'splash)) (sound-moved)))))))))
+(define SPLASHES (splashes-at '(0.0 0.2 0.4 0.6 1.2)))
+
+(test-group "a4 sound: 10, the splash's limit"
+  (test "entering the water at 0, 0.2, 0.4, 0.6 and 1.2 s splashes at 0, 0.6 and 1.2 only"
+    (assert-equal 3 SPLASHES)))
