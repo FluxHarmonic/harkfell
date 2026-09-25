@@ -5,7 +5,7 @@ version: 0.1.0
 summary: The first slice of Harkfell is here: the Hollow and Reedfen, free to play in your browser.
 ---
 
-Harkfell is here! Well, the first slice of it is, and I'm really happy to finally share it with you.
+Harkfell is here! Well, the first slice of it is, and I'm excited for you to check it out.
 
 Harkfell is a quiet little platformer about listening. The stones on the fells used to ring, and now only the wind does. Somewhere far below, a very low note is waiting for its overtones to come back, and you're the small, long-eared creature who goes looking for them.
 
