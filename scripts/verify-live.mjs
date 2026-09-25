@@ -105,6 +105,16 @@ else {
   else pass("isolation", "/play/ COOP same-origin + COEP require-corp; / not isolated");
 }
 
+// ---- version.json -------------------------------------------------------------------
+// The game polls it for updates (D38); an edge cache in front of it would hide a
+// release. Its bytes are already checked in the files sweep.
+{
+  const r = await get(`${base}/version.json`); await r.arrayBuffer();
+  const cc = r.headers.get("cache-control") || "";
+  if (r.status !== 200 || !/no-store/.test(cc)) fail("version-json", `/version.json answered ${r.status} with cache-control "${cc}"`);
+  else pass("version-json", `200, cache-control "${cc}", ${r.headers.get("content-type")}`);
+}
+
 // ---- missing ---------------------------------------------------------------------------
 {
   const probes = ["/no-such-page/", "/play/no-such-file.js", `/play/w/${"0".repeat(16)}/harkfell.wasm`, "/play/harkfell.wasm", "/_headers"];

@@ -31,6 +31,13 @@
 //             wasm, the game says "harkfell: world N files, 0 problems", the
 //             canvas holds drawn pixels, and every request the page made was
 //             2xx (a file the stage left out shows up here)
+//   news      /news/ lists every post newest first; each post page answers
+//             with its title, date and version; no em dash (D38)
+//   version   /version.json parses, has exactly its five fields, names the
+//             staged game's stamp and package.sgl's version, points at that
+//             version's post and carries its summary, which is printable
+//             ASCII (what the game can draw until the runtime glyph atlas)
+//             and at most 120 characters; served no-store as JSON (D38)
 //   missing   a missing page, a missing file under /play/ and a wasm hash
 //             nobody published all answer 404 (with the site's 404 page), never a 200 index.html
 //   console   no console error and no exception over the run
@@ -78,7 +85,7 @@ const GATE_FILES = ["verify-site.mjs", "scripts/serve-site.mjs", "scripts/tree-m
 const gate = GATE_FILES.map((g) => [g, sha256(fs.readFileSync(g))]);
 const gateHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const gateClean = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() === "";
-for (const f of ["index.html", "play/index.html", "_headers"]) {
+for (const f of ["index.html", "play/index.html", "_headers", "version.json", "news/index.html"]) {
   if (!fs.existsSync(path.join(DIR, f))) { console.log(`SETUP-FAILED: ${DIR}/${f} missing (scripts/stage-web builds the tree)`); process.exit(2); }
 }
 if (!fs.existsSync(MANIFEST)) { console.log(`SETUP-FAILED: ${MANIFEST} missing (scripts/stage-web writes it)`); process.exit(2); }
@@ -258,7 +265,7 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
   if (facts.imgs.length < 6) detail.push(`${facts.imgs.length} images (want the carousel's five and the mark)`);
   if (badImgs.length) detail.push(`images not decoded: ${badImgs.map((i) => i[0]).join(", ")}`);
   if (facts.play !== `${origin}/play/`) detail.push(`the Play link resolves to ${facts.play}`);
-  for (const want of ["https://github.com/FluxHarmonic/harkfell", "https://creativecommons.org/licenses/by/4.0/", `${origin}/fonts/OFL.txt`]) {
+  for (const want of ["https://github.com/FluxHarmonic/harkfell", "https://creativecommons.org/licenses/by/4.0/", `${origin}/fonts/OFL.txt`, `${origin}/news/`]) {
     if (!facts.links.includes(want)) detail.push(`no link to ${want}`);
   }
   if (!facts.links.some((l) => /LICENSE$/.test(l))) detail.push("no link to the code's licence");
@@ -385,6 +392,75 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
   await shot("play.png");
   if (detail.length) fail("play", detail.join("; "));
   else pass("play", `a click on Play loads /play/, isolated; "${world}"; the wasm from /play/w/${SHA16}/harkfell.wasm (200 application/wasm); canvas ${bins[1]}x${bins[2]} with ${bins[0]} colour bins; ${list.length} requests (${served} under /play/), every URL answered 2xx${retried(list) ? ` (${retried(list)} aborted by the page and fetched again)` : ""}`);
+}
+
+// ---- news -----------------------------------------------------------------------
+// /news/ (D38): every post listed newest first, each post page there with its
+// title, date and version, no em dash anywhere in it.
+const newsPosts = [];
+{
+  const detail = [];
+  const r = await fetch(`${origin}/news/`);
+  const html = await r.text();
+  if (r.status !== 200) detail.push(`/news/ answered ${r.status}`);
+  const items = [...html.matchAll(/<li data-version="([^"]+)"><a href="(\/news\/[a-z0-9-]+\/)">([\s\S]*?)<\/a>\s*<time datetime="([^"]+)">[\s\S]*?<p>([\s\S]*?)<\/p><\/li>/g)]
+    .map((m) => ({ version: m[1], href: m[2], title: m[3], date: m[4], summary: m[5] }));
+  if (!items.length) detail.push("/news/ lists no posts");
+  const order = items.map((i) => i.date + i.version);
+  if (order.join() !== [...order].sort().reverse().join()) detail.push(`/news/ is not newest first: ${items.map((i) => i.date).join(" ")}`);
+  for (const it of items) {
+    const p = await fetch(origin + it.href);
+    const body = await p.text();
+    if (p.status !== 200) { detail.push(`${it.href} answered ${p.status}`); continue; }
+    if (!body.includes(`data-version="${it.version}"`)) detail.push(`${it.href} is not the post for ${it.version}`);
+    if (!/<h1>[^<]+<\/h1>/.test(body) || !body.includes(`<time datetime="${it.date}">`)) detail.push(`${it.href} lacks its title or date`);
+    newsPosts.push(it);
+  }
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  const newsFiles = fs.existsSync(path.join(DIR, "news")) ? walk(path.join(DIR, "news")) : [];
+  for (const f of newsFiles) if (/—|&mdash;|&#8212;/.test(fs.readFileSync(f, "utf8"))) detail.push(`${path.relative(DIR, f)} has an em dash`);
+  if (detail.length) fail("news", detail.join("; "));
+  else pass("news", `/news/ lists ${items.length} post(s) newest first (${items.map((i) => `${i.version} ${i.date}`).join(", ")}); each post page answers with its title, date and version; no em dash`);
+}
+
+// ---- version ---------------------------------------------------------------------
+// /version.json (D38): generated into this tree by stage-web; the game's update
+// line reads it, so it must name this build, this version, that version's post,
+// and a summary the game can draw.
+//
+// DRAWABLE is the characters the start screen can draw at run time. Printable
+// ASCII until the runtime glyph atlas lands in sigil-graphics (the leader,
+// 2026-09-25, with LOOK); then this becomes that atlas's set.
+const DRAWABLE = /^[\x20-\x7e]*$/;
+const SUMMARY_MAX = 120;   // one line under "Press any key to step in."; LOOK owns the real width
+{
+  const detail = [];
+  let vj = null;
+  try { vj = JSON.parse(text("version.json")); } catch (e) { detail.push(`version.json does not parse: ${e.message}`); }
+  if (vj) {
+    const keys = Object.keys(vj).sort().join(",");
+    if (keys !== "build,date,news,summary,version") detail.push(`version.json has the fields ${keys} (want build, date, news, summary, version)`);
+    if (vj.build !== header["web-stamp"]) detail.push(`build "${vj.build}" is not the staged game's stamp ${header["web-stamp"]}`);
+    const pkg = (fs.readFileSync("package.sgl", "utf8").match(/^  version: "([0-9.]+)"/m) || [])[1];
+    if (vj.version !== pkg) detail.push(`version "${vj.version}" is not package.sgl's ${pkg}`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(vj.date || "")) detail.push(`date "${vj.date}" is not YYYY-MM-DD`);
+    const post = newsPosts.find((p) => p.version === vj.version);
+    if (!post) detail.push(`no news post for version ${vj.version} (posts: ${newsPosts.map((p) => p.version).join(", ") || "none"}); the game would announce it with nothing to say`);
+    else {
+      if (vj.news !== `https://harkfell.com${post.href}`) detail.push(`news "${vj.news}" is not the post's URL https://harkfell.com${post.href}`);
+      const listed = post.summary.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/<[^>]+>/g, "");
+      if (vj.summary !== listed) detail.push(`summary differs from the post's: "${vj.summary}" against "${listed}"`);
+    }
+    if (!vj.summary) detail.push("the summary is empty");
+    if (!DRAWABLE.test(vj.summary || "")) detail.push(`the summary has characters the game cannot draw: ${[...(vj.summary || "")].filter((c) => !DRAWABLE.test(c)).map((c) => `"${c}" U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`).join(", ")}`);
+    if ((vj.summary || "").length > SUMMARY_MAX) detail.push(`the summary is ${vj.summary.length} characters (at most ${SUMMARY_MAX})`);
+  }
+  const r = await fetch(`${origin}/version.json`);
+  await r.arrayBuffer();
+  if (!/no-store/.test(r.headers.get("cache-control") || "")) detail.push(`/version.json is served with cache-control "${r.headers.get("cache-control")}", not no-store`);
+  if (!/^application\/json/.test(r.headers.get("content-type") || "")) detail.push(`/version.json is served as ${r.headers.get("content-type")}`);
+  if (detail.length) fail("version", detail.join("; "));
+  else pass("version", `version.json ${vj.version} ${vj.date} build ${vj.build} -> ${vj.news}; summary ${vj.summary.length} chars, printable ASCII; served no-store as application/json`);
 }
 
 // ---- missing --------------------------------------------------------------------

@@ -14,3 +14,8 @@
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Resource-Policy: same-origin
+
+# The game asks for this to learn whether a newer version is out (D38): it
+# must never be answered from a cache.
+/version.json
+  Cache-Control: no-store
