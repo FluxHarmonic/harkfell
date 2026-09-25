@@ -17,7 +17,9 @@
 // [text](url). Anything it does not know is text, escaped.
 //
 // Writes TREE/news/index.html (every post, newest first), TREE/news/<slug>/
-// index.html (the slug is the file name without .md), and TREE/version.json:
+// index.html (the slug is the file name without .md), the feeds
+// TREE/news/feed.xml (RSS 2.0) and TREE/news/feed.json (JSON Feed 1.1) in
+// the shape Crash's Press site writes them, and TREE/version.json:
 //     { "version", "date", "build", "summary", "news" }
 // with the summary and news URL of the post whose version equals --version.
 // When no post has that version, version.json says so ("summary": "",
@@ -68,6 +70,8 @@ function page(title, main, depth) {
   <title>${esc(title)}</title>
   <meta name="theme-color" content="#000000">
   <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="alternate" type="application/rss+xml" title="Harkfell news" href="/news/feed.xml">
+  <link rel="alternate" type="application/feed+json" title="Harkfell news" href="/news/feed.json">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -115,12 +119,45 @@ const list = posts.map((p) => `      <li data-version="${esc(p.version)}"><a hre
         <time datetime="${p.date}">${longDate(p.date)}</time>
         <p>${inline(p.summary)}</p></li>`).join("\n");
 fs.writeFileSync(path.join(TREE, "news", "index.html"), page("News - Harkfell", `    <h1>News</h1>
+    <p class="feeds">Follow along with <a href="/news/feed.xml">RSS</a> or <a href="/news/feed.json">JSON Feed</a>.</p>
     <ul class="post-list">
 ${list}
     </ul>`, 1));
+
+// ---- the feeds (Crash's, as Press's (press feeds) writes them) --------------
+// RSS 2.0 at /news/feed.xml and JSON Feed 1.1 at /news/feed.json, newest first,
+// at most 20 entries. Each entry carries the post's absolute URL and its whole
+// rendered body (Crash's feeds carry the body, not an excerpt), with the body's
+// site-relative links made absolute so they work in a feed reader; the JSON
+// Feed entry also carries the post's summary.
+const FEED_TITLE = "Harkfell news";
+const FEED_DESC = "What's new in each release of Harkfell.";
+const AUTHOR = "David Wilson";
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const rfc822 = (d) => { const t = new Date(d + "T00:00:00Z"); return `${WEEKDAYS[t.getUTCDay()]}, ${String(t.getUTCDate()).padStart(2, "0")} ${MONTHS[t.getUTCMonth()]} ${t.getUTCFullYear()} 00:00:00 +0000`; };
+const rfc3339 = (d) => `${d}T00:00:00Z`;
+const absolute = (html) => html.replace(/(href|src)="\/(?!\/)/g, `$1="${SITE}/`);
+const xml = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const feedPosts = posts.slice(0, 20).map((p) => ({ ...p, url: `${SITE}/news/${p.slug}/`, html: absolute(markdown(p.body)) }));
+const rss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>${xml(FEED_TITLE)}</title><link>${SITE}/</link><description>${xml(FEED_DESC)}</description><language>en</language><atom:link href="${SITE}/news/feed.xml" rel="self" type="application/rss+xml"></atom:link>${feedPosts.length ? `<lastBuildDate>${rfc822(feedPosts[0].date)}</lastBuildDate>` : ""}${feedPosts.map((p) => `<item><title>${xml(p.title)}</title><link>${p.url}</link><guid isPermaLink="true">${p.url}</guid><pubDate>${rfc822(p.date)}</pubDate><dc:creator>${AUTHOR}</dc:creator><description>${xml(p.html)}</description></item>`).join("")}</channel></rss>
+`;
+const jsonFeed = {
+  version: "https://jsonfeed.org/version/1.1",
+  title: FEED_TITLE,
+  home_page_url: `${SITE}/`,
+  description: FEED_DESC,
+  language: "en",
+  feed_url: `${SITE}/news/feed.json`,
+  authors: [{ name: AUTHOR }],
+  items: feedPosts.map((p) => ({ id: p.url, url: p.url, title: p.title, date_published: rfc3339(p.date), content_html: p.html, summary: p.summary })),
+};
+fs.writeFileSync(path.join(TREE, "news", "feed.xml"), rss);
+fs.writeFileSync(path.join(TREE, "news", "feed.json"), JSON.stringify(jsonFeed, null, 2) + "\n");
 
 const mine = posts.find((p) => p.version === VERSION);
 if (!mine) console.error(`build-news: WARNING: no post for version ${VERSION} (posts: ${versions.join(", ")}); version.json carries no summary and verify-site.mjs will refuse the tree`);
 const vj = { version: VERSION, date: TODAY, build: STAMP, summary: mine ? mine.summary : "", news: mine ? `${SITE}/news/${mine.slug}/` : `${SITE}/news/` };
 fs.writeFileSync(path.join(TREE, "version.json"), JSON.stringify(vj, null, 2) + "\n");
-console.log(`build-news: ${posts.length} post(s) -> news/; version.json ${VERSION} ${STAMP} ${mine ? "-> " + vj.news : "(NO POST)"}`);
+console.log(`build-news: ${posts.length} post(s) -> news/ (+ feed.xml, feed.json); version.json ${VERSION} ${STAMP} ${mine ? "-> " + vj.news : "(NO POST)"}`);

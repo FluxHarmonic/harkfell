@@ -33,6 +33,10 @@
 //             2xx (a file the stage left out shows up here)
 //   news      /news/ lists every post newest first; each post page answers
 //             with its title, date and version; no em dash (D38)
+//   feeds     /news/feed.xml (RSS 2.0, parsed by the browser) and feed.json
+//             (JSON Feed 1.1) list every post as /news/ does, newest first,
+//             with every URL absolute under https://harkfell.com (bodies
+//             included); <link rel="alternate"> on / and /news/; an RSS link
 //   version   /version.json parses, has exactly its five fields, names the
 //             staged game's stamp and package.sgl's version, points at that
 //             version's post and carries its summary, which is printable
@@ -421,6 +425,82 @@ const newsPosts = [];
   for (const f of newsFiles) if (/—|&mdash;|&#8212;/.test(fs.readFileSync(f, "utf8"))) detail.push(`${path.relative(DIR, f)} has an em dash`);
   if (detail.length) fail("news", detail.join("; "));
   else pass("news", `/news/ lists ${items.length} post(s) newest first (${items.map((i) => `${i.version} ${i.date}`).join(", ")}); each post page answers with its title, date and version; no em dash`);
+}
+
+// ---- feeds ----------------------------------------------------------------------
+// /news/feed.xml (RSS 2.0) and /news/feed.json (JSON Feed 1.1), Crash's shape:
+// both parse, both list every post /news/ lists, newest first, with RFC 822 /
+// RFC 3339 dates, and every URL in them (the channel's, each entry's, and
+// every link inside an entry's body) is absolute under https://harkfell.com.
+// The pages point at them (<link rel="alternate"> on / and /news/), and /news/
+// shows a visible RSS link.
+{
+  const detail = [];
+  const SITE = "https://harkfell.com";
+  const xr = await fetch(`${origin}/news/feed.xml`);
+  const xmlText = await xr.text();
+  if (xr.status !== 200) detail.push(`/news/feed.xml answered ${xr.status}`);
+  // the browser's own XML parser: a real parse, not a regex
+  const rss = await evalJS(`(() => {
+    const d = new DOMParser().parseFromString(${JSON.stringify(xmlText)}, "application/xml");
+    const err = d.querySelector("parsererror");
+    if (err) return { error: err.textContent.slice(0, 160) };
+    const rssEl = d.documentElement;
+    const ch = d.querySelector("channel");
+    const t = (el, sel) => { const e = el && el.getElementsByTagName(sel)[0]; return e ? e.textContent : null; };
+    const self = ch && [...ch.getElementsByTagName("atom:link")].map((e) => e.getAttribute("href"))[0];
+    return { root: rssEl.tagName, version: rssEl.getAttribute("version"), link: t(ch, "link"), self,
+             items: [...d.getElementsByTagName("item")].map((i) => ({ title: t(i, "title"), link: t(i, "link"), guid: t(i, "guid"), pubDate: t(i, "pubDate"), description: t(i, "description") })) };
+  })()`);
+  let jf = null;
+  const jr = await fetch(`${origin}/news/feed.json`);
+  try { jf = JSON.parse(await jr.text()); } catch (e) { detail.push(`/news/feed.json does not parse: ${e.message}`); }
+  if (jr.status !== 200) detail.push(`/news/feed.json answered ${jr.status}`);
+  const want = newsPosts.map((p) => `${SITE}${p.href}`);
+  const abs = (u, where) => { if (typeof u !== "string" || !u.startsWith(`${SITE}/`)) detail.push(`${where}: "${u}" is not an absolute ${SITE}/ URL`); };
+  const bodyUrls = (html, where) => { for (const m of (html || "").matchAll(/(?:href|src)="([^"]*)"/g)) if (!/^mailto:/.test(m[1]) && !/^https:\/\/(?!harkfell\.com)/.test(m[1])) abs(m[1], `${where} body link`); };
+  if (rss.error) detail.push(`feed.xml does not parse as XML: ${rss.error}`);
+  else {
+    if (rss.root !== "rss" || rss.version !== "2.0") detail.push(`feed.xml is <${rss.root} version="${rss.version}">, not RSS 2.0`);
+    abs(rss.link, "RSS channel link"); abs(rss.self, "RSS atom:link self");
+    if (rss.self !== `${SITE}/news/feed.xml`) detail.push(`RSS self link is ${rss.self}`);
+    const got = rss.items.map((i) => i.link);
+    if (got.join() !== want.join()) detail.push(`RSS items ${got.join(", ")} are not /news/'s posts in its order (${want.join(", ")})`);
+    for (const i of rss.items) {
+      abs(i.link, "RSS item link"); abs(i.guid, "RSS item guid");
+      if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} \+0000$/.test(i.pubDate || "")) detail.push(`RSS pubDate "${i.pubDate}" is not RFC 822`);
+      if (!i.description || i.description.length < 40) detail.push(`RSS item ${i.link} has no body`);
+      bodyUrls(i.description, `RSS ${i.link}`);
+    }
+    const dates = rss.items.map((i) => Date.parse(i.pubDate));
+    if (dates.some((d, k) => k > 0 && d > dates[k - 1])) detail.push("RSS items are not newest first");
+  }
+  if (jf) {
+    if (jf.version !== "https://jsonfeed.org/version/1.1") detail.push(`feed.json version "${jf.version}"`);
+    abs(jf.home_page_url, "JSON home_page_url"); abs(jf.feed_url, "JSON feed_url");
+    if (jf.feed_url !== `${SITE}/news/feed.json`) detail.push(`JSON feed_url is ${jf.feed_url}`);
+    const got = (jf.items || []).map((i) => i.url);
+    if (got.join() !== want.join()) detail.push(`JSON items ${got.join(", ")} are not /news/'s posts in its order`);
+    for (const i of jf.items || []) {
+      abs(i.id, "JSON item id"); abs(i.url, "JSON item url");
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(i.date_published || "")) detail.push(`JSON date_published "${i.date_published}" is not RFC 3339`);
+      if (!i.content_html || i.content_html.length < 40) detail.push(`JSON item ${i.url} has no body`);
+      const post = newsPosts.find((p) => `${SITE}${p.href}` === i.url);
+      if (post && i.summary !== post.summary.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, "\"")) detail.push(`JSON item ${i.url} summary differs from /news/'s`);
+      bodyUrls(i.content_html, `JSON ${i.url}`);
+    }
+    const dates = (jf.items || []).map((i) => Date.parse(i.date_published));
+    if (dates.some((d, k) => k > 0 && d > dates[k - 1])) detail.push("JSON items are not newest first");
+    for (const i of jf.items || []) if (!fs.existsSync(path.join(DIR, new URL(i.url).pathname, "index.html"))) detail.push(`${i.url} has no page in the tree`);
+  }
+  for (const p of ["/", "/news/"]) {
+    const html = await (await fetch(origin + p)).text();
+    if (!/<link rel="alternate" type="application\/rss\+xml"[^>]*href="\/news\/feed\.xml"/.test(html)) detail.push(`${p} has no <link rel="alternate"> to the RSS feed`);
+    if (!/<link rel="alternate" type="application\/feed\+json"[^>]*href="\/news\/feed\.json"/.test(html)) detail.push(`${p} has no <link rel="alternate"> to the JSON feed`);
+  }
+  if (!/<a href="\/news\/feed\.xml">RSS<\/a>/.test(await (await fetch(`${origin}/news/`)).text())) detail.push("/news/ shows no visible RSS link");
+  if (detail.length) fail("feeds", [...new Set(detail)].join("; "));
+  else pass("feeds", `feed.xml (RSS 2.0, parsed by the browser) and feed.json (JSON Feed 1.1) list ${want.length} post(s) as /news/ does, newest first, RFC 822 / RFC 3339 dates, every URL absolute under ${SITE}/ (bodies included); <link rel="alternate"> on / and /news/; the RSS link on /news/`);
 }
 
 // ---- version ---------------------------------------------------------------------
