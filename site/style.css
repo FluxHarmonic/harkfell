@@ -155,10 +155,12 @@ h1 {
 }
 
 
-.play .news-link {
-  display: block;
-  margin-top: 1.4rem;
-  font-size: 1rem;
+/* the news page, as a plain sentence under the Play block (not a second
+   button: David, 2026-09-25) */
+.news-line {
+  text-align: center;
+  margin: -1.5rem 0 3.5rem;
+  font-size: 1.05rem;
   color: var(--fur-2);
 }
 
