@@ -639,6 +639,18 @@
     });
   })();
   </script>
+  <script>
+  // Substratic's page script (assets/substratic/substratic.js), here for the
+  // playtest reports only (?playtest: F1, F2, and the i and report buttons on a
+  // phone). This page keeps its own touch controls, focus handling, fullscreen
+  // button and update line, so those parts are off.
+  window.SUBSTRATIC = {
+    canvas: "#stage", sticks: [], buttons: [], playtest: "param",
+    reportUrl: "playtest-report", versionUrl: null, fullscreen: false,
+    gamepad: false, focus: false
+  };
+  </script>
+  <script src="assets/substratic/substratic.js"></script>
   <!--sigil:app-->
 </body>
 </html>

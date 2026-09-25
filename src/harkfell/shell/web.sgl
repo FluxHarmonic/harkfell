@@ -88,6 +88,7 @@
 
 (define-library (harkfell shell web)
   (import (sigil io)
+          (substratic playtest session)
           (sigil list)
           (sigil string)
           (sigil graphics)
@@ -101,7 +102,7 @@
           (harkfell tunes)
           (harkfell audio)
           (harkfell save)
-          (engine store)
+          (substratic store kv)
           (harkfell images)
           (harkfell shell web-images)
           (only (harkfell title) start-words-landed?))
@@ -161,6 +162,7 @@
             (say "frame" "words"))
           (gles3-resize-to-display)
           (shell-present! (gles3-canvas-width) (gles3-canvas-height) ticks)
+          (shell-playtest-after-frame! (gles3-canvas-width) (gles3-canvas-height))
           (set! *work-ms* (- (now-ms) w0)))))
 
     ;; "A,B,C" -> a list of numbers (#f for a field that is not one).
@@ -175,6 +177,8 @@
       (set-viewport #f)
       (set-letterbox-color 0.0 0.0 0.0)
       (shell-boot!)
+      ;; F1 and F2 (Substratic's playtest reports): off until ?playtest
+      (shell-playtest-setup! (quote web) "web" #f)
       (shell-add-frame-listener! (lambda (ev) (say "frame" (symbol->string ev))))
       ;; D40: the sound pauses and resumes with the game (SOUND's fade and hold)
       (shell-add-pause-listener! (lambda (ev) (if (eq? ev 'pause) (audio-pause!) (audio-resume!))))
@@ -189,6 +193,13 @@
 
     (define (web-dispatch type payload)
       (cond ((string=? type "frame") (web-tick payload) 0)
+            ;; ?playtest (the page forwards every parameter as ("param", ...)),
+            ;; then the playtest's own events and F1/F2, and every key while a
+            ;; report is open
+            ((string=? type "param")
+             (when (string=? payload "playtest") (playtest-set-enabled! (shell-playtest) #t))
+             0)
+            ((playtest-dispatch! (shell-playtest) type payload) 1)
             ((string=? type "keydown")
              (let ((k (dom-key->sym payload)))
                (cond ((and (eq? k 'r) (shell-over-offered?)) (shell-over-key! #t))

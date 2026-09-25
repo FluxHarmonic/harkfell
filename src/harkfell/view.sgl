@@ -1,0 +1,21 @@
+;;; (harkfell view) - Substratic's view fit, with Harkfell's one switch.
+;;;
+;;; (substratic view fit) places the 400x176 view on a window at a whole
+;;; scale, or sharp bilinear where no whole scale fits well; integer-only is
+;;; an argument there. Harkfell sets it once, for the whole game, from the
+;;; native shell (D37: the desktop window is whole scales only, black around
+;;; the view); the web leaves it off. This module holds that switch and
+;;; passes it to every fit, so the modules that call view-fit need not know.
+
+(define-library (harkfell view)
+  (import (rename (substratic view fit) (view-fit substratic-view-fit)))
+
+  (export fit fit? fit-mode fit-scale fit-x fit-y fit-w fit-h fit-up
+          view-fit window->view SHARP-BELOW view-set-integer-only!)
+
+  (begin
+    (define *integer-only* #f)
+    (define (view-set-integer-only! on) (set! *integer-only* (and on #t)))
+
+    (define (view-fit win-w win-h vw vh)
+      (substratic-view-fit win-w win-h vw vh integer-only: *integer-only*))))

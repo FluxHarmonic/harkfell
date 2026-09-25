@@ -2,7 +2,7 @@
 ;;;
 ;;; One body moving through a tilemap ((engine tilemap)'s kinds), one fixed
 ;;; tick at a time. Everything is in pixels and ticks (1/60 s at the clock
-;;; (engine tween) keeps), and every number that shapes the feel comes in
+;;; (substratic time clock) keeps), and every number that shapes the feel comes in
 ;;; a FEEL record the game fills: the engine has the mechanics, the game
 ;;; has the constants.
 ;;;

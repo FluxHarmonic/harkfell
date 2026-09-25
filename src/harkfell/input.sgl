@@ -7,7 +7,7 @@
 ;;;
 ;;;   keyboard   arrows or WASD to move, climb and swim; Space or Z to
 ;;;              jump (section 3's controls table)
-;;;   touch      the stick's sector ((engine stick)) and the jump button
+;;;   touch      the stick's sector ((substratic input sticks)) and the jump button
 ;;;   gamepad    not in A0: sigil-desktop 0.10.2 exposes no gamepad
 ;;;
 ;;; A press is an edge the shell latches until a tick consumes it: a
@@ -19,7 +19,7 @@
 (define-library (harkfell input)
   (import (sigil math)
           (engine body)
-          (engine stick))
+          (substratic input sticks))
 
   (export keys-h keys-v jump-key? jump-key-in?
           tick-intent)
@@ -42,7 +42,7 @@
 
     (define (clamp1 n) (max -1 (min 1 n)))
 
-    ;; keys: the key symbols held. sector: the stick's ((engine stick)).
+    ;; keys: the key symbols held. sector: the stick's ((substratic input sticks)).
     ;; touch-jump: the jump button is down. press: a jump press is latched.
     (define (tick-intent keys sector touch-jump press)
       (let ((hv (sector->hv sector))

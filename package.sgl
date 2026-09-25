@@ -7,8 +7,11 @@
 ;;; (harkfell shell web) over the browser's requestAnimationFrame for the
 ;;; web config.
 ;;;
-;;; The modules under (engine ...) are written for the shared Sigil game
-;;; engine Crash's P5 is to extract (ruling D6): no Harkfell names in them.
+;;; The shared engine is Substratic (github.com/substratic/substratic): the
+;;; view, the window, the store and settings, the clock and tweens, the touch
+;;; stick's reader, and the playtest reports (F1, F2). The platformer
+;;; modules still under (engine ...) (tilemap, bodies, rooms, reach, the
+;;; mixer, the mini font) stay here until a second game needs them (ruling D6).
 ;;;
 ;;;   scripts/dev sigil build                       native (dev: bytecode)
 ;;;   scripts/dev sigil build --config release      native, what you play
@@ -145,8 +148,11 @@
     ;; size and fullscreen (window-set-size!, set-fullscreen!); 0.13.0 for
     ;; the window's size in screen units (window-width, window-height).
     (from-git url: app-repo version: "^0.13.0" configs: '(dev release))
-    ;; Drawing, both targets.
-    (from-git url: graphics-repo version: "^0.11.4")
+    ;; The shared engine. 0.2.0 for settings tables with no schema version
+    ;; (Harkfell's players have settings and no version key).
+    (from-git url: "github:substratic/substratic" version: "^0.2.0")
+    ;; Drawing, both targets. 0.12.0 is what substratic builds against.
+    (from-git url: graphics-repo version: "^0.12.0")
     ;; Web only: the wasm runtime and loader, the WebGL2 bridge and app
     ;; shell, and localStorage for (engine store).
     (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.6" configs: '(web))

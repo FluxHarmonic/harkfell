@@ -22,7 +22,7 @@
         (sigil fs)
         (sigil time)
         (engine body)
-        (engine store)
+        (substratic store kv)
         (engine worldmap)
         (harkfell world)
         (harkfell source)

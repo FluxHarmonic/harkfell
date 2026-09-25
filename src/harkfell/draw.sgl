@@ -3,7 +3,7 @@
 ;;;
 ;;; Everything in play is drawn as palette SLOTS into (harkfell render)'s
 ;;; index target, then resolved into colours in one shader pass; the shell
-;;; puts the colour target on the window at a whole scale ((engine view)).
+;;; puts the colour target on the window at a whole scale ((harkfell view)).
 ;;;
 ;;; A room is drawn in layers, back to front:
 ;;;   backdrop     the region's sky, a dithered ramp of its four sky slots

@@ -1,11 +1,11 @@
-;;; The touch stick's directions ((engine stick)): the wide left and right
+;;; The touch stick's directions ((substratic input sticks)): the wide left and right
 ;;; sectors that keep "hold toward the wall" from slipping into a climb,
 ;;; the hysteresis at a boundary, and the dead zone's two thresholds.
 ;;; Offsets are in ring radii, dy down.
 
 (import (sigil test)
         (sigil math)
-        (engine stick))
+        (substratic input sticks))
 
 ;; A unit vector at deg degrees above the horizontal, to the right.
 (define (at deg r)

@@ -1,87 +1,54 @@
 ;;; (harkfell settings) - The settings, and where they live.
 ;;;
-;;; COPIED from Crash The Stack master e737d21, src/crash/settings.sgl, as
-;;; ruling D6 asks. Kept: the setting record, the settings-in-force alist
-;;; and its verbs (settings-defaults, settings-value, settings-with,
-;;; settings-step, setting-ref, setting-value?), unchanged. Changed: the
-;;; module name; Crash's eight rows replaced by Harkfell's; Crash's groups,
-;;; schema version, retired keys, "when a change takes" and value labels
-;;; left out (a settings screen is not in A0).
+;;; Harkfell's rows as a (substratic store settings) table. The verbs keep
+;;; the names and arities Harkfell's shell and tests already use (no table
+;;; argument: this module closes over Harkfell's table); the code behind
+;;; them is Substratic's.
 ;;;
-;;; A0's one row: STICK, the touch joystick's form (ruling D25, both built
-;;; so David picks by feel): float (the hybrid: the ring rests at its home
-;;; spot and re-centres under a thumb that lands anywhere in the lower-left
-;;; quarter) or fixed (the ring stays where it is drawn). The page's
-;;; ?stick=fixed|float sets it and the store keeps it, so a phone stays on
-;;; the form last asked for until asked otherwise. David chose fixed after
-;;; playing both (2026-09-24), so fixed is the default.
+;;; STICK: the touch joystick's form (ruling D25, both built so David picks
+;;; by feel): float (the hybrid: the ring rests at its home spot and
+;;; re-centres under a thumb that lands anywhere in the lower-left quarter)
+;;; or fixed (the ring stays where it is drawn). The page's ?stick=fixed|float
+;;; sets it and the store keeps it. David chose fixed after playing both
+;;; (2026-09-24), so fixed is the default.
 ;;;
-;;; Every setting is its own store key holding a plain datum (a symbol,
-;;; so a missing key, which reads as #f, is never mistaken for a value).
-;;; A missing or unreadable key is the default. Pure: the shell does the
+;;; SCALE (D37): the native window's whole scale of the 400x176 view (x2 is
+;;; 800x352, Knytt's small window), or fullscreen at the largest whole scale
+;;; that fits; remembered between runs. Native only: the web fits its canvas.
+;;;
+;;; The table has NO schema version (version: #f): Harkfell's players have
+;;; these keys in their stores already and no version key, and a versioned
+;;; table would reset their settings once on the update that adopted it.
+;;;
+;;; Every setting is its own store key holding a symbol (a missing key reads
+;;; as #f, which a boolean could not be told from). Pure: the shell does the
 ;;; store reads and writes.
 
 (define-library (harkfell settings)
-  (import (sigil struct))
+  (import (rename (substratic store settings)
+                  (setting-ref table-setting-ref)
+                  (settings-defaults table-settings-defaults)
+                  (settings-value table-settings-value)
+                  (settings-with table-settings-with)
+                  (settings-step table-settings-step)))
 
   (export setting setting? setting-id setting-name setting-values setting-default setting-key
-          SETTINGS SETTING-IDS setting-ref setting-value?
+          SETTINGS SETTINGS-TABLE SETTING-IDS setting-ref setting-value?
           settings-defaults settings-value settings-with settings-step)
 
   (begin
-    (define-struct setting
-      (id default: #f)
-      (name default: "")
-      (values default: '())        ; the values in stepping order
-      (default default: #f)
-      (key default: ""))           ; the store key
-
     ;; Built with list, not quoted (Crash's wasm literal hazard).
     (define SETTINGS
       (list (setting id: 'stick name: "STICK" values: (list 'fixed 'float) default: 'fixed key: "stick")
-            ;; D37 (David, 2026-09-24): the native window's whole scale of the
-            ;; 400x176 view (x2 is 800x352, Knytt's small window), or fullscreen
-            ;; at the largest whole scale that fits; remembered between runs.
-            ;; Native only: the web fits its canvas.
             (setting id: 'scale name: "SCALE" values: (list 'x2 'x3 'x4 'x5 'x6 'x7 'x8 'fullscreen)
                      default: 'x2 key: "scale")))
 
+    (define SETTINGS-TABLE (make-settings-table SETTINGS version: #f))
+
     (define SETTING-IDS (map setting-id SETTINGS))
 
-    (define (setting-ref id)
-      (let loop ((ss SETTINGS))
-        (cond ((null? ss) #f)
-              ((eq? (setting-id (car ss)) id) (car ss))
-              (else (loop (cdr ss))))))
-
-    (define (setting-value? st v)
-      (and (member v (setting-values st)) #t))
-
-    ;; --- the settings in force -----------------------------------------------
-
-    (define (settings-defaults)
-      (map (lambda (st) (cons (setting-id st) (setting-default st))) SETTINGS))
-
-    (define (settings-value s id)
-      (let ((e (assq id s)))
-        (if e (cdr e) (let ((st (setting-ref id))) (and st (setting-default st))))))
-
-    ;; s with id at v (v must be one of the row's values; else s).
-    (define (settings-with s id v)
-      (let ((st (setting-ref id)))
-        (if (and st (setting-value? st v))
-            (map (lambda (e) (if (eq? (car e) id) (cons id v) e)) s)
-            s)))
-
-    ;; s with id stepped by delta (+1 forward, -1 back), wrapping.
-    (define (settings-step s id delta)
-      (let ((st (setting-ref id)))
-        (if (not st)
-            s
-            (let* ((vs (setting-values st))
-                   (n (length vs))
-                   (at (let loop ((l vs) (i 0))
-                         (cond ((null? l) 0)
-                               ((equal? (car l) (settings-value s id)) i)
-                               (else (loop (cdr l) (+ i 1)))))))
-              (settings-with s id (list-ref vs (modulo (+ at delta) n)))))))))
+    (define (setting-ref id) (table-setting-ref SETTINGS-TABLE id))
+    (define (settings-defaults) (table-settings-defaults SETTINGS-TABLE))
+    (define (settings-value s id) (table-settings-value SETTINGS-TABLE s id))
+    (define (settings-with s id v) (table-settings-with SETTINGS-TABLE s id v))
+    (define (settings-step s id delta) (table-settings-step SETTINGS-TABLE s id delta))))

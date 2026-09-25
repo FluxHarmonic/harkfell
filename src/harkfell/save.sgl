@@ -1,6 +1,6 @@
 ;;; (harkfell save) - Save and continue (A4).
 ;;;
-;;; A save is one datum, kept under the store key "save" ((engine store):
+;;; A save is one datum, kept under the store key "save" ((substratic store kv):
 ;;; localStorage on the web, a file natively):
 ;;;
 ;;;   (harkfell-save 1

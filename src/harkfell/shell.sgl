@@ -7,12 +7,12 @@
 ;;; menu, two tables and a hub, none of which A0 has.
 ;;;
 ;;; Each frame the shell (native or web) calls shell-frame! with the
-;;; frame's wall dt. The clock ((engine tween)) turns it into whole 1/60 s
+;;; frame's wall dt. The clock ((substratic time clock)) turns it into whole 1/60 s
 ;;; ticks (at most MAX-STEPS-PER-FRAME, the rest dropped and counted) and
 ;;; the world steps once per tick with the intent of that tick
 ;;; ((harkfell input)). Then shell-present! draws the room into its
 ;;; 400x176 target and puts the target on the window at a whole scale
-;;; ((engine view)).
+;;; ((harkfell view)).
 ;;;
 ;;; Touch latency (the web page's ?ms). The page stamps every stick move
 ;;; and jump press with the event's timeStamp (the performance.now()
@@ -41,11 +41,15 @@
           (sigil string)
           (sigil time)
           (sigil graphics)
-          (engine tween)
-          (engine view)
+          (substratic time clock)
+          (substratic time tween)
+          (harkfell view)
+          (substratic view present)
+          (substratic playtest session)
+          (engine tilemap)
           (engine body)
-          (engine stick)
-          (engine store)
+          (substratic input sticks)
+          (substratic store kv)
           (harkfell world)
           (harkfell rooms)
           (harkfell input)
@@ -66,7 +70,8 @@
           (harkfell title)
           (harkfell render))
 
-  (export shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
+  (export shell-playtest-setup! shell-playtest shell-playtest-busy? shell-playtest-after-frame!
+          shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
           shell-add-frame-listener! shell-set-save-extras! shell-set-input-kind!
           shell-save-now! shell-saving? shell-reveal-alpha shell-revealed? shell-set-moment-clock! shell-set-look! shell-set-look-alpha! shell-set-look-over!
           shell-boot! shell-frame! shell-present! shell-reset-world!
@@ -96,8 +101,7 @@
     (define *ms* #f)               ; the readout is on
     (define *settings* #f)
     (define *room-rt* #f)
-    (define *sharp-rt* #f)
-    (define *sharp-up* 0)
+    (define *presenter* #f)         ; (substratic view present): the sharp pass's target
     (define *frame-ms* 0.0)
     (define *step-ms* 0.0)
     (define *draw-ms* 0.0)
@@ -426,6 +430,47 @@
       (let ((p (and *world* (world-room *world*))))
         (if (and p (placed-data p)) (room-label (placed-data p)) "test-room")))
 
+    ;; --- the playtest reports (Substratic's F1 and F2) ------------------------
+
+    ;; F1: where the player is. F2: a report (a screenshot, report.json with
+    ;; the location, the save datum and the input since the room was entered,
+    ;; and a typed note). Off until a shell turns it on (--playtest natively,
+    ;; ?playtest on the web): dev only.
+    (define *pt* (make-playtest game: "harkfell" enabled: #f))
+    (define *pt-room* #f)             ; the room last seen by the playtest
+
+    (define (describe-location)
+      (if (not *world*)
+          '()
+          (let* ((b (world-body *world*))
+                 (tm (world-tiles *world*)))
+            (list (cons 'room (shell-room-label))
+                  (cons 'cell (if tm (cons (px->col tm (body-x b)) (px->col tm (body-y b))) 'null))
+                  (cons 'position (cons (body-x b) (body-y b)))
+                  (cons 'carried (world-carry *world*))
+                  (cons 'mode *mode*)
+                  (cons 'frame (if *frame* (frame-phase *frame*) 'play))))))
+
+    ;; platform: 'desktop or 'web; build: the build's stamp.
+    (define (shell-playtest-setup! platform build enabled)
+      (set! *pt* (make-playtest game: "harkfell" build: build platform: platform
+                                describe: describe-location
+                                snapshot: (lambda () (current-save))
+                                enabled: enabled)))
+
+    (define (shell-playtest) *pt*)
+    (define (shell-playtest-busy?) (playtest-busy? *pt*))
+    (define (shell-playtest-after-frame! w h) (playtest-after-frame! *pt* w h))
+
+    ;; Each tick's intent, and a new log from each room entered.
+    (define (playtest-record-tick! in)
+      (let ((room (and *world* (world-room *world*))))
+        (unless (eq? room *pt-room*)
+          (set! *pt-room* room)
+          (playtest-room-entered! *pt* (world-ticks *world*))))
+      (playtest-record-input! *pt* (world-ticks *world*)
+                              (list (intent-h in) (intent-v in) (intent-jump in) (intent-press in))))
+
     ;; mode: 'play, 'atlas, or 'sheet with the region.
     (define (shell-set-mode! mode . region)
       (unless (eq? mode 'play) (end-game!))
@@ -608,6 +653,7 @@
           (draw-start! win-w win-h (min 1.0 (/ *look-s* 1.5)) *look-s*
                        (and *pointer* (car *pointer*)) (and *pointer* (cdr *pointer*))
                        #t *input-kind* *look-over*))
+      (playtest-draw! *pt* win-w win-h)          ; F1's readout, the desktop note
       (end-frame))
 
     (define (shell-frame! dt0)
@@ -640,10 +686,12 @@
       (set! *key-edge* #f)
       (set! *gesture* #f)
       (let loop ((i 0))
-        (when (and (< i (clock-steps *clock*)) (eq? *mode* 'play) (not *still*) (not (memq *look* (list (quote start) (quote card))))
+        (when (and (< i (clock-steps *clock*)) (eq? *mode* (quote play)) (not *still*) (not (memq *look* (list (quote start) (quote card))))
+                   (not (playtest-busy? *pt*))                 ; a report open: the world holds still
                    (or (not *frame*) (frame-world-steps? *frame*)))
           (let ((in (tick-intent *keys* *sector* *touch-jump* *press*)))
             (set! *press* #f)
+            (playtest-record-tick! in)
             ;; the creature wakes on the first input (D15: the first input is yours)
             (when (and *waking* (or (not (= (intent-h in) 0)) (not (= (intent-v in) 0)) (intent-jump in)))
               (set! *waking* #f))
@@ -655,6 +703,7 @@
               (when (or (memq 'jump ev) (memq 'wall-jump ev))
                 (set! *launched* #t))))
           (loop (+ i 1))))
+      (when *world* (playtest-tick! *pt* (world-ticks *world*)))
       (let ((p (world-take-news *world*)))
         (set! *world* (cdr p))
         (set! *frame-news* (car p))
@@ -752,10 +801,8 @@
     (define (ensure-targets! f)
       (unless *room-rt*
         (set! *room-rt* #t))
-      (when (and (eq? (fit-mode f) 'sharp) (not (= (fit-up f) *sharp-up*)))
-        (when *sharp-rt* (render-target-free! *sharp-rt*))
-        (set! *sharp-up* (fit-up f))
-        (set! *sharp-rt* (make-render-target (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*) 'linear))))
+      (unless *presenter*
+        (set! *presenter* (make-presenter VIEW-W VIEW-H))))
 
     ;; Draw the frame onto a window of win-w x win-h pixels. ticks: what
     ;; shell-frame! ran (for the latency record).
@@ -781,6 +828,7 @@
                        (shell-over-progress)))
         ((card) (draw-card! win-w win-h (frame-card-alpha *frame*) *wall*))
         (else (set-color 0.0 0.0 0.0 1.0) (draw-filled-rect 0 0 win-w win-h)))
+      (playtest-draw! *pt* win-w win-h)          ; F1's readout, the desktop note
       (end-frame))
 
     ;; The sheet or the atlas: one target the size of the overview, fitted
@@ -803,6 +851,7 @@
             (set-blend-mode 'normal)
             (draw-overview rooms (overview-k) (overview-gap) #t))
           (with-blend-mode 'none (draw-render-target *view-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f)))
+          (playtest-draw! *pt* win-w win-h)          ; F1's readout, the desktop note
           (end-frame))))
 
     (define (present-room! win-w win-h ticks)
@@ -835,13 +884,9 @@
         ;; blended over the black window those pixels came out dark (seen in
         ;; A3's first native shots: every glow a dark disc; the water had it
         ;; since A1).
-        (with-blend-mode 'none
-          (if (eq? (fit-mode f) 'integer)
-              (draw-render-target (room-color-rt) (fit-x f) (fit-y f) (fit-w f) (fit-h f))
-              (begin
-                (with-render-target *sharp-rt*
-                  (draw-render-target (room-color-rt) 0 0 (* VIEW-W *sharp-up*) (* VIEW-H *sharp-up*)))
-                (draw-render-target *sharp-rt* (fit-x f) (fit-y f) (fit-w f) (fit-h f)))))
+        ;; the room's target on the window at its fit, copied opaque, through
+        ;; the sharp-bilinear pass when the fit is 'sharp
+        (view-present! *presenter* (room-color-rt) f)
         ;; D35: the wordmark over the live world, at the first homecoming
         ;; ((harkfell title)'s draw-reveal!, on (harkfell reveal)'s schedule)
         (when (> (shell-reveal-alpha) 0.0)
@@ -867,6 +912,7 @@
                                 (*extra-lines*))
                         (fit-x f) (fit-y f) (fit-w f)
                         (max 1 (exact (floor (/ (fit-scale f) 2))))))
+        (playtest-draw! *pt* win-w win-h)          ; F1's readout, the desktop note
         (end-frame)
         (set! *draw-ms* (- (now-ms) t1))
         (when *frame-stamp*
