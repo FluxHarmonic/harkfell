@@ -40,7 +40,8 @@
 ;;;              eight directions at SWIM (SWIM-ACCEL to get there) and sinks
 ;;;              at SINK with no input; jump with the head out of the water
 ;;;              leaps WATER-JUMP-V.
-;;;   drop       (D31) down held and jump pressed while standing on one-way
+;;;   drop       (D31) straight down held (not a diagonal) and jump pressed
+;;;              while standing on one-way
 ;;;              ledges alone (nothing solid under the box) drops through
 ;;;              them: no jump, no coyote jump after it. On rock, down and
 ;;;              jump is an ordinary jump.
@@ -242,10 +243,13 @@
                          ((and (not (= h 0)) (wall-on? tm x y f h)) h)
                          (else 0)))
              (jump? (> (body-buffer b) 0))
-             ;; D31 drop-through: down held and jump pressed while standing on
+             ;; D31 drop-through: straight down held (no sideways: a stick pushed
+             ;; down-diagonally still jumps, the review found the touch stick's
+             ;; se and sw sectors start 30 degrees below level) and jump pressed
+             ;; while standing on
              ;; one-way ledges alone (nothing solid under the box) drops the
              ;; body through them instead of jumping
-             (drop (and jump? grounded (> v 0) (not (eq? (body-mode b) 'cling))
+             (drop (and jump? grounded (> v 0) (= h 0) (not (eq? (body-mode b) 'cling))
                         (not (box-any? tm x (+ y (feel-box-h f)) (feel-box-w f) 0.001 kind-solid?))))
              ;; clinging, a jump is always the kick off the wall (even standing
              ;; at the wall's foot, where the ground jump would also qualify)

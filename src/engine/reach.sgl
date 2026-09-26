@@ -658,12 +658,13 @@
               (unless (= h 0)
                 (fly from b1 (cons in rev) 1 h #t #f 'chimney)))))
 
-        ;; Down and jump pressed with direction h: if the body drops through
-        ;; the ledge it stands on ((engine body)'s drop event), fly on from
-        ;; there with jump let go. On rock nothing happens here (that press is
-        ;; an ordinary jump, which jump-from covers).
+        ;; Straight down and jump pressed (the drop needs no sideways input): if
+        ;; the body drops through the ledge it stands on ((engine body)'s drop
+        ;; event), fly on from there with jump let go, drifting toward h. On rock
+        ;; nothing happens here (that press is an ordinary jump, which jump-from
+        ;; covers).
         (define (drop-from from b rev h)
-          (let* ((in (make-intent* h 1 #t #t))
+          (let* ((in (make-intent* 0 1 #t #t))
                  (b1 (step b in)))
             (when (and b1 (memq 'drop (body-events b1)))
               (fly from b1 (cons in rev) 1 h #f #f 'default))))

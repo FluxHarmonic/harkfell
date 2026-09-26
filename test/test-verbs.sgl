@@ -412,6 +412,10 @@
          (on-rock (history (stand 7 2) tm down-jump 60))
          (plain (history (stand 2 2) tm (lambda (tick b) (intent jump: (= tick 0) press: (= tick 0))) 60))
          (held (history (stand 2 2) tm (lambda (tick b) (intent v: 1)) 30))
+         ;; the stick pushed down-diagonally (the se sector: h 1, v 1) and jump: a jump
+         (diagonal (history (stand 2 2) tm (lambda (tick b) (intent h: 1 v: 1 jump: (= tick 0) press: (= tick 0))) 60))
+         ;; half on the ledge's last cell (col 4), half on the rock (col 5): no drop
+         (straddle (history (body (body-at 76.0 34.0) mode: 'ground) tm down-jump 60))
          (coyote (history (stand 2 2) tm
                           (lambda (tick b) (intent v: 1 jump: (or (= tick 0) (= tick 3)) press: (or (= tick 0) (= tick 3))))
                           60))
@@ -429,6 +433,13 @@
       (assert-true (any-event? plain 'jump))
       (assert-false (any-event? plain 'drop))
       (assert-equal (* 16 3.0) (feet (last plain))))
+    (test "the stick down-diagonally and jump on a ledge is a jump, not a drop"
+      (assert-true (any-event? diagonal 'jump))
+      (assert-false (any-event? diagonal 'drop)))
+    (test "half on a ledge and half on rock, down and jump is a jump: rock under the body stops the drop"
+      (assert-true (any-event? straddle 'jump))
+      (assert-false (any-event? straddle 'drop))
+      (assert-true (<= (feet (last straddle)) (* 16 3.0))))
     (test "down held without a press does nothing"
       (assert-false (any-event? held 'drop))
       (assert-equal (* 16 3.0) (feet (last held))))
