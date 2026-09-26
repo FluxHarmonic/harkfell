@@ -1,0 +1,19 @@
+;;; The positive control for carry-softlock (t-c53681): the same room with
+;;; the pit's step made of rock, not a stone keyed to H2. Carrying H2 the pit
+;;; still has its step, so taking the harmonic strands nobody, and the
+;;; checker must pass it. If this goes red, the carry model is flagging
+;;; something other than the stone that vanishes.
+(start region: stonefen room: (0 0) cell: (2 8))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region stonefen
+  name: "Stone fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: ()
+  moments: ()
+  gives: ((overtone 2)))

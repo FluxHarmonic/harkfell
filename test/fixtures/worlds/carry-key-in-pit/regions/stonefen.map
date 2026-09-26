@@ -1,0 +1,7 @@
+(map
+  region: stonefen
+  origin: (0 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Pit" "a pit that holds the key to its own door")))

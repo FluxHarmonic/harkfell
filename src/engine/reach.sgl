@@ -97,7 +97,7 @@
           graph-same-edges?
           graph-tm graph-cells graph-edges graph-starts graph-stats
           graph-edges-from graph-rejected graph-waters cell-index index-cell
-          replay-witness witness-lands? witness-bodies
+          replay-witness witness-lands? witness-bodies witness-trace graph-walk-rect settle-cell
           reach-forward reach-backward)
 
   (begin
@@ -238,6 +238,36 @@
               (reverse (if b (cons b acc) acc))
               (loop (safe-step tm f b (car s)) (cdr s) (cons b acc))))))
 
+    ;; Every body of the witness's REPLAY as witness-lands? runs it: from the
+    ;; checked rest state (real-stand-body), through the script, then the
+    ;; settle with no input, start and end included. What a body passed
+    ;; through on the way (a pickup it touched) is read from this. '() when
+    ;; the start is not a rest state; the trace stops where a tick touched a
+    ;; hazard or left the map.
+    (define (witness-trace tm f w)
+      (let ((from (witness-from w)))
+        (let loop ((b (real-stand-body tm f (car from) (cdr from)))
+                   (s (witness-script w))
+                   (acc '()))
+          (cond ((not b) (reverse acc))
+                ((null? s)
+                 (let settle ((b b) (n 0) (acc acc))
+                   (cond ((not b) (reverse acc))
+                         ((or (at-rest? b) (>= n SETTLE-MAX)) (reverse (cons b acc)))
+                         (else (settle (safe-step tm f b NOTHING) (+ n 1) (cons b acc))))))
+                (else (loop (safe-step tm f b (car s)) (cdr s) (cons b acc)))))))
+
+    ;; Where a body standing in cell (c . r) comes to rest in tm when let go
+    ;; with no input: the cell itself when it is standable there, else where
+    ;; it falls to (a stone that held it has opened). The rest cell, or #f
+    ;; when it touches a hazard, leaves the map, or does not come to rest
+    ;; standing (it falls into water) within SETTLE-MAX ticks.
+    (define (settle-cell tm f cell)
+      (if (standable? tm (car cell) (cdr cell))
+          cell
+          (let ((b (settle-quietly tm f (body (stand-body tm f (car cell) (cdr cell)) mode: 'air))))
+            (and b (at-rest? b) (rest-cell tm f b)))))
+
     (define (outside? tm f b)
       (let ((cx (+ (body-x b) (/ (feel-box-w f) 2.0)))
             (cy (+ (body-y b) (/ (feel-box-h f) 2.0))))
@@ -279,6 +309,17 @@
       (memo default: #f))           ; (expansions . candidates), vectors by anchor key (REUSE)
 
     (define (graph-memo g) (reach-graph-memo g))
+
+    ;; The rectangle (c0 r0 c1 r1), in cells, that every body of every path
+    ;; the candidate walk from the standing anchor at cell realized
+    ;; overlapped, with a cell of margin (REUSE's rectangle). Every accepted
+    ;; edge out of cell replays one of those paths from the same state, so
+    ;; its bodies lie inside it. #f when the search never walked from there.
+    (define (graph-walk-rect g cell)
+      (let* ((tm (reach-graph-tm g))
+             (memo (reach-graph-memo g))
+             (e (and memo (vector-ref (cdr memo) (+ K-STAND (* NKINDS (cell-index tm (car cell) (cdr cell))))))))
+        (and e (car e))))
 
     ;; Every script the search tried from the standing anchor at cell and
     ;; followed to an anchor (walks, jumps, grabs: its expansion's notes, from

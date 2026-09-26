@@ -149,7 +149,7 @@
                                     (say "  rejected by the replay: ("
                                          (number->string (caar e)) "," (number->string (cdar e)) ") -> ("
                                          (number->string (cadr e)) "," (number->string (cddr e)) ")"))
-                                  (apply append (map (lambda (e) (graph-rejected (cdr e))) g)))))
+                                  (apply append (map (lambda (e) (graph-rejected (cset-graph e))) g)))))
                     (for-each (lambda (p) (say (problem->string p))) rps)
                     (let ((pk (arg-value args "--path"))
                           (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
@@ -162,9 +162,9 @@
                                 (say "path to " pk " (" pc "):")
                                 (let* ((hv (arg-value args "--have"))
                                        (carry (if hv (list-sort < (filter integer? (map string->number (string-split hv ",")))) '()))
-                                       (e (assoc carry g)))
+                                       (e (find (lambda (x) (equal? (cset-carry x) carry)) g)))
                                   (if e
-                                      (print-path ct (cdr e) (local->global ct rm (car xy) (cadr xy)))
+                                      (print-path ct (cset-graph e) (local->global ct rm (car xy) (cadr xy)))
                                       (say "--have: no carry set " (carry-label carry) " is one a player can hold"))))
                               (say "--path: no room " pk " or no cell " pc)))))
                     (when (and g (not (member "--path" args)))

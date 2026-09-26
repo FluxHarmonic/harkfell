@@ -1,0 +1,7 @@
+(map
+  region: stonefen
+  origin: (0 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Ledge" "a harmonic on a ledge its own stones lead to")))

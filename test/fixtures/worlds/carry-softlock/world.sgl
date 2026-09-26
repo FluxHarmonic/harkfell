@@ -1,0 +1,31 @@
+;;; A one-room fixture world for the reach checker's carry model
+;;; (t-c53681): a softlock that a checker searching each carry set only
+;;; from the start passes.
+;;;
+;;; The ledge (cols 9-14, standing row 4) is four tiles above the floor, out
+;;; of a held jump's 3.25; a ring-stone keyed to H2 at (8,8) is the step up to
+;;; it. H2 lies on the ledge. East of the ledge is a pit four deep in smooth
+;;; rock, whose only way out is a second H2 stone at (15,8), a step back up.
+;;;
+;;; Carrying nothing, every cell is reached and leads back: the stones are
+;;; steps. Carrying H2, both stones are open (air), so from the start the
+;;; ledge and the pit are out of reach, and a search from the start never
+;;; looks at them. But a player who takes H2 on the ledge is there carrying
+;;; it: from the ledge they can drop west to the floor (so "picked up, is
+;;; there a way back from the harmonic's cell?" says yes), or drop east into
+;;; the pit, whose step has gone. That is a softlock, and the checker must
+;;; report it as a trap carrying H2.
+(start region: stonefen room: (0 0) cell: (2 8))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region stonefen
+  name: "Stone fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: ()
+  moments: ()
+  gives: ((overtone 2)))

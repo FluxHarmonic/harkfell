@@ -1,0 +1,20 @@
+(room
+  region: stonefen
+  at: (0 0)
+  title: "Ledge"
+  intent: "a harmonic on a ledge its own stones lead to"
+  grid:
+  ("#########################"
+   "#                   #####"
+   "#                   #####"
+   "#                   #####"
+   "#                   #####"
+   "#        ######     #####"
+   "#        ######     #####"
+   "#        ######     #####"
+   "#       o######o    #####"
+   "#########################"
+   "#########################")
+  things: ((harmonic at: (10 4) overtone: 2)
+           (ring-stone at: (8 8) overtone: 2)
+           (ring-stone at: (15 8) overtone: 2)))

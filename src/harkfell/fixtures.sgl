@@ -3,7 +3,7 @@
 ;;;
 ;;;   harkfell --reach-fixtures [--fixtures DIR] [--explore]
 ;;;
-;;; Two kinds:
+;;; Four kinds:
 ;;;
 ;;; 1. FIXTURE FILES (test/fixtures/reach/*.fixture), each one room:
 ;;;
@@ -52,7 +52,19 @@
 ;;;    Sabotage: the search ignoring the changed cells reuses what the stone
 ;;;    touched, and the edges differ.
 ;;;
-;;; --reuse-only runs the reuse check alone (its sabotage leg's quick form).
+;;; 4. CARRY (t-c53681, (harkfell check)'s pickup as a change of carry): four
+;;;    one-room worlds in test/fixtures/worlds/carry-*, each checked whole
+;;;    (content-reach, reach-problems). carry-softlock must report a trap
+;;;    carrying H2 (a pit whose step is a stone keyed to the harmonic taken on
+;;;    the ledge above it); carry-softlock-rock, its control with a rock step,
+;;;    no problem; carry-key-in-pit (a pit holding the key to its own door) no
+;;;    problem; carry-jump-over (the Glasswood review's softlock) a trap
+;;;    carrying nothing. The base checker, which searched each carry set from
+;;;    the start alone, reported the first two identically and called the
+;;;    third a trap.
+;;;
+;;; --reuse-only runs the reuse check alone (its sabotage leg's quick form);
+;;; --carry-only the carry worlds alone.
 ;;;
 ;;; --explore also prints, per fixture, what the search accepts with the
 ;;; replay switched off: a diagnostic for choosing fixtures, never a gate.
@@ -271,6 +283,48 @@
                    ", steps " (number->string (stat reused 'steps)) " against " (number->string (stat fresh 'steps)) " afresh")
               (list ok)))))
 
+    ;; --- carry (t-c53681) --------------------------------------------------------------------
+    ;;
+    ;; One-room worlds in test/fixtures/worlds where a harmonic and the stones
+    ;; keyed to it make the answer depend on following a pickup as a change
+    ;; of carry. Each: (dir trap-carry trap-cell why): the world must report a
+    ;; trap carrying trap-carry that includes trap-cell, or (trap-carry #f) no
+    ;; reach problem at all.
+    (define CARRY-WORLDS
+      (list (list "carry-softlock" "carrying H2" "(16,8)"
+                  "H2 taken on a ledge its own stone was the step up to; the pit east of it loses its step (a stone) carrying H2")
+            (list "carry-softlock-rock" #f #f
+                  "control: the same pit with a rock step: taking H2 strands nobody")
+            (list "carry-key-in-pit" #f #f
+                  "a pit that holds the key to its own door: nobody in it stays carrying nothing")
+            (list "carry-jump-over" "carrying nothing" "(8,8)"
+                  "the Glasswood review's softlock: H2 at a pit's lip can be jumped over, and the pit's door is keyed to it")))
+
+    (define (has-sub? s sub)
+      (let ((n (string-length s)) (m (string-length sub)))
+        (let loop ((i 0))
+          (and (<= (+ i m) n)
+               (or (string=? (substring s i (+ i m)) sub) (loop (+ i 1)))))))
+
+    (define (run-carry)
+      (map (lambda (cw)
+             (let* ((dir (string-append "test/fixtures/worlds/" (car cw)))
+                    (want (cadr cw)) (cell (caddr cw))
+                    (ct (load-content (read-world-source dir))))
+               (if (not (null? (content-problems ct)))
+                   (begin (say "FAIL carry " (car cw) ": the world does not load clean") #f)
+                   (let* ((sets (content-reach ct))
+                          (ps (map problem-message (reach-problems ct sets)))
+                          (trap-lines (filter (lambda (m) (has-sub? m "traps, no way back")) ps))
+                          (ok (if want
+                                  (and (find (lambda (m) (and (has-sub? m (string-append want ": ")) (has-sub? m cell))) trap-lines) #t)
+                                  (null? ps))))
+                     (say (if ok "PASS " "FAIL ") "carry " (car cw) ": " (list-ref cw 3)
+                          "; expect " (if want (string-append "a trap " want " at " cell) "no reach problem")
+                          "; got " (if (null? ps) "none" (string-join ps " | ")))
+                     ok))))
+           CARRY-WORLDS))
+
     ;; --- main -------------------------------------------------------------------------------
 
     (define (reach-fixtures-main args)
@@ -282,6 +336,11 @@
            (if (car (run-reuse))
                (begin (say "PASS reach-fixtures --reuse-only") 0)
                (begin (say "FAIL reach-fixtures --reuse-only") 1)))
+          ((member "--carry-only" args)
+           (let ((rs (run-carry)))
+             (if (null? (filter not rs))
+                 (begin (say "PASS reach-fixtures --carry-only: " (number->string (length rs)) " worlds") 0)
+                 (begin (say "FAIL reach-fixtures --carry-only: " (number->string (length (filter not rs))) " of " (number->string (length rs))) 1))))
           ((not (directory? dir))
             (begin (say "SETUP-FAILED reach-fixtures: no " dir) 2))
           (else
@@ -294,7 +353,8 @@
                     (else
                      (let* ((results (append (map (lambda (r) (run-fixture (car r) explore?)) reads)
                                              (run-ceiling)
-                                             (run-reuse)))
+                                             (run-reuse)
+                                             (run-carry)))
                             (fails (length (filter not results))))
                        (if (= fails 0)
                            (begin (say "PASS reach-fixtures: " (number->string (length results)) " checks") 0)

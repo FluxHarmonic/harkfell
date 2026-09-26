@@ -56,7 +56,7 @@
     (define RING-TICKS 40)      ; it rings first ...
     (define SINK-TICKS 48)      ; ... then sinks, over 0.8 s
     (define SHIVER-TICKS 36)
-    (define TOUCH 6.0)          ; a pickup's reach around its cell's centre, px
+    (define TOUCH PICKUP-TOUCH) ; a pickup's reach around its cell's centre, px ((harkfell check): the reach check reads the same rule)
 
     ;; cell: a global (c . r). state: shut | ringing | sinking | open.
     ;; t: ticks in the state. near: the body is inside this approach.

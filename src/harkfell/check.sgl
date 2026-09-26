@@ -46,7 +46,9 @@
           room-cells-global global->local local->global room-standable-cells
           room-start-cell reach-summary
           content-reach-carrying content-reach-carrying* set-reach-reuse! sets-bare room-gated carry-label
-          content-pickup-cells content-stone-cells tiles-carrying)
+          content-pickup-cells content-stone-cells tiles-carrying
+          content-reach-seeded PICKUP-TOUCH carry-union edge-touches
+          cset? cset-carry cset-graph cset-entries cset-fwd cset-back cset-touch)
 
   (begin
     (define (room-tile-origin ct rm)
@@ -104,14 +106,46 @@
       (let ((dx (- (car a) (car b))) (dy (- (cdr a) (cdr b))))
         (+ (* dx dx) (* dy dy))))
 
-    ;; --- harmonics: the carry sets a player can hold (A3) -------------------------
+
+    ;; --- harmonics: carry sets, and a pickup as a change of carry ------------------
     ;;
     ;; A ring-stone keyed to a harmonic you carry opens (harkfell gates), so
     ;; what is reachable depends on what you carry. The checker searches each
-    ;; CARRY SET a player can actually hold: the empty set first, then every
-    ;; set the harmonics reachable with a set lead to (the set plus the one
-    ;; picked up), until no new set appears (at most 2^6). For each it builds
-    ;; the world's tilemap with the stones of the carried harmonics open.
+    ;; CARRY SET a player can actually hold, and for each builds the world's
+    ;; tilemap with the stones of the carried harmonics open.
+    ;;
+    ;; A PICKUP IS A CHANGE OF CARRY (t-c53681, Glasswood). The states are
+    ;; (cell, carry): standing there, holding that. The empty set is entered at
+    ;; the start. An edge (a witness) whose replay touches a harmonic you do not
+    ;; carry (the gates' rule: the body's box within PICKUP-TOUCH px of the
+    ;; harmonic's cell centre, any tick of the replay, its start and its settle
+    ;; included) takes you to the larger set at the edge's far end; so does
+    ;; standing on the harmonic's cell. Each larger set's search is seeded at
+    ;; those places (as well as at the start), so what a player can do right
+    ;; after the pickup is searched even where the start, carrying the same,
+    ;; could not get to it (a stone keyed to the harmonic that was the step up
+    ;; to it has opened). Sets are searched smallest first; a pickup only ever
+    ;; grows the carry, so every way into a set is known before it is searched.
+    ;;
+    ;; FORWARD (which states exist) is over-approximated: a touching edge also
+    ;; leaves you in the smaller set at its far end, because a pickup can be
+    ;; jumped over (6 px) by a trajectory the search did not keep, and that is
+    ;; how the Glasswood review's softlock is made. The one exception: coming
+    ;; to rest on the harmonic's own cell always takes it.
+    ;;
+    ;; BACK (can the start be reached from a state, carrying anything) is exact
+    ;; per witness: an edge that touches a harmonic counts only as taking it.
+    ;; Over-approximating what exists and under-approximating the ways out
+    ;; means a trap found is reported, and a trap missed would need a state or
+    ;; an edge the search does not have (the search's own caveat).
+    ;;
+    ;; Not modelled: a stone takes RING-TICKS + SINK-TICKS (88 ticks, about
+    ;; 1.5 s) to open after you come near carrying its harmonic; the checker
+    ;; takes it as open at once, as it always has. And a trajectory after a
+    ;; mid-air pickup is taken to go on as its witness did (a stone keyed to
+    ;; the harmonic cannot open under it in less than 88 ticks).
+
+    (define PICKUP-TOUCH 6.0)   ; a pickup's reach around its cell's centre, px ((harkfell gates) TOUCH)
 
     (define (things-global ct kind)
       (apply append
@@ -141,7 +175,14 @@
           "carrying nothing"
           (string-append "carrying " (string-join (map (lambda (h) (string-append "H" (number->string h))) carry) " "))))
 
-    (define (sorted-carry l) (list-sort < l))
+    ;; Sorted, without repeats.
+    (define (sorted-carry l)
+      (let loop ((l (list-sort < l)) (acc '()))
+        (cond ((null? l) (reverse acc))
+              ((and (pair? acc) (= (car acc) (car l))) (loop (cdr l) acc))
+              (else (loop (cdr l) (cons (car l) acc))))))
+
+    (define (carry-union a b) (sorted-carry (append a b)))
 
     ;; The reach graph from the start, carrying carry (#f with no start).
     ;; log: optional, (expanded steps kind cell) after each anchor.
@@ -151,92 +192,269 @@
     ;; A4 (REUSE, (engine reach)): with base, an earlier set's graph, the
     ;; search takes from its memo whatever the stones that differ did not touch.
     (define (content-reach-carrying* ct carry base . log)
+      (apply content-reach-seeded ct carry base '() log))
+
+    ;; The same, searched from the start AND from seeds (cells a pickup lands
+    ;; you in, carrying carry).
+    (define (content-reach-seeded ct carry base seeds . log)
       (let ((s (start-cell ct))
             (tm (tiles-carrying ct carry)))
         (and s
-             (if (and base *reuse*)
-                 (apply reach-search* tm HARKFELL-FEEL (list s) witness-lands?
-                        (graph-memo base) (tilemap-changes (graph-tm base) tm) log)
-                 (apply reach-search tm HARKFELL-FEEL (list s) witness-lands? log)))))
+             (let ((starts (cons s (filter (lambda (c) (not (equal? c s))) seeds))))
+               (if (and base *reuse*)
+                   (apply reach-search* tm HARKFELL-FEEL starts witness-lands?
+                          (graph-memo base) (tilemap-changes (graph-tm base) tm) log)
+                   (apply reach-search tm HARKFELL-FEEL starts witness-lands? log))))))
 
     ;; REUSE on (the default) or off: --no-reuse, and the fixture check that
     ;; compares the two.
     (define *reuse* #t)
     (define (set-reach-reuse! on) (set! *reuse* on))
 
-    ;; Every carry set a player can hold, each with its graph: ((carry . g) ...),
-    ;; the empty set first; #f with no start.
-    (define (content-reach ct . log)
-      (and (start-cell ct)
-           (let ((pickups (content-pickup-cells ct)))
-             (let loop ((todo (list '())) (done '()))
-               (cond ((null? todo) (reverse done))
-                     ((assoc (car todo) done) (loop (cdr todo) done))
-                     (else
-                      (let* ((carry (car todo))
-                             ;; the first set searched (the last of done) lends its memo
-                             (g (apply content-reach-carrying* ct carry
-                                       (and (pair? done) (let first ((l done)) (if (null? (cdr l)) (cdr (car l)) (first (cdr l)))))
-                                       log))
-                             (fwd (reach-forward g (list (start-cell ct))))
-                             (tm (graph-tm g))
-                             (next (map (lambda (p) (sorted-carry (cons (car p) carry)))
-                                        (filter (lambda (p) (and (not (memv (car p) carry))
-                                                                 (vector-ref fwd (cell-index tm (car (cdr p)) (cdr (cdr p))))))
-                                                pickups))))
-                        (loop (append (cdr todo) next) (cons (cons carry g) done)))))))))
+    ;; One carry set, searched.
+    ;;   entries  the cells it is entered at: the start (the empty set), or
+    ;;            where a pickup leaves you
+    ;;   fwd      vector by cell index: standing there carrying this can happen
+    ;;   back     vector by cell index: from standing there carrying this, the
+    ;;            start is reachable (picking up more on the way if need be)
+    ;;   touch    ((from-index to-index overtones witness) ...): the edges whose
+    ;;            replay takes harmonics this set does not hold
+    (define-struct cset
+      (carry default: '())
+      (graph default: #f)
+      (entries default: '())
+      (fwd default: #f)
+      (back default: #f)
+      (touch default: '()))
 
-    ;; The graph searched with no harmonics (for --path).
-    (define (sets-bare sets) (cdr (car sets)))
+    ;; Does body b's box touch the harmonic lying in cell? ((harkfell gates)'s rule.)
+    (define (body-touches? tm b cell)
+      (let* ((s (tilemap-size tm))
+             (cx (+ (* s (car cell)) (/ s 2.0)))
+             (cy (+ (* s (cdr cell)) (/ s 2.0)))
+             (x (body-x b)) (y (body-y b))
+             (w (feel-box-w HARKFELL-FEEL)) (h (feel-box-h HARKFELL-FEEL)))
+        (and (< (- cx PICKUP-TOUCH) (+ x w)) (< x (+ cx PICKUP-TOUCH))
+             (< (- cy PICKUP-TOUCH) (+ y h)) (< y (+ cy PICKUP-TOUCH)))))
+
+    (define (in-rect? rect cell)
+      (and (<= (car rect) (car cell) (caddr rect)) (<= (cadr rect) (cdr cell) (cadddr rect))))
+
+    ;; The edges of g whose replay touches a harmonic not in carry:
+    ;; ((from-index to-index overtones witness) ...). Only the edges out of a
+    ;; cell whose walk rectangle ((engine reach) graph-walk-rect) holds a
+    ;; harmonic's cell are replayed: every body of those edges lies inside it.
+    (define (edge-touches g carry pickups)
+      (let* ((tm (graph-tm g))
+             (free (filter (lambda (p) (not (memv (car p) carry))) pickups))
+             (edges (graph-edges g))
+             (n (vector-length edges)))
+        (if (null? free)
+            '()
+            (let loop ((i 0) (acc '()))
+              (if (>= i n)
+                  (reverse acc)
+                  (let* ((es (vector-ref edges i))
+                         (near (if (null? es)
+                                   '()
+                                   (let ((rect (graph-walk-rect g (index-cell tm i))))
+                                     (if rect (filter (lambda (p) (in-rect? rect (cdr p))) free) free)))))
+                    (loop (+ i 1)
+                          (if (null? near)
+                              acc
+                              (let each ((es es) (acc acc))
+                                (if (null? es)
+                                    acc
+                                    (let* ((w (cdr (car es)))
+                                           (trace (witness-trace tm HARKFELL-FEEL w))
+                                           (hs (sorted-carry
+                                                 (map car (filter (lambda (p) (find (lambda (b) (body-touches? tm b (cdr p))) trace))
+                                                                  near)))))
+                                      (each (cdr es)
+                                            (if (null? hs) acc (cons (list i (car (car es)) hs w) acc))))))))))))))
+
+    ;; Cells reachable over g's edges from entries, never coming to rest in a
+    ;; blocked cell (a harmonic's cell this set does not hold: resting there
+    ;; takes it). Every edge is followed, touching or not (FORWARD above).
+    (define (forward-carrying g entries blocked)
+      (let* ((tm (graph-tm g))
+             (seen (make-vector (* (tilemap-cols tm) (tilemap-rows tm)) #f))
+             (edges (graph-edges g)))
+        (let loop ((front (map (lambda (c) (cell-index tm (car c) (cdr c))) entries)) (back '()))
+          (cond ((and (null? front) (null? back)) seen)
+                ((null? front) (loop (reverse back) '()))
+                (else
+                 (let ((i (car front)))
+                   (if (vector-ref seen i)
+                       (loop (cdr front) back)
+                       (begin
+                         (vector-set! seen i #t)
+                         (loop (cdr front)
+                               (append (filter (lambda (j) (not (memv j blocked))) (map car (vector-ref edges i)))
+                                       back))))))))))
+
+    (define (find-set sets carry)
+      (find (lambda (e) (equal? (cset-carry e) carry)) sets))
+
+    ;; Add cells to carry's entries in an alist ((carry . cells) ...).
+    (define (add-entries pending carry cells)
+      (cond ((null? pending) (list (cons carry cells)))
+            ((equal? (car (car pending)) carry)
+             (cons (cons carry (append (cdr (car pending))
+                                       (filter (lambda (c) (not (member c (cdr (car pending))))) cells)))
+                   (cdr pending)))
+            (else (cons (car pending) (add-entries (cdr pending) carry cells)))))
+
+    ;; The pending set to search next: fewest harmonics, then the first listed.
+    (define (smallest pending)
+      (let loop ((l (cdr pending)) (best (car pending)))
+        (cond ((null? l) best)
+              ((< (length (car (car l))) (length (car best))) (loop (cdr l) (car l)))
+              (else (loop (cdr l) best)))))
+
+    ;; Every carry set a player can hold, searched: (cset ...), the empty set
+    ;; first, then in the order searched; #f with no start.
+    (define (content-reach ct . log)
+      (let ((s (start-cell ct)))
+        (and s
+             (let* ((pickups (content-pickup-cells ct))
+                    (sets
+                      (let loop ((pending (list (list '() s))) (done '()))
+                        (if (null? pending)
+                            (reverse done)
+                            (let* ((p (smallest pending))
+                                   (carry (car p))
+                                   (entries (cdr p))
+                                   ;; the first set searched (the last of done) lends its memo
+                                   (base (and (pair? done) (cset-graph (list-ref done (- (length done) 1)))))
+                                   (g (apply content-reach-seeded ct carry base entries log))
+                                   (tm (graph-tm g))
+                                   (blocked (map (lambda (q) (cell-index tm (car (cdr q)) (cdr (cdr q))))
+                                                 (filter (lambda (q) (not (memv (car q) carry))) pickups)))
+                                   (fwd (forward-carrying g entries blocked))
+                                   ;; each pickup edge as (i j hs w), its far end j settled in
+                                   ;; the larger set's tilemap (a stone keyed to what was just
+                                   ;; taken, that held the body up, opens under it); j #f when
+                                   ;; the body comes to rest nowhere
+                                   (touch (map (lambda (t)
+                                                 (let* ((tm2 (tiles-carrying ct (carry-union carry (caddr t))))
+                                                        (c (settle-cell tm2 HARKFELL-FEEL (index-cell tm (cadr t)))))
+                                                   (list (car t) (and c (cell-index tm (car c) (cdr c))) (caddr t) (cadddr t))))
+                                               (filter (lambda (t) (vector-ref fwd (car t))) (edge-touches g carry pickups))))
+                                   (rest (filter (lambda (q) (not (eq? q p))) pending))
+                                   ;; where each pickup leaves you: the touching edge's far
+                                   ;; end, and the harmonic's own cell (settled likewise)
+                                   (next (let add ((ts touch) (pd rest))
+                                           (if (null? ts)
+                                               pd
+                                               (let* ((t (car ts))
+                                                      (hs (caddr t))
+                                                      (pd (if (cadr t)
+                                                              (add-entries pd (carry-union carry hs) (list (index-cell tm (cadr t))))
+                                                              pd)))
+                                                 (add (cdr ts)
+                                                      (let each ((hs hs) (pd pd))
+                                                        (if (null? hs)
+                                                            pd
+                                                            (let ((to (carry-union carry (list (car hs)))))
+                                                              (each (cdr hs)
+                                                                    (add-entries pd to
+                                                                                 (filter-map* (lambda (q)
+                                                                                                (and (= (car q) (car hs))
+                                                                                                     (settle-cell (tiles-carrying ct to) HARKFELL-FEEL (cdr q))))
+                                                                                              pickups))))))))))))
+                              (loop next (cons (cset carry: carry graph: g entries: entries fwd: fwd touch: touch) done)))))))
+               (with-back sets s)))))
+
+    ;; BACK for every set, exact per witness. A set's ways out go within it
+    ;; (edges that take nothing) or up to a larger set (edges that take
+    ;; something), so the largest sets are done first.
+    (define (with-back sets s)
+      (let loop ((order (list-sort (lambda (a b) (> (length (cset-carry a)) (length (cset-carry b)))) sets))
+                 (done '()))   ; ((carry . back) ...)
+        (if (null? order)
+            (map (lambda (e) (cset e back: (cdr (assoc (cset-carry e) done)))) sets)
+            (let* ((e (car order))
+                   (g (cset-graph e))
+                   (tm (graph-tm g))
+                   (n (* (tilemap-cols tm) (tilemap-rows tm)))
+                   (edges (graph-edges g))
+                   (touched (make-vector n '()))   ; from-index -> witnesses that take something
+                   (into (make-vector n '()))
+                   (seen (make-vector n #f)))
+              (for-each (lambda (t) (vector-set! touched (car t) (cons (cadddr t) (vector-ref touched (car t)))))
+                        (cset-touch e))
+              ;; the edges that take nothing, reversed
+              (let fill ((i 0))
+                (when (< i n)
+                  (for-each (lambda (x)
+                              (unless (memq (cdr x) (vector-ref touched i))
+                                (vector-set! into (car x) (cons i (vector-ref into (car x))))))
+                            (vector-ref edges i))
+                  (fill (+ i 1))))
+              (let* ((up (filter-map* (lambda (t)
+                                        (let ((b (assoc (carry-union (cset-carry e) (caddr t)) done)))
+                                          (and b (cadr t) (vector-ref (cdr b) (cadr t)) (car t))))
+                                      (cset-touch e)))
+                     (seeds (cons (cell-index tm (car s) (cdr s)) up)))
+                (let bfs ((front seeds) (back '()))
+                  (cond ((and (null? front) (null? back)) #f)
+                        ((null? front) (bfs (reverse back) '()))
+                        (else
+                         (let ((i (car front)))
+                           (if (vector-ref seen i)
+                               (bfs (cdr front) back)
+                               (begin
+                                 (vector-set! seen i #t)
+                                 (bfs (cdr front) (append (vector-ref into i) back))))))))
+                (loop (cdr order) (cons (cons (cset-carry e) seen) done)))))))
+
+    ;; The set searched with no harmonics (for --path).
+    (define (sets-bare sets) (cset-graph (car sets)))
 
     (define (cell-str c) (string-append "(" (number->string (car c)) "," (number->string (cdr c)) ")"))
 
     ;; Per room: (room unreached traps stale wet gated), cells room-local.
-    ;;   unreached  reached with NO carry set a player can hold (less declared)
-    ;;   traps      ((carry . cells) ...): reached carrying that, no way back carrying it
+    ;;   unreached  standing there can happen with NO carry set (less declared)
+    ;;   traps      ((carry . cells) ...): standing there carrying that can
+    ;;              happen, and from there no way leads back to the start
     ;;   stale      declared unreached, but reached with some set
     ;;   wet        ((carry . cells) ...): water traps, per set
     ;;   gated      ((cell . carry) ...): reached, but not carrying nothing; carry
     ;;              is the first set (in search order) that reaches it
     (define (classify ct sets)
-      (let* ((s (start-cell ct))
-             (per (map (lambda (e)
-                         (list (car e) (cdr e)
-                               (reach-forward (cdr e) (list s))
-                               (reach-backward (cdr e) (list s))))
-                       sets))
-             (tm (graph-tm (cdr (car sets)))))
+      (let* ((tm (graph-tm (cset-graph (car sets)))))
         (map (lambda (p)
                (let* ((rm (placed-data p))
                       (cells (room-standable-cells ct rm))
                       (idx (lambda (c) (cell-index tm (car c) (cdr c))))
                       (declared (room-unreached rm))
                       (local (lambda (c) (global->local ct rm c)))
-                      (fwd-any (lambda (c) (find (lambda (e) (vector-ref (caddr e) (idx c))) per)))
+                      (fwd-any (lambda (c) (find (lambda (e) (vector-ref (cset-fwd e) (idx c))) sets)))
                       (o (let ((g (global->local ct rm (cons 0 0)))) (cons (- (car g)) (- (cdr g)))))
                       (in-room? (lambda (c) (and (<= (car o) (car c) (+ (car o) ROOM-COLS -1))
                                                  (<= (cdr o) (cdr c) (+ (cdr o) ROOM-ROWS -1)))))
                       (unreached (filter (lambda (c) (not (fwd-any c))) cells))
                       (traps (filter (lambda (x) (pair? (cdr x)))
                                      (map (lambda (e)
-                                            (cons (car e)
-                                                  (map local (filter (lambda (c) (and (vector-ref (caddr e) (idx c))
-                                                                                      (not (vector-ref (cadddr e) (idx c)))))
+                                            (cons (cset-carry e)
+                                                  (map local (filter (lambda (c) (and (vector-ref (cset-fwd e) (idx c))
+                                                                                      (not (vector-ref (cset-back e) (idx c)))))
                                                                      cells))))
-                                          per)))
+                                          sets)))
                       (wet (filter (lambda (x) (pair? (cdr x)))
                                    (map (lambda (e)
-                                          (cons (car e)
+                                          (cons (cset-carry e)
                                                 (map (lambda (w) (local (car w)))
                                                      (filter (lambda (w)
                                                                (and (in-room? (car w))
-                                                                    (not (find (lambda (c) (vector-ref (cadddr e) (idx c))) (cdr w)))))
-                                                             (graph-waters (cadr e))))))
-                                        per)))
-                      (bare (car per))
+                                                                    (not (find (lambda (c) (vector-ref (cset-back e) (idx c))) (cdr w)))))
+                                                             (graph-waters (cset-graph e))))))
+                                        sets)))
+                      (bare (car sets))
                       (gated (filter-map* (lambda (c)
-                                            (and (not (vector-ref (caddr bare) (idx c)))
-                                                 (let ((e (fwd-any c))) (and e (cons (local c) (car e))))))
+                                            (and (not (vector-ref (cset-fwd bare) (idx c)))
+                                                 (let ((e (fwd-any c))) (and e (cons (local c) (cset-carry e))))))
                                           cells)))
                  (list rm
                        (filter (lambda (c) (not (member c declared))) (map local unreached))
@@ -251,39 +469,57 @@
       (let loop ((l l) (acc '()))
         (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
 
-    ;; The harmonics: every pickup is reached with some set, and from where it
-    ;; lies the start is reachable carrying what you then hold (picking it up
-    ;; never strands you).
+    ;; A global cell as "region:X,Y (c,r)".
+    (define (where ct cell)
+      (let* ((wm (content-map ct))
+             (rx (+ (worldmap-x0 wm) (exact (floor (/ (car cell) ROOM-COLS)))))
+             (ry (+ (worldmap-y0 wm) (exact (floor (/ (cdr cell) ROOM-ROWS)))))
+             (rm (content-room ct rx ry)))
+        (if rm (string-append (room-label rm) " " (cell-str (global->local ct rm cell))) "?")))
+
+    ;; The harmonics: every one is taken with some set; and wherever taking it
+    ;; leaves you (the far end of each edge that takes it, and its own cell),
+    ;; the start is reachable carrying what you then hold (picking it up never
+    ;; strands you). One problem per harmonic and set it was taken from.
     (define (pickup-problems ct sets)
-      (let ((s (start-cell ct)))
-        (apply append
-               (map (lambda (p)
-                      (let* ((h (car p)) (cell (cdr p))
-                             (where (lambda () (let* ((wm (content-map ct))
-                                                      (rx (+ (worldmap-x0 wm) (exact (floor (/ (car cell) ROOM-COLS)))))
-                                                      (ry (+ (worldmap-y0 wm) (exact (floor (/ (cdr cell) ROOM-ROWS)))))
-                                                      (rm (content-room ct rx ry)))
-                                                 (if rm (string-append (room-label rm) " " (cell-str (global->local ct rm cell))) "?"))))
-                             (reached-in (filter (lambda (e)
-                                                   (and (not (memv h (car e)))
-                                                        (vector-ref (reach-forward (cdr e) (list s))
-                                                                    (cell-index (graph-tm (cdr e)) (car cell) (cdr cell)))))
-                                                 sets)))
-                        (if (null? reached-in)
-                            (list (problem path: "world/world.sgl" line: #f
-                                           message: (string-append "harmonic H" (number->string h) " at " (where)
-                                                                   " is not reachable with any harmonics a player can carry")))
-                            (filter-map*
-                              (lambda (e)
-                                (let* ((after (assoc (sorted-carry (cons h (car e))) sets))
-                                       (back (and after (reach-backward (cdr after) (list s)))))
-                                  (and (not (and back (vector-ref back (cell-index (graph-tm (cdr after)) (car cell) (cdr cell)))))
-                                       (problem path: "world/world.sgl" line: #f
-                                                message: (string-append "harmonic H" (number->string h) " at " (where)
-                                                                        ": picked up " (carry-label (car e))
-                                                                        ", there is no way back to the start")))))
-                              reached-in))))
-                    (content-pickup-cells ct)))))
+      (apply append
+             (map (lambda (p)
+                    (let* ((h (car p)) (cell (cdr p))
+                           (takes (apply append
+                                         (map (lambda (e)
+                                                (map (lambda (t) (cons e t))
+                                                     (filter (lambda (t) (memv h (caddr t))) (cset-touch e))))
+                                              sets))))
+                      (if (null? takes)
+                          (list (problem path: "world/world.sgl" line: #f
+                                         message: (string-append "harmonic H" (number->string h) " at " (where ct cell)
+                                                                 " is not reachable with any harmonics a player can carry")))
+                          (let each ((ts takes) (said '()) (acc '()))
+                            (if (null? ts)
+                                (reverse acc)
+                                (let* ((e (car (car ts)))
+                                       (t (cdr (car ts)))
+                                       (from (cset-carry e))
+                                       (after (find-set sets (carry-union from (caddr t))))
+                                       (own (find-set sets (carry-union from (list h))))
+                                       (tm (graph-tm (cset-graph e)))
+                                       (stuck (filter (lambda (x)
+                                                        (let ((set (car x)) (i (cdr x)))
+                                                          (not (and set i (vector-ref (cset-back set) i)))))
+                                                      (list (cons after (cadr t))
+                                                            (cons own (let ((c (and own (settle-cell (graph-tm (cset-graph own)) HARKFELL-FEEL cell))))
+                                                                        (and c (cell-index tm (car c) (cdr c)))))))))
+                                  (if (or (null? stuck) (member from said))
+                                      (each (cdr ts) said acc)
+                                      (each (cdr ts) (cons from said)
+                                            (cons (problem path: "world/world.sgl" line: #f
+                                                           message: (string-append "harmonic H" (number->string h) " at " (where ct cell)
+                                                                                   ": picked up " (carry-label from)
+                                                                                   ", there is no way back to the start from "
+                                                                                   (let ((i (cdr (car stuck))))
+                                                                                     (if i (where ct (index-cell tm i)) "where it lands (it comes to rest nowhere)"))))
+                                                  acc)))))))))
+                  (content-pickup-cells ct))))
 
     (define (carried-cells l)
       (string-join (map (lambda (x) (string-append (carry-label (car x)) ": " (string-join (map cell-str (cdr x)) " "))) l) "; "))
@@ -370,13 +606,16 @@
           (if (null? (list-ref e 4)) '() (list (string-append "  WATER TRAP " (carried-cells (list-ref e 4)))))
           (if (null? (cadddr e)) '() (list (string-append "  STALE unreached: " (string-join (map cell-str (cadddr e)) " ")))))))
 
-    ;; One line per carry set searched.
+    ;; One line per carry set searched: its search's stats, how many places it
+    ;; is entered at, and how many edges take a harmonic.
     (define (reach-summary sets)
       (string-join
         (map (lambda (e)
-               (string-append (carry-label (car e)) ": "
+               (string-append (carry-label (cset-carry e)) ": "
                               (string-join (map (lambda (p) (string-append (symbol->string (car p)) " " (number->string (cdr p))))
-                                                (graph-stats (cdr e)))
-                                           ", ")))
+                                                (graph-stats (cset-graph e)))
+                                           ", ")
+                              ", entered at " (number->string (length (cset-entries e)))
+                              ", pickup edges " (number->string (length (cset-touch e)))))
              sets)
         (string-append (string #\newline) "       ")))))

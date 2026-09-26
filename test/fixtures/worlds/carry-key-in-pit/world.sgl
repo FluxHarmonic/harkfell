@@ -1,0 +1,27 @@
+;;; A fixture world for the reach checker's carry model (t-c53681): a pit
+;;; that holds the key to its own door. It is NOT a softlock, and the checker
+;;; must pass it.
+;;;
+;;; From the start (on the platform, cols 12-19) a player drops west into a
+;;; pit four wide and four deep in smooth rock (out of a held jump, and not a
+;;; chimney). H2 lies on the pit's floor, and the pit's door is a ring-stone
+;;; keyed to H2 at (12,8), onto a low corridor east under the platform to a
+;;; shaft whose rough wall climbs back up to the start. Carrying nothing the
+;;; pit has no way out, but nobody in it stays carrying nothing: the harmonic
+;;; is there to take. A checker that searches each carry set on its own
+;;; calls the pit a trap carrying nothing; one that follows a pickup as a
+;;; change of carry sees the way out through it.
+(start region: stonefen room: (0 0) cell: (16 4))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region stonefen
+  name: "Stone fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: ()
+  moments: ()
+  gives: ((overtone 2)))

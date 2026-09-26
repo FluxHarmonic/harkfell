@@ -1,0 +1,22 @@
+;;; A fixture world for the reach checker's carry model (t-c53681): the
+;;; Glasswood design review's softlock. H2 lies on the platform a tile short
+;;; of the lip of a pit whose only door is a ring-stone keyed to H2. A pickup
+;;; is taken only within 6 px of its cell's centre, so a player can jump over
+;;; it and drop into the pit carrying nothing, and stay there. The checker
+;;; must report the pit as a trap carrying nothing. A carry model that treats
+;;; every trajectory through the harmonic's cell as taking it would pass this
+;;; world; it must not.
+(start region: stonefen room: (0 0) cell: (18 4))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region stonefen
+  name: "Stone fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: ()
+  moments: ()
+  gives: ((overtone 2)))
