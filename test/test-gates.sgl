@@ -63,9 +63,9 @@
 (test-group "gates: the world has one stone and one harmonic"
   (test "the world loads clean"
     (assert-equal '() (content-problems CT)))
-  (test "three ring-stones: the Old Stone's and the bowl's keyed to 2, the one under the bowl to 3"
-    (assert-equal 3 (length (content-stones CT)))
-    (assert-equal '(2 2 3) (list-sort < (map stone-overtone (content-stones CT))))
+  (test "four ring-stones: the Old Stone's, the bowl's and Scree End's door (D41) keyed to 2, the one under the bowl to 3"
+    (assert-equal 4 (length (content-stones CT)))
+    (assert-equal '(2 2 2 3) (list-sort < (map stone-overtone (content-stones CT))))
     (assert-true (the-stone (world-standing 10 3 18 8 '())))
     (assert-equal 2 (stone-overtone (the-stone (world-standing 10 3 18 8 '())))))
   (test "one pickup, on the Far Mound (A4 moved it there from the Drowned Channel)"
