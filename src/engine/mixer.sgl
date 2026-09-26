@@ -458,7 +458,13 @@
     ;; --- cues ---------------------------------------------------------------------------------
     ;; A cue: mono f32 samples (a bytevector) and its frame count, at the mixer's rate.
     (define-struct cue (floats) (frames))
-    (define (make-cue floats frames) (cue floats: floats frames: frames))
+    ;; On the web a cue is uploaded to the bridge as it is made, so the worklet
+    ;; has it (and has loaded) long before the first play; a cue made before
+    ;; the context is open uploads on its first play instead.
+    (define (make-cue floats frames)
+      (let ((c (cue floats: floats frames: frames)))
+        (when (and *ctx* (eq? *cue-path* 'bridge)) (bridge-handle c))
+        c))
     (define (cue-ref c i) (bytevector-ieee-single-ref (cue-floats c) (* 4 i) 'little))
 
     (define (mixer-cue-count) (length *voices*))
@@ -510,7 +516,7 @@
       (when (and c (not *hold*))
         (let* ((g (cue-gains gain pan))
                (vp (cue-balance (car g) (cdr g)))
-               ;; the upload starts on the first play; that play takes the ring
+               ;; uploaded when made (or, made before the context, on this play)
                (h (and *ctx* (eq? *cue-path* 'bridge) (bridge-handle c))))
           (if (and h (cue-bridge-ok? (car vp) (bridge-mode)) (bridge-play h (car vp) (cdr vp)))
               (set! *bridge-plays* (+ *bridge-plays* 1))
