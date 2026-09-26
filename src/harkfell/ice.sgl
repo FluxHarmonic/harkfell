@@ -1,0 +1,149 @@
+;;; (harkfell ice) - Falling ice, Glasswood's hazard (topics/harkfell-glasswood-bible,
+;;; "Harm: falling ice"): listen before you walk.
+;;;
+;;; An ICICLE is a room thing, (icicle at: (C R)): it hangs in air cell
+;;; (C, R) from rock above it (the content gate's placement checks, (harkfell
+;;; content) icicle-placement-problems, hold it to a cell where that is fair).
+;;;
+;;;   hang     it hangs, still
+;;;   shiver   the TELL: your body comes within TELL-R px horizontally of its
+;;;            column, below it, while you play: it shivers and rings one
+;;;            bright note (news (ice tell x y)), then after SHIVER ticks ...
+;;;   fall     ... it drops under ICE-G (news (ice fall x y)) and lands
+;;;            IMPACT-TICKS after the tell, whatever its height: the time a
+;;;            runner at the one speed takes from the edge of the tell to the
+;;;            column's middle (TELL-R / the feel's run). If the one speed
+;;;            changes, the timing changes with it: nothing here is typed in
+;;;            ticks.
+;;;   gone     it shatters on the floor (news (ice shatter x y)) and is gone:
+;;;            it never becomes solid and never blocks a way.
+;;;
+;;; A falling icicle that touches the body (its box against the body's, both
+;;; shrunk by the feel's hazard inset, as a hazard tile is) is a HIT: the
+;;; world gives a soft return (D4), and the room's icicles grow back, as they
+;;; do whenever you enter the room (a soft return counts as entering again,
+;;; so a retry is the same puzzle).
+;;;
+;;; Positions are the world map's pixels. Pure.
+
+(define-library (harkfell ice)
+  (import (sigil struct)
+          (sigil list)
+          (sigil math)
+          (engine body)
+          (harkfell feel)
+          (harkfell content))
+
+  (export TELL-R IMPACT-TICKS impact-ticks-for ICE-G ICE-W ICE-H
+          icicle icicle? icicle-cell icicle-state icicle-t icicle-x icicle-y icicle-top icicle-floor
+          icicle-fall-ticks icicle-shiver-ticks
+          ices ices? ices-list ices-news ices-hit
+          room-ices ices-step)
+
+  (begin
+    (define TILE 16)
+    (define TELL-R (* 4.0 TILE))                                   ; 4 tiles
+    ;; The time a runner at the feel's one speed takes from the edge of the
+    ;; tell to the column's middle, in ticks: when the icicle lands.
+    (define (impact-ticks-for f) (exact (round (/ TELL-R (feel-run f)))))
+    (define IMPACT-TICKS (impact-ticks-for HARKFELL-FEEL))          ; 48 at 4.95 tiles/s
+    (define ICE-G (* (feel-gravity HARKFELL-FEEL) (feel-fall-mul HARKFELL-FEEL)))
+    (define ICE-W 6.0)                                              ; the icicle's box
+    (define ICE-H 14.0)
+    (define INSET (feel-hazard-inset HARKFELL-FEEL))
+
+    ;; cell: global (c . r). x: its box's left, px. top: where it hangs (its
+    ;; box's top, px). y: its box's top now. floor: the y it shatters at (the
+    ;; floor under it). state: hang shiver fall gone. t: ticks in the state.
+    (define-struct icicle
+      (cell default: #f)
+      (x default: 0.0)
+      (top default: 0.0)
+      (y default: 0.0)
+      (floor default: 0.0)
+      (state default: 'hang)
+      (t default: 0))
+
+    ;; list: the room's icicles. news: what this step said. hit: an icicle
+    ;; touched the body this step.
+    (define-struct ices
+      (list default: '())
+      (news default: '())
+      (hit default: #f))
+
+    ;; Ticks from the drop to the floor: the least n with ICE-G n^2 / 2 at or
+    ;; past the fall's height.
+    (define (icicle-fall-ticks ic)
+      (let ((h (- (icicle-floor ic) (+ (icicle-top ic) ICE-H))))
+        (if (<= h 0) 0 (exact (ceiling (sqrt (/ (* 2.0 h) ICE-G)))))))
+
+    ;; Ticks of shivering: what is left of IMPACT-TICKS after the fall.
+    (define (icicle-shiver-ticks ic)
+      (max 0 (- IMPACT-TICKS (icicle-fall-ticks ic))))
+
+    ;; The icicles of a content room placed with its top-left at (ox, oy)
+    ;; px, all hanging (a room entered, or entered again). The floor is the
+    ;; first cell under the icicle's that is not air ((harkfell content)
+    ;; icicle-floor-row); an icicle with none (the gate reports it) falls to
+    ;; the room's bottom.
+    (define (room-ices rm ox oy)
+      (ices list:
+            (filter-map* (lambda (t)
+                           (let ((a (thing-at t)))
+                             (and a
+                                  (let* ((c (car a)) (r (cdr a))
+                                         (fr (or (icicle-floor-row (room-grid rm) c r) ROOM-ROWS))
+                                         (top (+ oy (* TILE r))))
+                                    (icicle cell: (cons (+ (exact (floor (/ ox TILE))) c) (+ (exact (floor (/ oy TILE))) r))
+                                            x: (+ ox (* TILE c) (/ (- TILE ICE-W) 2.0))
+                                            top: (* 1.0 top) y: (* 1.0 top)
+                                            floor: (* 1.0 (+ oy (* TILE fr))))))))
+                         (room-things-of rm 'icicle))))
+
+    (define (filter-map* f l)
+      (let loop ((l l) (acc '()))
+        (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+    (define (overlap? ax ay aw ah bx by bw bh)
+      (and (< ax (+ bx bw)) (< bx (+ ax aw)) (< ay (+ by bh)) (< by (+ ay ah))))
+
+    ;; One tick. box: the body's (x y w h), px. playing: #f while the screen
+    ;; is dark (a soft return): nothing is told then.
+    (define (ices-step is box playing)
+      (let* ((news '())
+             (hit #f)
+             (say! (lambda (what ic) (set! news (cons (list 'ice what (+ (icicle-x ic) (/ ICE-W 2.0)) (+ (icicle-y ic) ICE-H)) news))))
+             (bx (car box)) (by (cadr box)) (bw (caddr box)) (bh (cadddr box))
+             (cx (+ bx (/ bw 2.0)))
+             (step (lambda (ic)
+                     (case (icicle-state ic)
+                       ((hang)
+                        (if (and playing
+                                 (<= (abs (- cx (+ (icicle-x ic) (/ ICE-W 2.0)))) TELL-R)
+                                 (>= by (+ (icicle-top ic) TILE)))
+                            (let ((ic (icicle ic state: 'shiver t: 0)))
+                              (say! 'tell ic)
+                              ic)
+                            ic))
+                       ((shiver)
+                        (if (>= (+ (icicle-t ic) 1) (icicle-shiver-ticks ic))
+                            (let ((ic (icicle ic state: 'fall t: 0)))
+                              (say! 'fall ic)
+                              ic)
+                            (icicle ic t: (+ (icicle-t ic) 1))))
+                       ((fall)
+                        (let* ((t (+ (icicle-t ic) 1))
+                               (y (min (- (icicle-floor ic) ICE-H) (+ (icicle-top ic) (* 0.5 ICE-G t t))))
+                               (ic (icicle ic t: t y: y)))
+                          (when (and playing
+                                     (overlap? (+ bx INSET) (+ by INSET) (- bw (* 2.0 INSET)) (- bh (* 2.0 INSET))
+                                               (icicle-x ic) y ICE-W ICE-H))
+                            (set! hit #t))
+                          (if (>= y (- (icicle-floor ic) ICE-H))
+                              (let ((ic (icicle ic state: 'gone t: 0)))
+                                (say! 'shatter ic)
+                                ic)
+                              ic)))
+                       (else (icicle ic t: (+ (icicle-t ic) 1))))))
+             (l (map step (ices-list is))))
+        (ices list: l news: (reverse news) hit: hit)))))

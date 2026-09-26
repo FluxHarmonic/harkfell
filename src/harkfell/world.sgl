@@ -46,7 +46,8 @@
           (substratic time tween)
           (harkfell feel)
           (harkfell gates)
-          (harkfell creatures))
+          (harkfell creatures)
+          (harkfell ice))
 
   (export world world? world-new world-at
           world-room world-body world-entry world-phase world-timer
@@ -55,7 +56,7 @@
           world-origin
           entry-body cell-body
           world-gates world-carry world-news world-still world-take-news world-populate
-          world-stones world-pickups world-critters)
+          world-stones world-pickups world-critters world-ice)
 
   (begin
     (define DIM-TICKS 15)
@@ -81,6 +82,7 @@
       ;; news: what happened since the shell last took it (the sound's cues).
       (gates default: #f)
       (critters default: #f)        ; the current room's creatures ((harkfell creatures)), with gates
+      (ice default: #f)             ; the current room's icicles ((harkfell ice)), with gates
       (still default: 0)
       (news default: '()))
 
@@ -97,6 +99,7 @@
         (world w
                wm: (worldmap (world-wm w) tiles: tm)
                critters: (room-critters (world-wm w) (world-room w))
+               ice: (room-ice (world-wm w) (world-room w))
                gates: (gstate stones: stones
                               pickups: (filter (lambda (p) (not (memv (pickup-overtone p) carry))) pickups)
                               carry: carry
@@ -216,8 +219,38 @@
                   (world w critters: (critters cs2 news: '())
                          news: (append (world-news w) (critters-news cs2))))))))
 
+    ;; The icicles of the room p ((harkfell ice)), or #f outside the written
+    ;; world.
+    (define (room-ice wm p)
+      (and p (placed-data p)
+           (let ((o (worldmap-origin wm p)))
+             (room-ices (placed-data p) (car o) (cdr o)))))
+
+    ;; The icicles after a tick. A room entered, or entered again by a soft
+    ;; return, grows its icicles back (the bible: once per visit, and a
+    ;; retry is the same puzzle). A falling icicle that touches the body
+    ;; while you play is a soft return, as a hazard is.
+    (define (ice-tick w before)
+      (if (not (world-gates w))
+          w
+          (let ((is (if (and (eq? (world-room w) (world-room before))
+                             (= (world-returns w) (world-returns before)))
+                        (world-ice w)
+                        (room-ice (world-wm w) (world-room w)))))
+            (if (not is)
+                (world w ice: #f)
+                (let* ((b (world-body w))
+                       (f HARKFELL-FEEL)
+                       (playing (eq? (world-phase w) 'play))
+                       (is2 (ices-step is (list (body-x b) (body-y b) (feel-box-w f) (feel-box-h f)) playing))
+                       (w (world w ice: (ices is2 news: '() hit: #f)
+                                  news: (append (world-news w) (ices-news is2)))))
+                  (if (and playing (ices-hit is2))
+                      (world w phase: 'dark timer: DIM-TICKS)
+                      w))))))
+
     (define (world-tick w in)
-      (critters-tick (still-tick (gates-tick (world-tick-body w in))) w))
+      (ice-tick (critters-tick (still-tick (gates-tick (world-tick-body w in))) w) w))
 
     (define (world-tick-body w in)
       (let ((w (world w ticks: (+ (world-ticks w) 1))))

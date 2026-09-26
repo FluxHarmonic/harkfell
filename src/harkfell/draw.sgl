@@ -43,6 +43,7 @@
           (harkfell content)
           (harkfell gates)
           (harkfell creatures)
+          (harkfell ice)
           (harkfell palette)
           (harkfell render)
           (harkfell atlas)
@@ -680,6 +681,21 @@
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
+              ;; CONTENT's placeholder for falling ice ((harkfell ice)) until the
+              ;; look track's frames (hang, shiver, fall, shatter): a pale spike,
+              ;; shaking a pixel either way while it shivers (D10: the tell is
+              ;; seen as well as heard)
+              (let ((is (world-ice w)))
+                (when is
+                  (for-each (lambda (ic)
+                              (unless (eq? (icicle-state ic) 'gone)
+                                (let ((x (+ (- (icicle-x ic) ox) (if (eq? (icicle-state ic) 'shiver) (if (odd? (quotient t 2)) 1 -1) 0)))
+                                      (y (- (icicle-y ic) oy)))
+                                  (paint! 'ground-4)
+                                  (draw-filled-rect (floor-int x) (floor-int y) (floor-int ICE-W) 8)
+                                  (draw-filled-rect (+ (floor-int x) 1) (+ (floor-int y) 8) 4 4)
+                                  (draw-filled-rect (+ (floor-int x) 2) (+ (floor-int y) 12) 2 2))))
+                            (ices-list is))))
               ;; a reedling perched on a reed tip rides the tip's sway
               (for-each (lambda (c)
                           (unless (eyes? c)

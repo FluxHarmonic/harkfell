@@ -1,0 +1,152 @@
+;;; Falling ice ((harkfell ice), topics/harkfell-glasswood-bible "Harm: falling
+;;; ice"), on the real physics and the real world tick:
+;;;
+;;;   the timing   the icicle lands IMPACT-TICKS after its tell, the time a
+;;;                runner at the one speed takes from the tell's edge to the
+;;;                column's middle, and that number is derived from the feel
+;;;                (a faster run lands it sooner)
+;;;   a runner     who keeps running from the tell is hit: a soft return, and
+;;;                the icicle is back on its rock afterwards
+;;;   a stopper    who lets go at the tell is not hit, watches it shatter,
+;;;                and can then walk under the column: it fell once this visit
+;;;   placement    the three gates (hung, over ground, a way out), each with
+;;;                the bible's red cases and its controls
+;;;   the room     an icicle needs no roster entry; a badly hung one is a
+;;;                content problem
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine tilemap)
+        (engine worldmap)
+        (engine roomfile)
+        (engine body)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell ice))
+
+(define SRC (read-world-source "test/fixtures/worlds/ice"))
+(define CT (load-content SRC))
+(define TM (worldmap-tiles (content-map CT)))
+
+(define (world-standing c r)
+  (let ((g (local->global CT (content-room CT 0 0) c r)))
+    (world-populate (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g)))
+                    '() '() '())))
+
+;; Tick w under policy (tick w -> intent) for n ticks: (w . ((tick . news-item) ...)).
+(define (run w policy n)
+  (let loop ((w w) (k 0) (acc '()))
+    (if (= k n)
+        (cons w (reverse acc))
+        (let* ((w (world-tick w (policy k w)))
+               (p (world-take-news w)))
+          (loop (cdr p) (+ k 1) (append (reverse (map (lambda (item) (cons k item)) (car p))) acc))))))
+
+(define RIGHT (intent h: 1 v: 0 jump: #f press: #f))
+(define (ice-events log what) (filter (lambda (e) (and (eq? (cadr e) 'ice) (eq? (caddr e) what))) log))
+(define (first-tick log what) (let ((l (ice-events log what))) (and (pair? l) (car (car l)))))
+(define (the-icicle w) (car (ices-list (world-ice w))))
+
+;; --- the timing -----------------------------------------------------------------------
+(test-group "ice: the timing"
+  (test "the impact comes the time a runner takes across the tell: 4 tiles at 4.95 tiles/s, 48 ticks"
+    (assert-equal 48 IMPACT-TICKS)
+    (assert-equal IMPACT-TICKS (impact-ticks-for HARKFELL-FEEL)))
+  (test "derived, not typed: a run a third faster lands it sooner"
+    (assert-equal 36 (impact-ticks-for (feel-with-run HARKFELL-FEEL (* (/ 4.0 3.0) (feel-run HARKFELL-FEEL))))))
+  (test "the fixture's icicle falls for fewer ticks than the impact, so it shivers first"
+    (let ((ic (the-icicle (world-standing 4 8))))
+      (assert-true (> (icicle-shiver-ticks ic) 0))
+      (assert-equal IMPACT-TICKS (+ (icicle-shiver-ticks ic) (icicle-fall-ticks ic))))))
+
+;; --- a runner ---------------------------------------------------------------------------
+(define RAN (run (world-standing 4 8) (lambda (k w) RIGHT) 240))
+
+(test-group "ice: a runner who ignores the ring"
+  (test "it rings, falls, and the runner is sent back: one soft return"
+    (assert-true (first-tick (cdr RAN) 'tell))
+    (assert-true (first-tick (cdr RAN) 'fall))
+    (assert-equal 1 (world-returns (car RAN))))
+  (test "and the icicle grows back on its rock for the retry"
+    ;; the runner, sent back and still running, may have rung it again by now;
+    ;; what matters is that the first one's shatter did not leave it gone
+    (assert-true (memq (icicle-state (the-icicle (car RAN))) '(hang shiver fall)))))
+
+;; --- a stopper --------------------------------------------------------------------------
+;; Run until the tell, then let go.
+(define STOP
+  (let* ((a (run (world-standing 4 8)
+                 (lambda (k w) (if (eq? (icicle-state (the-icicle w)) 'hang) RIGHT NO-INTENT))
+                 200)))
+    a))
+(define AFTER (run (car STOP) (lambda (k w) RIGHT) 150))
+
+(test-group "ice: a player who stops at the ring"
+  (test "it rings and shatters in front of them; no soft return"
+    (assert-true (first-tick (cdr STOP) 'tell))
+    (assert-true (first-tick (cdr STOP) 'shatter))
+    (assert-equal 0 (world-returns (car STOP))))
+  (test "from the ring to the shatter is the impact time"
+    (assert-equal IMPACT-TICKS (- (first-tick (cdr STOP) 'shatter) (first-tick (cdr STOP) 'tell))))
+  (test "stopped a tile or more short of the column"
+    (let* ((b (world-body (car STOP)))
+           (ic (the-icicle (car STOP))))
+      (assert-true (> (- (+ (icicle-x ic) (/ ICE-W 2.0)) (+ (body-x b) (/ (feel-box-w HARKFELL-FEEL) 2.0))) 16.0))))
+  (test "it fell once this visit: walking under the column rings nothing more"
+    (assert-equal 'gone (icicle-state (the-icicle (car AFTER))))
+    (assert-false (first-tick (cdr AFTER) 'tell))
+    (assert-equal 0 (world-returns (car AFTER)))
+    (assert-true (> (body-x (world-body (car AFTER))) (+ (icicle-x (the-icicle (car AFTER))) 16.0)))))
+
+;; --- placement ----------------------------------------------------------------------------
+(define (ok? grid c r) (null? (icicle-placement-problems grid c r)))
+(define (says? grid c r word)
+  (let ((ps (icicle-placement-problems grid c r)))
+    (and (find (lambda (m) (string-contains? m word)) ps) #t)))
+
+(test-group "ice: hung"
+  (test "an icicle under air is red"
+    (assert-true (says? '("#########" "#       #" "#       #" "#       #" "#########") 4 2 "does not hang from rock")))
+  (test "an icicle under a false wall is red"
+    (assert-true (says? '("#########" "#   +   #" "#       #" "#       #" "#########") 4 2 "does not hang from rock")))
+  (test "control: an icicle under rough rock is green"
+    (assert-true (ok? '("#########" "#   %   #" "#       #" "#       #" "#########") 4 2))))
+
+(test-group "ice: over ground"
+  (test "an icicle over a gap a player must jump is red"
+    (assert-true (says? '("#########" "#       #" "#       #" "#       #" "#### ####") 4 1 "over a gap")))
+  (test "an icicle over a ledge is red"
+    (assert-true (says? '("#########" "#       #" "#       #" "#   =   #" "#########") 4 1 "not rock")))
+  (test "control: an icicle over flat floor is green"
+    (assert-true (ok? '("#########" "#       #" "#       #" "#       #" "#########") 4 1)))
+  (test "control: an icicle beside a gap but not over it is green"
+    (assert-true (ok? '("#########" "#       #" "#       #" "#       #" "##### ###") 4 1))))
+
+(test-group "ice: a way out"
+  (test "an icicle over a one-cell-wide pit you must drop into is red"
+    (assert-true (says? '("#########" "#       #" "#       #" "#### ####" "#########") 4 1 "no step aside")))
+  (test "control: an icicle over a floor with a step on one side only is green"
+    (assert-true (ok? '("#########" "#       #" "#       #" "#    ####" "#########") 4 1))))
+
+;; --- the room ------------------------------------------------------------------------------
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a)
+             (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+(define (with-room f)
+  (map (lambda (e) (if (string-contains? (car e) "x0y0.room") (cons (car e) (f (cdr e))) e)) SRC))
+
+(test-group "ice: the room"
+  (test "the fixture world loads clean: an icicle needs no roster entry"
+    (assert-equal '() (content-problems CT)))
+  (test "an icicle hung under air is a content problem"
+    (let ((ps (content-problems (load-content (with-room (lambda (t) (swap t "(icicle at: (14 3))" "(icicle at: (14 5))")))))))
+      (assert-true (find (lambda (p) (string-contains? (problem-message p) "does not hang from rock")) ps)))))

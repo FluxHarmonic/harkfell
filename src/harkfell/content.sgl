@@ -28,7 +28,10 @@
 ;;;                      roster, its bed channels the region's, its moment one
 ;;;                      of the region's; every ring-stone cell (o) named in
 ;;;                      things: as (ring-stone at: (C R) overtone: N) and every
-;;;                      such thing on an o; no two rooms at one coordinate
+;;;                      such thing on an o; an icicle (icicle at: (C R), on no
+;;;                      roster) placed where it is fair (icicle-placement-
+;;;                      problems: hung, over ground, a way out); no two rooms
+;;;                      at one coordinate
 ;;;   the map            every room in a region map has its file and every file
 ;;;                      its map entry, with the same title and intent, and the
 ;;;                      map's connections are the seams: two neighbours are
@@ -69,7 +72,8 @@
           read-room-source room-placed
           region-map region-map? region-map-region region-map-rooms region-map-origin
           region-rooms
-          thing-kw thing-at room-things-of grid-standable?)
+          thing-kw thing-at room-things-of grid-standable?
+          icicle-floor-row icicle-placement-problems)
 
   (begin
     (define ROOM-COLS 25)
@@ -194,6 +198,70 @@
              (memq (char-kind (ch c r)) (list 'air))
              (memq (char-kind (ch c (+ r 1))) (list 'solid 'climbable 'ledge))
              #t)))
+
+    ;; --- Glasswood: falling ice's placement (topics/harkfell-glasswood-bible) -----------
+    ;;
+    ;; An icicle ((icicle at: (C R)), (harkfell ice)) is only fair where you
+    ;; are under it while walking on open ground, with somewhere to step back
+    ;; to. Three checks on the grid, each a problem when it fails:
+    ;;   hung         its cell is air, and the cell above it is rock (# or %):
+    ;;                not a false wall, a ledge, air, a stone or water
+    ;;   over ground  straight down from it, air all the way onto a floor of
+    ;;                rock (# or %): no gap to the room's bottom, no water, no
+    ;;                hazard, no ledge, no stone, no false wall in the column,
+    ;;                and at least one cell of air under it to fall through
+    ;;   a way out    the standing cell at the foot of that fall has a
+    ;;                standing neighbour beside it, left or right, on the same
+    ;;                floor (air, with rock or a ledge under it)
+
+    (define (ice-air? ch) (or (char=? ch #\space) (char=? ch #\|) (char=? ch #\^)))
+    (define (ice-rock? ch) (or (char=? ch #\#) (char=? ch #\%)))
+
+    (define (grid-char grid c r)
+      (and (< -1 r (length grid))
+           (let ((row (list-ref grid r)))
+             (and (< -1 c (string-length row)) (string-ref row c)))))
+
+    ;; The row of the first cell under (c, r) that is not air, or #f when the
+    ;; column is air to the grid's bottom.
+    (define (icicle-floor-row grid c r)
+      (let loop ((y (+ r 1)))
+        (let ((ch (grid-char grid c y)))
+          (cond ((not ch) #f)
+                ((ice-air? ch) (loop (+ y 1)))
+                (else y)))))
+
+    (define (cell-name c r) (string-append "(" (number->string c) " " (number->string r) ")"))
+
+    ;; The placement problems of an icicle at (c, r) in grid (strings): '()
+    ;; when it is fair.
+    (define (icicle-placement-problems grid c r)
+      (let* ((here (grid-char grid c r))
+             (above (grid-char grid c (- r 1)))
+             (at (cell-name c r))
+             (hung (cond ((not (and here (ice-air? here)))
+                          (list (string-append "icicle at: " at " is not in air (hung: its own cell must be open)")))
+                         ((not (and above (ice-rock? above)))
+                          (list (string-append "icicle at: " at " does not hang from rock (hung: the cell above must be # or %)")))
+                         (else '())))
+             (fr (icicle-floor-row grid c r))
+             (fch (and fr (grid-char grid c fr)))
+             (ground (cond ((not fr)
+                            (list (string-append "icicle at: " at " is over a gap (over ground: no floor under it in this room)")))
+                           ((= fr (+ r 1))
+                            (list (string-append "icicle at: " at " has no air under it to fall through (over ground)")))
+                           ((not (ice-rock? fch))
+                            (list (string-append "icicle at: " at " falls onto " (string fch) " at " (cell-name c fr)
+                                                 ", not rock (over ground: no water, hazard, ledge, stone or false wall)")))
+                           (else '())))
+             (stand-r (and fr (- fr 1)))
+             (standable (lambda (x) (let ((ch (grid-char grid x stand-r)) (fl (grid-char grid x fr)))
+                                      (and ch fl (ice-air? ch) (or (ice-rock? fl) (char=? fl #\=))))))
+             (way (if (and (null? ground) (not (or (standable (- c 1)) (standable (+ c 1)))))
+                      (list (string-append "icicle at: " at " falls where there is no step aside (a way out: the cell under it at "
+                                           (cell-name c stand-r) " has no standing neighbour on the same floor)"))
+                      '())))
+        (append hung ground way)))
 
     ;; The room's things of one kind.
     (define (room-things-of rm kind)
@@ -393,6 +461,12 @@
                                  (add! (string-append "things: harmonic overtone: " (number->string o) " is not one "
                                                       (symbol->string region-sym) " gives: (gives: in world/world.sgl)")
                                        "things"))))
+                            ((eq? (car t) 'icicle)            ; Glasswood: falling ice, on no roster
+                             (let ((a (thing-kw t "at")))
+                               (if (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
+                                   (add! (string-append "things: icicle at: " (datum->string a) " is not a cell of the grid") "things")
+                                   (for-each (lambda (m) (add! (string-append "things: " m) "things"))
+                                             (icicle-placement-problems (roomfile-grid rf) (car a) (cadr a))))))
                             ((and reg (not (memq (car t) (or (region-field reg 'roster) '()))))
                              (add! (string-append "things: " (symbol->string (car t)) " is not on "
                                                   (symbol->string region-sym) "'s roster")

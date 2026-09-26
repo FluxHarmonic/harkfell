@@ -1,0 +1,7 @@
+(map
+  region: icefen
+  origin: (0 0)
+  layout:
+  ("A")
+  rooms:
+  ((A "Icicle" "one icicle over a flat floor")))

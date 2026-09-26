@@ -1,0 +1,18 @@
+;;; A one-room fixture world for falling ice ((harkfell ice), test/test-ice.sgl):
+;;; a flat floor under a band of rock, with one icicle hanging at (14,3). A
+;;; runner from the west end walks into its tell and on under it; the icicle
+;;; is on no region's roster (falling ice is a thing every region may hang).
+(start region: icefen room: (0 0) cell: (4 8))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region icefen
+  name: "Ice fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: ()
+  moments: ()
+  gives: ())
