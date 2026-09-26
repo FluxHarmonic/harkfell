@@ -35,6 +35,19 @@
 (define (string-prefix? p s)
   (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
 (define (drop l n) (if (= n 0) l (drop (cdr l) (- n 1))))
+(define (take l n) (if (or (= n 0) (null? l)) '() (cons (car l) (take (cdr l) (- n 1)))))
+
+;; Green, for the no-green rule: an HSV hue from 70 to 170 degrees, with
+;; saturation at least 0.08 (a near-grey has a hue, but no one sees it).
+(define (green-hue? rgb)
+  (let* ((r (car rgb)) (g (cadr rgb)) (b (caddr rgb))
+         (mx (max r g b)) (mn (min r g b)) (c (- mx mn)))
+    (and (> c 0) (> mx 0) (>= (/ c mx) 0.08)
+         (let* ((h0 (cond ((= mx r) (/ (- g b) c))
+                          ((= mx g) (+ 2 (/ (- b r) c)))
+                          (else (+ 4 (/ (- r g) c)))))
+                (h (* 60 (if (< h0 0) (+ h0 6) h0))))
+           (<= 70 h 170)))))
 
 (define WORLD (load-content (read-world-source "world")))
 (define LOOK (load-content (read-world-source "test/fixtures/worlds/look")))
@@ -94,6 +107,16 @@
     (for-each (lambda (w) (assert-true (assq w (content-palette WORLD)))) WORLD-SLOTS))
   (test "the look fixture's palette is world/world.sgl's"
     (assert-equal (content-palette WORLD) (content-palette LOOK)))
+  ;; Glasswood's bible: no green in the region's sixteen, so H3's pale
+  ;; green (the moths, the harmonic, the green stones) is the only green on
+  ;; screen. The control: H3 itself reads as green by the same rule, so the
+  ;; rule can fail.
+  (test "no Glasswood role has a green hue (and H3's colour does)"
+    (let* ((hex (lambda (role) (let ((e (assq role (content-palette WORLD)))) (and e (cadr e)))))
+           (gw (find (lambda (r) (eq? (region-name r) 'glasswood)) (content-regions WORLD)))
+           (roles (take (region-field gw 'palette) 13)))
+      (assert-true (green-hue? (hex->rgb (hex 'h3))))
+      (assert-equal '() (filter (lambda (role) (green-hue? (hex->rgb (hex role)))) roles))))
   (test "a lookup names only slots"
     (for-each (lambda (table)
                 (for-each (lambda (e)
@@ -134,7 +157,7 @@
                         (loop (+ m 1))))
                     (vloop (+ v 1)))))))
           MATERIALS))
-      (list "reedfen" "hollow")))
+      (list "reedfen" "hollow" "glasswood")))
   (test "reeds have as many top, mid and base cells, so a stalk runs on"
     (for-each
       (lambda (sheet)
@@ -142,7 +165,7 @@
           (assert-true (> (n "top") 0))
           (assert-equal (n "top") (n "mid"))
           (assert-equal (n "top") (n "base"))))
-      (list "reedfen" "hollow")))
+      (list "reedfen" "hollow" "glasswood")))
   (test "climbable rock has holds that smooth rock has not (not colour alone)"
     (for-each
       (lambda (sheet)
@@ -154,7 +177,7 @@
                              (* 256.0 (length fills)))))))
           (assert-true (> (joints "rough") 0.15))
           (assert-true (< (joints "rock") 0.03))))
-      (list "reedfen" "hollow"))))
+      (list "reedfen" "hollow" "glasswood"))))
 
 (test-group "art: the player"
   (test "every frame player-frame can name exists, and faces the same way"
@@ -220,7 +243,7 @@
     (assert-equal "wake-c" (waking-frame 10))
     (assert-true (member (waking-frame 200) (list "wake-a" "wake-b"))))
   (test "each sheet has tufts for its front decoration; the sky has clouds"
-    (for-each (lambda (s) (assert-true (cell (string-append s "/tuft-a")))) (list "reedfen" "hollow"))
+    (for-each (lambda (s) (assert-true (cell (string-append s "/tuft-a")))) (list "reedfen" "hollow" "glasswood"))
     (assert-true (cell "sky/cloud-a"))))
 
 (test-group "art: the player's frames as player-frame picks them"

@@ -44,6 +44,7 @@
           (harkfell gates)
           (harkfell creatures)
           (harkfell ice)
+          (harkfell feel)
           (harkfell palette)
           (harkfell render)
           (harkfell atlas)
@@ -310,14 +311,106 @@
             (cols (+ x 1))))
         bv))
 
-    (define *backdrops* '())       ; ((key . texture) ...), key a region or 'under
+    ;; --- Glasswood (the region's bible, "The look") ---
+
+    (define (glw-hash x k) (modulo (+ (* x x 31) (* x (+ 17 k)) (* k 101) 7) 97))
+
+    ;; Glasswood's backdrop: the misty valley below the scree and the far
+    ;; wood standing in it. The sky's four bands (slate blue high up to the
+    ;; warm haze); the valley's far side, a low ridge in sky-2; under it the
+    ;; valley full of mist, the haze thick at the ridge's foot and thinning,
+    ;; and the far birch wood rising out of it: thin trunks and dithered
+    ;; crowns in sky-2, a pixel here and there catching the light (the wood
+    ;; glitters far below), and a second band of mist lying across it.
+    (define (glasswood-bytes)
+      (let* ((seams (list 18 34 48)) (horizon 62)
+             (tops (make-vector VIEW-W #f))
+             (bv (make-bytevector (* 4 VIEW-W VIEW-H) 0)))
+        ;; the far wood's trunks: about one column in seven, never two side by side
+        (let loop ((x 0) (prev #f))
+          (when (< x VIEW-W)
+            (let ((t? (and (not prev) (< (glw-hash x 0) 15))))
+              (when t? (vector-set! tops x (+ 70 (modulo (glw-hash x 3) 18))))
+              (loop (+ x 1) t?))))
+        (let ((crown? (lambda (x y)
+                        (let loop ((dx -4))
+                          (and (<= dx 4)
+                               (let* ((tx (+ x dx))
+                                      (top (and (>= tx 0) (< tx VIEW-W) (vector-ref tops tx))))
+                                 (or (and top
+                                          (let ((u (/ dx 3.5)) (v (/ (- y (+ top 3)) 7.0)))
+                                            (< (+ (* u u) (* v v)) 1.0)))
+                                     (loop (+ dx 1)))))))))
+          (let cols ((x 0))
+            (when (< x VIEW-W)
+              (let ((ridge (floor-int (- horizon (hill x 10 11)))))
+                (let rows ((y 0))
+                  (when (< y VIEW-H)
+                    (let* ((th (bayer x y))
+                           (s (cond ((< y ridge) (sky-slot seams x y))
+                                    ((< y (+ horizon 2)) 1)
+                                    (else
+                                     (let* ((d (- y horizon))
+                                            ;; the bands drift up and down along the valley
+                                            (band (+ 102 (* 5.0 (sin (+ 0.7 (* x 0.013)))) (* 2.0 (sin (* x 0.047)))))
+                                            (mist (max (- 0.85 (* d (+ 0.032 (* 0.008 (sin (* x 0.021))))))
+                                                       (* 0.65 (max 0.0 (- 1.0 (/ (abs (- y band)) 7.0))))))
+                                            (top (vector-ref tops x))
+                                            (trunk (and top (> y (+ top 2))))
+                                            (crown (and (not trunk) (crown? x y) (> 0.5 (bayer (+ x 2) (+ y 1))))))
+                                       (cond ((< th mist) 3)
+                                             (trunk 1)
+                                             (crown (if (= 0 (modulo (glw-hash (+ x (* 3 y)) 5) 9)) 3 1))
+                                             (else 2))))))
+                           (o (* 4 (+ x (* y VIEW-W)))))
+                      (bytevector-u8-set! bv o s)
+                      (bytevector-u8-set! bv (+ o 3) 255))
+                    (rows (+ y 1)))))
+              (cols (+ x 1)))))
+        bv))
+
+    ;; Under Glasswood: a wall of blue ice, not earth. Ice in shade (ground-2)
+    ;; with long flow bands of ice (ground-3), and pools of the ice's own glow
+    ;; (water, which the dark leaves as it is: the caves' shapes stay just
+    ;; visible, the bible's "faint blue glow from the ice itself"). Birch
+    ;; roots hang from the top in bark grey.
+    (define (glasswood-under-bytes)
+      (let ((bv (make-bytevector (* 4 VIEW-W VIEW-H) 0)))
+        (let cols ((x 0))
+          (when (< x VIEW-W)
+            (let* ((root (and (= 0 (modulo (+ (* x 7) (floor-int (* 5.0 (sin (* x 0.37))))) 29)) (> (sin (* x 0.9)) -0.2)))
+                   (root-len (+ 12 (modulo (* x 13) 40))))
+              (let rows ((y 0))
+                (when (< y VIEW-H)
+                  (let* ((th (bayer x y))
+                         (flow (+ 0.5 (* 0.5 (sin (+ (* x 0.09) (* 2.2 (sin (+ (* y 0.031) (* x 0.004)))))))))
+                         ;; the ice's glow: soft pools deep in the wall, a sparse
+                         ;; dither of water thickening toward each pool's heart
+                         (glow (* (sin (+ (* x 0.029) (* 1.6 (sin (* y 0.043))) 0.4))
+                                  (sin (+ (* y 0.051) (* x 0.011) (* 0.8 (sin (* x 0.07)))))))
+                         (s (cond ((and root (< y root-len) (> (+ root-len (- y)) (* 4.0 th))) 9)
+                                  ((< th (* 0.5 (- glow 0.4))) 11)
+                                  ((> flow (+ 0.62 (* 0.3 th))) 6)
+                                  (else 5)))
+                         (o (* 4 (+ x (* y VIEW-W)))))
+                    (bytevector-u8-set! bv o s)
+                    (bytevector-u8-set! bv (+ o 3) 255))
+                  (rows (+ y 1)))))
+            (cols (+ x 1))))
+        bv))
+
+    (define *backdrops* '())       ; ((key . texture) ...), key a region, 'under or 'glasswood-under
 
     (define (backdrop key)
       (let ((e (assq key *backdrops*)))
         (if e
             (cdr e)
             (let ((t (make-texture-from-pixels VIEW-W VIEW-H
-                                               (if (eq? key 'under) (under-bytes) (backdrop-bytes key))
+                                               (case key
+                                                 ((under) (under-bytes))
+                                                 ((glasswood-under) (glasswood-under-bytes))
+                                                 ((glasswood) (glasswood-bytes))
+                                                 (else (backdrop-bytes key)))
                                                'nearest)))
               (set! *backdrops* (cons (cons key t) *backdrops*))
               t))))
@@ -353,7 +446,9 @@
     ;; The room's backdrop: its region's sky, or earth when it lies under
     ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
-      (let ((tex (backdrop (if (under? rm) (quote under) (room-region rm))))
+      (let ((tex (backdrop (cond ((not (under? rm)) (room-region rm))
+                                 ((eq? (room-region rm) (quote glasswood)) (quote glasswood-under))
+                                 (else (quote under)))))
             (r (* FOCUS-R *focus* *focus*)))
         (if (> r 0.3)
             (draw-texture-scattered! tex VIEW-W VIEW-H r)
@@ -649,12 +744,63 @@
 
     ;; The slot of the light's own colour in the room: the harmonic the
     ;; room's light belongs to (its pickup, its stone, the moths' draw).
+    ;; A room with neither takes its moths' harmonic (Root Ice's moths glow
+    ;; H3's green, not H2's amber).
     (define (room-hue w)
-      (let ((stones (world-stones w)) (pickups (world-pickups w)))
+      (let* ((stones (world-stones w)) (pickups (world-pickups w))
+             (cs (let ((c (world-critters w))) (if c (critters-list c) '())))
+             (moth (find (lambda (c) (and (eq? (critter-kind c) 'moth) (critter-drawn c))) cs)))
         (slot-of (harmonic-role
                   (cond ((pair? pickups) (pickup-overtone (car pickups)))
                         ((pair? stones) (stone-overtone (car stones)))
+                        (moth (critter-drawn moth))
                         (else 2))))))
+
+    ;; A disc of light (B, additive: the caller's blend) of amount a, radius
+    ;; r, one rect per row.
+    (define (light-disc! cx cy r a)
+      (when (> a 0.0)
+        (paint-light! a)
+        (let* ((x0 (floor-int cx)) (y0 (floor-int cy)) (ri (floor-int r)))
+          (let loop ((dy (- ri)))
+            (when (<= dy ri)
+              (let ((hw (floor-int (sqrt (max 0.0 (- (* r r) (* dy dy)))))))
+                (draw-filled-rect (- x0 hw) (+ y0 dy) (+ 1 (* 2 hw)) 1))
+              (loop (+ dy 1)))))))
+
+    ;; The moth light (D42; the bible, "The lantern moths and the moth
+    ;; light"). Only in a room darker than daylight, where the resolve takes
+    ;; light (B) first off the dark, DARK-GAIN steps a unit:
+    ;;   - a moth that is not drawn to you lifts the dark in a small patch
+    ;;     round itself, so a cloud of moths you do not carry for is a faint
+    ;;     glow in the dark;
+    ;;   - moths drawn to you (they orbit your body) spread into a lit circle
+    ;;     round you, about three tiles across: three rings adding up to the
+    ;;     whole dark at the middle, the outer two dithering back into it.
+    ;;     It grows with the moths' glow, which rises as they come to you,
+    ;;     so the circle opens as they gather.
+    ;; The rings only cancel the dark, never more, so inside the circle the
+    ;; room and the moths' own glows look as they do by day (a moth's glow
+    ;; stacked on a brighter circle burned white).
+    (define MOTH-RINGS (list 36.0 27.0 19.0))
+    (define (draw-moth-light! moths b rm ox oy t)
+      (let ((dark (dark-steps (room-light rm))))
+        (when (and (> dark 0.0) (pair? moths))
+          (let* ((unit (/ dark DARK-GAIN))
+                 (drawn (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths)))
+            (for-each (lambda (c)
+                        (unless (eq? (critter-state c) 'drawn)
+                          (light-disc! (- (critter-x c) ox) (- (critter-y c) oy) 9.0
+                                       (* 0.7 unit (max 0.3 (critter-glow c))))))
+                      moths)
+            (when (pair? drawn)
+              (let* ((g (/ (apply + (map critter-glow drawn)) (length drawn)))
+                     (n (min 1.0 (/ (length drawn) 3.0)))
+                     (c (body-center b HARKFELL-FEEL))
+                     (cx (- (car c) ox)) (cy (- (cdr c) oy 4))
+                     (a (* (/ unit 3.0) g)))
+                (for-each (lambda (r) (light-disc! cx cy (* r (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 g))) a))
+                          MOTH-RINGS)))))))
 
     ;; Play into the current (index) pass: the room, its things, the body.
     (define (draw-play w)
@@ -729,6 +875,7 @@
                                 (when (in-room? x y) (draw-pickup-light (pickup-overtone pk) x y t))))
                             (world-pickups w))
                   (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) moths)
+                  (draw-moth-light! moths b rm ox oy t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
                             *flashes*)))
               (for-each (lambda (f) (draw-flash (car f) (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f)) slot))
@@ -756,7 +903,8 @@
           (draw-strips! *strips*))
         (resolve! (world-ticks w)
                   (max (world-dim w) (if (pair? black) (car black) 0.0))
-                  (if rm (room-hue w) (slot-of 'h2)))))
+                  (if rm (room-hue w) (slot-of 'h2))
+                  (if rm (room-light rm) 1.0))))
 
     ;; --- the overviews: the region sheet and the atlas ----------------------------------
 
@@ -816,7 +964,7 @@
               (set-blend-mode 'normal)
               (draw-room-still rm)
               (draw-strips! *strips*))
-            (resolve! 0 0.0 (slot-of 'h2))
+            (resolve! 0 0.0 (slot-of 'h2) (room-light rm))
             (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
               (with-render-target rt
                 (with-blend-mode 'none

@@ -1,0 +1,22 @@
+(room
+  region: glasswood
+  at: (4 0)
+  title: "Blue Hour"
+  intent: "the same wood at the blue hour: light 0.7"
+  bed: (wind 0.3 drone 0.6)
+  light: 0.7
+  grid:
+  ("                        #"
+   "                        #"
+   "        |         |     #"
+   "        |==     ==|     #"
+   "    |   |         |   | #"
+   "%  =|=  |    |    |   | #"
+   "%%  |   |    |    |  =|=#"
+   "%%% |   |    |    |   | #"
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (12 4) count: 3 drawn: 3))
+  start: (4 7)
+  decor: auto)

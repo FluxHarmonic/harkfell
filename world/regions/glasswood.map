@@ -4,7 +4,9 @@
 ;;;
 ;;; PHASE 1: only the negative-coordinates probe's two rooms, The Scree (A)
 ;;; and First Sight (B), joined to the Hollow's Scree End through the old
-;;; amber door. The other twenty come in phase 2, with the full layout:
+;;; amber door; and the look track's dark look probe, Root Ice (U), closed on
+;;; every side until the caves are written. The other nineteen come in
+;;; phase 2, with the full layout:
 ;;;
 ;;;   x-6  x-5  x-4  x-3  x-2  x-1  x0
 ;;;   J -  I -  H -  G -  F    B -  A      y3  the crowns (sky above)
@@ -18,8 +20,13 @@
   region: glasswood
   origin: (-1 3)
   layout:
-  ("B-A")
+  ("B-A"
+   "   "
+   "   "
+   "   "
+   "U  ")
   rooms:
   ((A "The Scree" "through the old stone door, scree falls away west into mist, and the birches glitter far below")
-   (B "First Sight" "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath"))
+   (B "First Sight" "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath")
+   (U "Root Ice" "a low cave where the birches' roots hang down through the ice: a breath in the dark"))
   borders: ((A east)))

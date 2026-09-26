@@ -1,0 +1,21 @@
+(room
+  region: glasswood
+  at: (3 0)
+  title: "Birch Floor"
+  intent: "glass ice, scree, birch trunks and branches, and a pool, in daylight"
+  bed: (wind 0.5 drone 0.6)
+  grid:
+  ("#                        "
+   "#                        "
+   "#  |               |     "
+   "#==|==    |        |==   "
+   "#  |      |     |  |     "
+   "#  |     =|==   |  |   %%"
+   "#  |      |   ==|= |   %%"
+   "#  |      |     |  |  %%%"
+   "#####~~~~################"
+   "######~~#################"
+   "#########################")
+  things: ((lantern-moth at: (13 4) count: 3 drawn: 3))
+  start: (1 7)
+  decor: auto)

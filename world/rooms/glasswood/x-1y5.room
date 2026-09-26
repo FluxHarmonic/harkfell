@@ -1,0 +1,27 @@
+;; world/rooms/glasswood/x-1y5.room
+(room
+  region: glasswood
+  at: (-1 5)
+  title: "Root Ice"
+  intent: "a low cave where the birches' roots hang down through the ice: a breath in the dark"
+  bed: (wind 0.05 water 0.7 hum 0.3)
+  light: 0.25
+  grid:
+  ("#########################"
+   "#########################"
+   "####   ######     #######"
+   "##          ##       ####"
+   "#                     ###"
+   "#                      ##"
+   "#                    %%##"
+   "#                  %%%%##"
+   "#####~~~~~~~~~#####%%%%##"
+   "######~~~~~~~############"
+   "#########################")
+  things: ((lantern-moth at: (9 5) count: 4 drawn: 3))
+  start: (2 7)
+  decor: auto)
+;; LOOK PROBE (the look track, 2026-09-26): the dark palette and the moths'
+;; lit circle (D42), in the slot the map gives Root Ice. Closed on every
+;; side until the ROOMS slice writes the caves; the ROOMS slice redraws it.
+;; Carry H3 (?carry=2,3) and the moths come to you and light the cave.

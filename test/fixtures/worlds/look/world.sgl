@@ -34,6 +34,23 @@
   (hol-turf-3 "#9aa25e" "grass lit")
   (hol-tarn "#465a6b" "the tarn")
   (hol-bracken "#b0643a" "the Hollow's one warm accent: bracken")
+  ;; Glasswood: a birch wood the morning after an ice storm, every twig
+  ;; cased in clear ice; a low winter sun at the wood's edge. NO GREEN in
+  ;; these sixteen (the bible: H3's pale green is the only green on screen;
+  ;; test/test-art.sgl checks each role's hue)
+  (glw-sky-1 "#586c8e" "high sky, slate blue")
+  (glw-sky-2 "#8497b3" "middle sky; the far wood")
+  (glw-sky-3 "#b7c1d0" "low sky, pale")
+  (glw-sky-4 "#e9dccb" "a warm haze at the horizon; mist")
+  (glw-ice-1 "#1c2130" "blue-black shadow")
+  (glw-ice-2 "#44587a" "ice in shade, snow in shadow")
+  (glw-ice-3 "#8ba3c2" "ice and glazed rock")
+  (glw-ice-4 "#e8eef6" "lit snow")
+  (glw-birch-1 "#27242a" "birch marks, near black")
+  (glw-birch-2 "#8c8790" "bark in shade")
+  (glw-birch-3 "#f2e8da" "bark lit, warm white")
+  (glw-melt "#2f5f8f" "blue ice and dark meltwater")
+  (glw-copper "#cc7f45" "the low sun: Glasswood's one warm accent")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")
@@ -60,3 +77,19 @@
   moments: ())
 
 (creature frog behaviour: hop)
+
+;; Glasswood (the look track, 2026-09-26): its tiles and palette on every
+;; material, in daylight and at the blue hour (light: 0.7), before the
+;; region's rooms exist. Not Glasswood the player walks.
+(region glasswood
+  name: "Glasswood (look fixture)"
+  bounds: ((3 0) (4 0))
+  bed: "bed-hollow"
+  bed-channels: (wind water texture drone)
+  palette: (glw-sky-1 glw-sky-2 glw-sky-3 glw-sky-4 glw-ice-1 glw-ice-2 glw-ice-3 glw-ice-4
+            glw-birch-1 glw-birch-2 glw-birch-3 glw-melt glw-copper fur-1 fur-2 ink)
+  tiles: glasswood
+  roster: (lantern-moth)
+  moments: ())
+
+(creature lantern-moth behaviour: follow)

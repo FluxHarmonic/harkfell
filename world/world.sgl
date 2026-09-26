@@ -47,6 +47,23 @@
   (hol-turf-3 "#9aa25e" "grass lit")
   (hol-tarn "#465a6b" "the tarn")
   (hol-bracken "#b0643a" "the Hollow's one warm accent: bracken")
+  ;; Glasswood: a birch wood the morning after an ice storm, every twig
+  ;; cased in clear ice; a low winter sun at the wood's edge. NO GREEN in
+  ;; these sixteen (the bible: H3's pale green is the only green on screen;
+  ;; test/test-art.sgl checks each role's hue)
+  (glw-sky-1 "#586c8e" "high sky, slate blue")
+  (glw-sky-2 "#8497b3" "middle sky; the far wood")
+  (glw-sky-3 "#b7c1d0" "low sky, pale")
+  (glw-sky-4 "#e9dccb" "a warm haze at the horizon; mist")
+  (glw-ice-1 "#1c2130" "blue-black shadow")
+  (glw-ice-2 "#44587a" "ice in shade, snow in shadow")
+  (glw-ice-3 "#8ba3c2" "ice and glazed rock")
+  (glw-ice-4 "#e8eef6" "lit snow")
+  (glw-birch-1 "#27242a" "birch marks, near black")
+  (glw-birch-2 "#8c8790" "bark in shade")
+  (glw-birch-3 "#f2e8da" "bark lit, warm white")
+  (glw-melt "#2f5f8f" "blue ice and dark meltwater")
+  (glw-copper "#cc7f45" "the low sun: Glasswood's one warm accent")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")
@@ -84,10 +101,11 @@
 ;; birch wood caught by an ice storm, west of the Hollow and lower, at
 ;; negative x. You come down into it through the old amber door at Scree
 ;; End (H2); H3 lies in the Old Birch at its far west corner. PHASE 1 holds
-;; only the negative-coordinates probe (The Scree, First Sight). PLACEHOLDERS
-;; until the look and sound tracks land: the Hollow's palette roles and
-;; tiles, and its bed (SOUND's glasswood-bed, channels wind water chimes
-;; drone); gives: H3 once the Old Birch is written.
+;; only the negative-coordinates probe (The Scree, First Sight), and LOOK's
+;; dark look probe (Root Ice). The palette and tiles are the look track's
+;; (glw-*, assets/art/glasswood.txt). PLACEHOLDER until the sound track
+;; lands: the Hollow's bed (SOUND's glasswood-bed, channels wind water
+;; chimes drone); gives: H3 once the Old Birch is written.
 (region glasswood
   name: "Glasswood"
   bounds: ((-6 3) (0 6))
@@ -95,9 +113,9 @@
   bed: "hollow-bed"
   bed-channels: (wind water hum drone)
   mode: lydian
-  palette: (hol-sky-1 hol-sky-2 hol-sky-3 hol-sky-4 hol-stone-1 hol-stone-2 hol-stone-3 hol-stone-4
-            hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
-  tiles: hollow
+  palette: (glw-sky-1 glw-sky-2 glw-sky-3 glw-sky-4 glw-ice-1 glw-ice-2 glw-ice-3 glw-ice-4
+            glw-birch-1 glw-birch-2 glw-birch-3 glw-melt glw-copper fur-1 fur-2 ink)
+  tiles: glasswood
   roster: (lantern-moth snow-owl snow-vole)
   moments: ()
   wander: ()

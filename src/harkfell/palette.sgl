@@ -32,6 +32,7 @@
 ;;;   DEEP      the same, a tile or more down
 ;;;   REFLECT   a slot seen mirrored in the water's skin
 ;;;   LIT       a slot in light (a moth, a stone ringing)
+;;;   DARK      a slot in a dark room (light: under 1)
 ;;;
 ;;; Pure: no drawing. (harkfell render) turns a region's colours and these
 ;;; lookups into the strips its shader reads.
@@ -43,7 +44,7 @@
 
   (export SLOTS REGION-SLOT-COUNT SLOT-COUNT WORLD-SLOTS
           slot-of slot-name hex->rgb
-          WATER DEEP REFLECT LIT lookup
+          WATER DEEP REFLECT LIT DARK lookup
           region-rgb-vector MAGENTA)
 
   (begin
@@ -123,6 +124,21 @@
             (cons 'fur-2 'fur-1) (cons 'ink 'ground-2)
             ;; on the black of the start screen and the card a glow shows warm
             (cons 'black 'accent)))
+
+    ;; In the dark (a room's light: under 1, Glasswood's caves and the blue
+    ;; hour deeper in the wood): a step down its own ramp, toward the blue-
+    ;; black shadow; what grows (the birches, moss, reeds) goes over to the
+    ;; ground's cold ramp a step down, as white bark turns blue at dusk.
+    ;; Water keeps its colour, so ice and meltwater glow
+    ;; faintly in a dark room and its shapes stay just visible (the bible:
+    ;; "a faint blue glow from the ice itself"). The accent (the low sun)
+    ;; goes out first. Applied once or twice, dithered by how dark the room is.
+    (define DARK
+      (list (cons 'sky-1 'ground-2) (cons 'sky-2 'sky-1) (cons 'sky-3 'sky-2) (cons 'sky-4 'sky-3)
+            (cons 'ground-2 'ground-1) (cons 'ground-3 'ground-2) (cons 'ground-4 'ground-3)
+            (cons 'leaf-1 'ground-1) (cons 'leaf-2 'ground-2) (cons 'leaf-3 'ground-3)
+            (cons 'accent 'ground-2)
+            (cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2)))
 
     ;; The slot a lookup table sends slot i to.
     (define (lookup table i)

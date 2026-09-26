@@ -12,7 +12,7 @@
 ;;;   B  light, added (a moth, a ringing stone, a harmonic)
 ;;; Under the 176 view rows sit STRIP-ROWS rows of lookup strips, one pixel
 ;;; per slot: the region's colour for each slot, and its colour under
-;;; water, deeper, mirrored in the skin, lit, lit twice. sigil-graphics
+;;; water, deeper, mirrored in the skin, lit, lit twice, dark, dark twice. sigil-graphics
 ;;; binds one texture per shader and caps its uniform block at 512 bytes,
 ;;; so the strips ride in the same target the shader reads.
 ;;;
@@ -35,7 +35,7 @@
 ;;; rows and convert.
 ;;;
 ;;;   (render-begin-room!)            the room target, cleared, as the current pass
-;;;   (render-resolve! into strips-tex t black hue)   the room target, resolved into
+;;;   (resolve! t black hue [light])  the room target, resolved into
 ;;;                                   the colour target (call inside no pass)
 ;;;   (paint-slot! s) (paint-slot-a! s a)   set-color for slot s
 ;;;   (paint-water!) (paint-light! amount)  set-color for the water and light passes
@@ -51,13 +51,13 @@
           paint-slot! paint-slot-a! paint-water! paint-light!
           strip-bytes make-strips strips-update! draw-strips!
           ensure-render! room-index-rt room-color-rt
-          resolve! sway-composite! sway-offset draw-texture-scattered! draw-texture-dissolved!
+          resolve! dark-steps DARK-GAIN sway-composite! sway-offset draw-texture-scattered! draw-texture-dissolved!
           GLSL-PREFIX VERT-SOURCE)
 
   (begin
     (define VIEW-W 400)
     (define VIEW-H 176)
-    (define STRIP-ROWS 6)                 ; base water deep reflect lit lit2
+    (define STRIP-ROWS 8)                 ; base water deep reflect lit lit2 dark dark2
     (define STRIP-W 32)                   ; slots per strip (SLOT-COUNT fits)
     (define INDEX-H (+ VIEW-H STRIP-ROWS))
 
@@ -86,7 +86,9 @@
                         (lambda (i) (lookup DEEP i))
                         (lambda (i) (lookup REFLECT i))
                         (lambda (i) (lookup LIT i))
-                        (lambda (i) (lookup LIT (lookup LIT i))))))
+                        (lambda (i) (lookup LIT (lookup LIT i)))
+                        (lambda (i) (lookup DARK i))
+                        (lambda (i) (lookup DARK (lookup DARK i))))))
         (let loop ((rs rows) (r 0))
           (unless (null? rs)
             (let slots ((i 0))
@@ -165,6 +167,7 @@
        "uniform float u_view_h;\n"
        "uniform float u_black;\n"
        "uniform float u_hue;\n"
+       "uniform float u_dark;\n"
        "vec3 strip(int row, int slot) {\n"
        "    return texelFetch(iTexChannel0_iSmpChannel0, ivec2(slot, int(u_size.y) - 1 - (int(u_view_h) + row)), 0).rgb;\n"
        "}\n"
@@ -178,6 +181,7 @@
        "    float th = bayer(x, y);\n"
        "    vec3 c;\n"
        "    int lslot = slot;\n"
+       "    bool own = false;\n"
        "    if (s.g > 0.5) {\n"
        ;; depth below the skin, in rows (0 is the skin)
        "        int d = 0;\n"
@@ -197,7 +201,7 @@
        "            c = (d > 20 || (d > 12 && th < float(d - 12) / 8.0)) ? strip(2, rs) : strip(1, rs);\n"
        ;; the water's own colour dithered through everything under the skin,
        ;; thicker with depth, so water reads over a dark wall as over sky
-       "            if (th < min(0.3 + float(d) * 0.012, 0.55)) c = strip(0, 11);\n"
+       "            if (th < min(0.3 + float(d) * 0.012, 0.55)) { c = strip(0, 11); own = true; }\n"
        ;; the mirror of the world above: streaks on alternate rows, fading
        ;; out over seven, each row drifting sideways on its own
        "            if (d <= 7 && (d & 1) == 1 && th < 0.95 - float(d) * 0.11) {\n"
@@ -209,8 +213,20 @@
        "    } else {\n"
        "        c = strip(0, slot);\n"
        "    }\n"
-       ;; light: B against the threshold: lit, lit twice, the light's colour
+       ;; the dark (a room with light: under 1): u_dark steps down the DARK
+       ;; strips, dithered; light (B) cancels it first, DARK-GAIN steps per
+       ;; unit, so a moth lights a circle in a dark room; what light is left
+       ;; over lights as in daylight
+       ;; (under water: the dark of what the water shows, its own colour kept)
+       "    int ds = (s.g > 0.5) ? (own ? 11 : lslot) : slot;\n"
        "    float L = s.b;\n"
+       "    float dk = u_dark - L * 5.0;\n"
+       "    if (dk > 0.0) {\n"
+       "        if (dk > 1.0 + th) c = strip(7, ds);\n"
+       "        else if (dk > th) c = strip(6, ds);\n"
+       "    }\n"
+       "    L = L - u_dark / 5.0;\n"
+       ;; light: B against the threshold: lit, lit twice, the light's colour
        "    if (L > 0.0) {\n"
        "        if (L > 0.72 + th * 0.28) c = strip(0, int(u_hue));\n"
        "        else if (L > 0.36 + th * 0.36) c = strip(5, lslot);\n"
@@ -321,6 +337,24 @@
       (with-shader *blur*
         (draw-texture tex 0 0 w h)))
 
+    ;; --- the dark -----------------------------------------------------------------------
+
+    ;; A room's light: (0 < light <= 1, 1 daylight) as steps down the DARK
+    ;; strips, three per unit of dark, rounded to the nearest half step: 0
+    ;; in daylight; 2, every pixel two steps down, at light 1/3 and below (a
+    ;; dark cave is flat dark, not grain); 0.7, the blue hour, one step. A
+    ;; whole step is a clean shift and a half an even 50% dither; nothing
+    ;; between, since a 90% dither reads as noise, not dusk. Light (B) then
+    ;; dithers its way back up through the steps.
+    (define (dark-steps light)
+      (if (and (number? light) (< light 1.0))
+          (/ (round (* 2.0 (min 2.0 (* 3.0 (- 1.0 (max 0.0 light)))))) 2.0)
+          0.0))
+
+    ;; How many steps of the dark one unit of light (B) cancels: the
+    ;; resolve's "L * 5.0". A moth's lit circle is drawn in these units.
+    (define DARK-GAIN 5.0)
+
     ;; --- the targets ------------------------------------------------------------------
 
     (define *index-rt* #f)
@@ -341,14 +375,19 @@
 
     ;; The index target resolved into the colour target. t: the world's
     ;; ticks; black: 0..1, the dithered fade; hue: the slot of the light's
-    ;; own colour (the harmonic lighting the room). Outside any pass.
-    (define (resolve! t black hue)
+    ;; own colour (the harmonic lighting the room); light (optional, 1.0 by
+    ;; default): the room's light: level (Glasswood's bible, "Light goes
+    ;; down as you go in"), drawn as dark-steps down the DARK strips.
+    ;; Outside any pass.
+    (define (resolve! t black hue . opt)
+      (define light (if (pair? opt) (car opt) 1.0))
       (ensure-render!)
       (set-shader-uniform *resolve* 'u_size (list (inexact VIEW-W) (inexact INDEX-H)))
       (set-shader-uniform *resolve* 'u_view_h (inexact VIEW-H))
       (set-shader-uniform *resolve* 'u_t (inexact t))
       (set-shader-uniform *resolve* 'u_black (inexact black))
       (set-shader-uniform *resolve* 'u_hue (inexact hue))
+      (set-shader-uniform *resolve* (quote u_dark) (inexact (dark-steps light)))
       (with-render-target *color-rt*
         (set-blend-mode 'none)
         (set-color 1.0 1.0 1.0 1.0)
