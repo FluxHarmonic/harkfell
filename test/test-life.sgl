@@ -56,6 +56,14 @@
 (define WATCH-E (run (world-standing 14 8 '()) STILL 30))
 (define WATCH-W (run (world-standing 9 8 '()) STILL 30))
 (define RUSHED (run (world-standing 2 8 '()) (walk 1) 200))
+;; the tick it lifts off: where the body is, and the perch it makes for
+(define LIFT
+  (let loop ((w (world-standing 2 8 '())) (t 0))
+    (cond ((>= t 200) #f)
+          ((eq? (critter-state (one w 'owl)) 'flying)
+           (let ((o (one w 'owl)) (b (body-center (world-body w) HARKFELL-FEEL)))
+             (list (car b) (cdr b) (critter-tx o) (critter-ty o))))
+          (else (loop (cdr (world-take-news (world-tick w ((walk 1) t)))) (+ t 1))))))
 (define STILL-NEAR (run (world-standing 9 8 '()) STILL 200))
 (define H3-NEAR (run (world-standing 14 8 '(3)) STILL 200))
 (define NO-H3 (run (world-standing 14 8 '(2)) STILL 200))
@@ -65,11 +73,14 @@
     (assert-equal 1 (critter-facing (one (car WATCH-E) 'owl)))
     (assert-equal 'perch-down (critter-frame (one (car WATCH-E) 'owl)))
     (assert-equal -1 (critter-facing (one (car WATCH-W) 'owl))))
-  (test "rushed, it lifts off without a sound and settles on a high perch away from you"
+  (test "rushed, it makes for a high perch at least 80 px from where you are as it lifts (a nearer high branch is passed over)"
+    (assert-true LIFT)
+    (assert-true (< (list-ref LIFT 3) 100.0))
+    (assert-true (> (sqrt (+ (expt (- (list-ref LIFT 2) (car LIFT)) 2) (expt (- (list-ref LIFT 3) (cadr LIFT)) 2))) 80.0)))
+  (test "rushed, it lifts off without a sound and settles on a high perch"
     (let ((o (one (car RUSHED) 'owl)) (b (body-center (world-body (car RUSHED)) HARKFELL-FEEL)))
       (assert-equal 'perched (critter-state o))
       (assert-true (< (critter-y o) 100.0))
-      (assert-true (> (sqrt (+ (expt (- (critter-x o) (car b)) 2) (expt (- (critter-y o) (cdr b)) 2))) 80.0))
       (assert-equal '() (filter (lambda (n) (eq? (car n) 'call)) (cdr RUSHED)))))
   (test "control: standing still as near, it stays on its branch"
     (let ((o (one (car STILL-NEAR) 'owl)))

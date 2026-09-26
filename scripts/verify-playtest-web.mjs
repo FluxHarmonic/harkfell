@@ -179,7 +179,7 @@ if (rep) {
   const j = rep.json, loc = j.location || {};
   if (j.note === NOTE) pass("report note"); else fail("report note", JSON.stringify(j.note));
   if (j.platform === "web" && j.game === "harkfell") pass("report platform web, game harkfell"); else fail("report", `platform ${j.platform}, game ${j.game}`);
-  if (/^[a-z-]+:\d+,\d+$/.test(loc.room || "")) pass(`report room (${loc.room})`); else fail("report room", JSON.stringify(loc.room));
+  if (/^[a-z-]+:-?\d+,-?\d+$/.test(loc.room || "")) pass(`report room (${loc.room})`); else fail("report room", JSON.stringify(loc.room));
   if (Array.isArray(loc.cell) && loc.cell.length === 2 && Array.isArray(loc.position) && loc.position.length === 2) pass(`report cell ${JSON.stringify(loc.cell)} and position`);
   else fail("report cell/position", JSON.stringify(loc));
   if (typeof j["state-sexp"] === "string" && j["state-sexp"].startsWith("(")) pass("report state (the save datum)"); else fail("report state", "no state-sexp");

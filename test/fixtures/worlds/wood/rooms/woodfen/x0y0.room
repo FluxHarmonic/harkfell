@@ -7,9 +7,9 @@
   ("#########################"
    "#                       #"
    "#                       #"
-   "#   =====        =====  #"
    "#                       #"
    "#                       #"
+   "#      ===         ==== #"
    "#                       #"
    "#         ===           #"
    "#                       #"
@@ -17,3 +17,6 @@
    "#########################")
   things: ((snow-owl at: (11 6))
            (snow-vole at: (20 8))))
+;; The high branches (row 5, their perches at row 4) are one near the place a
+;; walker from the west rushes the owl (cols 7-9, within 80 px of the body
+;; there) and one far (cols 19-22): the owl must take the far one.

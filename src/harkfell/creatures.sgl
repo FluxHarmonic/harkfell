@@ -70,6 +70,7 @@
   (export critters critters? critters-list critters-news critters-new critters-step
           critter critter? critter-kind critter-x critter-y critter-state critter-t
           critter-facing critter-frame critter-glow critter-drawn critter-anim critter-home critter-vx critter-vy
+          critter-tx critter-ty
           ALARM FLEE DRAW-R SONG-GAP)
 
   (begin

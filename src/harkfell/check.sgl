@@ -225,7 +225,8 @@
       (entries default: '())
       (fwd default: #f)
       (back default: #f)
-      (touch default: '()))
+      (touch default: '())
+      (touch-all default: '()))   ; every edge of the set's graph that takes something, from anywhere (raw: (i j hs w))
 
     ;; Does body b's box touch the harmonic lying in cell? ((harkfell gates)'s rule.)
     (define (body-touches? tm b cell)
@@ -273,10 +274,13 @@
                                       (each (cdr es)
                                             (if (null? hs) acc (cons (list i (car (car es)) hs w) acc))))))))))))))
 
-    ;; Cells reachable over g's edges from entries, never coming to rest in a
-    ;; blocked cell (a harmonic's cell this set does not hold: resting there
-    ;; takes it). Every edge is followed, touching or not (FORWARD above).
-    (define (forward-carrying g entries blocked)
+    ;; Cells reachable over g's edges from entries. Every edge is followed,
+    ;; touching or not (FORWARD above), except one whose replay takes a harmonic
+    ;; and comes to rest on that harmonic's own cell: standing there, you hold it
+    ;; (blocked? i e). A body resting on the cell by an overhang that misses
+    ;; the harmonic does not hold it, and its edge is followed (the review of
+    ;; phase 1: blocking by cell lost that state from every set).
+    (define (forward-carrying g entries blocked?)
       (let* ((tm (graph-tm g))
              (seen (make-vector (* (tilemap-cols tm) (tilemap-rows tm)) #f))
              (edges (graph-edges g)))
@@ -290,7 +294,7 @@
                        (begin
                          (vector-set! seen i #t)
                          (loop (cdr front)
-                               (append (filter (lambda (j) (not (memv j blocked))) (map car (vector-ref edges i)))
+                               (append (map car (filter (lambda (e) (not (blocked? i e))) (vector-ref edges i)))
                                        back))))))))))
 
     (define (find-set sets carry)
@@ -329,9 +333,17 @@
                                    (base (and (pair? done) (cset-graph (list-ref done (- (length done) 1)))))
                                    (g (apply content-reach-seeded ct carry base entries log))
                                    (tm (graph-tm g))
-                                   (blocked (map (lambda (q) (cell-index tm (car (cdr q)) (cdr (cdr q))))
-                                                 (filter (lambda (q) (not (memv (car q) carry))) pickups)))
-                                   (fwd (forward-carrying g entries blocked))
+                                   (touch-all (edge-touches g carry pickups))
+                                   (by-from (let ((v (make-vector (* (tilemap-cols tm) (tilemap-rows tm)) '())))
+                                              (for-each (lambda (t) (vector-set! v (car t) (cons t (vector-ref v (car t))))) touch-all)
+                                              v))
+                                   (blocked? (lambda (i e)
+                                               (let ((t (find (lambda (t) (eq? (cadddr t) (cdr e))) (vector-ref by-from i))))
+                                                 (and t (find (lambda (q) (and (memv (car q) (caddr t))
+                                                                              (= (car e) (cell-index tm (car (cdr q)) (cdr (cdr q))))))
+                                                              pickups)
+                                                      #t))))
+                                   (fwd (forward-carrying g entries blocked?))
                                    ;; each pickup edge as (i j hs w), its far end j settled in
                                    ;; the larger set's tilemap (a stone keyed to what was just
                                    ;; taken, that held the body up, opens under it); j #f when
@@ -340,7 +352,7 @@
                                                  (let* ((tm2 (tiles-carrying ct (carry-union carry (caddr t))))
                                                         (c (settle-cell tm2 HARKFELL-FEEL (index-cell tm (cadr t)))))
                                                    (list (car t) (and c (cell-index tm (car c) (cdr c))) (caddr t) (cadddr t))))
-                                               (filter (lambda (t) (vector-ref fwd (car t))) (edge-touches g carry pickups))))
+                                               (filter (lambda (t) (vector-ref fwd (car t))) touch-all)))
                                    (rest (filter (lambda (q) (not (eq? q p))) pending))
                                    ;; where each pickup leaves you: the touching edge's far
                                    ;; end, and the harmonic's own cell (settled likewise)
@@ -363,7 +375,7 @@
                                                                                                 (and (= (car q) (car hs))
                                                                                                      (settle-cell (tiles-carrying ct to) HARKFELL-FEEL (cdr q))))
                                                                                               pickups))))))))))))
-                              (loop next (cons (cset carry: carry graph: g entries: entries fwd: fwd touch: touch) done)))))))
+                              (loop next (cons (cset carry: carry graph: g entries: entries fwd: fwd touch: touch touch-all: touch-all) done)))))))
                (with-back sets s)))))
 
     ;; BACK for every set, exact per witness. A set's ways out go within it
@@ -383,7 +395,7 @@
                    (into (make-vector n '()))
                    (seen (make-vector n #f)))
               (for-each (lambda (t) (vector-set! touched (car t) (cons (cadddr t) (vector-ref touched (car t)))))
-                        (cset-touch e))
+                        (cset-touch-all e))
               ;; the edges that take nothing, reversed
               (let fill ((i 0))
                 (when (< i n)
