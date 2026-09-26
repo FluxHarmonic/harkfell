@@ -203,7 +203,9 @@ deploy() {   # branch -> prints the deployment URL on the last line
   set -e
   cat "$WORK/deploy-$1.log" >&2
   [ "$drc" = 0 ] || { say "wrangler pages deploy to $1 failed (rc=$drc)"; exit 1; }
-  url="$(grep -o 'https://[a-z0-9.-]*\.pages\.dev' "$WORK/deploy-$1.log" | tail -1)"
+  # The deployment's own URL, which wrangler prints first; the branch alias it
+  # prints last can be served from the edge cache of an older deployment.
+  url="$(grep -o 'https://[a-z0-9.-]*\.pages\.dev' "$WORK/deploy-$1.log" | head -1)"
   [ -n "$url" ] || { say "the deploy to $1 printed no pages.dev URL; check it by hand: node scripts/verify-live.mjs <url> $DIR"; exit 1; }
   echo "$url"
 }
