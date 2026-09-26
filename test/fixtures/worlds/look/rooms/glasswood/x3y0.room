@@ -12,10 +12,11 @@
    "#  |      |     |  | %%% "
    "#  |     =|==   |  |   %%"
    "#  |      |   ==|= |   %%"
-   "#  |      |     |  |  %%%"
+   "#  |      |o o  |  |  %%%"
    "#####~~~~################"
    "######~~#################"
    "#########################")
-  things: ((lantern-moth at: (13 4) count: 3 drawn: 3) (snow-owl at: (21 2)) (snow-vole at: (13 7)) (icicle at: (21 5)))
+  things: ((lantern-moth at: (13 4) count: 3 drawn: 3) (snow-owl at: (21 2)) (snow-vole at: (15 7)) (icicle at: (21 5))
+           (ring-stone at: (11 7) overtone: 4) (ring-stone at: (13 7) overtone: 3))
   start: (1 7)
   decor: auto)
