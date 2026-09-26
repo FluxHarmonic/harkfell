@@ -73,6 +73,15 @@
 //              fades after 2.5 s and a mouse move brings it back; with the
 //              Fullscreen API removed (iPhone Safari) it is hidden and F asks
 //              for nothing
+//   pause      (D40) a blur pauses (a held key moves nothing) and a focus resumes;
+//              the game says audio hold / release, and every AudioContext on
+//              the page is running before the blur, suspended while held and
+//              running after (0.1.1)
+//   cues       (0.1.1) walking plays step cues: by default through the audio
+//              bridge's worklet (mode worklet, a lag readout), and with
+//              ?sound=cues:ring through the old cue sink (a ring-depth readout);
+//              the worklet's wait is under the ring's. Both figures leave out the
+//              device's output latency
 //   errors     no console error and no exception in any leg
 //
 // Every leg but frame, save and fullscreen boots with &frame=off (open()
@@ -96,7 +105,7 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "cues", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -586,12 +595,21 @@ if (LEGS.includes("save")) {
 if (LEGS.includes("pause")) {
   ran.add("pause");
   await open("trace&test-room");
+  // 0.1.1: the page's AudioContexts themselves (SOUND's open item): a key is
+  // the gesture that starts them (the control: running before the blur),
+  // the hold suspends every one, the release resumes them
+  const states = () => evaluate(`(window.HARKFELL_CONTEXTS || []).map((c) => c.state).join(",")`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+  await sleep(500);
+  const ctxBefore = await states();
   await evaluate(`window.dispatchEvent(new Event("blur"))`);
   const a = await where();
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await sleep(600);
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   const b = await where();
+  const ctxHeld = await states();
   await evaluate(`window.dispatchEvent(new Event("focus"))`);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await sleep(500);
@@ -599,8 +617,12 @@ if (LEGS.includes("pause")) {
   const c = await where();
   // SOUND's hold and release (the page suspends and resumes its audio on them)
   const held = lines.includes("harkfell: audio hold"), released = lines.includes("harkfell: audio release");
-  (b.x === a.x && b.y === a.y && c.x > b.x + 8 && held && released ? pass : fail)("pause",
-    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}; audio hold ${held}, release ${released}`);
+  const ctxAfter = await states();
+  const all = (s, want) => s.length > 0 && s.split(",").every((x) => x === want);
+  (b.x === a.x && b.y === a.y && c.x > b.x + 8 && held && released &&
+   all(ctxBefore, "running") && all(ctxHeld, "suspended") && all(ctxAfter, "running") ? pass : fail)("pause",
+    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}; audio hold ${held}, release ${released}; ` +
+    `contexts before [${ctxBefore}], held [${ctxHeld}], after [${ctxAfter}]`);
 }
 
 // D40: with a save, the start screen's R held 1.5 s wipes it and begins a
@@ -693,6 +715,44 @@ if (LEGS.includes("fullscreen")) {
     `start screen: shown ${!start.hidden}, not faded after 3 s ${!start.faded}; click: asked ${asked}, ${onLine}, fullscreen element #${full.el}; ` +
     `start screen kept ${stayed}; F: ${offLine}, fullscreen ${left.full}; kept ${stayed2}; play: faded after 3.3 s ${idle.faded}, back on a mouse move ${!woken.faded}; ` +
     `no API: hidden ${none.hidden}, F asks nothing ${noAsk}`);
+}
+
+// 0.1.1: the cues' latency, one build, both paths. Walking in the Climb Back
+// plays step cues. By default they are the bridge's (mixed in the
+// AudioWorklet): the readout gives the last play's wait for its first render
+// quantum. With ?sound=cues:ring they go the old way, into the cue sink: the
+// readout gives the queue ahead of the last cue. Both leave out the device's
+// output latency, so the two are comparable; this box is not a phone.
+async function cueLine() {
+  const before = lines.length;
+  await evaluate(`SigilWebApp.dispatch("cues", "")`);
+  const l = await waitFor(() => lines.slice(before).find((x) => x.startsWith("harkfell: cues ")), 5000, "cues");
+  const w = l.split(" ");
+  const num = (k) => { const i = w.indexOf(k); return i >= 0 && w[i + 1] !== "-" ? Number(w[i + 1]) : null; };
+  return { line: l, path: w[2], mode: w[3], plays: num("plays"), ring: num("ring-ms"), lag: num("lag-ms") };
+}
+async function walkUntil(pred, ms) {
+  const t0 = Date.now();
+  let k = 0;
+  while (Date.now() - t0 < ms) {
+    const key = k++ % 2 ? ["ArrowLeft", 37] : ["ArrowRight", 39];
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: key[0], code: key[0], windowsVirtualKeyCode: key[1] });
+    await sleep(700);
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: key[0], code: key[0], windowsVirtualKeyCode: key[1] });
+    const c = await cueLine();
+    if (pred(c)) return c;
+  }
+  return await cueLine();
+}
+if (LEGS.includes("cues")) {
+  ran.add("cues");
+  await open("trace&room=reedfen:10,4");
+  const br = await walkUntil((c) => c.plays >= 3 && c.lag !== null, 60000);
+  await open("trace&room=reedfen:10,4&sound=cues:ring");
+  const rg = await walkUntil((c) => c.ring !== null, 60000);
+  (br.path === "bridge" && br.mode === "worklet" && br.plays >= 3 && br.lag !== null &&
+   rg.path === "ring" && rg.ring !== null && br.lag < rg.ring ? pass : fail)("cues",
+    `bridge: ${br.line.slice(15)}; ring: ${rg.line.slice(15)}`);
 }
 
 if (LEGS.includes("errors")) {

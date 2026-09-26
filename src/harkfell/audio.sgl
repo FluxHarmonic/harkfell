@@ -31,7 +31,7 @@
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
-          audio-pause! audio-resume! audio-paused? audio-set-wall-clock!
+          audio-pause! audio-resume! audio-paused? audio-set-wall-clock! audio-cue-words
           audio-carry! audio-tone-room! audio-lines world-place room-moment-name
           audio-sound-door! frame-event! save-extras restore-extras!)
 
@@ -114,6 +114,8 @@
                   (cond ((string=? item "border:cross") (sound-set-border-mode! 'cross))
                         ((string=? item "border:through") (sound-set-border-mode! 'through))
                         ((string=? item "bench:a4") (bench-set-phases! 'a4))
+                        ;; 0.1.1: the web's cues through the old ring, to hear and measure it
+                        ((string=? item "cues:ring") (mixer-set-cue-path! 'ring))
                         ((and (> (string-length item) 7) (string=? (substring item 0 7) "moment:"))
                          (let ((name (substring item 7 (string-length item))))
                            ;; ask for the text now: on the web the page fetches it
@@ -323,9 +325,22 @@
 
     (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
 
+    ;; The cues' path and latency, as words (the web's "cues" probe and the
+    ;; readout): PATH MODE plays N ring-ms X lag-ms Y ("-" when not measured).
+    ;; Both figures leave out the device's own output latency.
+    (define (audio-cue-words)
+      (let* ((st (mixer-stats))
+             (num (lambda (v) (if (number? v) (r1 v) "-"))))
+        (list (symbol->string (stats-ref st 'cue-path))
+              (let ((m (stats-ref st 'cue-mode))) (if m (symbol->string m) "-"))
+              "plays" (number->string (stats-ref st 'cue-plays))
+              "ring-ms" (num (stats-ref st 'cue-ring-ms))
+              "lag-ms" (num (stats-ref st 'cue-lag-ms)))))
+
     (define (audio-lines)
       (let ((st (mixer-stats)))
         (append (sound-lines)
                 (list (string-append "music " (r1 (stats-ref st 'frame-ms)) " ms/frame pump "
                                      (r1 (car (stats-ref st 'pump))) " dry " (number->string (stats-ref st 'dry-sounding))
-                                     " rate " (number->string (mixer-rate)))))))))
+                                     " rate " (number->string (mixer-rate)))
+                      (string-append "cues " (string-join (audio-cue-words) " "))))))))

@@ -1,0 +1,55 @@
+;;; The cues' two paths give the same two gains (0.1.1, (engine mixer)).
+;;;
+;;; The mixer's own cues are equal-power with a sqrt 2 make-up (cue-gains).
+;;; On the web a cue is the audio bridge's instead (sigil-wasm-audio's
+;;; play-audio-cue), whose pan is a balance: the near side at vol, the far
+;;; side at vol x (1 - |pan|). cue-balance picks vol and pan so that law
+;;; lands on exactly cue-gains' two gains, at every pan: moving the cues
+;;; to the worklet must not change what a panned cue sounds like.
+;;;
+;;; Natively and headless the path is the ring (sigil-audio 0.12.2 has no
+;;; cues), and asking for the bridge there keeps the ring.
+
+(import (sigil test)
+        (sigil list)
+        (engine mixer))
+
+;; The bridge's law (sigil-wasm-audio.js: gl = vol x (pan > 0 ? 1 - pan : 1),
+;; gr = vol x (pan < 0 ? 1 + pan : 1)).
+(define (balance vol pan)
+  (cons (* vol (if (> pan 0) (- 1.0 pan) 1.0))
+        (* vol (if (< pan 0) (+ 1.0 pan) 1.0))))
+
+(define (near? a b) (< (abs (- a b)) 1e-9))
+;; against written constants: the mixer's pi and sqrt 2 are 9 digits
+(define (close? a b) (< (abs (- a b)) 1e-6))
+
+(define PANS (map (lambda (i) (- (/ i 10.0) 1.0)) (iota 21)))
+(define GAINS (list 0.05 0.3 1.0))
+
+(test-group "cues: the bridge's balance gives the mixer's gains"
+  (test "at every pan from -1 to 1 and three gains, the two gains match"
+    (for-each (lambda (g)
+                (for-each (lambda (p)
+                            (let* ((want (cue-gains g p))
+                                   (vp (cue-balance (car want) (cdr want)))
+                                   (got (balance (car vp) (cdr vp))))
+                              (assert-true (near? (car want) (car got)))
+                              (assert-true (near? (cdr want) (cdr got)))
+                              (assert-true (<= -1.0 (cdr vp) 1.0))))
+                          PANS))
+              GAINS))
+  (test "centred, unity on both sides; hard right, the near side 3 dB up and the far side silent"
+    (let ((c (cue-gains 0.5 0.0)) (r (cue-gains 0.5 1.0)))
+      (assert-true (close? 0.5 (car c)))
+      (assert-true (close? 0.5 (cdr c)))
+      (assert-true (< (abs (car r)) 1e-6))
+      (assert-true (close? (* 0.5 1.41421356) (cdr r)))))
+  (test "silence stays silence"
+    (assert-equal (cons 0.0 0.0) (cue-balance 0.0 0.0))))
+
+(test-group "cues: the path"
+  (test "natively and headless the cues take the ring, and the bridge cannot be asked for"
+    (assert-equal 'ring (mixer-cue-path))
+    (mixer-set-cue-path! 'bridge)
+    (assert-equal 'ring (mixer-cue-path))))

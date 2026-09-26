@@ -15,10 +15,16 @@
 ;;; it is started (an open sink with nothing pushed counts starved frames)
 ;;; and closes once it has ended and played out.
 ;;;
-;;; CUES are mono float buffers played once with a gain and a pan, mixed
-;;; into one shallow sink of their own (the cue path of Crash's audio
-;;; ticket, option B: a cue's latency is the cue sink's depth, not the
-;;; sources').
+;;; CUES are mono float buffers played once with a gain and a pan. On the
+;;; web they are the audio bridge's cues (sigil-wasm-audio's load-audio-cue
+;;; and play-audio-cue): uploaded on their first play and mixed in the
+;;; AudioWorklet from its next render quantum, so a cue waits for no ring.
+;;; Natively and headless (sigil-audio 0.12.2 has no cues), and on the web
+;;; when (mixer-set-cue-path! 'ring) asks, they are mixed into one shallow
+;;; sink of their own (the cue path of Crash's audio ticket, option B: a
+;;; cue's latency is the cue sink's depth, CUE-DEPTH-S, not the sources').
+;;; Both paths give the same two gains: equal-power with a sqrt 2 make-up,
+;;; which the bridge's balance pan reproduces exactly (cue-balance).
 ;;;
 ;;;   (mixer-open! rate-hint)        open the context and the cue sink; #t when sound is possible
 ;;;   (mixer-open-headless! rate tap)   no sinks: sources pulled to the clock, blocks to the tap
@@ -52,6 +58,27 @@
           (sigil time)
           (sigil audio sink))
 
+  ;; the web's cue path: the bridge's cues (sigil-wasm-audio 0.22.7 on)
+  (cond-expand
+    (wasm (import (only (sigil browser audio-sink)
+                        load-audio-cue play-audio-cue stop-audio-cues! audio-cue-mode audio-cue-lag)))
+    (else))
+  (cond-expand
+    (wasm (begin
+            (define BRIDGE-CUES? #t)
+            (define (bridge-load bv) (load-audio-cue bv channels: 1))
+            (define (bridge-play c vol pan) (play-audio-cue c volume: vol pan: pan))
+            (define (bridge-stop!) (stop-audio-cues!))
+            (define (bridge-mode) (audio-cue-mode))
+            (define (bridge-lag) (audio-cue-lag))))
+    (else (begin
+            (define BRIDGE-CUES? #f)
+            (define (bridge-load bv) #f)
+            (define (bridge-play c vol pan) #f)
+            (define (bridge-stop!) #f)
+            (define (bridge-mode) #f)
+            (define (bridge-lag) #f))))
+
   (export mixer-open! mixer-open-headless! mixer-resume! mixer-rate mixer-open? mixer-state
           mixer-add! mixer-find mixer-remove! mixer-rename! mixer-sources
           mixer-hold! mixer-release! mixer-held? HOLD-FADE-S RELEASE-FADE-S source-rendered
@@ -59,6 +86,7 @@
           source-start! source-factor! source-factor source-gain source-on-end!
           mixer-at! mixer-pump! mixer-now
           make-cue cue? cue-frames cue-ref mixer-cue! mixer-cue-count
+          cue-gains cue-balance mixer-set-cue-path! mixer-cue-path
           mixer-stats mixer-stats-reset! stats-ref
           median-of percentile-of
           DEPTH-S CUE-DEPTH-S SOURCE-BUFFER)
@@ -285,7 +313,15 @@
               (cons 'dry-sounding (+ *dry-sounding* (live-dry)))
               (cons 'dry-tail *dry-tail*)
               (cons 'cue-dry-sounding *cue-dry-sounding*)
-              (cons 'cue-dry-idle *cue-dry-idle*))))
+              (cons 'cue-dry-idle *cue-dry-idle*)
+              ;; the cues' latency, the device's own output latency left out:
+              ;; ring, the queue ahead of the last cue mixed; bridge, the last
+              ;; play's wait for its first quantum (the bridge's measure)
+              (cons 'cue-path *cue-path*)
+              (cons 'cue-mode (bridge-mode))
+              (cons 'cue-plays *bridge-plays*)
+              (cons 'cue-ring-ms *cue-ring-ms*)
+              (cons 'cue-lag-ms (let ((f (bridge-lag))) (and f (/ (* 1000.0 f) *rate*)))))))
 
     (define (stats-ref st key) (let ((e (assq key st))) (and e (cdr e))))
 
@@ -359,6 +395,7 @@
         (set! *hold* now)
         (set! *hold-dry* (live-dry))
         (set! *voices* '())
+        (when (and *ctx* BRIDGE-CUES?) (bridge-stop!))
         (for-each (lambda (s) (source-factor! s 'hold 0.0 HOLD-FADE-S now)) *sources*)))
 
     (define (mixer-release! now)
@@ -426,13 +463,51 @@
 
     (define (mixer-cue-count) (length *voices*))
 
+    ;; A cue's two gains: pan -1 (left) .. 1 (right), equal-power with a
+    ;; sqrt 2 make-up (unity on both sides at the centre). (gl . gr)
+    (define (cue-gains gain pan)
+      (let* ((p (max -1.0 (min 1.0 pan)))
+             (a (* 0.25 3.14159265 (+ p 1.0))))
+        (cons (* gain (cos a) 1.41421356) (* gain (sin a) 1.41421356))))
+
+    ;; The bridge's cue pan is a balance (vol on the near side, vol x (1 - |p|)
+    ;; on the far one). Two gains as (vol . pan) on that law, exactly: the
+    ;; louder side is vol, the quieter one's ratio to it sets the pan.
+    (define (cue-balance gl gr)
+      (cond ((and (<= gl 0.0) (<= gr 0.0)) (cons 0.0 0.0))
+            ((>= gr gl) (cons gr (- 1.0 (/ gl gr))))
+            (else (cons gl (- (/ gr gl) 1.0)))))
+
+    ;; 'bridge (the web's default) or 'ring (natively and headless always;
+    ;; on the web, a door to hear and measure the old path)
+    (define *cue-path* (if BRIDGE-CUES? 'bridge 'ring))
+    (define (mixer-cue-path) *cue-path*)
+    (define (mixer-set-cue-path! p) (set! *cue-path* (if (and BRIDGE-CUES? (eq? p 'bridge)) 'bridge 'ring)))
+
+    (define *bridge-cues* '())     ; ((cue . handle) ...), uploaded on first play
+    (define *bridge-plays* 0)
+    (define *cue-ring-ms* #f)      ; the ring's depth ahead of the last cue mixed into it, ms
+
+    (define (bridge-handle c)
+      (let ((e (assq c *bridge-cues*)))
+        (if e
+            (cdr e)
+            (let ((h (bridge-load (cue-floats c))))
+              (set! *bridge-cues* (cons (cons c h) *bridge-cues*))
+              h))))
+
     ;; pan -1 (left) .. 1 (right), equal-power
     (define (mixer-cue! c gain pan)
       ;; none while held (D40)
-      (when (and *cue-stream* c (not *hold*))
-        (let* ((p (max -1.0 (min 1.0 pan)))
-               (a (* 0.25 3.14159265 (+ p 1.0))))
-          (set! *voices* (cons (vector c 0 (* gain (cos a) 1.41421356) (* gain (sin a) 1.41421356)) *voices*)))))
+      (when (and c (not *hold*))
+        (let ((g (cue-gains gain pan)))
+          (cond ((and *ctx* (eq? *cue-path* 'bridge))
+                 (let ((h (bridge-handle c))
+                       (vp (cue-balance (car g) (cdr g))))
+                   (when (and h (bridge-play h (car vp) (cdr vp)))
+                     (set! *bridge-plays* (+ *bridge-plays* 1)))))
+                (*cue-stream*
+                 (set! *voices* (cons (vector c 0 (car g) (cdr g)) *voices*)))))))
 
     (define ZERO (make-bytevector (* 8 PUSH-MAX) 0))
 
@@ -447,6 +522,9 @@
         (let* ((depth (audio-stream-depth *cue-stream*))
                (n (min PUSH-MAX (audio-stream-room *cue-stream*)
                        (- (exact (round (* CUE-DEPTH-S *rate*))) depth))))
+          ;; a voice not yet begun starts behind what the ring already holds
+          (when (and (> n 0) (any (lambda (v) (= 0 (vector-ref v 1))) *voices*))
+            (set! *cue-ring-ms* (/ (* 1000.0 depth) *rate*)))
           (when (> n 0)
             (bytevector-copy! *cue-out* 0 ZERO 0 (* 8 n))
             (set! *voices*
