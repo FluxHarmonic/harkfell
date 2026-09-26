@@ -80,13 +80,27 @@
 
     (define (room-cells-global ct rm) (room-standable-cells ct rm))
 
+    ;; The water cells of a room, global, in reading order: a room with
+    ;; nowhere to stand (The Drowned Bell, all water and rock) is entered
+    ;; swimming.
+    (define (room-water-cells ct rm)
+      (let ((tm (worldmap-tiles (content-map ct)))
+            (o (room-tile-origin ct rm)))
+        (filter (lambda (cell) (kind-water? (tilemap-ref tm (car cell) (cdr cell))))
+                (apply append
+                       (map (lambda (r) (map (lambda (c) (cons (+ (car o) c) (+ (cdr o) r))) (iota ROOM-COLS)))
+                            (iota ROOM-ROWS))))))
+
     ;; Where a door (?room=, --room) puts the body in a room, as a global
     ;; cell: the world's start cell if it is in this room, else the room's
     ;; start: field, else the standable cell nearest the room's middle
-    ;; (reading order breaks ties); #f if the room has none.
+    ;; (reading order breaks ties), else, in a room with nowhere to stand,
+    ;; the water cell nearest the middle (0.1.1: ?room=reedfen:14,5 said "no
+    ;; room"); #f if the room has neither.
     (define (room-start-cell ct rm)
       (let* ((s (content-start ct))
-             (cells (room-standable-cells ct rm)))
+             (standable (room-standable-cells ct rm))
+             (cells (if (null? standable) (room-water-cells ct rm) standable)))
         (cond ((and s (eq? (car s) (room-region rm))
                     (= (car (cadr s)) (room-x rm)) (= (cadr (cadr s)) (room-y rm)))
                (local->global ct rm (car (caddr s)) (cadr (caddr s))))

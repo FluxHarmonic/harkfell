@@ -329,3 +329,26 @@
     (assert-equal '(pause resume) HEARD)))
 
 (store-remove! SAVE-KEY)
+
+;; --- 0.1.1: the door into a room with nowhere to stand ---------------------------------
+;; The Drowned Bell (reedfen 14,5) is all water and rock. Its door answered
+;; "no room" (t-1319c7), while &at=12,2 worked: the door's default cell was
+;; the standable cell nearest the middle, and the room has none. The door now
+;; puts the body in the water cell nearest the middle, swimming.
+(define WATER-DOOR (shell-goto! "reedfen:14,5"))
+(frames 30)
+(define WATER-ROOM (shell-room-label))
+(define WATER-MODE (body-mode (body-now)))
+(define LAND-DOOR (shell-goto! "reedfen:10,4"))
+(define LAND-ROOM (shell-room-label))
+
+(test-group "begin: the door into water (0.1.1)"
+  (test "reedfen:14,5 has a door, and the body swims in that room"
+    (assert-true WATER-DOOR)
+    (assert-equal "reedfen:14,5" WATER-ROOM)
+    (assert-equal 'swim WATER-MODE))
+  (test "a room with somewhere to stand still gets its standing door (the control)"
+    (assert-true LAND-DOOR)
+    (assert-equal "reedfen:10,4" LAND-ROOM)))
+
+(store-remove! SAVE-KEY)
