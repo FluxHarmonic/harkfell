@@ -40,12 +40,16 @@
 ;;;              eight directions at SWIM (SWIM-ACCEL to get there) and sinks
 ;;;              at SINK with no input; jump with the head out of the water
 ;;;              leaps WATER-JUMP-V.
+;;;   drop       (D31) down held and jump pressed while standing on one-way
+;;;              ledges alone (nothing solid under the box) drops through
+;;;              them: no jump, no coyote jump after it. On rock, down and
+;;;              jump is an ordinary jump.
 ;;;   hazard     a hazard tile under the box (shrunk by HAZARD-INSET) or a
 ;;;              fall out of the map's bottom adds 'hazard to the tick's
 ;;;              events. What happens then is the game's.
 ;;;
 ;;; Each tick's EVENTS are a list of symbols: jump wall-jump land grab
-;;; mantle let-go splash hazard. The game reads them for sound and effects
+;;; mantle let-go splash drop hazard. The game reads them for sound and effects
 ;;; and the tests read them to see a verb happen.
 ;;;
 ;;; Pure: no platform, no drawing, no randomness. Only + - * / and
@@ -238,9 +242,15 @@
                          ((and (not (= h 0)) (wall-on? tm x y f h)) h)
                          (else 0)))
              (jump? (> (body-buffer b) 0))
+             ;; D31 drop-through: down held and jump pressed while standing on
+             ;; one-way ledges alone (nothing solid under the box) drops the
+             ;; body through them instead of jumping
+             (drop (and jump? grounded (> v 0) (not (eq? (body-mode b) 'cling))
+                        (not (box-any? tm x (+ y (feel-box-h f)) (feel-box-w f) 0.001 kind-solid?))))
              ;; clinging, a jump is always the kick off the wall (even standing
              ;; at the wall's foot, where the ground jump would also qualify)
-             (launch (cond ((and jump? (eq? (body-mode b) 'cling)) 'wall-jump)
+             (launch (cond (drop #f)
+                           ((and jump? (eq? (body-mode b) 'cling)) 'wall-jump)
                            ((and jump? (or grounded (> coyote 0) (head-out? tm x y f))) 'jump)
                            ((and jump? (not (= wall 0))) 'wall-jump)
                            (else #f)))
@@ -258,7 +268,13 @@
                                     facing: (- wall))
                               'wall-jump))
                   (else b)))
-             (coyote (if launch 0 coyote))
+             ;; the drop: the box is set a pixel into the ledge's row, so the
+             ;; move down below never scans that row again (a ledge the box
+             ;; already overlaps lets it through, (engine collide)); no coyote
+             ;; jump and no buffered jump survive it
+             (b (if drop (add-event (body b buffer: 0 jumping: #f cut: #f) 'drop) b))
+             (y (if drop (+ y 1.0) y))
+             (coyote (if (or launch drop) 0 coyote))
              (locked (> (body-lock b) 0))
              ;; the variable jump: a rise let go is cut
              (b (if (and (body-jumping b) (not (intent-jump in)))

@@ -1,0 +1,23 @@
+;; D31's fixture: a shaft of one-way ledges that span it wall to wall. A held
+;; jump (3.25 tiles) goes up through each three-row step, so the top is
+;; reached; the only way back down is through the ledges (nothing to walk
+;; off, the walls smooth and five apart), so the way back needs the drop
+;; (down and jump). Without drop-through the top is a trap.
+(fixture
+  name: "a shaft of ledges, up by jumps and down only by dropping through"
+  expect: reachable
+  why: "the envelope (3-tile rises) and D31's drop-through"
+  start: (12 8)
+  target: ((12 2) (12 5))
+  grid:
+  ("#########################"
+   "#########     ###########"
+   "#########     ###########"
+   "#########=====###########"
+   "#########     ###########"
+   "#########     ###########"
+   "#########=====###########"
+   "#########     ###########"
+   "#########     ###########"
+   "#########################"
+   "#########################"))

@@ -387,3 +387,52 @@
       (assert-true (jumps (- g 5))))
     (test "a press 6 ticks before it does not"
       (assert-false (jumps (- g 6))))))
+
+;; --- drop-through (D31) ------------------------------------------------------
+;; Down and jump on a one-way ledge drops through it; on rock the same press is
+;; an ordinary jump; a press without down is a jump from the ledge; and after
+;; a drop there is no coyote jump.
+;; A0's legend (. air) with the world's one-way ledge (=) added.
+(define LEDGES
+  (list "##########"
+        "#........#"
+        "#........#"
+        "#====#####"
+        "#........#"
+        "#........#"
+        "#........#"
+        "##########"))
+
+(define (ledge-tiles rows) (room-tiles (parse-room rows (cons (cons #\= 'ledge) ROOM-LEGEND) ROOM-MARKERS TILE)))
+
+(test-group "drop-through"
+  (let* ((tm (ledge-tiles LEDGES))
+         (down-jump (lambda (tick b) (intent v: 1 jump: (= tick 0) press: (= tick 0))))
+         (drop (history (stand 2 2) tm down-jump 60))
+         (on-rock (history (stand 7 2) tm down-jump 60))
+         (plain (history (stand 2 2) tm (lambda (tick b) (intent jump: (= tick 0) press: (= tick 0))) 60))
+         (held (history (stand 2 2) tm (lambda (tick b) (intent v: 1)) 30))
+         (coyote (history (stand 2 2) tm
+                          (lambda (tick b) (intent v: 1 jump: (or (= tick 0) (= tick 3)) press: (or (= tick 0) (= tick 3))))
+                          60))
+         (feet (lambda (b) (+ (body-y b) (feel-box-h F)))))
+    (test "on a ledge, down and jump drops through it to the floor below"
+      (assert-true (any-event? drop 'drop))
+      (assert-false (any-event? drop 'jump))
+      (assert-equal 'ground (body-mode (last drop)))
+      (assert-equal (* 16 7.0) (feet (last drop))))
+    (test "on rock, down and jump is an ordinary jump, and it lands back on the rock"
+      (assert-true (any-event? on-rock 'jump))
+      (assert-false (any-event? on-rock 'drop))
+      (assert-equal (* 16 3.0) (feet (last on-rock))))
+    (test "on a ledge, jump without down jumps and lands back on the ledge"
+      (assert-true (any-event? plain 'jump))
+      (assert-false (any-event? plain 'drop))
+      (assert-equal (* 16 3.0) (feet (last plain))))
+    (test "down held without a press does nothing"
+      (assert-false (any-event? held 'drop))
+      (assert-equal (* 16 3.0) (feet (last held))))
+    (test "a press three ticks after the drop is no coyote jump"
+      (assert-true (any-event? coyote 'drop))
+      (assert-false (any-event? coyote 'jump))
+      (assert-equal (* 16 7.0) (feet (last coyote))))))

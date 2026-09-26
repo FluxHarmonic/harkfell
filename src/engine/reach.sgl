@@ -20,7 +20,8 @@
 ;;;                   and in the air holding the direction, letting go of it,
 ;;;                   or reversing it; a CHIMNEY policy that kicks off each
 ;;;                   wall it is pushed into and turns; up beside rough rock
-;;;                   (the grab from the ground)
+;;;                   (the grab from the ground); on one-way ledges, the drop
+;;;                   through them (down and jump, D31), straight or drifting
 ;;;   from a cling    climb up (and over the top, then on for a few lengths),
 ;;;                   climb down, kick off (at several heights), let go
 ;;;   from a wall     (a smooth wall touched in the air while pushing into it)
@@ -657,6 +658,16 @@
               (unless (= h 0)
                 (fly from b1 (cons in rev) 1 h #t #f 'chimney)))))
 
+        ;; Down and jump pressed with direction h: if the body drops through
+        ;; the ledge it stands on ((engine body)'s drop event), fly on from
+        ;; there with jump let go. On rock nothing happens here (that press is
+        ;; an ordinary jump, which jump-from covers).
+        (define (drop-from from b rev h)
+          (let* ((in (make-intent* h 1 #t #t))
+                 (b1 (step b in)))
+            (when (and b1 (memq 'drop (body-events b1)))
+              (fly from b1 (cons in rev) 1 h #f #f 'default))))
+
         ;; A kick off the wall on side `side` (clinging, or pushing into it):
         ;; away, and the branches (stop, come back, the chimney policy).
         (define (kick-from from b rev side press-h)
@@ -694,6 +705,9 @@
                                      (or off off?))))
                             (else (settle from b rev)))))))
               (list -1 1)))
+          ;; D31: the drop through one-way ledges (down and jump), straight or
+          ;; drifting either way; in the air the usual branches (fly)
+          (for-each (lambda (h) (drop-from from b0 '() h)) (list 0 -1 1))
           ;; jumps from standing and from every even tick of a run-up
           (jump-from from b0 '() 0)
           (for-each
