@@ -25,7 +25,7 @@
 // takes its worklet-msg path. Chrome over the DevTools protocol with Node's
 // own WebSocket. One PASS/FAIL per check, then GREEN / RED (exit 1), or
 // SETUP-FAILED (exit 2).
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -66,10 +66,12 @@ server.stdout.on("data", (d) => { serverLog += d; });
 server.stderr.on("data", (d) => { serverLog += d; });
 for (let i = 0; !serverLog.includes("serving"); i++) { if (i > 50) setupFailed(`server: ${serverLog}`); await sleep(100); }
 
+// The audio rule (worker-instructions): a null sink as well as --mute-audio.
+spawnSync("sh", ["-c", "pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null >/dev/null 2>&1 || true"]);
 const chrome = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${path.join(work, "chrome")}`,
                               "--no-first-run", "--no-default-browser-check", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
                               "--window-size=1280,720", "--mute-audio", "--autoplay-policy=no-user-gesture-required", "about:blank"],
-                     { detached: true, stdio: ["ignore", "ignore", "pipe"] });
+                     { detached: true, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, PULSE_SINK: "worker-null", PIPEWIRE_NODE: "worker-null" } });
 procs.push(chrome);
 let target = null;
 for (let i = 0; i < 100 && !target; i++) {
