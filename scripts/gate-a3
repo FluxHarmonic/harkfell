@@ -99,8 +99,8 @@ green_all() {
   green test/test-gates.sgl 12
   green test/test-regions.sgl 8
   green test/test-creatures.sgl 13
-  green test/test-place.sgl 12
-  green test/test-reload-stone.sgl 2
+  green test/test-place.sgl 14
+  green test/test-reload-stone.sgl 5
   [ "$REACH" -eq 1 ] && reach
 }
 
