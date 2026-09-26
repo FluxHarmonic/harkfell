@@ -147,7 +147,8 @@
     ;; Window and keyboard (GLFW); native only. 0.11.0 for D37: the window's
     ;; size and fullscreen (window-set-size!, set-fullscreen!); 0.13.0 for
     ;; the window's size in screen units (window-width, window-height).
-    (from-git url: app-repo version: "^0.13.0" configs: '(dev release))
+    ;; 0.14.0 for the focus pause (window-focused?).
+    (from-git url: app-repo version: "^0.14.0" configs: '(dev release))
     ;; The shared engine. 0.2.0 for settings tables with no schema version
     ;; (Harkfell's players have settings and no version key).
     ;; 0.2.1 widens its sigil-graphics range to take 0.13.0.

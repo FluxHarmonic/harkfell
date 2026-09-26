@@ -85,7 +85,7 @@
           shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-view-size
           shell-set-extra-lines! shell-set-carry! shell-take-news! shell-take-body-events!
           shell-over-offered? shell-over-progress shell-over-key! shell-start-press! shell-start-release!
-          shell-set-over-hit! shell-pause! shell-resume! shell-paused? shell-add-pause-listener!
+          shell-set-over-hit! shell-pause! shell-resume! shell-paused? shell-focus! shell-add-pause-listener!
           VIEW-W VIEW-H)
 
   (begin
@@ -221,6 +221,16 @@
              (for-each (lambda (f) (f 'resume)) *pause-listeners*)
              #t)))
     (define (shell-paused?) *paused*)
+    ;; Native (0.1.1): the window's focus, polled once a frame (sigil-desktop
+    ;; 0.14's window-focused?). Losing it pauses, having it resumes, each
+    ;; heard once however many frames repeat it. A #f before the first #t is
+    ;; not a loss: on Wayland the focus reads #f until the compositor's
+    ;; keyboard-enter arrives, a frame or two after the window opens.
+    (define *focus-seen* #f)
+    (define (shell-focus! focused?)
+      (cond (focused? (set! *focus-seen* #t) (shell-resume!))
+            (*focus-seen* (shell-pause!))
+            (else #f)))
     (define (shell-gesture!) (set! *gesture* #t))
     (define (shell-pointer! x y) (set! *pointer* (cons x y)))
     (define (shell-frame-phase) (if *frame* (frame-phase *frame*) 'play))

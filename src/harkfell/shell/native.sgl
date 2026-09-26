@@ -172,10 +172,10 @@
                 (begin (poll-keys!) (window-scaler-frame! *scaler*)))
             ;; the mouse, for the start screen's moths (drawn toward the pointer, D32)
             (shell-pointer! (mouse-x) (mouse-y))
+            ;; D40, natively (0.1.1): the window's focus lost pauses, back resumes
+            (shell-focus! (window-focused?))
             ;; D40: while the start screen offers starting over, R held is
             ;; the hold (1.5 s wipes the save); otherwise R resets the world.
-            ;; (The focus pause waits for sigil-desktop to report focus: then
-            ;; shell-pause! on a loss and shell-resume! on its return.)
             (unless busy
             (cond ((shell-over-offered?)
                    (when (key-pressed? 'r) (shell-over-key! #t))
@@ -253,9 +253,8 @@
                (shell-playtest-setup! (quote desktop) (or (arg-value args "--build") "desktop")
                                       (and (member "--playtest" args) #t))
                (shell-add-frame-listener! (lambda (ev) (say "harkfell: frame " (symbol->string ev))))
-               ;; D40: the sound pauses and resumes with the game (ready for the
-               ;; focus pause, which waits for sigil-desktop to report focus)
-               (shell-add-pause-listener! (lambda (ev) (if (eq? ev 'pause) (audio-pause!) (audio-resume!))))
+               ;; D40: the sound pauses and resumes with the game (the focus pause)
+               (shell-add-pause-listener! (lambda (ev) (say "harkfell: " (symbol->string ev)) (if (eq? ev 'pause) (audio-pause!) (audio-resume!))))
                ;; A4: images by path ((harkfell images)), read from the repository root
                (set-image-fetcher! native-fetcher)
                (shell-set-ms! (and (member "--ms" args) #t))

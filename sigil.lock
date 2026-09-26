@@ -20,9 +20,9 @@
            version: "0.22.8")
   (package name: "sigil-desktop"
            url: "codeberg:sigil/sigil-desktop"
-           ref: "^0.13.0"
-           sha: "a1e672622304a8e33a81d111e393b1a858a9d0c1"
-           version: "0.13.0")
+           ref: "^0.14.0"
+           sha: "f1790e4133163cab708856499a49847b816987b1"
+           version: "0.14.0")
   (package name: "substratic"
            url: "github:substratic/substratic"
            ref: "^0.2.1"

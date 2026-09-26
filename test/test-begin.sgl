@@ -313,6 +313,8 @@
 (define SECOND-RESUME (shell-resume!))
 (frames 60)
 (define T2 (world-ticks (shell-world)))
+;; snapshot: the listener stays registered, and later sections pause again
+(define HEARD-D40 HEARD)
 
 (test-group "begin: the pause (D40)"
   (test "in play (the premise)"
@@ -326,7 +328,7 @@
     (assert-false SECOND-PAUSE)
     (assert-true FIRST-RESUME)
     (assert-false SECOND-RESUME)
-    (assert-equal '(pause resume) HEARD)))
+    (assert-equal '(pause resume) HEARD-D40)))
 
 (store-remove! SAVE-KEY)
 
@@ -350,5 +352,43 @@
   (test "a room with somewhere to stand still gets its standing door (the control)"
     (assert-true LAND-DOOR)
     (assert-equal "reedfen:10,4" LAND-ROOM)))
+
+(store-remove! SAVE-KEY)
+
+;; --- 0.1.1: the native focus pause (shell-focus!, polled once a frame) ------------------
+;; Before the first #t, #f is not a loss (Wayland reads #f until the
+;; keyboard-enter); after it, #f pauses and #t resumes, each heard once.
+(define FOCUS-HEARD '())
+(shell-add-pause-listener! (lambda (ev) (set! FOCUS-HEARD (append FOCUS-HEARD (list ev)))))
+(store-remove! SAVE-KEY)
+(shell-begin! #f #f)
+(frames 1200)
+(define F-PHASE (shell-frame-phase))
+(define F0 (world-ticks (shell-world)))
+(let loop ((k 0)) (when (< k 30) (shell-focus! #f) (shell-frame! (/ 1 60.0)) (loop (+ k 1))))
+(define F1 (world-ticks (shell-world)))
+(define F-HEARD-EARLY FOCUS-HEARD)
+(let loop ((k 0)) (when (< k 30) (shell-focus! #t) (shell-frame! (/ 1 60.0)) (loop (+ k 1))))
+(define F2 (world-ticks (shell-world)))
+(let loop ((k 0)) (when (< k 60) (shell-focus! #f) (shell-frame! (/ 1 60.0)) (loop (+ k 1))))
+(define F3 (world-ticks (shell-world)))
+(define F-PAUSED (shell-paused?))
+(let loop ((k 0)) (when (< k 60) (shell-focus! #t) (shell-frame! (/ 1 60.0)) (loop (+ k 1))))
+(define F4 (world-ticks (shell-world)))
+
+(test-group "begin: the native focus pause (0.1.1)"
+  (test "in play (the premise)"
+    (assert-equal 'play F-PHASE))
+  (test "a #f before any #t is not a loss: nothing heard, the world steps"
+    (assert-equal '() F-HEARD-EARLY)
+    (assert-true (>= (- F1 F0) 25)))
+  (test "after a #t, #f pauses: a second of #f frames steps the world not at all"
+    (assert-true F-PAUSED)
+    (assert-true (>= (- F2 F1) 25))
+    (assert-equal F2 F3))
+  (test "#t resumes; each change heard once, in order"
+    (assert-true (>= (- F4 F3) 55))
+    (assert-false (shell-paused?))
+    (assert-equal '(pause resume) FOCUS-HEARD)))
 
 (store-remove! SAVE-KEY)
