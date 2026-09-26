@@ -1,0 +1,125 @@
+;;; moment: as a list, spent per moment, and the 0.1 save migration (the
+;;; Glasswood bible's "A second moment in the start room is real work"):
+;;;
+;;;   the room file  moment: may list several moments; each is checked as one
+;;;                  was, and no tune twice in a room
+;;;   the pick       on a visit the first moment not spent whose carrying: is
+;;;                  met may play (hollow-answers before hollow-fifth when
+;;;                  both are armed); a later one waits, unmet, armed
+;;;   the director   a moment is spent under "region:X,Y/NAME", so playing one
+;;;                  of a room's moments leaves the room's others to come
+;;;   the save       a 0.1 save kept a room's key ("hollow:4,3"); it reads as
+;;;                  that room's first moment, so the moment it heard stays
+;;;                  heard and the second is still to come
+;;;
+;;; The start room lists hollow-answers then high-fell (a real tune) here in
+;;; place of hollow-fifth, whose tune the sound track has not written yet.
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine roomfile)
+        (engine mixer)
+        (harkfell content)
+        (harkfell source)
+        (harkfell hush)
+        (harkfell sound)
+        (harkfell save)
+        (only (harkfell audio) room-moment-now room-moment-names))
+
+(define SRC (read-world-source "world"))
+(define CT (load-content SRC))
+
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a)
+             (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+
+(define ONE "moment: (tune: hollow-answers when: first-visit carrying: 2)")
+(define (with-start-moment text)
+  (map (lambda (e) (if (string-contains? (car e) "hollow/x4y3.room") (cons (car e) (swap (cdr e) ONE text)) e)) SRC))
+(define (problems src) (map problem-message (content-problems (load-content src))))
+(define (has? ps s) (and (find (lambda (p) (string-contains? p s)) ps) #t))
+
+(define TWO "moment: ((tune: hollow-answers when: first-visit carrying: 2) (tune: high-fell when: first-visit carrying: 3))")
+(define CT2 (load-content (with-start-moment TWO)))
+(define START (content-room CT2 4 3))
+
+;; --- the room file ----------------------------------------------------------------------
+(test-group "moments: the room file"
+  (test "two moments listed in the start room load clean"
+    (assert-equal '() (content-problems CT2))
+    (assert-equal '("hollow-answers" "high-fell") (room-moment-names START)))
+  (test "one moment, as before, is still a list of one"
+    (assert-equal '("hollow-answers") (room-moment-names (content-room CT 4 3))))
+  (test "a tune listed twice is red"
+    (assert-true (has? (problems (with-start-moment "moment: ((tune: hollow-answers when: first-visit) (tune: hollow-answers when: first-visit carrying: 3))"))
+                       "is listed twice in this room")))
+  (test "each moment is checked: a bad condition in the second is red"
+    (assert-true (has? (problems (with-start-moment "moment: ((tune: hollow-answers when: first-visit carrying: 2) (tune: high-fell when: first-visit carying: 3))"))
+                       "carying: is not a condition a moment knows"))))
+
+;; --- the pick -----------------------------------------------------------------------------
+(define (tune m) (and m (symbol->string (moment-kw m "tune"))))
+
+(test-group "moments: the pick"
+  (test "both armed, carrying 2 and 3: the first plays first"
+    (assert-equal "hollow-answers" (tune (room-moment-now START '(2 3) '()))))
+  (test "the first spent: the second"
+    (assert-equal "high-fell" (tune (room-moment-now START '(2 3) '("hollow:4,3/hollow-answers")))))
+  (test "the first spent, the second's harmonic not carried: the second, armed and unmet"
+    (let ((m (room-moment-now START '(2) '("hollow:4,3/hollow-answers"))))
+      (assert-equal "high-fell" (tune m))
+      (assert-equal 3 (moment-kw m "carrying"))))
+  (test "both spent: none"
+    (assert-false (room-moment-now START '(2 3) '("hollow:4,3/hollow-answers" "hollow:4,3/high-fell"))))
+  (test "the room's key alone (0.1's) spends nothing now: the director and the save use moment keys"
+    (assert-equal "hollow-answers" (tune (room-moment-now START '(2 3) '("hollow:4,3"))))))
+
+;; --- the director ---------------------------------------------------------------------------
+(define RATE 32000)
+(sound-boot! '() (lambda parts #f))
+(mixer-open-headless! RATE #f)
+(sound-reset!)
+(sound-preopen! "hollow-answers")
+(define (bowl name key carrying)
+  (place key: "hollow:4,3" region: 'hollow bed-tune: #f groups: '(wind water hum drone)
+         levels: '((wind . 0.3)) moment: name moment-key: key moment-carrying: carrying
+         wander: '() tones: '() carry: '(2 3) still: #f px: 100.0 py: 100.0 rx: 4 ry: 3))
+(let loop ((t 0.0))
+  (when (< t 1.0)
+    (sound-frame! t 0.1 (bowl "hollow-answers" "hollow:4,3/hollow-answers" 2))
+    (loop (+ t 0.1))))
+(define PLAYING (sound-moment-playing))
+(define SPENT (hush-spent (sound-hush)))
+
+(test-group "moments: the director spends per moment"
+  (test "entering the bowl with hollow-answers armed plays it"
+    (assert-equal "hollow-answers" PLAYING))
+  (test "and spends it under its own key, not the room's"
+    (assert-true (member "hollow:4,3/hollow-answers" SPENT))
+    (assert-false (member "hollow:4,3" SPENT)))
+  (test "so the room's second moment is not spent"
+    (assert-false (eq? 'spent (hush-fixed-decision (sound-hush) "hollow:4,3/high-fell")))))
+
+;; --- the save: 0.1's room keys ------------------------------------------------------------
+(define OLD
+  (list 'harkfell-save 1 (list 'room 'hollow 4 3) (list 'cell 15 8) (list 'carry 2) (list 'stones)
+        (list 'moments "hollow:4,3" "reedfen:9,3" "wander:seed-wind" "hollow:4,3/high-fell" "nowhere:1,1")
+        (list 'played 100.5) (list 'revealed #t)))
+
+(test-group "moments: a 0.1 save"
+  (test "a room's key reads as its first moment; wandering, per-moment and unknown keys are kept"
+    (assert-equal '("hollow:4,3/hollow-answers" "reedfen:9,3/first-open-water" "wander:seed-wind"
+                    "hollow:4,3/high-fell" "nowhere:1,1")
+                  (restored-moments (save-restore CT OLD))))
+  (test "so the start room's first moment is heard and its second is still to come"
+    (let ((spent (restored-moments (save-restore CT2 (list 'harkfell-save 1 (list 'room 'hollow 4 3) (list 'cell 15 8)
+                                                           (list 'carry 2 3) (list 'stones) (list 'moments "hollow:4,3")
+                                                           (list 'played 1.5) (list 'revealed #t))))))
+      (assert-equal "high-fell" (tune (room-moment-now START '(2 3) spent)))))
+  (test "nothing is forgiven for it"
+    (assert-equal '() (restored-notes (save-restore CT OLD)))))

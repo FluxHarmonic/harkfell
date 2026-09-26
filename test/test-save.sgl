@@ -45,7 +45,7 @@
 
 (define SAVED
   (save-datum CT (body-at-cell CT 9 3 4 7) '(2) (stones-with-open CT 10 3 21 8)
-              (list "reedfen:9,3") 612.5))
+              (list "reedfen:9,3/first-open-water") 612.5))
 (define BACK (save-restore CT SAVED))
 
 (test-group "save: the round trip"
@@ -57,7 +57,7 @@
   (test "the carry, the opened stone, the moments and the time come back"
     (assert-equal '(2) (restored-carry BACK))
     (assert-equal (list (cons (global CT 10 3 21 8) 2)) (restored-stones BACK))
-    (assert-equal (list "reedfen:9,3") (restored-moments BACK))
+    (assert-equal (list "reedfen:9,3/first-open-water") (restored-moments BACK))
     (assert-equal 612.5 (restored-played BACK)))
   (test "nothing was forgiven"
     (assert-equal '() (restored-notes BACK))))

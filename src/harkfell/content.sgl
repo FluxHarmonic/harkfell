@@ -73,7 +73,8 @@
           region-map region-map? region-map-region region-map-rooms region-map-origin
           region-rooms
           thing-kw thing-at room-things-of grid-standable?
-          icicle-floor-row icicle-placement-problems)
+          icicle-floor-row icicle-placement-problems
+          moment-forms moment-kw room-moments moment-key)
 
   (begin
     (define ROOM-COLS 25)
@@ -262,6 +263,32 @@
                                            (cell-name c stand-r) " has no standing neighbour on the same floor)"))
                       '())))
         (append hung ground way)))
+
+    ;; --- a room's fixed moments (Glasswood: moment: as a list) -----------------------------
+    ;; A room's moment: field is one moment, (tune: NAME when: first-visit ...),
+    ;; or a list of them, ((tune: A ...) (tune: B ...)), in the order they are
+    ;; armed: on a visit the first that is not spent and whose conditions are
+    ;; met is the one that may play (the start room: hollow-answers, then
+    ;; hollow-fifth). The forms, as a list, '() for none.
+    (define (moment-forms m)
+      (cond ((not m) '())
+            ((null? m) '())
+            ((and (pair? m) (pair? (car m))) m)
+            (else (list m))))
+
+    ;; A keyword's value in a moment form, or #f.
+    (define (moment-kw m name)
+      (let find ((l m))
+        (cond ((or (not (pair? l)) (null? (cdr l))) #f)
+              ((and (keyword? (car l)) (string=? (keyword->string (car l)) name)) (cadr l))
+              (else (find (cdr l))))))
+
+    (define (room-moments rm) (moment-forms (room-moment rm)))
+
+    ;; The key a fixed moment is spent under: "region:X,Y/NAME" (spent per
+    ;; moment; 0.1 kept one key per room, "region:X,Y", which a save reads as
+    ;; that room's first moment: (harkfell save)).
+    (define (moment-key rm name) (string-append (room-label rm) "/" name))
 
     ;; The room's things of one kind.
     (define (room-things-of rm kind)
@@ -511,8 +538,18 @@
                         (unless (and (number? lv) (<= 0 lv 1))
                           (add! (string-append "bed: level " (datum->string lv) " is not between 0 and 1") "bed")))
                       (loop (cddr b))))))
-            ;; moment: (tune: NAME when: ...) naming one of the region's moments
-            (let ((m (roomfile-field rf 'moment)))
+            ;; moment: (tune: NAME when: ...) naming one of the region's moments, or
+            ;; (Glasswood) a list of them, ((tune: A ...) (tune: B ...)): each checked,
+            ;; no tune twice in one room
+            (let ((ms (moment-forms (roomfile-field rf 'moment))))
+             (let ((names (map (lambda (m) (and (list? m) (moment-kw m "tune"))) ms)))
+               (let dup ((l names))
+                 (when (pair? l)
+                   (if (and (car l) (memq (car l) (cdr l)))
+                       (add! (string-append "moment: " (datum->string (car l)) " is listed twice in this room") "moment")
+                       (dup (cdr l))))))
+             (for-each
+              (lambda (m)
               (when m
                 (let ((tune (and (list? m) (let find ((l m))
                                              (cond ((or (null? l) (null? (cdr l))) #f)
@@ -548,6 +585,7 @@
                                      (else
                                       (add! (string-append "moment: " k ": is not a condition a moment knows (when: still: carrying:)") "moment")))
                                (loop (cddr l))))))))))
+              ms))
             ;; ring-stones: every o has one, with its overtone, and every one is on an o
             (let* ((things (let ((t (roomfile-field rf 'things '()))) (if (list? t) t '())))
                    (grid (roomfile-grid rf))

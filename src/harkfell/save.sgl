@@ -117,6 +117,29 @@
                      (list 'played played)
                      (list 'revealed (and (pair? revealed) (car revealed) #t)))))))
 
+    ;; A moment heard, as the save keeps it, in this content's terms (Glasswood:
+    ;; spent per moment). 0.1 kept a fixed moment's ROOM ("hollow:4,3"), one
+    ;; moment a room; it reads as that room's first moment
+    ;; ("hollow:4,3/hollow-answers"), so a 0.1 save keeps every moment it heard
+    ;; and the start room's second (hollow-fifth) is still to come. A key with a
+    ;; moment in it, a wandering one ("wander:NAME"), or one naming no room
+    ;; with a moment is kept as it is.
+    (define (moment-key-now ct k)
+      (let* ((rk (and (not (string-index-of k #\/)) (not (wander-key? k)) (parse-room-key k)))
+             (rm (and rk (content-room ct (cadr rk) (caddr rk))))
+             (name1 (and rm (eq? (room-region rm) (car rk))
+                         (let ((ms (room-moments rm)))
+                           (and (pair? ms) (symbol? (moment-kw (car ms) "tune")) (moment-kw (car ms) "tune"))))))
+        (if name1 (moment-key rm (symbol->string name1)) k)))
+
+    (define (wander-key? k) (and (>= (string-length k) 7) (string=? (substring k 0 7) "wander:")))
+
+    (define (string-index-of s ch)
+      (let loop ((i 0))
+        (cond ((>= i (string-length s)) #f)
+              ((char=? (string-ref s i) ch) i)
+              (else (loop (+ i 1))))))
+
     ;; A save read back into this content: a restored, or #f for "no save"
     ;; (nothing there, or not a save of this version).
     (define (save-restore ct d)
@@ -170,7 +193,7 @@
                  (restored cell: at
                            carry: carry
                            stones: stones
-                           moments: (if (list? moments) (filter string? moments) '())
+                           moments: (if (list? moments) (map (lambda (k) (moment-key-now ct k)) (filter string? moments)) '())
                            played: (if (number? played) played 0.0)
                            revealed: (let ((v (field fields 'revealed))) (and (pair? v) (eq? (car v) #t)))
                            notes: (reverse notes))))))))

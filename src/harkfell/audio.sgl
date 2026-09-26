@@ -32,7 +32,7 @@
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
           audio-pause! audio-resume! audio-paused?
-          audio-carry! audio-tone-room! audio-lines world-place room-moment-name
+          audio-carry! audio-tone-room! audio-lines world-place room-moment-name room-moment-names room-moment-now
           audio-sound-door! frame-event! save-extras restore-extras!)
 
   (begin
@@ -175,18 +175,35 @@
               ((and (keyword? (car l)) (string=? (keyword->string (car l)) name)) (cadr l))
               (else (find (cdr l))))))
 
-    ;; A room's fixed moment as a tune name (a string), or #f.
+    ;; A room's fixed moment as a tune name (a string), or #f: its first
+    ;; (Glasswood: moment: may list several; room-moment-names has them all).
     (define (room-moment-name rm)
-      (let* ((m (room-moment rm))
-             (t (and (list? m) (kw-ref m "tune"))))
-        (and (symbol? t) (symbol->string t))))
+      (let ((ns (room-moment-names rm))) (and (pair? ns) (car ns))))
 
-    ;; A4: the moment's conditions, moment: (tune: T when: first-visit
-    ;; carrying: 2 still: 6); each a number, or #f.
-    (define (room-moment-number rm key)
-      (let* ((m (room-moment rm))
-             (v (and (list? m) (kw-ref m key))))
+    ;; Every fixed moment a room names, in its order, as tune names.
+    (define (room-moment-names rm)
+      (filter-map (lambda (m) (let ((t (moment-kw m "tune"))) (and (symbol? t) (symbol->string t))))
+                  (room-moments rm)))
+
+    ;; A4: a moment's condition, moment: (tune: T when: first-visit carrying: 2
+    ;; still: 6); a number, or #f.
+    (define (moment-number m key)
+      (let ((v (and (list? m) (moment-kw m key))))
         (and (number? v) (> v 0) v)))
+
+    ;; The room's fixed moment for this visit (Glasswood: moment: as a list,
+    ;; spent per moment): the first of its moments not spent whose carrying:
+    ;; is met, or else the first not spent (unmet, it stays armed, as it always
+    ;; did); #f when every one is spent or it has none. So with the start
+    ;; room's hollow-answers (carrying 2) and hollow-fifth (carrying 3) both
+    ;; armed, hollow-answers plays first and hollow-fifth waits.
+    (define (room-moment-now rm carry spent)
+      (let* ((ms (filter (lambda (m) (symbol? (moment-kw m "tune"))) (room-moments rm)))
+             (live (filter (lambda (m) (not (member (moment-key rm (symbol->string (moment-kw m "tune"))) spent))) ms))
+             (met (filter (lambda (m) (let ((n (moment-kw m "carrying"))) (or (not (integer? n)) (memv n carry)))) live)))
+        (cond ((pair? met) (car met))
+              ((pair? live) (car live))
+              (else #f))))
 
     ;; A region's wandering moments (its wander: list) as tune names.
     (define (region-wander reg)
@@ -249,6 +266,7 @@
                     (b (world-body w))
                     (wm (world-map w))
                     (bed (region-field reg 'bed))
+                    (mm (room-moment-now rm (world-carry w) (hush-spent (sound-hush))))
                     (frogs (filter-map (lambda (t)
                                          (and (pair? t) (eq? (car t) 'bellfrog)
                                               (let ((at (kw-ref (cdr t) "at")))
@@ -259,9 +277,10 @@
                            bed-tune: (cond ((string? bed) bed) ((symbol? bed) (symbol->string bed)) (else #f))
                            groups: (or (region-field reg 'bed-channels) '())
                            levels: (plist->alist (room-bed rm))
-                           moment: (room-moment-name rm)
-                           moment-carrying: (room-moment-number rm "carrying")
-                           moment-still: (room-moment-number rm "still")
+                           moment: (and mm (symbol->string (moment-kw mm "tune")))
+                           moment-carrying: (moment-number mm "carrying")
+                           moment-still: (moment-number mm "still")
+                           moment-key: (and mm (moment-key rm (symbol->string (moment-kw mm "tune"))))
                            wander: (region-wander reg)
                            frogs: frogs
                            ;; ABSOLUTE world pixels: the map's pixels start at its
@@ -297,7 +316,7 @@
     ;; opened ahead.
     (define (audio-world! ct)
       (when ct
-        (let ((ms (filter-map (lambda (p) (room-moment-name (placed-data p))) (content-rooms ct)))
+        (let ((ms (apply append (map (lambda (p) (room-moment-names (placed-data p))) (content-rooms ct))))
               (ws (apply append (map region-wander (content-regions ct)))))
           (sound-boot! (append ms ws) *say*))))
 

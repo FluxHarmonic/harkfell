@@ -68,7 +68,7 @@
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
-          place-wander place-moment-carrying place-moment-still
+          place-wander place-moment-carrying place-moment-still place-moment-key
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
@@ -128,13 +128,16 @@
     ;;                     this harmonic (moment: (... carrying: 2)), or #f
     ;;   moment-still      it plays only once you have stood still this many
     ;;                     seconds in the room (moment: (... still: 6)), or #f
+    ;; Glasswood:
+    ;;   moment-key        the key the hush spends this moment under (one of
+    ;;                     the room's moments), or #f: the room's key
     (define-struct place
       (key default: #f) (region default: #f) (bed-tune default: #f) (groups default: '())
       (levels default: '()) (moment default: #f) (frogs default: '()) (water default: #f)
       (px default: 0.0) (py default: 0.0) (rx default: 0) (ry default: 0)
       (still default: #f) (returns default: 0)
       (carry default: #f) (tones default: #f) (stones default: '()) (news default: '())
-      (wander default: '()) (moment-carrying default: #f) (moment-still default: #f)
+      (wander default: '()) (moment-carrying default: #f) (moment-still default: #f) (moment-key default: #f)
       (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f))
 
     ;; --- state ---------------------------------------------------------------------
@@ -567,7 +570,7 @@
           (apply-room-levels! (place-levels pl) now ROOM-RAMP-S))
       (let ((m (place-moment pl)))
         (when m
-          (let ((d (hush-fixed-decision *hush* (place-key pl)))
+          (let ((d (hush-fixed-decision *hush* (hush-key pl)))
                 (unmet (moment-unmet pl)))
             ;; A4's conditions. carrying: unmet, the moment neither plays nor
             ;; fades the one playing, and stays armed. still: armed now,
@@ -577,8 +580,8 @@
                   ;; a still: room is armed even while the hush blocks it: the
                   ;; stillness decides again, and waits for the hush
                   ((and (memq d '(play blocked)) (place-moment-still pl))
-                   (set! *still-wait* (list m (place-key pl) (inexact (place-moment-still pl)))))
-                  ((eq? d 'play) (start-moment! m (place-key pl) now))
+                   (set! *still-wait* (list m (place-key pl) (inexact (place-moment-still pl)) (hush-key pl))))
+                  ((eq? d 'play) (start-moment! m (hush-key pl) now))
                   (else #f))
             (*say* "sound" "room" "moment" m (if unmet (symbol->string unmet)
                                                   (if (and (memq d '(play blocked)) (place-moment-still pl)) "still-wait" (symbol->string d)))))))
@@ -592,8 +595,14 @@
       (let ((n (place-moment-carrying pl)))
         (and n (not (memv n *carry*)) 'carrying)))
 
+    ;; The key the hush spends the room's fixed moment under: the place's
+    ;; moment-key when content gives one (Glasswood: spent per moment,
+    ;; "region:X,Y/NAME", a room holding more than one), else the room's key
+    ;; as it always was.
+    (define (hush-key pl) (or (place-moment-key pl) (place-key pl)))
+
     (define (room-armed? pl)
-      (and (place-moment pl) (not (eq? (hush-fixed-decision *hush* (place-key pl)) 'spent))))
+      (and (place-moment pl) (not (eq? (hush-fixed-decision *hush* (hush-key pl)) 'spent))))
 
     ;; --- A4: wandering moments -------------------------------------------------------------
     ;; A region's wandering moments (its wander: list) may play in any of its
@@ -642,7 +651,7 @@
                    (start-moment! (car w) #f now)))))))
 
     ;; A fixed moment with still: waits in its room for the stillness.
-    (define *still-wait* #f)      ; (name key secs)
+    (define *still-wait* #f)      ; (name room-key secs hush-key)
     (define (still-wait-frame! now)
       (let ((w *still-wait*))
         (when w
@@ -650,11 +659,11 @@
                 ((>= *still-for* (caddr w))
                  ;; still long enough: play if the hush allows, keep waiting
                  ;; while it blocks, give up once spent
-                 (let ((d (hush-fixed-decision *hush* (cadr w))))
+                 (let ((d (hush-fixed-decision *hush* (cadddr w))))
                    (cond ((and (eq? d 'play) (not *moment*))
                           (set! *still-wait* #f)
                           (*say* "sound" "still" (car w) "play")
-                          (start-moment! (car w) (cadr w) now))
+                          (start-moment! (car w) (cadddr w) now))
                          ((eq? d 'spent) (set! *still-wait* #f))
                          (else #f))))
                 (else #f)))))
