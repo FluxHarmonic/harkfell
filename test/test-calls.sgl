@@ -1,0 +1,63 @@
+;;; D45: a shut stone calls when you carry its note ((harkfell sound)
+;;; call-frame!; the Glasswood bible's "How the player gets there"). Through
+;;; the real director and the mixer's headless mode, with places made by
+;;; hand: the body at (100, 100) px, a stone east of it.
+;;;
+;;;   it calls     carrying H2, a shut H2 stone 1.5 rooms off sounds tone-h2 as
+;;;                "call-h2", at CALL-GAIN of the finding tone's gain there
+;;;   not else     carrying only H3, the H2 stone does not call; out of range
+;;;                (4.5 rooms) it does not either
+;;;   it stops     once the stone starts to ring, its call fades out
+;;;   the ears     standing still, they lean toward the calling stone, and
+;;;                when two stones of one note are in range the nearer calls
+
+(import (sigil test)
+        (sigil list)
+        (engine mixer)
+        (harkfell sound))
+
+(define ROOM 400.0)
+(define (pl carry tones stones . px)
+  (place key: "t" region: 'hollow bed-tune: #f groups: '() levels: '()
+         carry: carry tones: tones stones: stones news: '()
+         px: (if (pair? px) (car px) 100.0) py: 100.0 rx: 0 ry: 0 still: #t))
+
+;; Run the director 3 s in place p (or (p t) when p is a procedure); the
+;; voice's gain at the end, and the ears.
+(define (listen p id)
+  (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+  (sound-reset!)
+  (let loop ((f 0))
+    (let ((now (/ f 30.0)))
+      (when (<= now 3.0)
+        (sound-frame! now (if (= f 0) 0.0 (/ 1 30.0)) (if (procedure? p) (p now) p))
+        (mixer-pump! now)
+        (loop (+ f 1)))))
+  (let ((s (sound-voice-source id)))
+    (list (and s (source-gain s 3.0)) (sound-ears))))
+
+(define EAST (+ 100.0 (* 1.5 ROOM)))
+(define CALL (listen (pl '(2) '() (list (list 2 'shut EAST 100.0))) (call-id 2)))
+(define TONE (listen (pl '() (list (list 2 EAST 100.0)) '()) "tone-h2"))
+(define WRONG-NOTE (listen (pl '(3) '() (list (list 2 'shut EAST 100.0))) (call-id 2)))
+(define FAR (listen (pl '(2) '() (list (list 2 'shut (+ 100.0 (* 4.5 ROOM)) 100.0))) (call-id 2)))
+(define RINGS (listen (lambda (t) (pl '(2) '() (list (list 2 (if (< t 1.0) 'shut 'ringing) EAST 100.0)))) (call-id 2)))
+;; two H2 stones, the nearer WEST at 1 room, the other east at 2.5
+(define TWO (listen (pl '(2) '() (list (list 2 'shut (+ 100.0 (* 2.5 ROOM)) 100.0) (list 2 'shut (- 100.0 ROOM) 100.0)))
+                    (call-id 2)))
+
+(test-group "calls: a shut stone calls when you carry its note"
+  (test "carrying H2, the H2 stone calls, at CALL-GAIN of the finding tone's gain there"
+    (display "  call ") (display (car CALL)) (display ", tone ") (display (car TONE)) (newline)
+    (assert-true (and (car CALL) (> (car CALL) 0.0)))
+    (assert-true (< (abs (- (car CALL) (* CALL-GAIN (car TONE)))) (* 0.05 (car CALL)))))
+  (test "carrying only H3, it does not call"
+    (assert-false (car WRONG-NOTE)))
+  (test "past the finding tone's range, it does not call"
+    (assert-false (car FAR)))
+  (test "once it starts to ring, the call fades out"
+    (assert-true (or (not (car RINGS)) (< (car RINGS) 0.01))))
+  (test "standing still, the ears lean toward it"
+    (assert-equal 'right (cadr CALL)))
+  (test "of two stones of one note, the nearer calls (west here), and the ears follow it"
+    (assert-equal 'left (cadr TWO))))

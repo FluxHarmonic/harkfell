@@ -66,7 +66,7 @@
           region region? region-name region-field
           room room? room-path room-region room-x room-y room-title room-intent
           room-grid room-things room-bed room-moment room-decor room-start
-          room-unreached room-file
+          room-unreached room-file room-light
           content-room room-key parse-room-key room-label
           room-char world-char
           read-room-source room-placed
@@ -101,7 +101,8 @@
       (moment default: #f)
       (decor default: 'auto)
       (start default: #f)           ; (c . r) or #f
-      (unreached default: '()))     ; ((c . r) ...) declared unreachable
+      (unreached default: '())      ; ((c . r) ...) declared unreachable
+      (light default: 1.0))         ; Glasswood: how lit the room is, 0 < light <= 1 (1 daylight)
 
     ;; A region map: ((letter x y title intent) ...), which neighbours are
     ;; joined, and (A4) which of its rooms open onto another region's.
@@ -415,7 +416,7 @@
     ;; --- rooms ---------------------------------------------------------------------------
 
     (define ROOM-FIELDS
-      (list 'region 'at 'title 'intent 'bed 'grid 'things 'moment 'decor 'start 'unreached))
+      (list 'region 'at 'title 'intent 'bed 'grid 'things 'moment 'decor 'start 'unreached 'light))
     (define ROOM-REQUIRED (list 'region 'at 'title 'intent 'grid))
 
     ;; A room file read and checked on its own and against the regions: (room . problems).
@@ -623,6 +624,11 @@
             (let ((u (roomfile-field rf 'unreached '())))
               (unless (and (list? u) (every (lambda (p) (and (int-pair? p) (< -1 (car p) ROOM-COLS) (< -1 (cadr p) ROOM-ROWS))) u))
                 (add! "unreached: is not ((C R) ...) with cells inside the grid" "unreached"))))
+          ;; light: (Glasswood, for the dark caves the moths light, D42) how lit
+          ;; the room is, a number above 0 and at most 1 (1, daylight, if absent)
+          (let ((l (roomfile-field rf 'light)))
+            (when (and l (not (and (number? l) (> l 0) (<= l 1))))
+              (add! (string-append "light: " (datum->string l) " is not a number above 0 and at most 1") "light")))
           (let* ((grid-ps (check-grid rf ROOM-COLS ROOM-ROWS LEGEND-CHARS))
                  (all (append (roomfile-problems rf) (reverse ps) (if (roomfile-ok? rf) grid-ps '())))
                  (u (roomfile-field rf 'unreached '()))
@@ -640,6 +646,7 @@
                         moment: (roomfile-field rf 'moment)
                         decor: (roomfile-field rf 'decor 'auto)
                         start: (and (int-pair? s) (cons (car s) (cadr s)))
+                        light: (let ((l (roomfile-field rf 'light 1.0))) (if (and (number? l) (> l 0) (<= l 1)) (inexact l) 1.0))
                         unreached: (if (and (list? u) (every int-pair? u))
                                        (map (lambda (p) (cons (car p) (cadr p))) u)
                                        '()))

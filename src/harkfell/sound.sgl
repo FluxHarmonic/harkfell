@@ -36,6 +36,9 @@
 ;;; you and darker below. Standing still STILL-S seconds dips the bed 6 dB
 ;;; (factor 'still), brings the tone forward 4 dB, and raises the ears toward
 ;;; the strongest tone (sound-ears); moving brings the bed back.
+;;; D45 (Glasswood): a shut stone whose harmonic you carry CALLS, its
+;;; harmonic's finding tone from where it stands at CALL-GAIN of a tone's
+;;; gain (call-frame!), until it starts to ring; the ears take the loudest.
 ;;;
 ;;; SPOT SOUNDS. One-shot cues rendered at boot from short tunes, scheduled
 ;;; with a rate range each: the bellfrogs of the room croak from where they
@@ -64,7 +67,7 @@
 
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
           sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
-          sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING sound-bed-notes sound-region sound-cue-tunes sound-voice-source HUM-ID
+          sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING sound-bed-notes sound-region sound-cue-tunes sound-voice-source HUM-ID CALL-GAIN call-id
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
@@ -789,13 +792,22 @@
             (dy (/ (- y (place-py pl)) ROOM-H)))
         (list dx dy (sqrt (+ (* dx dx) (* dy dy))))))
 
-    ;; The loudest unfound harmonic's geometry (the ears point to it), or #f.
+    ;; The loudest thing to listen for, its geometry (the ears point to it), or
+    ;; #f: an unfound harmonic's tone, or (D45) a calling stone, CALL-GAIN
+    ;; quieter at the same distance. Among tones alone the loudest is the
+    ;; nearest, as it always was.
     (define (tone-geometry pl)
-      (let loop ((ts (tone-spots pl)) (best #f))
+      (let loop ((ts (append (map (lambda (t) (cons 1.0 t)) (tone-spots pl))
+                             (map (lambda (t) (cons CALL-GAIN t)) (call-spots pl))))
+                 (best #f) (bg -1.0))
         (if (null? ts)
             best
-            (let ((g (geometry-to pl (cadr (car ts)) (caddr (car ts)))))
-              (loop (cdr ts) (if (or (not best) (< (caddr g) (caddr best))) g best))))))
+            (let* ((k (car (car ts))) (sp (cdr (car ts)))
+                   (g (geometry-to pl (cadr sp) (caddr sp)))
+                   (gain (* k (tone-gain (caddr g)))))
+              (if (or (not best) (> gain bg) (and (= gain bg) (< (caddr g) (caddr best))))
+                  (loop (cdr ts) g gain)
+                  (loop (cdr ts) best bg))))))
 
     (define (tone-gain d)
       (cond ((> d (+ TONE-ROOMS 0.5)) 0.0)
@@ -869,7 +881,7 @@
                  (st (vector p 1.0 1.0 1.0 1.0 0.0 0.0 sid))
                  (s (mixer-add! sid (voice-pull st) #t)))
             (source-factor! s 'dist 0.0 0.0 now)
-            (when (and *still* (tone-id? id)) (source-factor! s 'still TONE-FORWARD 0.0 now))
+            (when (and *still* (listen-id? id)) (source-factor! s 'still TONE-FORWARD 0.0 now))
             (set! *voices* (cons (cons id st) (filter (lambda (v) (not (string=? (car v) id))) *voices*)))))
         p))
 
@@ -921,6 +933,55 @@
                       (voice-fade! (car v) now)))
                   *voices*)))
 
+    ;; D45 (David, 2026-09-26): A SHUT STONE CALLS WHEN YOU CARRY ITS NOTE. The
+    ;; nearest shut stone keyed to each harmonic you carry sounds that
+    ;; harmonic's finding tone from where it stands ("call-hN", the tune
+    ;; tone-hN): the finding tone's range, pan and brightness, at CALL-GAIN of
+    ;; its gain, so it is quieter than an unfound harmonic. It stops (fades)
+    ;; when the stone starts to ring. Without it the one stone you could open
+    ;; was the one you could not hear from afar (the hum is only for a stone
+    ;; whose note you do not carry).
+    (define CALL-GAIN 0.5)         ; -6 dB under a finding tone at the same distance
+
+    (define (call-id n) (string-append "call-h" (number->string n)))
+    (define (call-id? id) (and (>= (string-length id) 6) (string=? (substring id 0 6) "call-h")))
+    ;; a voice standing still sharpens: the finding tones and the calls
+    (define (listen-id? id) (or (tone-id? id) (call-id? id)))
+
+    ;; ((overtone x y) ...): for each carried harmonic, its nearest shut stone.
+    (define (call-spots pl)
+      (let loop ((ss (place-stones pl)) (best '()))   ; ((n d x y) ...)
+        (if (null? ss)
+            (map (lambda (b) (list (car b) (caddr b) (cadddr b))) best)
+            (let* ((st (car ss)) (n (car st)) (x (caddr st)) (y (cadddr st))
+                   (d (sqrt (+ (expt (- x (place-px pl)) 2) (expt (- y (place-py pl)) 2))))
+                   (have (assv n best)))
+              (if (and (eq? (cadr st) 'shut) (memv n *carry*) (or (not have) (< d (cadr have))))
+                  (loop (cdr ss) (cons (list n d x y) (filter (lambda (b) (not (eqv? (car b) n))) best)))
+                  (loop (cdr ss) best))))))
+
+    ;; The calls, as tone-frame! does the finding tones.
+    (define (call-frame! pl now)
+      (let ((spots (call-spots pl)))
+        (for-each
+          (lambda (sp)
+            (let* ((n (car sp)) (id (call-id n))
+                   (g (geometry-to pl (cadr sp) (caddr sp)))
+                   (dx (car g)) (dy (cadr g)) (d (caddr g))
+                   (open? (assoc id *voices*)))
+              (cond ((and (not open?) (< d TONE-OPEN-ROOMS))
+                     (when (voice-open! id (tone-id n) now)
+                       (voice-set! id (* CALL-GAIN (tone-gain d)) (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx)) (tone-cutoff d dy) now)))
+                    ((and open? (> d TONE-CLOSE-ROOMS)) (voice-fade! id now))
+                    (open? (voice-set! id (* CALL-GAIN (tone-gain d)) (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx)) (tone-cutoff d dy) now))
+                    (else #f))))
+          spots)
+        (for-each (lambda (v)
+                    (when (and (call-id? (car v))
+                               (not (find (lambda (sp) (string=? (call-id (car sp)) (car v))) spots)))
+                      (voice-fade! (car v) now)))
+                  *voices*)))
+
     ;; The nearest mute stone (shut, its harmonic not carried) within HUM-R
     ;; hums its harmonic's note, quietly, louder as you come closer.
     (define *hum-n* #f)
@@ -951,7 +1012,7 @@
           (when *bed-src*
             (source-factor! *bed-src* 'still (if now-still DUCK-GAIN 1.0) (if now-still STILL-IN-S STILL-OUT-S) now))
           (for-each (lambda (v)
-                      (when (tone-id? (car v))
+                      (when (listen-id? (car v))
                         (let ((s (voice-src (car v))))
                           (when s (source-factor! s 'still (if now-still TONE-FORWARD 1.0) (if now-still STILL-IN-S STILL-OUT-S) now)))))
                     *voices*)
@@ -1350,6 +1411,7 @@
         (still-wait-frame! now)
         (wander-frame! now)
         (tone-frame! pl now)
+        (call-frame! pl now)
         (hum-frame! pl now)
         (news-frame! pl)
         (movement-frame! pl)

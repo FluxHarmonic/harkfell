@@ -82,7 +82,7 @@
           shell-latency-lines now-ms
           shell-load-content! shell-content shell-goto! shell-goto-start!
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
-          shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-view-size
+          shell-tap! shell-replace-file! shell-replace-files! shell-room-label shell-room-light shell-view-size
           shell-set-extra-lines! shell-set-carry! shell-take-news! shell-take-body-events!
           shell-over-offered? shell-over-progress shell-over-key! shell-start-press! shell-start-release!
           shell-set-over-hit! shell-pause! shell-resume! shell-paused? shell-add-pause-listener!
@@ -429,6 +429,13 @@
     (define (shell-room-label)
       (let ((p (and *world* (world-room *world*))))
         (if (and p (placed-data p)) (room-label (placed-data p)) "test-room")))
+
+    ;; How lit the current room is (Glasswood's light:, D42): 0 < light <= 1,
+    ;; 1 (daylight) outside the written world. The look track's palette pass
+    ;; reads it for the dark caves and the moths' lit circle.
+    (define (shell-room-light)
+      (let ((p (and *world* (world-room *world*))))
+        (if (and p (placed-data p)) (room-light (placed-data p)) 1.0)))
 
     ;; --- the playtest reports (Substratic's F1 and F2) ------------------------
 

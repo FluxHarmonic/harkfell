@@ -1,0 +1,64 @@
+;;; light: (Glasswood, D42): how lit a room is, read by the game. The content
+;;; gate takes a number above 0 and at most 1 and refuses anything else; a
+;;; room without it is daylight (1.0); the shell gives the current room's
+;;; light to the look track's palette pass (shell-room-light).
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (sigil time)
+        (engine roomfile)
+        (substratic store kv)
+        (harkfell content)
+        (harkfell source)
+        (harkfell save)
+        (harkfell shell))
+
+(define SRC (read-world-source "world"))
+
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a)
+             (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+
+;; First Sight (glasswood:-1,3) with a light: line after its bed.
+(define BED "  bed: (wind 0.7 water 0.1 hum 0.1)")
+(define (with-light v)
+  (map (lambda (e) (if (string-contains? (car e) "glasswood/x-1y3.room")
+                       (cons (car e) (swap (cdr e) BED (string-append BED "\n  light: " v)))
+                       e))
+       SRC))
+(define (problems src) (map problem-message (content-problems (load-content src))))
+(define (has? ps s) (and (find (lambda (p) (string-contains? p s)) ps) #t))
+
+(define DARK (with-light "0.3"))
+
+(test-group "light: the room file"
+  (test "light: 0.3 loads clean and is read"
+    (assert-equal '() (problems DARK))
+    (assert-equal 0.3 (room-light (content-room (load-content DARK) -1 3))))
+  (test "a room without it is daylight"
+    (assert-equal 1.0 (room-light (content-room (load-content SRC) -1 3))))
+  (test "light: 1 is allowed (daylight, written)"
+    (assert-equal '() (problems (with-light "1"))))
+  (test "light: 0, 1.5 and a word are each red"
+    (assert-true (has? (problems (with-light "0")) "light: 0 is not a number above 0 and at most 1"))
+    (assert-true (has? (problems (with-light "1.5")) "light: 1.5 is not a number above 0 and at most 1"))
+    (assert-true (has? (problems (with-light "dark")) "light: dark is not a number above 0 and at most 1"))))
+
+(define DIR (string-append "/tmp/harkfell-test-light-" (number->string (current-jiffy))))
+(shell-boot!)
+(set-store-root! DIR)
+(store-remove! SAVE-KEY)
+(shell-load-content! DARK)
+(define IN-DARK (and (shell-goto! "glasswood:-1,3") (shell-room-light)))
+(define IN-LIGHT (and (shell-goto! "glasswood:0,3") (shell-room-light)))
+
+(test-group "light: read by the game"
+  (test "in the dark room the shell reads 0.3"
+    (assert-equal 0.3 IN-DARK))
+  (test "next door, without light:, 1.0"
+    (assert-equal 1.0 IN-LIGHT)))
