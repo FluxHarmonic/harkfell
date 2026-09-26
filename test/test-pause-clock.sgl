@@ -10,6 +10,7 @@
 ;;;   twice        a second pause or resume does nothing; two pauses add up
 
 (import (sigil test)
+        (sigil time)
         (engine mixer)
         (harkfell audio))
 
@@ -61,3 +62,13 @@
   (test "a second pause's exclusion adds to the first"
     ;; 30 s paused less the fade, then 5 s less the fade
     (assert-true (near? (- 1038.0 (- 30.0 HOLD-FADE-S) (- 5.0 HOLD-FADE-S)) A-TWO))))
+
+;; the real clock back, unpaused, for whatever runs next in this process
+(audio-set-wall-clock! #f)
+(define RESTORED-PAUSED (audio-paused?))
+(define RESTORED-GAP (abs (- (audio-now) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))))
+
+(test-group "the pause clock: the real clock back"
+  (test "set back, it is the wall clock again, with no pause left over"
+    (assert-false RESTORED-PAUSED)
+    (assert-true (< RESTORED-GAP 1.0))))

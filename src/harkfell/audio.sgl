@@ -40,10 +40,16 @@
     (define *last* #f)
 
     ;; The wall clock the sound runs on; a test drives it by hand
-    ;; (audio-set-wall-clock!, test-pause-clock).
-    (define *wall-clock* (lambda () (/ (current-jiffy) (* 1.0 (jiffies-per-second)))))
+    ;; (audio-set-wall-clock! f; #f is the real clock again). A new clock starts
+    ;; the sound's clock afresh, unpaused: a test's hand clock and its pauses
+    ;; must not reach the next test file (the suite is one process).
+    (define (real-clock) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+    (define *wall-clock* real-clock)
     (define (wall-now) (*wall-clock*))
-    (define (audio-set-wall-clock! f) (set! *wall-clock* f))
+    (define (audio-set-wall-clock! f)
+      (set! *wall-clock* (or f real-clock))
+      (set! *paused-at* #f)
+      (set! *paused-total* 0.0))
 
     ;; D40: the game pauses when it loses focus, and the sound with it. The
     ;; sound's clock (audio-now) leaves out the time paused, from the end of

@@ -86,7 +86,7 @@
           source-start! source-factor! source-factor source-gain source-on-end!
           mixer-at! mixer-pump! mixer-now
           make-cue cue? cue-frames cue-ref mixer-cue! mixer-cue-count
-          cue-gains cue-balance mixer-set-cue-path! mixer-cue-path
+          cue-gains cue-balance cue-bridge-ok? mixer-set-cue-path! mixer-cue-path
           mixer-stats mixer-stats-reset! stats-ref
           median-of percentile-of
           DEPTH-S CUE-DEPTH-S SOURCE-BUFFER)
@@ -496,18 +496,26 @@
               (set! *bridge-cues* (cons (cons c h) *bridge-cues*))
               h))))
 
+    ;; A play goes to the bridge only when the bridge gives the same two
+    ;; gains: its worklet is running (the buffer-source path, and 'pending
+    ;; while the worklet loads, pan with a StereoPannerNode, which is another
+    ;; law: up to +5 dB on the near side), and the volume fits the bridge's
+    ;; clamp at 1.0 (the equal-power near side reaches gain x 1.414). Anything
+    ;; else, and a cue whose upload failed, plays on the ring.
+    (define (cue-bridge-ok? vol mode) (and (eq? mode 'worklet) (<= vol 1.0)))
+
     ;; pan -1 (left) .. 1 (right), equal-power
     (define (mixer-cue! c gain pan)
       ;; none while held (D40)
       (when (and c (not *hold*))
-        (let ((g (cue-gains gain pan)))
-          (cond ((and *ctx* (eq? *cue-path* 'bridge))
-                 (let ((h (bridge-handle c))
-                       (vp (cue-balance (car g) (cdr g))))
-                   (when (and h (bridge-play h (car vp) (cdr vp)))
-                     (set! *bridge-plays* (+ *bridge-plays* 1)))))
-                (*cue-stream*
-                 (set! *voices* (cons (vector c 0 (car g) (cdr g)) *voices*)))))))
+        (let* ((g (cue-gains gain pan))
+               (vp (cue-balance (car g) (cdr g)))
+               ;; the upload starts on the first play; that play takes the ring
+               (h (and *ctx* (eq? *cue-path* 'bridge) (bridge-handle c))))
+          (if (and h (cue-bridge-ok? (car vp) (bridge-mode)) (bridge-play h (car vp) (cdr vp)))
+              (set! *bridge-plays* (+ *bridge-plays* 1))
+              (when *cue-stream*
+                (set! *voices* (cons (vector c 0 (car g) (cdr g)) *voices*)))))))
 
     (define ZERO (make-bytevector (* 8 PUSH-MAX) 0))
 

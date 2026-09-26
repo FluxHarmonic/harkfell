@@ -15,10 +15,12 @@
         (engine mixer))
 
 ;; The bridge's law (sigil-wasm-audio.js: gl = vol x (pan > 0 ? 1 - pan : 1),
-;; gr = vol x (pan < 0 ? 1 + pan : 1)).
+;; gr = vol x (pan < 0 ? 1 + pan : 1)), with its clamp: vol at most 1.0
+;; (cuePlay's Math.min(1, ...), and the native arg_unit).
 (define (balance vol pan)
-  (cons (* vol (if (> pan 0) (- 1.0 pan) 1.0))
-        (* vol (if (< pan 0) (+ 1.0 pan) 1.0))))
+  (let ((vol (min 1.0 vol)))
+    (cons (* vol (if (> pan 0) (- 1.0 pan) 1.0))
+          (* vol (if (< pan 0) (+ 1.0 pan) 1.0)))))
 
 (define (near? a b) (< (abs (- a b)) 1e-9))
 ;; against written constants: the mixer's pi and sqrt 2 are 9 digits
@@ -28,14 +30,15 @@
 (define GAINS (list 0.05 0.3 1.0))
 
 (test-group "cues: the bridge's balance gives the mixer's gains"
-  (test "at every pan from -1 to 1 and three gains, the two gains match"
+  (test "at every pan from -1 to 1 and three gains, where the bridge is used, the two gains match"
     (for-each (lambda (g)
                 (for-each (lambda (p)
                             (let* ((want (cue-gains g p))
                                    (vp (cue-balance (car want) (cdr want)))
                                    (got (balance (car vp) (cdr vp))))
-                              (assert-true (near? (car want) (car got)))
-                              (assert-true (near? (cdr want) (cdr got)))
+                              (when (cue-bridge-ok? (car vp) (quote worklet))
+                                (assert-true (near? (car want) (car got)))
+                                (assert-true (near? (cdr want) (cdr got))))
                               (assert-true (<= -1.0 (cdr vp) 1.0))))
                           PANS))
               GAINS))
@@ -53,3 +56,19 @@
     (assert-equal 'ring (mixer-cue-path))
     (mixer-set-cue-path! 'bridge)
     (assert-equal 'ring (mixer-cue-path))))
+
+;; The review (0.1.1): a play the bridge would give other gains goes to the
+;; ring: the bridge's clamp at 1.0 (the equal-power near side reaches
+;; gain x 1.414), and its paths other than the worklet (a StereoPannerNode).
+(test-group "cues: when the bridge is used"
+  (test "the worklet at a volume within its clamp: the bridge"
+    (assert-true (cue-bridge-ok? 0.97 'worklet))
+    (assert-true (cue-bridge-ok? 1.0 'worklet)))
+  (test "over the clamp: the ring (gain 1.0 hard right needs 1.414)"
+    (let* ((g (cue-gains 1.0 1.0)) (vp (cue-balance (car g) (cdr g))))
+      (assert-true (> (car vp) 1.0))
+      (assert-false (cue-bridge-ok? (car vp) 'worklet))))
+  (test "the worklet still loading, the buffer-source path, or no mode: the ring"
+    (assert-false (cue-bridge-ok? 0.5 'pending))
+    (assert-false (cue-bridge-ok? 0.5 'buffer-source))
+    (assert-false (cue-bridge-ok? 0.5 #f))))

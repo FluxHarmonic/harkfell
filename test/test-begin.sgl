@@ -375,6 +375,14 @@
 (define F-PAUSED (shell-paused?))
 (let loop ((k 0)) (when (< k 60) (shell-focus! #t) (shell-frame! (/ 1 60.0)) (loop (+ k 1))))
 (define F4 (world-ticks (shell-world)))
+(define F-PAUSED-AFTER (shell-paused?))
+(define FOCUS-HEARD-SNAP FOCUS-HEARD)
+
+;; a pause asked for another way is not the focus's to undo
+(shell-pause!)
+(let loop ((k 0)) (when (< k 30) (shell-focus! #t) (shell-frame! (/ 1 60.0)) (loop (+ k 1))))
+(define OTHER-STILL-PAUSED (shell-paused?))
+(shell-resume!)
 
 (test-group "begin: the native focus pause (0.1.1)"
   (test "in play (the premise)"
@@ -388,7 +396,9 @@
     (assert-equal F2 F3))
   (test "#t resumes; each change heard once, in order"
     (assert-true (>= (- F4 F3) 55))
-    (assert-false (shell-paused?))
-    (assert-equal '(pause resume) FOCUS-HEARD)))
+    (assert-false F-PAUSED-AFTER)
+    (assert-equal '(pause resume) FOCUS-HEARD-SNAP))
+  (test "a pause asked for another way stays through focused frames"
+    (assert-true OTHER-STILL-PAUSED)))
 
 (store-remove! SAVE-KEY)

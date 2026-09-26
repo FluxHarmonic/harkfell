@@ -225,11 +225,19 @@
     ;; 0.14's window-focused?). Losing it pauses, having it resumes, each
     ;; heard once however many frames repeat it. A #f before the first #t is
     ;; not a loss: on Wayland the focus reads #f until the compositor's
-    ;; keyboard-enter arrives, a frame or two after the window opens.
+    ;; keyboard-enter arrives, a frame or two after the window opens. The
+    ;; focus resumes only a pause it made itself, so a pause asked for some
+    ;; other way stays (the review, 0.1.1).
     (define *focus-seen* #f)
+    (define *focus-paused* #f)
     (define (shell-focus! focused?)
-      (cond (focused? (set! *focus-seen* #t) (shell-resume!))
-            (*focus-seen* (shell-pause!))
+      (cond (focused?
+             (set! *focus-seen* #t)
+             (when *focus-paused*
+               (set! *focus-paused* #f)
+               (shell-resume!)))
+            ((and *focus-seen* (not *focus-paused*) (shell-pause!))
+             (set! *focus-paused* #t))
             (else #f)))
     (define (shell-gesture!) (set! *gesture* #t))
     (define (shell-pointer! x y) (set! *pointer* (cons x y)))
