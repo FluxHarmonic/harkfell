@@ -95,6 +95,17 @@
     (loop (+ t 0.1))))
 (define PLAYING (sound-moment-playing))
 (define SPENT (hush-spent (sound-hush)))
+;; A step out of the bowl and straight back while hollow-answers plays: the
+;; place now arms the room's next moment (high-fell), and the one playing
+;; must not be faded for it (the review's finding: it was).
+(define (next-door) (place key: "hollow:5,3" region: 'hollow bed-tune: #f groups: '(wind water hum drone)
+                         levels: '((wind . 0.3)) moment: #f wander: '() tones: '() carry: '(2 3) still: #f
+                         px: 500.0 py: 100.0 rx: 5 ry: 3))
+(let loop ((t 1.0))
+  (when (< t 1.5) (sound-frame! t 0.1 (next-door)) (loop (+ t 0.1))))
+(let loop ((t 1.5))
+  (when (< t 2.0) (sound-frame! t 0.1 (bowl "high-fell" "hollow:4,3/high-fell" 3)) (loop (+ t 0.1))))
+(define STILL-PLAYING (sound-moment-playing))
 
 (test-group "moments: the director spends per moment"
   (test "entering the bowl with hollow-answers armed plays it"
@@ -102,8 +113,10 @@
   (test "and spends it under its own key, not the room's"
     (assert-true (member "hollow:4,3/hollow-answers" SPENT))
     (assert-false (member "hollow:4,3" SPENT)))
-  (test "so the room's second moment is not spent"
-    (assert-false (eq? 'spent (hush-fixed-decision (sound-hush) "hollow:4,3/high-fell")))))
+  (test "so the room's second moment is the one armed next (what the director spent picks it)"
+    (assert-equal "high-fell" (tune (room-moment-now START '(2 3) SPENT))))
+  (test "stepping out and back in, the room's own moment keeps playing"
+    (assert-equal "hollow-answers" STILL-PLAYING)))
 
 ;; --- the save: 0.1's room keys ------------------------------------------------------------
 (define OLD

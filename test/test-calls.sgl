@@ -24,17 +24,17 @@
 
 ;; Run the director 3 s in place p (or (p t) when p is a procedure); the
 ;; voice's gain at the end, and the ears.
-(define (listen p id)
+(define (listen p id . until)
   (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
   (sound-reset!)
   (let loop ((f 0))
     (let ((now (/ f 30.0)))
-      (when (<= now 3.0)
+      (when (<= now (if (pair? until) (car until) 3.0))
         (sound-frame! now (if (= f 0) 0.0 (/ 1 30.0)) (if (procedure? p) (p now) p))
         (mixer-pump! now)
         (loop (+ f 1)))))
   (let ((s (sound-voice-source id)))
-    (list (and s (source-gain s 3.0)) (sound-ears))))
+    (list (and s (source-gain s (if (pair? until) (car until) 3.0))) (sound-ears))))
 
 (define EAST (+ 100.0 (* 1.5 ROOM)))
 (define CALL (listen (pl '(2) '() (list (list 2 'shut EAST 100.0))) (call-id 2)))
@@ -42,6 +42,9 @@
 (define WRONG-NOTE (listen (pl '(3) '() (list (list 2 'shut EAST 100.0))) (call-id 2)))
 (define FAR (listen (pl '(2) '() (list (list 2 'shut (+ 100.0 (* 4.5 ROOM)) 100.0))) (call-id 2)))
 (define RINGS (listen (lambda (t) (pl '(2) '() (list (list 2 (if (< t 1.0) 'shut 'ringing) EAST 100.0)))) (call-id 2)))
+;; the same run stopped at 0.9 s, before the ring: the call is sounding (else the
+;; fade test above passes on a call that never was)
+(define RINGS-BEFORE (listen (lambda (t) (pl '(2) '() (list (list 2 (if (< t 1.0) 'shut 'ringing) EAST 100.0)))) (call-id 2) 0.9))
 ;; two H2 stones, the nearer WEST at 1 room, the other east at 2.5
 (define TWO (listen (pl '(2) '() (list (list 2 'shut (+ 100.0 (* 2.5 ROOM)) 100.0) (list 2 'shut (- 100.0 ROOM) 100.0)))
                     (call-id 2)))
@@ -56,8 +59,23 @@
   (test "past the finding tone's range, it does not call"
     (assert-false (car FAR)))
   (test "once it starts to ring, the call fades out"
+    (assert-true (and (car RINGS-BEFORE) (> (car RINGS-BEFORE) 0.1)))
     (assert-true (or (not (car RINGS)) (< (car RINGS) 0.01))))
   (test "standing still, the ears lean toward it"
     (assert-equal 'right (cadr CALL)))
   (test "of two stones of one note, the nearer calls (west here), and the ears follow it"
     (assert-equal 'left (cadr TWO))))
+
+;; Falling ice's news reaches the director as cues (the review: nothing consumed
+;; it, so the tell, the hazard's one warning, was silent). The cues are the sound
+;; track's to write; the routing is checked by what the director says.
+(define SAID '())
+(sound-boot! '() (lambda parts (set! SAID (cons parts SAID))))
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(sound-reset!)
+(sound-frame! 0.0 0.0 (place (pl '() '() '()) news: (list (list 'ice 'tell 500.0 100.0) (list 'ice 'shatter 500.0 150.0))))
+
+(test-group "calls: falling ice is heard"
+  (test "the tell and the shatter each reach the director"
+    (assert-true (member '("sound" "ice" "tell") SAID))
+    (assert-true (member '("sound" "ice" "shatter") SAID))))

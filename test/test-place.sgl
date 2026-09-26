@@ -19,7 +19,8 @@
         (engine mixer)
         (harkfell sound)
         (harkfell gates)
-        (harkfell audio))
+        (harkfell audio)
+        (harkfell save))
 
 (define CT (load-content (read-world-source "world")))
 
@@ -54,6 +55,25 @@
       (assert-equal "first-open-water" (place-moment pl))
       (assert-equal 2 (length (place-frogs pl)))
       (assert-true (every (lambda (x) (< 0 x 400)) (place-frogs pl))))))
+
+;; Glasswood: the adapter names the moment's key, per moment, and a 0.1 save
+;; (the room's key) continued leaves the start room's moment spent (the
+;; review: moment-key: #f here was caught by nothing).
+(define OLD-SAVE
+  (list 'harkfell-save 1 (list 'room 'hollow 4 3) (list 'cell 15 8) (list 'carry 2) (list 'stones)
+        (list 'moments "hollow:4,3") (list 'played 50.5) (list 'revealed #t)))
+(define BOWL-FRESH (world-place (world-in 4 3) CT))
+(sound-reset!)
+(restore-extras! (restored-moments (save-restore CT OLD-SAVE)) 50.5)
+(define BOWL-CONTINUED (world-place (world-in 4 3) CT))
+(sound-reset!)
+
+(test-group "place: the moment's key"
+  (test "the bowl's moment is spent under hollow:4,3/hollow-answers"
+    (assert-equal "hollow-answers" (place-moment BOWL-FRESH))
+    (assert-equal "hollow:4,3/hollow-answers" (place-moment-key BOWL-FRESH)))
+  (test "continued from a 0.1 save that heard it, the bowl has no moment left to play"
+    (assert-false (place-moment BOWL-CONTINUED))))
 
 ;; Listening, end to end on the real world: the director given the adapter's
 ;; place, standing still for 3 s. H2's tone is where the world's pickup lies:

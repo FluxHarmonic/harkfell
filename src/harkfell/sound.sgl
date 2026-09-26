@@ -579,7 +579,7 @@
             ;; fades the one playing, and stays armed. still: armed now,
             ;; decided again once you have stood still long enough in the room.
             (cond (unmet #f)
-                  ((and *moment* (not (eq? d 'spent)) (not (place-moment-still pl))) (fade-moment! now))
+                  ((and *moment* (not (eq? d 'spent)) (not (place-moment-still pl)) (not (own-moment? pl))) (fade-moment! now))
                   ;; a still: room is armed even while the hush blocks it: the
                   ;; stillness decides again, and waits for the hush
                   ((and (memq d '(play blocked)) (place-moment-still pl))
@@ -603,6 +603,18 @@
     ;; "region:X,Y/NAME", a room holding more than one), else the room's key
     ;; as it always was.
     (define (hush-key pl) (or (place-moment-key pl) (place-key pl)))
+
+    ;; Is the moment playing one of this room's own? (Its key is the room's, or
+    ;; "room/NAME".) Coming back into the room it plays for must not fade it,
+    ;; even when the room's next moment is the one now armed (the review of
+    ;; moment: lists: hollow-answers faded on a step out and back).
+    (define (own-moment? pl)
+      (let ((k *moment-key*) (r (place-key pl)))
+        (and (string? k) (string? r)
+             (or (string=? k r)
+                 (let ((p (string-append r "/")))
+                   (and (>= (string-length k) (string-length p))
+                        (string=? (substring k 0 (string-length p)) p)))))))
 
     (define (room-armed? pl)
       (and (place-moment pl) (not (eq? (hush-fixed-decision *hush* (hush-key pl)) 'spent))))
@@ -1146,6 +1158,14 @@
             ((near-miss) (let ((c (harmonic-cue "miss-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
             ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
             ((call) (unless *moment* (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
+            ;; Glasswood's falling ice ((harkfell ice)): its tell is a warning, so it
+            ;; sounds even under a moment; the fall and the shatter are spot sounds.
+            ;; The cues are the sound track's (ice-tell ice-fall ice-shatter); one not
+            ;; written yet plays nothing.
+            ((ice) (let ((c (string->symbol (string-append "ice-" (symbol->string (cadr item))))))
+                     (*say* "sound" "ice" (symbol->string (cadr item)))
+                     (when (or (eq? (cadr item) 'tell) (not *moment*))
+                       (cue-at! c (spot-gain c) (caddr item) pl))))
             (else #f)))
         (place-news pl)))
 
