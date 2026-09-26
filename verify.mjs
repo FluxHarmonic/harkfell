@@ -80,7 +80,8 @@
 //   cues       (0.1.1) walking plays step cues: by default through the audio
 //              bridge's worklet (mode worklet, a lag readout), and with
 //              ?sound=cues:ring through the old cue sink (a ring-depth readout);
-//              the worklet's wait is under the ring's. Both figures leave out the
+//              the worklet's wait is under the ring's, at most 20 ms, and the ring's
+//              queue at least 50 ms (it keeps 120). Both figures leave out the
 //              device's output latency
 //   errors     no console error and no exception in any leg
 //
@@ -751,7 +752,8 @@ if (LEGS.includes("cues")) {
   await open("trace&room=reedfen:10,4&sound=cues:ring");
   const rg = await walkUntil((c) => c.ring !== null, 60000);
   (br.path === "bridge" && br.mode === "worklet" && br.plays >= 3 && br.lag !== null &&
-   rg.path === "ring" && rg.ring !== null && br.lag < rg.ring ? pass : fail)("cues",
+   rg.path === "ring" && rg.ring !== null && br.lag < rg.ring &&
+   br.lag <= 20 && rg.ring >= 50 ? pass : fail)("cues",
     `bridge: ${br.line.slice(15)}; ring: ${rg.line.slice(15)}`);
 }
 
