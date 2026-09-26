@@ -322,7 +322,7 @@
     ;; and the far birch wood rising out of it: thin trunks and dithered
     ;; crowns in sky-2, a pixel here and there catching the light (the wood
     ;; glitters far below), and a second band of mist lying across it.
-    (define (glasswood-bytes)
+    (define (glasswood-bytes sun)
       (let* ((seams (list 18 34 48)) (horizon 62)
              (tops (make-vector VIEW-W #f))
              (bv (make-bytevector (* 4 VIEW-W VIEW-H) 0)))
@@ -348,7 +348,8 @@
                   (when (< y VIEW-H)
                     (let* ((th (bayer x y))
                            (s (cond ((< y ridge) (sky-slot seams x y))
-                                    ((< y (+ horizon 2)) 1)
+                                    ;; the ridge's crest catching the low sun
+                                    ((< y (+ horizon 2)) (if (and (<= y (+ ridge 1)) (< th (* 0.45 sun))) 12 1))
                                     (else
                                      (let* ((d (- y horizon))
                                             ;; the bands drift up and down along the valley
@@ -360,7 +361,10 @@
                                             (crown (and (not trunk) (crown? x y) (> 0.5 (bayer (+ x 2) (+ y 1))))))
                                        (cond ((< th mist) 3)
                                              (trunk 1)
-                                             (crown (if (= 0 (modulo (glw-hash (+ x (* 3 y)) 5) 9)) 3 1))
+                                             (crown (if (= 0 (modulo (glw-hash (+ x (* 3 y)) 5) 9))
+                                                        ;; the far crowns glitter, copper where the sun reaches
+                                                        (if (< (glw-hash (+ y (* 7 x)) 1) (* 97.0 0.6 sun)) 12 3)
+                                                        1))
                                              (else 2))))))
                            (o (* 4 (+ x (* y VIEW-W)))))
                       (bytevector-u8-set! bv o s)
@@ -409,7 +413,12 @@
                                                (case key
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
-                                                 ((glasswood) (glasswood-bytes))
+                                                 ((glasswood) (glasswood-bytes 1.0))
+                                                 ((glasswood-sun-0) (glasswood-bytes 0.0))
+                                                 ((glasswood-sun-1) (glasswood-bytes 0.25))
+                                                 ((glasswood-sun-2) (glasswood-bytes 0.5))
+                                                 ((glasswood-sun-3) (glasswood-bytes 0.75))
+                                                 ((glasswood-sun-4) (glasswood-bytes 1.0))
                                                  (else (backdrop-bytes key)))
                                                'nearest)))
               (set! *backdrops* (cons (cons key t) *backdrops*))
@@ -446,7 +455,11 @@
     ;; The room's backdrop: its region's sky, or earth when it lies under
     ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
-      (let ((tex (backdrop (cond ((not (under? rm)) (room-region rm))
+      (let ((tex (backdrop (cond ((and (not (under? rm)) (glasswood-sheet? rm))
+                                  ;; Glasswood's sky by the room's sun, in quarters
+                                  (vector-ref (vector (quote glasswood-sun-0) (quote glasswood-sun-1) (quote glasswood-sun-2) (quote glasswood-sun-3) (quote glasswood-sun-4))
+                                              (exact (round (* 4 (room-sun rm))))))
+                                 ((not (under? rm)) (room-region rm))
                                  ((eq? (room-region rm) (quote glasswood)) (quote glasswood-under))
                                  (else (quote under)))))
             (r (* FOCUS-R *focus* *focus*)))
@@ -543,6 +556,8 @@
                            (begin (set-color 1.0 1.0 1.0 1.0) (atlas-draw! i x y 1))
                            (begin (paint! 'leaf-2)
                                   (draw-filled-rect (+ x 4) y 1 S) (draw-filled-rect (+ x 10) y 1 S))))))
+        ;; Glasswood's low sun on the bark, before the weights so it sways with it
+        (draw-sun-on-trunks! rm)
         ;; the sway weight in G, row by row: 0 at a stalk's root, 1 at its tip
         (with-additive-blend
           (each-tile rm (lambda (m) (eq? m 'reeds))
@@ -600,7 +615,8 @@
         (atlas-ensure!)
         (with-render-target *solid-rt*
           (set-blend-mode 'normal)
-          (draw-solids! rm))
+          (draw-solids! rm)
+          (draw-sun-on-branches! rm))
         (with-render-target *foliage-rt*
           (set-blend-mode 'normal)
           (draw-foliage! rm))
@@ -613,32 +629,103 @@
     ;; Glints on the glaze (Glasswood's bible, "Moving pictures"): points of
     ;; light along the tops of glazed branches and ice, each catching the
     ;; sun now and then, more often as the wind rises (the same wind the
-    ;; reeds and trunks bend in). ((x y phase) ...) for the room, view px;
-    ;; only a region drawn from the glasswood sheet has any.
+    ;; reeds and trunks bend in). ((x y phase sunny?) ...) for the room, view
+    ;; px; only a region drawn from the glasswood sheet has any. A sunny glint
+    ;; has a copper core (the low sun caught in the glaze), as many of them
+    ;; as the room has sun.
     (define *glints* '())
     (define (room-glints rm)
-      (if (not (string=? (region-sheet (room-region rm)) "glasswood"))
+      (if (not (glasswood-sheet? rm))
           '()
-          (let ((acc '()))
+          (let ((acc '()) (sun (room-sun rm)))
             (each-tile rm (lambda (m) (memq m (list 'ledge 'rock)))
                        (lambda (mat x y m gc gr)
                          (when (not (mask-has? m MASK-UP))
                            (for-each (lambda (dx)
-                                       (set! acc (cons (list (+ x dx) y (* 1.0 (tile-variant (+ gc dx) gr 97))) acc)))
+                                       (let ((ph (tile-variant (+ gc dx) gr 97)))
+                                         (set! acc (cons (list (+ x dx) y (* 1.0 ph) (< (modulo (* ph 7) 10) (* 10.0 sun))) acc))))
                                      (if (eq? mat 'ledge) (list 3 11) (list 6))))))
             acc)))
 
+    (define (glint-on? g t)
+      (> (sin (+ (* t 0.031) (* 0.7 (caddr g)))) (- 0.985 (* 0.03 (wind-at t)))))
+
     ;; The glints now, in the light pass (B, additive).
     (define (draw-glints! t)
-      (let ((wind (wind-at t)))
-        (for-each (lambda (g)
-                    (when (> (sin (+ (* t 0.031) (* 0.7 (caddr g)))) (- 0.985 (* 0.03 wind)))
-                      (paint-light! 0.6)
-                      (draw-filled-rect (car g) (cadr g) 1 1)
-                      (paint-light! 0.25)
-                      (draw-filled-rect (- (car g) 1) (cadr g) 3 1)
-                      (draw-filled-rect (car g) (- (cadr g) 1) 1 3)))
-                  *glints*)))
+      (for-each (lambda (g)
+                  (when (glint-on? g t)
+                    (paint-light! 0.6)
+                    (draw-filled-rect (car g) (cadr g) 1 1)
+                    (paint-light! 0.25)
+                    (draw-filled-rect (- (car g) 1) (cadr g) 3 1)
+                    (draw-filled-rect (car g) (- (cadr g) 1) 1 3)))
+                *glints*))
+
+    ;; The sunny glints' copper cores, after the light pass (ordinary blend:
+    ;; a slot, unlit, so the core is the accent itself inside its lit halo).
+    (define (draw-glint-cores! t)
+      (for-each (lambda (g)
+                  (when (and (cadddr g) (glint-on? g t))
+                    (paint! 'accent)
+                    (draw-filled-rect (car g) (cadr g) 1 1)))
+                *glints*))
+
+    ;; --- the low sun (David on contact sheet 1: copper as an accent, "copper
+    ;; light on the bark and caught in the glaze, strongest in The Scree and
+    ;; First Sight and fading toward the blue hour deeper in") ---
+
+    (define (glasswood-sheet? rm) (string=? (region-sheet (room-region rm)) "glasswood"))
+
+    ;; How much low sun a room has: 1 at its region's east edge (Glasswood's
+    ;; wood's edge, where the sun comes in low over the fell), 0.35 less a
+    ;; room west, none from three rooms in; none outside the glasswood
+    ;; sheet. A room with light: under 1 loses what copper it has to the dark
+    ;; anyway (DARK sends the accent to shade). PROPOSED to CONTENT: a room
+    ;; field sun: (0..1) to set this per room instead of by position.
+    (define (room-sun rm)
+      (if (not (glasswood-sheet? rm))
+          0.0
+          (let* ((r (and *content* (content-region *content* (room-region rm))))
+                 (b (and r (region-field r 'bounds)))
+                 (xe (if (and (list? b) (= 2 (length b)) (list? (cadr b))) (car (cadr b)) (room-x rm))))
+            (max 0.0 (min 1.0 (- 1.0 (* 0.35 (- xe (room-x rm)))))))))
+
+    ;; A copper pixel at (x, y) where the hash of (gc, k) falls under p.
+    (define (sun-pixel! x y gc k p)
+      (when (< (tile-variant (+ gc 13) (+ k 5) 100) (* 100.0 p))
+        (draw-filled-rect x y 1 1)))
+
+    ;; Copper on the birches' sunlit edge: the lit column of each trunk
+    ;; variant (a b c stand at columns 6-9, 9-11, 3-7), in runs of two rows,
+    ;; about half of them in full sun; not up in a crown's first twigs.
+    (define TRUNK-LIT-COL (vector 6 9 3))
+    (define (draw-sun-on-trunks! rm)
+      (let ((sun (room-sun rm)))
+        (when (> sun 0.0)
+          (paint! 'accent)
+          (each-tile rm (lambda (m) (eq? m 'reeds))
+                     (lambda (mat x y m gc gr)
+                       (let* ((col (vector-ref TRUNK-LIT-COL (tile-variant gc 0 3)))
+                              (from (if (mask-has? m MASK-UP) 0 10)))
+                         (let rows ((r from) (to (if (mask-has? m MASK-DOWN) 16 11)))
+                           (when (< r to)
+                             (when (< (tile-variant (+ gc 13) (+ (* 8 gr) (quotient* r 2) 5) 100) (* 50.0 sun))
+                               (draw-filled-rect (+ x col) (+ y r) 1 1))
+                             (rows (+ r 1) to)))))))))
+
+    ;; Copper caught in the glaze along the tops of the branches, and more
+    ;; sparsely in the frozen crust on the snow of a bare top (rock, scree).
+    (define (draw-sun-on-branches! rm)
+      (let ((sun (room-sun rm)))
+        (when (> sun 0.0)
+          (paint! 'accent)
+          (each-tile rm (lambda (m) (memq m (list 'ledge 'rock 'rough)))
+                     (lambda (mat x y m gc gr)
+                       (when (or (eq? mat 'ledge) (not (mask-has? m MASK-UP)))
+                         (let cols ((c 1))
+                           (when (< c 15)
+                             (sun-pixel! (+ x c) y gc (+ (* 16 gr) c) (* (if (eq? mat 'ledge) 0.22 0.06) sun))
+                             (cols (+ c 1))))))))))
 
     ;; The water: G over every water cell of the room, in the current pass.
     (define (draw-water! rm)
@@ -938,6 +1025,7 @@
                   (draw-glints! t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
                             *flashes*)))
+              (draw-glint-cores! t)
               (for-each (lambda (f) (draw-flash (car f) (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f)) slot))
                         *flashes*)))))
 

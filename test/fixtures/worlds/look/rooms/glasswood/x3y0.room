@@ -9,13 +9,13 @@
    "#                        "
    "#  |               |     "
    "#==|==    |        |==   "
-   "#  |      |     |  |     "
+   "#  |      |     |  | %%% "
    "#  |     =|==   |  |   %%"
    "#  |      |   ==|= |   %%"
    "#  |      |     |  |  %%%"
    "#####~~~~################"
    "######~~#################"
    "#########################")
-  things: ((lantern-moth at: (13 4) count: 3 drawn: 3) (snow-owl at: (21 2)) (snow-vole at: (13 7)))
+  things: ((lantern-moth at: (13 4) count: 3 drawn: 3) (snow-owl at: (21 2)) (snow-vole at: (13 7)) (icicle at: (21 5)))
   start: (1 7)
   decor: auto)
