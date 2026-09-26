@@ -72,6 +72,7 @@
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
+          sound-work! sound-set-work-in-frame! sound-bank-busy? sound-cue MOVING-CUES
           place-moves place-mode place-vx place-bx place-foot sound-moved spot-gain
           THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S BORDER-DEFAULT
           bed-channels-of group-channels
@@ -1084,53 +1085,91 @@
     ;; Every tune the director renders as a cue (the gates check each exists).
     (define (sound-cue-tunes) (map cadr SPOTS))
 
-    ;; Render the queued cues a few blocks a frame (review M7: a whole cue at
+    ;; Render the queued cues a block at a time (review M7: a whole cue at
     ;; once, its notes and motif's 2 s release tail, was one long frame each).
+    ;; How many blocks a frame is the caller's (boot-work!'s more?): four in
+    ;; the tests, a time budget in the game ((harkfell audio)).
+    ;; 0.1.1 (David's test: the jump silent 3-4 s after control, and crackle
+    ;; at startup): the movement cues render FIRST (MOVING-CUES), and a cue's
+    ;; render ends after SILENT-BLOCKS blocks under SILENT-PEAK once it has
+    ;; been heard, those blocks dropped. motif's release tail rendered 72
+    ;; blocks for a step audible in 3 to 22 of them (measured at 32 kHz).
     (define CUE-BLOCK 1024)
     (define CUE-BLOCKS-PER-FRAME 4)
-    (define *cue-job* #f)         ; #(name player chunks frames) being rendered
+    (define SILENT-BLOCKS 4)
+    (define SILENT-PEAK 1e-4)     ; -80 dBFS
+    (define MOVING-CUES
+      (list 'jump 'land-soft 'land-hard 'step-fen-a 'step-fen-b 'step-grass-a 'step-grass-b
+            'splash 'wall-jump 'step-stone-a 'step-stone-b 'step-wood-a 'step-wood-b))
+    (define (bank-order)
+      (append (filter spot-ref MOVING-CUES)
+              (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))))
+    (define *cue-job* #f)         ; #(name player chunks frames silent heard?) being rendered
     (define *cue-buf* (make-bytevector (* 8 CUE-BLOCK) 0))
+    (define *moving-said* #f)
+    (define *all-said* #f)
 
+    ;; One block of the current cue (starting the next queued one first if
+    ;; there is none). The caller has checked the queue's head has its text.
     (define (render-next-cue!)
       (when (and (not *cue-job*) (pair? *cue-queue*))
         (let* ((name (car *cue-queue*))
                (spec (spot-ref name))
                (p (and spec (open (cadr spec) #f))))
           (set! *cue-queue* (cdr *cue-queue*))
-          (when p (set! *cue-job* (vector name p '() 0)))))
+          (when p (set! *cue-job* (vector name p '() 0 0 #f)))))
       (when *cue-job*
-        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (* 6 (mixer-rate))))
-          (let loop ((k 0))
-            (when (< k CUE-BLOCKS-PER-FRAME)
-              (let ((more (and (< (vector-ref j 3) limit) (player-pull! p *cue-buf* 0 CUE-BLOCK))))
-                (if more
-                    (begin
-                      (vector-set! j 2 (cons (mono-of *cue-buf* CUE-BLOCK) (vector-ref j 2)))
-                      (vector-set! j 3 (+ (vector-ref j 3) CUE-BLOCK))
-                      (loop (+ k 1)))
-                    (finish-cue! j))))))))
+        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (* 6 (mixer-rate)))
+               (more (and (< (vector-ref j 3) limit) (player-pull! p *cue-buf* 0 CUE-BLOCK))))
+          (if more
+              (let* ((mp (mono-of *cue-buf* CUE-BLOCK))
+                     (quiet (< (cdr mp) SILENT-PEAK))
+                     (heard (or (vector-ref j 5) (not quiet)))
+                     (silent (if (and heard quiet) (+ (vector-ref j 4) 1) 0)))
+                (vector-set! j 2 (cons (car mp) (vector-ref j 2)))
+                (vector-set! j 3 (+ (vector-ref j 3) CUE-BLOCK))
+                (vector-set! j 4 silent)
+                (vector-set! j 5 heard)
+                (when (>= silent SILENT-BLOCKS) (finish-cue! j)))
+              (finish-cue! j)))))
 
+    ;; The rendered cue, less its trailing silent blocks.
     (define (finish-cue! j)
-      (let* ((frames (vector-ref j 3))
+      (let* ((chunks (list-tail* (vector-ref j 2) (vector-ref j 4)))
+             (frames (* CUE-BLOCK (length chunks)))
              (out (make-bytevector (* 4 frames) 0)))
         (player-close! (vector-ref j 1))
-        (let fill ((cs (reverse (vector-ref j 2))) (at 0))
+        (let fill ((cs (reverse chunks)) (at 0))
           (when (pair? cs)
             (bytevector-copy! out (* 4 at) (car cs) 0 (bytevector-length (car cs)))
             (fill (cdr cs) (+ at CUE-BLOCK))))
         (set! *cues* (cons (cons (vector-ref j 0) (make-cue out frames)) *cues*))
-        (set! *cue-job* #f)))
+        (set! *cue-job* #f)
+        (bank-news!)))
 
+    (define (list-tail* l k) (if (or (<= k 0) (null? l)) l (list-tail* (cdr l) (- k 1))))
+
+    ;; "sound cues-moving T" once every movement cue is rendered, "sound
+    ;; cues-all T" once the bank is (T the sound's clock): what the web's
+    ;; startup check reads against "frame play".
+    (define (bank-news!)
+      (when (and (not *moving-said*) (every (lambda (n) (or (not (spot-ref n)) (assq n *cues*))) MOVING-CUES))
+        (set! *moving-said* #t)
+        (*say* "sound" "cues-moving" (number->string (/ (round (* 100.0 *now*)) 100.0))))
+      (when (and (not *all-said*) (not *cue-job*) (null? *cue-queue*))
+        (set! *all-said* #t)
+        (*say* "sound" "cues-all" (number->string (/ (round (* 100.0 *now*)) 100.0)))))
+
+    ;; The block downmixed to mono, and its peak: (bytevector . peak).
     (define (mono-of buf n)
       (let ((m (make-bytevector (* 4 n) 0)))
-        (let loop ((i 0))
-          (when (< i n)
-            (bytevector-ieee-single-set! m (* 4 i)
-              (* 0.5 (+ (bytevector-ieee-single-ref buf (* 8 i) 'little)
-                        (bytevector-ieee-single-ref buf (+ 4 (* 8 i)) 'little)))
-              'little)
-            (loop (+ i 1))))
-        m))
+        (let loop ((i 0) (peak 0.0))
+          (if (< i n)
+              (let ((x (* 0.5 (+ (bytevector-ieee-single-ref buf (* 8 i) 'little)
+                                 (bytevector-ieee-single-ref buf (+ 4 (* 8 i)) 'little)))))
+                (bytevector-ieee-single-set! m (* 4 i) x 'little)
+                (loop (+ i 1) (max peak (abs x))))
+              (cons m peak)))))
 
     (define (cue! name gain pan)
       (unless (eq? name 'return) (set! *spots* (+ *spots* 1)))
@@ -1261,7 +1300,8 @@
       ;; from nothing: the late-cue gate relies on it)
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
       (set! *cue-job* #f) (set! *cues* (quote ())) (set! *pending-cues* (quote ()))
-      (set! *cue-queue* (map car SPOTS))
+      (set! *cue-queue* (bank-order))
+      (set! *moving-said* #f) (set! *all-said* #f)
       (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) (map cadr SPOTS))))
 
     ;; One piece of deferred work a frame: a cue render or a moment open,
@@ -1276,28 +1316,59 @@
     (define (waited-out? wait name)
       (and wait (equal? (car wait) name) (> (- *now* (cdr wait)) TEXT-GIVE-UP-S)))
 
-    (define (boot-work!)
-      (cond (*cue-job* (render-next-cue!))
+    ;; The frame's deferred work: blocks of cue rendering while more? says
+    ;; there is time, or one moment open (an open is one long stall, so it
+    ;; ends the frame's work). more? is asked after each step.
+    (define (boot-work! more?)
+      (let loop ()
+        (when (and (eq? (boot-step!) 'block) (more?)) (loop))))
+
+    ;; One step: 'block (a cue block rendered), 'open (a moment opened), or
+    ;; #f (nothing to do, or waiting for a text).
+    (define (boot-step!)
+      (cond (*cue-job* (render-next-cue!) 'block)
             ((and (pair? *cue-queue*) (tune-text (cadr (spot-ref (car *cue-queue*)))))
              (set! *cue-wait* #f)
-             (render-next-cue!))
+             (render-next-cue!)
+             'block)
             ((and (pair? *cue-queue*) (waited-out? *cue-wait* (car *cue-queue*)))
              (*say* "sound" "error" "no-text" (cadr (spot-ref (car *cue-queue*))))
              (set! *cue-queue* (cdr *cue-queue*))
-             (set! *cue-wait* #f))
+             (set! *cue-wait* #f)
+             (bank-news!)
+             'block)
             ((and (pair? *to-open*) (tune-text (car *to-open*)))
              (set! *open-wait* #f)
              (sound-preopen! (car *to-open*))
-             (set! *to-open* (cdr *to-open*)))
+             (set! *to-open* (cdr *to-open*))
+             'open)
             ((and (pair? *to-open*) (waited-out? *open-wait* (car *to-open*)))
              (*say* "sound" "error" "no-text" (car *to-open*))
              (set! *to-open* (cdr *to-open*))
-             (set! *open-wait* #f))
+             (set! *open-wait* #f)
+             #f)
             (else
              (when (and (pair? *cue-queue*) (not (and *cue-wait* (equal? (car *cue-wait*) (car *cue-queue*)))))
                (set! *cue-wait* (cons (car *cue-queue*) *now*)))
              (when (and (pair? *to-open*) (not (and *open-wait* (equal? (car *open-wait*) (car *to-open*)))))
-               (set! *open-wait* (cons (car *to-open*) *now*))))))
+               (set! *open-wait* (cons (car *to-open*) *now*)))
+             #f)))
+
+    ;; Where the work runs. By default inside sound-frame! (the tests), four
+    ;; blocks a frame. The game ((harkfell audio)) turns that off and calls
+    ;; sound-work! itself after the mixer's pump, with a time budget, so the
+    ;; sinks are topped up before any rendering (0.1.1: startup crackle).
+    (define *work-in-frame* #t)
+    (define (sound-set-work-in-frame! on) (set! *work-in-frame* on))
+    (define (in-frame-more?)
+      (let ((n 1)) (lambda () (set! n (+ n 1)) (<= n CUE-BLOCKS-PER-FRAME))))
+    ;; more?: a thunk, #t while there is time for another step.
+    (define (sound-work! more?)
+      (unless (moment-busy?) (boot-work! more?)))
+    ;; Is the bank still rendering (the game gives it more time while it is)?
+    (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*)))
+    ;; A rendered cue by name ((engine mixer) make-cue), or #f: for the tests.
+    (define (sound-cue name) (let ((e (assq name *cues*))) (and e (cdr e))))
 
     ;; The moments opened ahead, by name (the gates).
     (define (sound-moments-ahead) (map car *moments*))
@@ -1306,6 +1377,9 @@
     (define (sound-frame! now dt pl0)
       (set! *now* now)
       (opening-frame!)
+      ;; the cue bank and the moments opened ahead: while the world is held too
+      ;; (the start screen, the card), since they need no place
+      (when *work-in-frame* (sound-work! (in-frame-more?)))
       (let ((pl (and (not *held*) pl0)))
         (sound-frame-place! now dt pl)))
 
@@ -1314,7 +1388,6 @@
       (when (and pl (list? (place-carry pl))) (sound-set-carry! (place-carry pl)))
       (when pl
         (set! *hush* (hush-tick *hush* dt))
-        (unless (moment-busy?) (boot-work!))
         ;; A room entry waits until its bed's and its moment's texts are in (on
         ;; the web the page fetches them; tune-text asks): handled on the first
         ;; frame they are, so the bed opens and the moment is decided with them

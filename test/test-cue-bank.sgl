@@ -1,0 +1,107 @@
+;;; The cue bank at boot (0.1.1, (harkfell sound)): David's test of the cue
+;;; build heard the jump silent for 3-4 s after he had control, and crackle at
+;;; startup. The bank rendered every cue in SPOTS order (the jump tenth), four
+;;; blocks a frame, only once the world had a place (after the dawn), each
+;;; through motif's 2 s release tail.
+;;;
+;;;   order      the movement cues (MOVING-CUES) render before any other
+;;;   held       the bank renders while the world is held (no place: the start
+;;;              screen, the card), and says "cues-moving" when they are done
+;;;   the trim   a cue's render ends after 4 blocks under -80 dBFS once heard:
+;;;              the jump keeps the full render's samples up to its cut, and
+;;;              what it drops is all under -80 dBFS; the movement cues in at
+;;;              most half the blocks they took untrimmed
+;;;   the game   with the work taken out of the frame ((harkfell audio) does),
+;;;              sound-frame! renders nothing, and sound-work! renders while
+;;;              its more? says yes
+
+(import (sigil test)
+        (sigil list)
+        (engine mixer)
+        (motif tune player)
+        (harkfell tunes)
+        (harkfell sound))
+
+(define RATE 32000)
+(define SAID '())
+(define (say . parts) (set! SAID (cons parts SAID)))
+(define (said? word) (any (lambda (p) (and (pair? (cdr p)) (equal? (cadr p) word))) SAID))
+
+(mixer-open-headless! RATE #f)
+(sound-boot! '() say)
+
+;; --- held: frames with no place, counting frames until each cue is ready ---
+(define READY '())                    ; ((name . frame) ...) in the order they became ready
+(define (note-ready! f)
+  (for-each (lambda (n) (when (and (sound-cue n) (not (assq n READY))) (set! READY (append READY (list (cons n f))))))
+            (append MOVING-CUES (list 'return 'chirp-a 'pickup-h2 'ring-h2 'stone-slide))))
+(let loop ((f 0))
+  (when (and (< f 3000) (not (said? "cues-all")))
+    (sound-frame! (/ f 60.0) (/ 1.0 60.0) #f)
+    (note-ready! f)
+    (loop (+ f 1))))
+(define MOVING-SAID (said? "cues-moving"))
+(define FIRST-OTHER (let ((e (find (lambda (r) (not (memq (car r) MOVING-CUES))) READY))) (and e (cdr e))))
+(define LAST-MOVING (apply max (map (lambda (n) (let ((e (assq n READY))) (if e (cdr e) 99999))) MOVING-CUES)))
+
+;; --- the trim: the jump against a full render of its tune -----------------
+(define JUMP (sound-cue 'jump))
+(define FULL
+  (let ((p (open-tune-player (tune-parsed "jump") RATE loop: #f))
+        (buf (make-bytevector (* 8 1024) 0)))
+    (let loop ((acc '()))
+      (if (player-pull! p buf 0 1024)
+          (loop (cons (let ((m (make-bytevector (* 4 1024) 0)))
+                        (let fill ((i 0))
+                          (when (< i 1024)
+                            (bytevector-ieee-single-set! m (* 4 i)
+                              (* 0.5 (+ (bytevector-ieee-single-ref buf (* 8 i) 'little)
+                                        (bytevector-ieee-single-ref buf (+ 4 (* 8 i)) 'little)))
+                              'little)
+                            (fill (+ i 1))))
+                        m)
+                      acc))
+          (reverse acc)))))
+(define FULL-FRAMES (* 1024 (length FULL)))
+(define (full-ref i) (bytevector-ieee-single-ref (list-ref FULL (quotient i 1024)) (* 4 (remainder i 1024)) 'little))
+(define PREFIX-SAME
+  (let loop ((i 0))
+    (or (>= i (cue-frames JUMP))
+        (and (= (cue-ref JUMP i) (full-ref i)) (loop (+ i 1))))))
+(define DROPPED-PEAK
+  (let loop ((i (cue-frames JUMP)) (m 0.0))
+    (if (>= i FULL-FRAMES) m (loop (+ i 1) (max m (abs (full-ref i)))))))
+
+;; every movement cue's rendered blocks, trimmed (untrimmed, each is 72 at 32 kHz)
+(define MOVING-BLOCKS (apply + (map (lambda (n) (quotient (cue-frames (sound-cue n)) 1024)) MOVING-CUES)))
+
+;; --- the game's path: no work in the frame, sound-work! instead ------------
+(sound-boot! '() say)
+(sound-set-work-in-frame! #f)
+(let loop ((f 0)) (when (< f 30) (sound-frame! (/ f 60.0) (/ 1.0 60.0) #f) (loop (+ f 1))))
+(define NONE-IN-FRAME (not (sound-cue 'jump)))
+(let loop ((f 0))
+  (when (and (< f 3000) (not (sound-cue 'jump)))
+    (sound-work! (let ((n 0)) (lambda () (set! n (+ n 1)) (< n 8))))
+    (loop (+ f 1))))
+(define WORKED (and (sound-cue 'jump) #t))
+(sound-set-work-in-frame! #t)
+
+(test-group "the cue bank at boot (0.1.1)"
+  (test "held (no place), the movement cues render and it says so"
+    (assert-true MOVING-SAID)
+    (assert-true (every (lambda (n) (assq n READY)) MOVING-CUES)))
+  (test "every movement cue is ready before any other cue"
+    (assert-true (number? FIRST-OTHER))
+    (assert-true (< LAST-MOVING FIRST-OTHER)))
+  (test "the jump is first, and ready within half a second of frames"
+    (assert-equal 'jump (car (car READY)))
+    (assert-true (< (cdr (car READY)) 30)))
+  (test "the trim: the jump keeps the full render's samples and drops only silence; the movement cues render in at most half their untrimmed blocks"
+    (assert-true PREFIX-SAME)
+    (assert-true (< DROPPED-PEAK 1e-4))
+    (assert-true (< (cue-frames JUMP) FULL-FRAMES))
+    (assert-true (<= (* 2 MOVING-BLOCKS) (* 72 (length MOVING-CUES)))))
+  (test "the game's path: nothing renders in the frame; sound-work! renders"
+    (assert-true NONE-IN-FRAME)
+    (assert-true WORKED)))

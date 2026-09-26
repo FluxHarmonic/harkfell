@@ -99,14 +99,14 @@ import { spawn, spawnSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
-const VALUED = ["--port", "--cdp", "--legs", "--record-replay", "--replay-fixture", "--shot"];
+const VALUED = ["--port", "--cdp", "--legs", "--record-replay", "--replay-fixture", "--shot", "--cpu-throttle"];
 const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && VALUED.includes(args[i - 1])));
 const ROOT = path.resolve(positional[0] || "build/web");
 const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "cues", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "cues", "startup", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -759,6 +759,48 @@ if (LEGS.includes("cues")) {
    rg.path === "ring" && rg.ring !== null && br.lag < rg.ring &&
    br.lag <= 20 && rg.ring >= 50 ? pass : fail)("cues",
     `bridge: ${br.line.slice(15)}; ring: ${rg.line.slice(15)}`);
+}
+
+// 0.1.1: the startup (David's test of the cue build: crackle at startup, and
+// the jump silent for 3-4 s after control). A fresh game with the frame, the
+// CPU throttled (--cpu-throttle, default 4: a phone is several times slower
+// than this box), the start screen given 3 s, then the gesture, the card, the
+// dawn, and 8 s of walking and jumping. Measured by the page, not the game:
+// every sink's sounding underruns (SigilWasmAudio.sinkUnderrunsSounding: starved
+// frames that cut off sound), polled every 100 ms from before the gesture.
+// Pass: 0 of them, and the movement cues ready ("sound cues-moving") before
+// "frame play".
+const THROTTLE = Number(opt("--cpu-throttle", "4"));
+if (LEGS.includes("startup")) {
+  ran.add("startup");
+  await send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
+  await open("trace&frame=on&new");
+  await evaluate(`(() => { window.__under = {}; const A = window.SigilWasmAudio;
+    window.__poll = setInterval(() => { if (!A) return;
+      for (let id = 0; id < 256; id++) { const n = A.sinkUnderrunsSounding(id);
+        if (n > (window.__under[id] || 0)) window.__under[id] = n; } }, 100); return true; })()`);
+  await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 30000, "startup: frame start");
+  await sleep(3000);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", code: "KeyX" });
+  await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 90000, "startup: frame play");
+  const playAt = lines.indexOf("harkfell: frame play");
+  const readyAt = lines.findIndex((l) => l.startsWith("harkfell: sound cues-moving"));
+  for (const [key, code, vk, ms] of [["ArrowRight", "ArrowRight", 39, 2500], [" ", "Space", 32, 150], ["ArrowLeft", "ArrowLeft", 37, 2500], [" ", "Space", 32, 150]]) {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk });
+    await sleep(ms);
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk });
+    await sleep(500);
+  }
+  await sleep(2000);
+  const under = await evaluate(`(() => { clearInterval(window.__poll); return JSON.stringify(window.__under); })()`);
+  await send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  const per = JSON.parse(under || "{}");
+  const total = Object.values(per).reduce((a, b) => a + b, 0);
+  const ready = readyAt >= 0 && readyAt < playAt;
+  (ready && total === 0 ? pass : fail)("startup",
+    `cpu x${THROTTLE}; movement cues ready before control: ${ready} (${readyAt >= 0 ? lines[readyAt] : "no cues-moving line"}); ` +
+    `sounding underruns ${total} frames, per sink ${under}`);
 }
 
 if (LEGS.includes("errors")) {

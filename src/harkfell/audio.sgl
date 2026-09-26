@@ -84,6 +84,8 @@
     (define (audio-boot! say)
       (set! *say* say)
       (mixer-open!)
+      ;; the sound's deferred work runs after the pump (audio-frame!), not in the frame
+      (sound-set-work-in-frame! #f)
       (shell-set-extra-lines! audio-lines)
       ;; A4: a save keeps the moments heard and the time played, and a
       ;; continue gives them back ((harkfell save))
@@ -313,6 +315,20 @@
               (ws (apply append (map region-wander (content-regions ct)))))
           (sound-boot! (append ms ws) *say*))))
 
+    ;; The frame's deferred sound work (the cue bank, the moments opened ahead)
+    ;; runs AFTER the pump, so the sinks are topped up first, for at most
+    ;; WORK-MS-SOUNDING of wall time while anything sounds, WORK-MS-QUIET
+    ;; while nothing does (the start screen before the gesture: free time), and
+    ;; at least one step (0.1.1: David's test, crackle at startup and the jump
+    ;; late; measured by verify.mjs's startup leg).
+    (define WORK-MS-SOUNDING 3.0)
+    (define WORK-MS-QUIET 12.0)
+    (define (wall-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
+    (define (work-more? budget-ms)
+      (let ((until (+ (wall-ms) budget-ms)))
+        (lambda () (< (wall-ms) until))))
+    (define (sounding?) (any source-live? (mixer-sources)))
+
     (define (audio-frame! frame-ms work-ms)
       (let ((now (audio-now)))
         (cond
@@ -327,7 +343,9 @@
                     (pl (world-place (shell-world) (shell-content) (shell-take-news!))))
                 (sound-frame! now dt (and pl (place pl moves: moves)))))))
         (set! *last* now)
-        (mixer-pump! now)))
+        (mixer-pump! now)
+        (unless (or *paused-at* (bench-running?) (bench-done?))
+          (sound-work! (work-more? (if (sounding?) WORK-MS-SOUNDING WORK-MS-QUIET))))))
 
     (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
 
