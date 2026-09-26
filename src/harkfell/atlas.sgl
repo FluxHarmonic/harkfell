@@ -102,7 +102,7 @@
                    (parts-for m))))
 
     ;; The materials a region sheet may author with fills and parts.
-    (define MATERIALS (list "rock" "rough" "ledge" "hazard"))
+    (define MATERIALS (list "rock" "rough" "ledge" "hazard" "cave"))
 
     (define (material-cell-name sheet mat m v)
       (string-append sheet "/" mat "@m" (number->string m) "v" (number->string v)))

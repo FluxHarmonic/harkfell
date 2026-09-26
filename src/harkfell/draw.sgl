@@ -513,7 +513,10 @@
                   (draw-filled-rect x y S S))))))
 
     (define (draw-solids! rm)
-      (let ((sheet (region-sheet (room-region rm))))
+      (let* ((sheet (region-sheet (room-region rm)))
+             ;; a cave (a room under a ceiling of rock) draws its rock as the
+             ;; sheet's cave ice when the sheet has it (Glasswood's glass caves)
+             (cave? (and (under? rm) (mat-cells sheet "cave") #t)))
         ;; under water nothing grows: a solid with water on it takes the mask
         ;; of one covered from above (no turf on a pool's floor)
         (each-tile rm solid-mat?
@@ -521,7 +524,7 @@
                      (let ((m (if (and (not (mask-has? m MASK-UP)) (eq? (material-at gc (- gr 1)) 'water))
                                   (+ m MASK-UP)
                                   m)))
-                       (solid-tile! sheet mat x y m gc gr))))))
+                       (solid-tile! sheet (if (and cave? (eq? mat (quote rock))) (quote cave) mat) x y m gc gr))))))
 
     ;; Reeds: a column's cells, top over mid over base, one variant per
     ;; column so a stalk runs on from cell to cell.
@@ -538,6 +541,22 @@
             ((not (mask-has? m MASK-DOWN)) "base")
             (else "mid")))
 
+    ;; The Old Birch: a | with a | beside it is part of a wide trunk, drawn
+    ;; from the sheet's old-* cells by its place (l m r; top, mid, base; the
+    ;; hollow in a middle column just above the base). #f where the sheet
+    ;; has none (Reedfen's reeds and the Hollow's grass stand side by side
+    ;; and stay as they are).
+    (define (old-birch-cell sheet m gc gr)
+      (let ((l (mask-has? m MASK-LEFT)) (r (mask-has? m MASK-RIGHT)))
+        (and (or l r)
+             (let* ((pos (cond ((not l) "l") ((not r) "r") (else "m")))
+                    (row (cond ((not (mask-has? m MASK-UP)) "top-")
+                               ((not (mask-has? m MASK-DOWN)) "base-")
+                               (else "")))
+                    (hollow? (and (string=? pos "m") (string=? row "") (= 2 (reed-run-down gc gr)))))
+               (or (and hollow? (atlas-index (string-append sheet "/old-hollow")))
+                   (atlas-index (string-append sheet "/old-" row pos)))))))
+
     ;; How many reed cells run down from global (gc, gr), itself included.
     (define (reed-run-down gc gr)
       (let loop ((r gr) (n 0))
@@ -551,7 +570,8 @@
         (set-blend-mode 'normal)
         (each-tile rm (lambda (m) (eq? m 'reeds))
                    (lambda (mat x y m gc gr)
-                     (let ((i (or (reed-cell sheet (reed-part m) gc) (reed-cell sheet "mid" gc))))
+                     (let ((i (or (old-birch-cell sheet m gc gr)
+                                  (reed-cell sheet (reed-part m) gc) (reed-cell sheet "mid" gc))))
                        (if i
                            (begin (set-color 1.0 1.0 1.0 1.0) (atlas-draw! i x y 1))
                            (begin (paint! 'leaf-2)
@@ -573,32 +593,41 @@
     ;; Front decoration (a room's decor: auto): a tuft of grass on about one
     ;; bare top in three of rock or rough rock (one with air above it), in
     ;; front of the creature, swaying; its weight rises up the tuft's six rows.
+    ;; Glasswood's crowns: glazed twig sprays standing up from about two
+    ;; branches (=) in three, with air above them (the sheet's crown-a, -b).
     (define (draw-front! rm)
       (when (eq? (room-decor rm) (quote auto))
-        (let* ((sheet (region-sheet (room-region rm)))
-               (tufts (filter (lambda (x) x)
-                              (map (lambda (v) (atlas-index (string-append sheet "/tuft-" v))) (list "a" "b" "c"))))
-               (bare? (lambda (mat gc gr) (and (memq mat (list (quote rock) (quote rough)))
-                                               (not (material-at gc (- gr 1))))))
-               (pick (lambda (gc gr) (tile-variant (+ gc 7) (+ gr 3) (* 3 (max 1 (length tufts)))))))
-          (when (pair? tufts)
-            (set-blend-mode (quote normal))
-            (each-tile rm (lambda (m) (memq m (list (quote rock) (quote rough))))
+        (let ((sheet (region-sheet (room-region rm))))
+          (front-sprigs! rm sheet "tuft-" (list "a" "b" "c") (list (quote rock) (quote rough)) 3)
+          (front-sprigs! rm sheet "crown-" (list "a" "b") (list (quote ledge)) 1.5))))
+
+    ;; Sprigs of the sheet's PREFIX cells, 6 rows standing on the bare tops of
+    ;; MATS: one top in PER has one, and they sway, their weight rising up the
+    ;; six rows.
+    (define (front-sprigs! rm sheet prefix names mats per)
+      (let* ((cells (filter (lambda (x) x)
+                            (map (lambda (v) (atlas-index (string-append sheet "/" prefix v))) names)))
+             (n (length cells))
+             (bare? (lambda (mat gc gr) (and (memq mat mats) (not (material-at gc (- gr 1))))))
+             (pick (lambda (gc gr) (tile-variant (+ gc 7) (+ gr 3) (max 1 (exact (round (* per (max 1 n)))))))))
+        (when (pair? cells)
+          (set-blend-mode (quote normal))
+          (each-tile rm (lambda (m) (memq m mats))
+                     (lambda (mat x y m gc gr)
+                       (let ((k (pick gc gr)))
+                         (when (and (bare? mat gc gr) (< k n))
+                           (set-color 1.0 1.0 1.0 1.0)
+                           (atlas-draw! (list-ref cells k) x (- y 6) 1)))))
+          (with-additive-blend
+            (each-tile rm (lambda (m) (memq m mats))
                        (lambda (mat x y m gc gr)
                          (let ((k (pick gc gr)))
-                           (when (and (bare? mat gc gr) (< k (length tufts)))
-                             (set-color 1.0 1.0 1.0 1.0)
-                             (atlas-draw! (list-ref tufts k) x (- y 6) 1)))))
-            (with-additive-blend
-              (each-tile rm (lambda (m) (memq m (list (quote rock) (quote rough))))
-                         (lambda (mat x y m gc gr)
-                           (let ((k (pick gc gr)))
-                             (when (and (bare? mat gc gr) (< k (length tufts)))
-                               (let rows ((py 0))
-                                 (when (< py 6)
-                                   (set-color 0.0 (/ (- 6 py) 6.0) 0.0 1.0)
-                                   (draw-filled-rect x (+ (- y 6) py) S 1)
-                                   (rows (+ py 1)))))))))))))
+                           (when (and (bare? mat gc gr) (< k n))
+                             (let rows ((py 0))
+                               (when (< py 6)
+                                 (set-color 0.0 (/ (- 6 py) 6.0) 0.0 1.0)
+                                 (draw-filled-rect x (+ (- y 6) py) S 1)
+                                 (rows (+ py 1))))))))))))
 
     (define *solid-rt* #f)
     (define *front-rt* #f)
@@ -616,7 +645,8 @@
         (with-render-target *solid-rt*
           (set-blend-mode 'normal)
           (draw-solids! rm)
-          (draw-sun-on-branches! rm))
+          (draw-sun-on-branches! rm)
+          (draw-water-bed! rm))
         (with-render-target *foliage-rt*
           (set-blend-mode 'normal)
           (draw-foliage! rm))
@@ -624,6 +654,7 @@
           (set-blend-mode (quote normal))
           (draw-front! rm))
         (set! *glints* (room-glints rm))
+        (set! *crusts* (room-crusts rm))
         (set! *layers-key* rm)))
 
     ;; Glints on the glaze (Glasswood's bible, "Moving pictures"): points of
@@ -683,7 +714,7 @@
     ;; anyway (DARK sends the accent to shade). PROPOSED to CONTENT: a room
     ;; field sun: (0..1) to set this per room instead of by position.
     (define (room-sun rm)
-      (if (not (glasswood-sheet? rm))
+      (if (or (not (glasswood-sheet? rm)) (under? rm))
           0.0
           (let* ((r (and *content* (content-region *content* (room-region rm))))
                  (b (and r (region-field r 'bounds)))
@@ -705,10 +736,14 @@
           (paint! 'accent)
           (each-tile rm (lambda (m) (eq? m 'reeds))
                      (lambda (mat x y m gc gr)
-                       (let* ((col (vector-ref TRUNK-LIT-COL (tile-variant gc 0 3)))
+                       (let* ((l (mask-has? m MASK-LEFT)) (rt (mask-has? m MASK-RIGHT))
+                              ;; the Old Birch (| beside |): only its west edge, at column 3
+                              (col (cond ((and (not l) rt) 3)
+                                         ((or l rt) #f)
+                                         (else (vector-ref TRUNK-LIT-COL (tile-variant gc 0 3)))))
                               (from (if (mask-has? m MASK-UP) 0 10)))
                          (let rows ((r from) (to (if (mask-has? m MASK-DOWN) 16 11)))
-                           (when (< r to)
+                           (when (and col (< r to))
                              (when (< (tile-variant (+ gc 13) (+ (* 8 gr) (quotient* r 2) 5) 100) (* 50.0 sun))
                                (draw-filled-rect (+ x col) (+ y r) 1 1))
                              (rows (+ r 1) to)))))))))
@@ -726,6 +761,61 @@
                            (when (< c 15)
                              (sun-pixel! (+ x c) y gc (+ (* 16 gr) c) (* (if (eq? mat 'ledge) 0.22 0.06) sun))
                              (cols (+ c 1))))))))))
+
+    ;; --- Glasswood's water and weather ---
+
+    ;; The bed under Glasswood's water, drawn into the solid layer so the
+    ;; water pass sees it through the water (stones, dark ice, silt): the
+    ;; water reads as depth, not a flat sheet of its colour. On the bottom
+    ;; cell of each water column.
+    (define (draw-water-bed! rm)
+      (when (glasswood-sheet? rm)
+        (let ((cells (filter (lambda (i) i) (list (ice-cell "water-bed-a") (ice-cell "water-bed-b")))))
+          (when (pair? cells)
+            (set-color 1.0 1.0 1.0 1.0)
+            (each-tile rm (lambda (m) (eq? m 'water))
+                       (lambda (mat x y m gc gr)
+                         (unless (mask-has? m MASK-DOWN)
+                           (atlas-draw! (list-ref cells (tile-variant gc gr (length cells))) x y 1))))))))
+
+    ;; A crust of clear ice across open water in daylight (the frozen tarn,
+    ;; the pools under the sky): on each water cell with air above it, in a
+    ;; room open to the sky. Drawn after the water pass, so it is solid ice,
+    ;; not seen through water. ((x y) ...) for the room.
+    (define *crusts* '())
+    (define (room-crusts rm)
+      (if (or (not (glasswood-sheet? rm)) (under? rm))
+          '()
+          (let ((acc '()))
+            (each-tile rm (lambda (m) (eq? m 'water))
+                       (lambda (mat x y m gc gr)
+                         (unless (material-at gc (- gr 1))
+                           (set! acc (cons (list x y) acc)))))
+            acc)))
+    (define (draw-crusts!)
+      (let ((i (ice-cell "tarn-crust")))
+        (when i
+          (set-blend-mode 'normal)
+          (set-color 1.0 1.0 1.0 1.0)
+          (for-each (lambda (c) (atlas-draw! i (car c) (cadr c) 1)) *crusts*))))
+
+    ;; Snow falling (the bible's "Moving pictures"): slow flakes, heavier
+    ;; deeper in the wood (fewer where the sun is), none in the caves; each
+    ;; drifts on its own and with the wind. In front of the creature.
+    (define (draw-snow! rm t)
+      (when (and (glasswood-sheet? rm) (not (under? rm)))
+        (let* ((n (+ 18 (exact (floor (* 54.0 (- 1.0 (room-sun rm)))))))
+               (wind (wind-at t)))
+          (set-blend-mode 'normal)
+          (paint! 'ground-4)
+          (let loop ((i 0))
+            (when (< i n)
+              (let* ((u (- (* i 0.618034) (floor (* i 0.618034))))
+                     (speed (+ 0.09 (* 0.07 u)))
+                     (x (modulo (floor-int (+ (* i 83) (* 4.0 (sin (+ (* t 0.013) i))) (* t 0.04 wind))) VIEW-W))
+                     (y (- (modulo (floor-int (+ (* i 37) (* t speed))) (+ VIEW-H 8)) 4)))
+                (draw-filled-rect x y 1 1))
+              (loop (+ i 1)))))))
 
     ;; The water: G over every water cell of the room, in the current pass.
     (define (draw-water! rm)
@@ -879,7 +969,7 @@
         (when is
           (for-each (lambda (ic)
                       (let* ((st (icicle-state ic))
-                             (i (ice-cell (if (eq? st 'shiver) "icicle-shiver" "icicle-hang"))))
+                             (i (ice-cell (case st ((shiver) "icicle-shiver") ((fall) "icicle-fall") (else "icicle-hang")))))
                         (unless (or (eq? st 'gone) (not i))
                           (atlas-draw! i
                                        (+ (floor-int (- (icicle-x ic) ox)) (if (eq? st 'shiver) (if (odd? (quotient t 2)) 1 -1) 0))
@@ -999,6 +1089,8 @@
                         (filter (lambda (c) (not ((kind? 'moth) c))) cs))
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (draw-water! rm)
+              (draw-crusts!)
+              (draw-snow! rm t)
               (for-each (lambda (c) (draw-critter c ox oy t slot)) (filter eyes? cs))
               ;; front decoration, in front of the creature, swaying
               (set-blend-mode (quote normal))

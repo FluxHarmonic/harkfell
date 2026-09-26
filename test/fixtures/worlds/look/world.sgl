@@ -83,7 +83,7 @@
 ;; region's rooms exist. Not Glasswood the player walks.
 (region glasswood
   name: "Glasswood (look fixture)"
-  bounds: ((3 0) (4 0))
+  bounds: ((2 0) (4 0))
   bed: "bed-hollow"
   bed-channels: (wind water texture drone)
   palette: (glw-sky-1 glw-sky-2 glw-sky-3 glw-sky-4 glw-ice-1 glw-ice-2 glw-ice-3 glw-ice-4

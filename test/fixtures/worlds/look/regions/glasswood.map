@@ -1,8 +1,9 @@
 (map
   region: glasswood
-  origin: (3 0)
+  origin: (2 0)
   layout:
-  ("A-B")
+  ("C A-B")
   rooms:
   ((A "Birch Floor" "glass ice, scree, birch trunks and branches, and a pool, in daylight")
-   (B "Blue Hour" "the same wood at the blue hour: light 0.7")))
+   (B "Blue Hour" "the same wood at the blue hour: light 0.7")
+   (C "Fall's Foot" "a frozen fall, the Old Birch, a frozen pool and branches in the crowns")))

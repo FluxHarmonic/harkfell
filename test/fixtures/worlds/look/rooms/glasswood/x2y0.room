@@ -1,0 +1,20 @@
+(room
+  region: glasswood
+  at: (2 0)
+  title: "Fall's Foot"
+  intent: "a frozen fall, the Old Birch, a frozen pool and branches in the crowns"
+  bed: (wind 0.4 drone 0.6)
+  grid:
+  ("#####                   #"
+   "#####                   #"
+   "####    |||             #"
+   "####    |||      ==     #"
+   "####    |||             #"
+   "#####   |||         |   #"
+   "#####   |||         |   #"
+   "#####   |||         |   #"
+   "##############~~~~~######"
+   "###############~~~#######"
+   "#########################")
+  start: (6 7)
+  decor: auto)
