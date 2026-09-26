@@ -44,6 +44,9 @@
 //             and at most 120 characters; served no-store as JSON (D38)
 //   missing   a missing page, a missing file under /play/ and a wasm hash
 //             nobody published all answer 404 (with the site's 404 page), never a 200 index.html
+//   preview   og:image and twitter:image are the 1200x528 Standing Stones
+//             shot with type, size and alt; twitter:card summary_large_image
+//   crosslink the landing's footer links Crash The Stack beside Flux Harmonic
 //   console   no console error and no exception over the run
 //
 // Any FAIL exits 1; SETUP-FAILED or a timeout exits 2. On ALL PASS it writes
@@ -563,6 +566,45 @@ const SUMMARY_MAX = 120;   // one line under "Press any key to step in."; LOOK o
   }
   if (detail.length) fail("missing", detail.join("; "));
   else pass("missing", got.join(", ") + ", each the site's 404 page");
+}
+
+// ---- preview (2026-09-26) ---------------------------------------------------------
+// A shared link gets the large card: og:image and twitter:image are the
+// Standing Stones shot at 3x (1200x528, a PNG in the tree, served as
+// image/png), with its size and alt text, and twitter:card is
+// summary_large_image. The 400x176 room shot previewed as a small card.
+{
+  const detail = [];
+  const html = text("index.html");
+  const meta = (attr, key) => (new RegExp(`<meta ${attr}="${key}" content="([^"]*)"`).exec(html) || [])[1];
+  const URL_ = "https://harkfell.com/shots/og-hollow-stones.png";
+  const want = [["property", "og:image", URL_], ["property", "og:image:type", "image/png"], ["property", "og:image:width", "1200"], ["property", "og:image:height", "528"],
+    ["name", "twitter:card", "summary_large_image"], ["name", "twitter:image", URL_]];
+  for (const [a, k, v] of want) { const got = meta(a, k); if (got !== v) detail.push(`${k} is ${got === undefined ? "absent" : `"${got}"`}, not "${v}"`); }
+  for (const [a, k] of [["property", "og:image:alt"], ["name", "twitter:image:alt"], ["name", "twitter:title"], ["name", "twitter:description"]]) if (!meta(a, k)) detail.push(`${k} is absent or empty`);
+  const file = path.join(DIR, "shots", "og-hollow-stones.png");
+  if (!fs.existsSync(file)) detail.push("shots/og-hollow-stones.png is not in the tree");
+  else {
+    const png = fs.readFileSync(file);
+    const w = png.readUInt32BE(16), h = png.readUInt32BE(20);
+    if (png.toString("ascii", 1, 4) !== "PNG" || w !== 1200 || h !== 528) detail.push(`shots/og-hollow-stones.png is ${w}x${h}, not a 1200x528 PNG`);
+  }
+  const r = await fetch(`${origin}/shots/og-hollow-stones.png`);
+  if (r.status !== 200 || !/^image\/png/.test(r.headers.get("content-type") || "")) detail.push(`/shots/og-hollow-stones.png answered ${r.status} ${r.headers.get("content-type")}`);
+  if (detail.length) fail("preview", detail.join("; "));
+  else pass("preview", `og:image and twitter:image ${URL_} (1200x528 PNG, served image/png) with type, size and alt; twitter:card summary_large_image`);
+}
+
+// ---- crosslink (2026-09-26) -------------------------------------------------------
+// The landing's footer links the other Flux Harmonic game, beside the studio's mark.
+{
+  const foot = (/<footer>([\s\S]*?)<\/footer>/.exec(text("index.html")) || [])[1] || "";
+  const detail = [];
+  if (!foot) detail.push("index.html has no footer");
+  if (!/<p>Also from Flux Harmonic: <a href="https:\/\/crashthestack\.com\/">Crash The Stack<\/a><\/p>/.test(foot)) detail.push("the footer does not link Crash The Stack");
+  if (!/href="https:\/\/fluxharmonic\.com\/"/.test(foot)) detail.push("the footer lost the Flux Harmonic link");
+  if (detail.length) fail("crosslink", detail.join("; "));
+  else pass("crosslink", "the landing's footer links Crash The Stack beside the Flux Harmonic mark");
 }
 
 // ---- console --------------------------------------------------------------------
