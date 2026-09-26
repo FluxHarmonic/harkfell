@@ -54,7 +54,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { createHandler } from "./scripts/serve-site.mjs";
 
 const args = process.argv.slice(2);
@@ -163,6 +163,10 @@ await new Promise((r, j) => { server.once("error", j); server.listen(PORT, "127.
 const origin = `http://127.0.0.1:${PORT}`;
 
 const udd = fs.mkdtempSync("/tmp/harkfell-verify-site-chrome-");
+// The audio rule (worker-instructions): the page's audio goes to a null sink,
+// never the desktop's device; --mute-audio alone still opens a stream on it,
+// and a PULSE_SINK naming a sink that does not exist falls back to the default.
+spawnSync("sh", ["-c", "pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null >/dev/null 2>&1 || true"]);
 const chrome = spawn("google-chrome", [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--mute-audio",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
