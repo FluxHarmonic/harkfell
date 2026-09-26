@@ -56,7 +56,7 @@
           world-origin
           entry-body cell-body
           world-gates world-carry world-news world-still world-take-news world-populate
-          world-stones world-pickups world-critters world-ice)
+          world-stones world-pickups world-critters world-ice map-shift map-cell-shift)
 
   (begin
     (define DIM-TICKS 15)
@@ -275,7 +275,9 @@
 
     ;; Back to the current room's entry at once (the R key).
     (define (world-reset w)
-      (world w body: (world-entry w) phase: 'play timer: 0))
+      ;; a fresh start in the room: its icicles grow back (as a soft return's do)
+      (world w body: (world-entry w) phase: 'play timer: 0
+             ice: (and (world-ice w) (room-ice (world-wm w) (world-room w)))))
 
     ;; In rock or in a hazard: not a place to leave a body after a reload.
     (define (inside-rock? tm b)
@@ -284,8 +286,24 @@
 
     ;; The world on a new map (a room file changed). fallback: a body to use
     ;; when both the body and the entry are inside rock now.
+    ;; The shift from map a's pixels to map b's, (dx . dy), and in cells: a room
+    ;; added west or north of the rest moves the map's origin (worldmap-x0
+    ;; and -y0), and every global pixel and cell with it (Glasswood, x -6..0,
+    ;; is written room by room under live reload; the review of phase 1).
+    (define (map-shift a b)
+      (cons (* (worldmap-cols a) (worldmap-size a) (- (worldmap-x0 a) (worldmap-x0 b)))
+            (* (worldmap-rows a) (worldmap-size a) (- (worldmap-y0 a) (worldmap-y0 b)))))
+    (define (map-cell-shift a b)
+      (cons (* (worldmap-cols a) (- (worldmap-x0 a) (worldmap-x0 b)))
+            (* (worldmap-rows a) (- (worldmap-y0 a) (worldmap-y0 b)))))
+    (define (shift-body b d)
+      (and b (body b x: (+ (body-x b) (car d)) y: (+ (body-y b) (cdr d)))))
+
     (define (world-reload w wm fallback)
-      (let* ((tm (worldmap-tiles wm))
+      (let* ((d (map-shift (world-wm w) wm))
+             (w (world w body: (shift-body (world-body w) d) entry: (shift-body (world-entry w) d)
+                       ground: (shift-body (world-ground w) d)))
+             (tm (worldmap-tiles wm))
              (room (and (world-room w)
                         (worldmap-room wm (placed-x (world-room w)) (placed-y (world-room w)))))
              (entry (if (inside-rock? tm (world-entry w)) fallback (world-entry w)))

@@ -237,7 +237,10 @@
 
     ;; The placement problems of an icicle at (c, r) in grid (strings): '()
     ;; when it is fair.
-    (define (icicle-placement-problems grid c r)
+    ;; others: the room's other icicles, ((c . r) ...): a step aside under one of
+    ;; them is no way out (the review of phase 1: two side by side each passed
+    ;; on the other's foot).
+    (define (icicle-placement-problems grid c r . others)
       (let* ((here (grid-char grid c r))
              (above (grid-char grid c (- r 1)))
              (at (cell-name c r))
@@ -258,7 +261,8 @@
                            (else '())))
              (stand-r (and fr (- fr 1)))
              (standable (lambda (x) (let ((ch (grid-char grid x stand-r)) (fl (grid-char grid x fr)))
-                                      (and ch fl (ice-air? ch) (or (ice-rock? fl) (char=? fl #\=))))))
+                                      (and ch fl (ice-air? ch) (or (ice-rock? fl) (char=? fl #\=))
+                                           (not (find (lambda (o) (and (= (car o) x) (< (cdr o) stand-r))) others))))))
              (way (if (and (null? ground) (not (or (standable (- c 1)) (standable (+ c 1)))))
                       (list (string-append "icicle at: " at " falls where there is no step aside (a way out: the cell under it at "
                                            (cell-name c stand-r) " has no standing neighbour on the same floor)"))
@@ -415,6 +419,9 @@
 
     ;; --- rooms ---------------------------------------------------------------------------
 
+    ;; light: absent (a room written without one), told apart from light: #f
+    (define NO-LIGHT (list 'no-light))
+
     (define ROOM-FIELDS
       (list 'region 'at 'title 'intent 'bed 'grid 'things 'moment 'decor 'start 'unreached 'light))
     (define ROOM-REQUIRED (list 'region 'at 'title 'intent 'grid))
@@ -494,7 +501,11 @@
                                (if (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
                                    (add! (string-append "things: icicle at: " (datum->string a) " is not a cell of the grid") "things")
                                    (for-each (lambda (m) (add! (string-append "things: " m) "things"))
-                                             (icicle-placement-problems (roomfile-grid rf) (car a) (cadr a))))))
+                                             (apply icicle-placement-problems (roomfile-grid rf) (car a) (cadr a)
+                                                    (filter (lambda (o) o)
+                                                            (map (lambda (u) (let ((b (and (pair? u) (eq? (car u) (quote icicle)) (thing-kw u "at"))))
+                                                                               (and (int-pair? b) (not (equal? b a)) (cons (car b) (cadr b)))))
+                                                                 things)))))))
                             ((and reg (not (memq (car t) (or (region-field reg 'roster) '()))))
                              (add! (string-append "things: " (symbol->string (car t)) " is not on "
                                                   (symbol->string region-sym) "'s roster")
@@ -626,8 +637,8 @@
                 (add! "unreached: is not ((C R) ...) with cells inside the grid" "unreached"))))
           ;; light: (Glasswood, for the dark caves the moths light, D42) how lit
           ;; the room is, a number above 0 and at most 1 (1, daylight, if absent)
-          (let ((l (roomfile-field rf 'light)))
-            (when (and l (not (and (number? l) (> l 0) (<= l 1))))
+          (let ((l (roomfile-field rf 'light NO-LIGHT)))
+            (when (and (not (eq? l NO-LIGHT)) (not (and (number? l) (> l 0) (<= l 1))))
               (add! (string-append "light: " (datum->string l) " is not a number above 0 and at most 1") "light")))
           (let* ((grid-ps (check-grid rf ROOM-COLS ROOM-ROWS LEGEND-CHARS))
                  (all (append (roomfile-problems rf) (reverse ps) (if (roomfile-ok? rf) grid-ps '())))

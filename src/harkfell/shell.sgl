@@ -296,10 +296,14 @@
     ;; A world entered anew (a door, the start, a reload) keeps what the
     ;; session has done: the harmonics carried and the stones opened (by cell
     ;; and overtone). The pickups are the content's, less what is carried.
+    ;; old may be on an older map whose origin differs (a live reload that added
+    ;; a room west or north): its stones' cells are shifted into this one's.
     (define (kept-stones old)
-      (let ((old-stones (if old (world-stones old) '())))
+      (let ((old-stones (if old (world-stones old) '()))
+            (d (if old (map-cell-shift (world-map old) (content-map *content*)) (cons 0 0))))
         (map (lambda (s)
-               (let ((o (find (lambda (o) (and (equal? (stone-cell o) (stone-cell s))
+               (let ((o (find (lambda (o) (and (equal? (cons (+ (car (stone-cell o)) (car d)) (+ (cdr (stone-cell o)) (cdr d)))
+                                                       (stone-cell s))
                                                (= (stone-overtone o) (stone-overtone s))
                                                (stone-open? o)))
                               old-stones)))

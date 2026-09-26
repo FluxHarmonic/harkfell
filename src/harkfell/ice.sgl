@@ -120,7 +120,9 @@
                        ((hang)
                         (if (and playing
                                  (<= (abs (- cx (+ (icicle-x ic) (/ ICE-W 2.0)))) TELL-R)
-                                 (>= by (+ (icicle-top ic) TILE)))
+                                 (>= by (+ (icicle-top ic) TILE))
+                                 ;; on its own floor or above it: not a body in a room below
+                                 (<= (+ by bh) (+ (icicle-floor ic) 0.5)))
                             (let ((ic (icicle ic state: 'shiver t: 0)))
                               (say! 'tell ic)
                               ic)

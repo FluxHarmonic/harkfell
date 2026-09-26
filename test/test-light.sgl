@@ -47,7 +47,8 @@
   (test "light: 0, 1.5 and a word are each red"
     (assert-true (has? (problems (with-light "0")) "light: 0 is not a number above 0 and at most 1"))
     (assert-true (has? (problems (with-light "1.5")) "light: 1.5 is not a number above 0 and at most 1"))
-    (assert-true (has? (problems (with-light "dark")) "light: dark is not a number above 0 and at most 1"))))
+    (assert-true (has? (problems (with-light "dark")) "light: dark is not a number above 0 and at most 1"))
+    (assert-true (has? (problems (with-light "#f")) "light: #f is not a number above 0 and at most 1"))))
 
 (define DIR (string-append "/tmp/harkfell-test-light-" (number->string (current-jiffy))))
 (shell-boot!)

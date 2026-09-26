@@ -152,3 +152,33 @@
   (test "an icicle hung under air is a content problem"
     (let ((ps (content-problems (load-content (with-room (lambda (t) (swap t "(icicle at: (14 3))" "(icicle at: (14 5))")))))))
       (assert-true (find (lambda (p) (string-contains? (problem-message p) "does not hang from rock")) ps)))))
+
+;; --- the review's two: R regrows, and no tell from below the floor ------------------------
+;; R (world-reset) after the icicle shattered: a fresh start grows it back.
+(define RESET (world-tick (world-reset (car STOP)) NO-INTENT))
+;; The icicle's own ices, stepped with a body far below its floor (a room
+;; underneath), then with the stopper's body where it rang it.
+(define ICES0 (world-ice (world-standing 4 8)))
+(define (body-box b) (list (body-x b) (body-y b) (feel-box-w HARKFELL-FEEL) (feel-box-h HARKFELL-FEEL)))
+(define BELOW (ices-step ICES0 (list 226.0 1000.0 8.0 14.0) #t))
+(define ON-FLOOR (ices-step ICES0 (list 226.0 130.0 8.0 14.0) #t))
+
+(test-group "ice: a fresh start and the tell's reach"
+  (test "R after it shattered grows it back"
+    (assert-equal 'gone (icicle-state (the-icicle (car STOP))))
+    (assert-equal 'hang (icicle-state (the-icicle RESET))))
+  (test "a body far below its floor, in its column, does not ring it"
+    (assert-equal '() (ices-news BELOW)))
+  (test "control: the same column on its own floor rings it"
+    (assert-equal 1 (length (ices-news ON-FLOOR)))))
+
+;; Two icicles side by side over a two-wide floor between steps: each has only
+;; the other's foot to step to, which is no way out (the review of phase 1).
+(define PAIR '("#########" "#       #" "#       #" "###  ####" "#########"))
+(test-group "ice: a way out is not under another icicle"
+  (test "each of two side by side is red"
+    (assert-true (and (find (lambda (m) (string-contains? m "no step aside")) (icicle-placement-problems PAIR 3 1 (cons 4 1))) #t))
+    (assert-true (and (find (lambda (m) (string-contains? m "no step aside")) (icicle-placement-problems PAIR 4 1 (cons 3 1))) #t)))
+  (test "control: either alone is green"
+    (assert-true (ok? PAIR 3 1))
+    (assert-true (ok? PAIR 4 1))))
