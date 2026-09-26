@@ -66,14 +66,14 @@
 (define (full-ref i) (bytevector-ieee-single-ref (list-ref FULL (quotient i 1024)) (* 4 (remainder i 1024)) 'little))
 (define PREFIX-SAME
   (let loop ((i 0))
-    (or (>= i (cue-frames JUMP))
+    (or (not JUMP) (>= i (cue-frames JUMP))
         (and (= (cue-ref JUMP i) (full-ref i)) (loop (+ i 1))))))
 (define DROPPED-PEAK
-  (let loop ((i (cue-frames JUMP)) (m 0.0))
+  (let loop ((i (if JUMP (cue-frames JUMP) FULL-FRAMES)) (m 0.0))
     (if (>= i FULL-FRAMES) m (loop (+ i 1) (max m (abs (full-ref i)))))))
 
 ;; every movement cue's rendered blocks, trimmed (untrimmed, each is 72 at 32 kHz)
-(define MOVING-BLOCKS (apply + (map (lambda (n) (quotient (cue-frames (sound-cue n)) 1024)) MOVING-CUES)))
+(define MOVING-BLOCKS (apply + (map (lambda (n) (let ((c (sound-cue n))) (if c (quotient (cue-frames c) 1024) 72))) MOVING-CUES)))
 
 ;; --- the game's path: no work in the frame, sound-work! instead ------------
 (sound-boot! '() say)
@@ -98,9 +98,10 @@
     (assert-equal 'jump (car (car READY)))
     (assert-true (< (cdr (car READY)) 30)))
   (test "the trim: the jump keeps the full render's samples and drops only silence; the movement cues render in at most half their untrimmed blocks"
+    (assert-true (and JUMP #t))
     (assert-true PREFIX-SAME)
     (assert-true (< DROPPED-PEAK 1e-4))
-    (assert-true (< (cue-frames JUMP) FULL-FRAMES))
+    (assert-true (and JUMP (< (cue-frames JUMP) FULL-FRAMES)))
     (assert-true (<= (* 2 MOVING-BLOCKS) (* 72 (length MOVING-CUES)))))
   (test "the game's path: nothing renders in the frame; sound-work! renders"
     (assert-true NONE-IN-FRAME)
