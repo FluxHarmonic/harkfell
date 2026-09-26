@@ -142,3 +142,79 @@ h...h
 .....
 7hkh7
 h...h
+
+# snow owl (Glasswood): white in the lit-snow slot, barred in the birches'
+# near black, the low sun's copper in its eyes. It sits on a high branch
+# and watches you (perch), looks down when you are below it (perch-down),
+# dozes once you carry H3 (doze), and lifts off without a sound (fly).
+= owl-perch
+...4444...
+..444444..
+..4x44x4..
+..441444..
+.34444443.
+.34454543.
+.34444443.
+.33454533.
+..344443..
+..334433..
+...5..5...
+
+= owl-perch-down
+...4444...
+..444444..
+..444444..
+..4x44x4..
+.34441443.
+.34454543.
+.34444443.
+.33454533.
+..344443..
+..334433..
+...5..5...
+
+= owl-doze
+...4444...
+..444444..
+..414414..
+..441444..
+.34444443.
+.34454543.
+.34444443.
+.33454533.
+..344443..
+..334433..
+...5..5...
+
+= owl-fly
+3............3
+443...44...344
+.444344443444.
+..4444x44444..
+...444414444..
+....454544....
+.....3443.....
+......55......
+
+# snow vole (Glasswood): a small grey vole in the snow. Hidden, only a
+# mound; it peeks out when you stand still, and sits up.
+= vole-hidden
+........
+..444...
+.44444..
+4444444.
+
+= vole-peek
+..66....
+.6756...
+.6666...
+.44444..
+4444444.
+
+= vole-up
+...66...
+..6756..
+..6666..
+.666667.
+.66666..
+.5..5...

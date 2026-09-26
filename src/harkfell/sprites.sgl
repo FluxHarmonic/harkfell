@@ -112,6 +112,21 @@
                                            (symbol->string (harmonic-role (or (critter-drawn c) 2))))
                             (if up "moth-up" "moth-down"))))
              (cell! name x (+ y 2) face)))
+          ;; Glasswood: the snow owl (perch, perch-down, doze, fly) and the
+          ;; snow vole (hidden, peek, up), by the frame the behaviour names
+          ((owl)
+           (cell! (case (critter-frame c)
+                    ((perch-down) "owl-perch-down")
+                    ((doze) "owl-doze")
+                    ((fly) "owl-fly")
+                    (else "owl-perch"))
+                  x y face))
+          ((vole)
+           (cell! (case (critter-frame c)
+                    ((peek) "vole-peek")
+                    ((up) "vole-up")
+                    (else "vole-hidden"))
+                  x y face))
           (else #f))))
 
     ;; A moth's light: a soft disc, pulsing; stronger when it is drawn to a

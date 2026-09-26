@@ -15,7 +15,10 @@
 #             region's palette colours (the palette pass's promise: water,
 #             light, the focus pull and fades never leave the palette), and
 #             in Reed Bridge the sky and the peat sit where they belong (a
-#             flipped or shifted resolve stays in the palette but not there)
+#             flipped or shifted resolve stays in the palette but not there);
+#             and Glasswood: its probe rooms, the look fixture's birches and
+#             blue hour, and Root Ice (light 0.25), which must be mostly shadow,
+#             and lit round the body when its moths come to H3
 # Needs: build/dev (scripts/dev sigil build) for the palette leg.
 #
 # Exit 0 green, 1 red, 2 SETUP-FAILED.
@@ -85,7 +88,7 @@ shoot() {
     [ -n "$pid" ] || { sleep 0.25; n=$((n+1)); }
   done
   [ -n "$pid" ] || { say "SETUP-FAILED: the game did not start ($*)"; cat "$S/game.log"; return 2; }
-  sleep 5
+  sleep "${SHOOT_WAIT:-5}"
   if [ ! -d "/proc/$pid" ]; then say "SETUP-FAILED: the game died ($*)"; tail -3 "$S/game.log"; return 2; fi
   DISPLAY=":$DISPLAYN" guix shell imagemagick -- import -window root "$out" 2>/dev/null
   kill "$pid" 2>/dev/null
@@ -107,7 +110,22 @@ check_colours() {
   return 0
 }
 
+
+# A role's hex in world/world.sgl, upper case, no #.
+role_hex() { awk -v role="$1" '$0 ~ "^ *\\(" role " \"#" { l = $0; sub(/^[^"]*"#/, "", l); print toupper(substr(l, 1, 6)); exit }' world/world.sgl; }
+
+# How many pixels of the crop are (count_hex) or are not (count_not_hex) the hex.
+count_hex() {
+  convert "$1" -crop "$3" +repage -format %c histogram:info:- 2>/dev/null \
+    | awk -v h="#$2" 'toupper($0) ~ h { n += $1 } END { print n + 0 }'
+}
+count_not_hex() {
+  total="$(convert "$1" -crop "$3" +repage -format '%[fx:w*h]' info:- 2>/dev/null)"
+  echo $(( ${total:-0} - $(count_hex "$@") ))
+}
+
 leg_palette() {
+  command -v convert > /dev/null 2>&1 && command -v import > /dev/null 2>&1 || { say "palette: SETUP-FAILED (no ImageMagick convert/import on PATH: the frames cannot be taken or read)"; return 2; }
   [ -x build/dev/bin/harkfell ] || { say "palette: SETUP-FAILED (no build/dev/bin/harkfell)"; return 2; }
   pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null > /dev/null 2>&1
   xvfb_up || { say "palette: SETUP-FAILED (no Xvfb :$DISPLAYN)"; return 2; }
@@ -136,7 +154,40 @@ leg_palette() {
   if [ "$top" = "$sky" ] && [ "$bottom" = "$peat" ]; then :; else
     say "palette: RED placement: reedfen:9,3 top-left #$top (want #$sky), bottom-left #$bottom (want #$peat)"; bad=1
   fi
-  [ "$bad" -eq 0 ] && { say "palette: GREEN ($frames frames, every colour a palette colour, sky and peat where they belong)"; return 0; }
+  # Glasswood (the look track, 2026-09-26): the probe rooms in daylight,
+  # Root Ice in the dark (light 0.25) without and with H3, and the look
+  # fixture's birches by day and at the blue hour (light 0.7)
+  region_hexes world glasswood > "$S/allowed-glasswood"
+  region_hexes test/fixtures/worlds/look glasswood > "$S/allowed-glasswood-fixture"
+  for r in 0,3 -1,3 -1,5; do
+    shoot "$S/shot-g$r.png" --room "glasswood:$r" || return 2
+    frames=$((frames + 1))
+    if check_colours "$S/shot-g$r.png" "$S/allowed-glasswood" 1200x528+0+0; then :; else say "palette: RED glasswood:$r"; bad=1; fi
+  done
+  for r in 3,0 4,0; do
+    shoot "$S/shot-gf$r.png" --world test/fixtures/worlds/look --room "glasswood:$r" || return 2
+    frames=$((frames + 1))
+    if check_colours "$S/shot-gf$r.png" "$S/allowed-glasswood-fixture" 1200x528+0+0; then :; else say "palette: RED fixture glasswood:$r"; bad=1; fi
+  done
+  SHOOT_WAIT=8 shoot "$S/shot-gmoth.png" --room glasswood:-1,5 --at 15,7 --carry 2,3 || return 2
+  frames=$((frames + 1))
+  if check_colours "$S/shot-gmoth.png" "$S/allowed-glasswood" 1200x528+0+0; then :; else say "palette: RED glasswood:-1,5 carrying H3"; bad=1; fi
+  # light: drawn: Root Ice is dark, more than half its frame the blue-black
+  # shadow (by day its ice wall is ice in shade, and none of it is shadow)
+  shadow="$(role_hex glw-ice-1)"
+  [ -n "$shadow" ] || { say "palette: SETUP-FAILED (no glw-ice-1 in world/world.sgl)"; return 2; }
+  n_dark="$(count_hex "$S/shot-g-1,5.png" "$shadow" 1200x528+0+0)"
+  if [ "$n_dark" -gt 316800 ]; then :; else say "palette: RED dark: Root Ice has $n_dark of 633600 px in the shadow (want more than half)"; bad=1; fi
+  # the moth light: carrying H3 the moths gather and light the box round
+  # the body (at cell 15,7); without H3 (the body at the start, far off)
+  # the same box is shadow
+  box=120x120+684+300
+  lit_on="$(count_not_hex "$S/shot-gmoth.png" "$shadow" $box)"
+  lit_off="$(count_not_hex "$S/shot-g-1,5.png" "$shadow" $box)"
+  if [ "$lit_on" -gt 6000 ] && [ "$lit_on" -gt $((3 * lit_off)) ]; then :; else
+    say "palette: RED moth light: $lit_on of 14400 px lit round the body carrying H3, $lit_off without (want over 6000 and over three times)"; bad=1
+  fi
+  [ "$bad" -eq 0 ] && { say "palette: GREEN ($frames frames, every colour a palette colour, sky and peat where they belong, Root Ice dark and lit by its moths)"; return 0; }
   return 1
 }
 
@@ -187,6 +238,12 @@ run_sabotage() {
   plant resolve-tint src/harkfell/render.sgl '{ sub(/"    fragColor = vec4\(c, 1.0\);\\n"/, "\"    fragColor = vec4(mix(c, vec3(1.0, 0.0, 1.0), 0.03), 1.0);\\n\""); print }' leg_palette_rebuilt "palette: RED" || fail=1
   # stays inside the palette, so only the placement probe can see it
   plant strip-row-shift src/harkfell/render.sgl '{ sub(/\(int\(u_view_h\) \+ row\)/, "(int(u_view_h) + row + 1)"); print }' leg_palette_rebuilt "RED placement" || fail=1
+  # Glasswood: a green role (the art layer), the dark and the moth light
+  # (the product layer: both stay inside the palette, so only their own
+  # probes can see them)
+  plant green-role world/world.sgl '{ sub(/\(glw-ice-3 "#8ba3c2"/, "(glw-ice-3 \"#6fb86a\""); print }' leg_art "no Glasswood role has a green hue" || fail=1
+  plant no-dark src/harkfell/render.sgl '{ sub(/\(if \(and \(number\? light\) \(< light 1\.0\)\)/, "(if #f"); print }' leg_palette_rebuilt "RED dark" || fail=1
+  plant no-moth-light src/harkfell/draw.sgl '{ sub(/\(a \(\* \(\/ unit 3\.0\) g\)\)\)/, "(a 0.0))"); print }' leg_palette_rebuilt "RED moth light" || fail=1
   return $fail
 }
 
