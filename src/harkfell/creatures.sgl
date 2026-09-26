@@ -39,9 +39,23 @@
 ;;;            them) and orbit at a distance, glowing in H's colour, tinking
 ;;;            in H's partials; stand still and they settle closer and slower
 ;;;
+;;; SNOW OWLS (perch; Glasswood). (snow-owl at: (C R)) sits on that standable
+;;; cell, a high branch.
+;;;   perched  it watches you, warily: its head follows you, and looks down
+;;;            when you are below it
+;;;   flying   you rush it (moving within RUSH px): it lifts off without a
+;;;            sound to another perch, the highest standing place at least
+;;;            OWL-PERCH-AWAY from you
+;;;   H3       carrying H3 it stops watching you (doze) and calls a soft
+;;;            falling fifth (owl-h3) as you come near, every 12 s you stay
+;;;
+;;; SNOW VOLES (burrow; Glasswood). (snow-vole at: (C R)) lives under the
+;;; snow at that cell: stand still near it and it puts its head out, then
+;;; sits up (a squeak, vole) and turns to you; move near and it is gone.
+;;;
 ;;; The step returns news for the sound layer:
 ;;;   (call KIND x y)   KIND: chirp-a chirp-b flurry song-h2 croak-a croak-b
-;;;                     croak-h2 plop moth-a moth-b moth-h2 (a cue each)
+;;;                     croak-h2 plop moth-a moth-b moth-h2 owl-h3 vole (a cue each)
 ;;;
 ;;; Pure, apart from nothing: the RNG is a state carried in the struct.
 
@@ -194,6 +208,20 @@
                                                    timer: (+ 120 (exact (floor (* 600 (list-ref rs (+ 1 (* 2 j))))))))))
                                       (iota n))))
                      (loop (cdr ts) (+ i 1) (append (reverse moths) acc) perches)))
+                  ((and (eq? k 'snow-owl) at)
+                   (let ((f (feet (car at) (cdr at))))
+                     (loop (cdr ts) (+ i 1)
+                           (cons (critter kind: 'owl x: (car f) y: (cdr f) home: f state: 'perched
+                                          frame: 'perch facing: (if (< (car at) 12) 1 -1) rng: seed)
+                                 acc)
+                           perches)))
+                  ((and (eq? k 'snow-vole) at)
+                   (let ((f (feet (car at) (cdr at))))
+                     (loop (cdr ts) (+ i 1)
+                           (cons (critter kind: 'vole x: (car f) y: (cdr f) home: f state: 'hidden
+                                          frame: 'hidden facing: (if (< (car at) 12) 1 -1) rng: seed)
+                                 acc)
+                           perches)))
                   (else (loop (cdr ts) (+ i 1) acc perches))))))))
 
     ;; --- the step -------------------------------------------------------------------------
@@ -245,6 +273,8 @@
                            ((reedling) (reedling-step c cs ctx (memv (critter-flock c) alarm-flocks) (eq? c singer) say!))
                            ((bellfrog) (frog-step c cs ctx say!))
                            ((moth) (moth-step c cs ctx say!))
+                           ((owl) (owl-step c cs ctx say!))
+                           ((vole) (vole-step c cs ctx say!))
                            (else c)))
                        (critters-list cs))))
         (critters cs
@@ -472,6 +502,100 @@
                                                          (dist (car b) (cdr b) (car home) (cdr home)))
                                                       (car l) b))))))
                     (cons (car best) (cons (cdr best) #f))))))))
+
+    ;; --- snow owls (perch) ---------------------------------------------------------------------
+    ;; states: perched (watching you, warily: the head follows you, looking
+    ;; down when you are below), flying (lifted off without a sound to
+    ;; another perch, when you rush it: moving within RUSH). Carrying H3 the
+    ;; perched owl stops watching you (frame doze) and calls a soft falling
+    ;; fifth (owl-h3) as you come within OWL-NEAR, and again every
+    ;; OWL-CALL-GAP while you stay (the Glasswood bible's "Life").
+    (define RUSH 56.0)             ; px: a moving body this close lifts the owl
+    (define OWL-NEAR 120.0)        ; px: carrying H3, it calls when you come this near
+    (define OWL-CALL-GAP 720)      ; ticks between its calls while you stay (12 s)
+    (define OWL-PERCH-AWAY 80.0)   ; px: the perch it flies to is at least this far from you
+
+    (define (owl-step c cs ctx say!)
+      (let* ((c (critter c t: (+ (critter-t c) 1) anim: (+ (critter-anim c) 1)))
+             (bx (ctx-bx ctx)) (by (ctx-by ctx))
+             (d (dist (critter-x c) (- (critter-y c) 6.0) bx by))
+             (h3 (memv 3 (ctx-carry ctx))))
+        (case (critter-state c)
+          ((perched)
+           (cond
+             ((and (< d RUSH) (ctx-moving ctx) (ctx-playing ctx))
+              (let ((p (owl-perch c cs bx by)))
+                (critter c state: 'flying t: 0 tx: (car p) ty: (cdr p) frame: 'fly
+                         facing: (if (> (car p) (critter-x c)) 1 -1))))
+             (h3
+              (let ((timer (- (critter-timer c) 1))
+                    (near (< d OWL-NEAR)))
+                (cond ((and near (<= timer 0) (ctx-playing ctx))
+                       (say! 'owl-h3 (critter-x c) (critter-y c))
+                       (critter c frame: 'doze timer: OWL-CALL-GAP))
+                      ((not near) (critter c frame: 'doze timer: 0))
+                      (else (critter c frame: 'doze timer: timer)))))
+             (else
+              (critter c facing: (if (> bx (critter-x c)) 1 -1)
+                       frame: (if (> by (+ (critter-y c) 24.0)) 'perch-down 'perch)))))
+          ((flying)
+           (let* ((c (steer c (critter-tx c) (critter-ty c) 1.8 0.1))
+                  (dd (dist (critter-x c) (critter-y c) (critter-tx c) (critter-ty c))))
+             (if (< dd 1.5)
+                 (critter c state: 'perched x: (critter-tx c) y: (critter-ty c) vx: 0.0 vy: 0.0
+                          home: (cons (critter-tx c) (critter-ty c)) frame: 'perch t: 0 timer: 0)
+                 (critter c facing: (if (> (critter-vx c) 0.0) 1 -1)))))
+          (else c))))
+
+    ;; Where an owl flies: a standing place in the room at least
+    ;; OWL-PERCH-AWAY from you and no lower than it sits, the highest of
+    ;; those; failing that, the standing place furthest from you.
+    (define (owl-perch c cs bx by)
+      (let* ((ps (critters-stand cs))
+             (away (filter (lambda (p) (> (dist (car p) (cdr p) bx by) OWL-PERCH-AWAY)) ps))
+             (high (filter (lambda (p) (<= (cdr p) (+ (critter-y c) 0.5))) away)))
+        (cond ((pair? high)
+               (let loop ((l (cdr high)) (b (car high)))
+                 (if (null? l) b (loop (cdr l) (if (< (cdr (car l)) (cdr b)) (car l) b)))))
+              ((pair? ps)
+               (let loop ((l (cdr ps)) (b (car ps)))
+                 (if (null? l) b
+                     (loop (cdr l) (if (> (dist (car (car l)) (cdr (car l)) bx by) (dist (car b) (cdr b) bx by)) (car l) b)))))
+              (else (critter-home c)))))
+
+    ;; --- snow voles (burrow) --------------------------------------------------------------------
+    ;; states: hidden (under the snow), peek (the head out), up (sat up,
+    ;; turned to you). Standing still (calm) within VOLE-NEAR brings it out,
+    ;; the head first, then sitting up with a squeak (vole); moving within
+    ;; VOLE-SHY sends it under again. Glasswood's Snow Hollow and Owl's Watch;
+    ;; Reedfen's fen voles could take the same (the density proposal's call).
+    (define VOLE-NEAR 110.0)
+    (define VOLE-SHY 72.0)
+    (define VOLE-HIDE-MIN 60)      ; ticks under before it looks out again
+    (define VOLE-PEEK 40)          ; ticks of the head alone before it sits up
+
+    (define (vole-step c cs ctx say!)
+      (let* ((c (critter c t: (+ (critter-t c) 1) anim: (+ (critter-anim c) 1)))
+             (bx (ctx-bx ctx)) (by (ctx-by ctx))
+             (d (dist (critter-x c) (- (critter-y c) 4.0) bx by))
+             (shy (and (< d VOLE-SHY) (ctx-moving ctx) (ctx-playing ctx)))
+             (face (if (> bx (critter-x c)) 1 -1)))
+        (case (critter-state c)
+          ((hidden)
+           (if (and (ctx-calm ctx) (ctx-playing ctx) (< d VOLE-NEAR) (>= (critter-t c) VOLE-HIDE-MIN))
+               (critter c state: 'peek t: 0 frame: 'peek facing: face)
+               (critter c frame: 'hidden)))
+          ((peek)
+           (cond (shy (critter c state: 'hidden t: 0 frame: 'hidden))
+                 ((>= (critter-t c) VOLE-PEEK)
+                  (say! 'vole (critter-x c) (critter-y c))
+                  (critter c state: 'up t: 0 frame: 'up facing: face))
+                 (else c)))
+          ((up)
+           (if shy
+               (critter c state: 'hidden t: 0 frame: 'hidden)
+               (critter c facing: face)))
+          (else c))))
 
     ;; A drawn moth chimes in its harmonic's partials: moth-hN.
     (define (moth-cue c)

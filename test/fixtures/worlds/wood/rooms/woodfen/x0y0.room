@@ -1,0 +1,19 @@
+(room
+  region: woodfen
+  at: (0 0)
+  title: "Owl's Branch"
+  intent: "an owl on a low branch, and a vole under the snow"
+  grid:
+  ("#########################"
+   "#                       #"
+   "#                       #"
+   "#   =====        =====  #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#         ===           #"
+   "#                       #"
+   "#########################"
+   "#########################")
+  things: ((snow-owl at: (11 6))
+           (snow-vole at: (20 8))))

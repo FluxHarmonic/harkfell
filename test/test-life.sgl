@@ -1,0 +1,99 @@
+;;; Glasswood's owl (perch) and vole (burrow) ((harkfell creatures);
+;;; topics/harkfell-glasswood-bible "Life"), stepped by the real world tick in
+;;; a fixture room (test/fixtures/worlds/wood), each beside the case that
+;;; must not happen:
+;;;
+;;;   the owl   watches you (turns to your side, looks down at you below);
+;;;             rushed, it lifts off without a sound to a high perch away
+;;;             from you, and a still body as near does not lift it;
+;;;             carrying H3 it stops watching and calls owl-h3, and never
+;;;             without H3
+;;;   the vole  stays under the snow while you move or stand far off;
+;;;             standing still near it brings it up (one squeak), and moving
+;;;             near sends it under
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine tilemap)
+        (engine worldmap)
+        (engine body)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell creatures))
+
+(define CT (load-content (read-world-source "test/fixtures/worlds/wood")))
+(define TM (worldmap-tiles (content-map CT)))
+
+(define (world-standing c r carry)
+  (let ((g (local->global CT (content-room CT 0 0) c r)))
+    (world-populate (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g))) '() '() carry)))
+
+(define (run w script n)
+  (let loop ((w w) (t 0) (news '()))
+    (if (= t n)
+        (cons w news)
+        (let* ((w (world-tick w (script t)))
+               (p (world-take-news w)))
+          (loop (cdr p) (+ t 1) (append news (car p)))))))
+
+(define STILL (lambda (t) NO-INTENT))
+(define (walk h) (lambda (t) (intent h: h v: 0 jump: #f press: #f)))
+(define (calls news kind) (filter (lambda (n) (and (eq? (car n) 'call) (eq? (cadr n) kind))) news))
+(define (one w k) (find (lambda (c) (eq? (critter-kind c) k)) (critters-list (world-critters w))))
+
+(test-group "life: made from the room's things"
+  (test "one owl perched, one vole hidden"
+    (let ((w (world-standing 2 8 '())))
+      (assert-equal 'perched (critter-state (one w 'owl)))
+      (assert-equal 'hidden (critter-state (one w 'vole))))))
+
+;; --- the owl --------------------------------------------------------------------------------
+;; The owl sits on the low branch at (11,6), its feet at x 184, y 112.
+(define WATCH-E (run (world-standing 14 8 '()) STILL 30))
+(define WATCH-W (run (world-standing 9 8 '()) STILL 30))
+(define RUSHED (run (world-standing 2 8 '()) (walk 1) 200))
+(define STILL-NEAR (run (world-standing 9 8 '()) STILL 200))
+(define H3-NEAR (run (world-standing 14 8 '(3)) STILL 200))
+(define NO-H3 (run (world-standing 14 8 '(2)) STILL 200))
+
+(test-group "life: the owl"
+  (test "it watches you: turned to your side, looking down at you"
+    (assert-equal 1 (critter-facing (one (car WATCH-E) 'owl)))
+    (assert-equal 'perch-down (critter-frame (one (car WATCH-E) 'owl)))
+    (assert-equal -1 (critter-facing (one (car WATCH-W) 'owl))))
+  (test "rushed, it lifts off without a sound and settles on a high perch away from you"
+    (let ((o (one (car RUSHED) 'owl)) (b (body-center (world-body (car RUSHED)) HARKFELL-FEEL)))
+      (assert-equal 'perched (critter-state o))
+      (assert-true (< (critter-y o) 100.0))
+      (assert-true (> (sqrt (+ (expt (- (critter-x o) (car b)) 2) (expt (- (critter-y o) (cdr b)) 2))) 80.0))
+      (assert-equal '() (filter (lambda (n) (eq? (car n) 'call)) (cdr RUSHED)))))
+  (test "control: standing still as near, it stays on its branch"
+    (let ((o (one (car STILL-NEAR) 'owl)))
+      (assert-equal 'perched (critter-state o))
+      (assert-true (= 112 (critter-y o)))))
+  (test "carrying H3 it stops watching and calls the falling fifth, once while you stay"
+    (assert-equal 'doze (critter-frame (one (car H3-NEAR) 'owl)))
+    (assert-equal 1 (length (calls (cdr H3-NEAR) 'owl-h3))))
+  (test "control: carrying H2 only, no owl-h3, and it watches"
+    (assert-equal '() (calls (cdr NO-H3) 'owl-h3))
+    (assert-equal 'perch-down (critter-frame (one (car NO-H3) 'owl)))))
+
+;; --- the vole -------------------------------------------------------------------------------
+;; The vole lives at (20,8), its feet at x 328.
+(define WAITED (run (world-standing 15 8 '()) STILL 200))
+(define STARTLED (run (car WAITED) (walk 1) 40))
+(define FAR (run (world-standing 5 8 '()) STILL 300))
+
+(test-group "life: the vole"
+  (test "standing still near it, it comes up and squeaks once"
+    (assert-equal 'up (critter-state (one (car WAITED) 'vole)))
+    (assert-equal 1 (length (calls (cdr WAITED) 'vole))))
+  (test "moving near, it goes under the snow"
+    (assert-equal 'hidden (critter-state (one (car STARTLED) 'vole))))
+  (test "control: standing still far off, it stays under"
+    (assert-equal 'hidden (critter-state (one (car FAR) 'vole)))
+    (assert-equal '() (calls (cdr FAR) 'vole))))

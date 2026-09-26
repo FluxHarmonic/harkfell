@@ -1,0 +1,20 @@
+;;; A one-room fixture world for Glasswood's owl and vole ((harkfell
+;;; creatures), test/test-life.sgl): an owl on a low branch over the floor,
+;;; high branches to fly to, and a vole under the snow at the east end.
+(start region: woodfen room: (0 0) cell: (2 8))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region woodfen
+  name: "Wood fen"
+  bounds: ((0 0) (0 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: (snow-owl snow-vole)
+  moments: ()
+  gives: ())
+
+(creature snow-owl behaviour: perch)
+(creature snow-vole behaviour: burrow)

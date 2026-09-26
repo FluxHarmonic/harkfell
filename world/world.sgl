@@ -98,7 +98,7 @@
   palette: (hol-sky-1 hol-sky-2 hol-sky-3 hol-sky-4 hol-stone-1 hol-stone-2 hol-stone-3 hol-stone-4
             hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
   tiles: hollow
-  roster: ()
+  roster: (lantern-moth snow-owl snow-vole)
   moments: ()
   wander: ()
   gives: ())
@@ -129,3 +129,5 @@
 (creature fen-vole behaviour: burrow)
 (creature pike behaviour: swim)
 (creature heron-shape behaviour: giant)
+(creature snow-owl behaviour: perch)
+(creature snow-vole behaviour: burrow)
