@@ -67,10 +67,11 @@
     "   \"#                       #\"\n   \"#########################\"\n   \"#########################\"))\n"))
 (define WEST-MAP
   (string-append
-    "(map\n  region: glasswood\n  origin: (-2 3)\n  layout:\n  (\"C B-A\")\n  rooms:\n"
+    "(map\n  region: glasswood\n  origin: (-2 3)\n  layout:\n  (\"C B-A\" \"     \" \"     \" \"     \" \"  U  \")\n  rooms:\n"
     "  ((A \"The Scree\" \"through the old stone door, scree falls away west into mist, and the birches glitter far below\")\n"
     "   (B \"First Sight\" \"the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath\")\n"
-    "   (C \"Probe West\" \"a sealed room west of First Sight\"))\n  borders: ((A east)))\n"))
+    "   (C \"Probe West\" \"a sealed room west of First Sight\")\n"
+    "   (U \"Root Ice\" \"a low cave where the birches' roots hang down through the ice: a breath in the dark\"))\n  borders: ((A east)))\n"))
 (define X0-BEFORE (worldmap-x0 (content-map (shell-content))))
 (define PS2 (shell-replace-files! (list (cons "world/rooms/glasswood/x-2y3.room" WEST-ROOM)
                                         (cons "world/regions/glasswood.map" WEST-MAP))))
