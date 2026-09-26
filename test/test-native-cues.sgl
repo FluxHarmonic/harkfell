@@ -8,14 +8,19 @@
 ;;;                    goes to the ring instead (its voice appears there)
 ;;;   the ring door    with the path set to the ring, a cue goes to the ring
 ;;;
-;;; Without an audio device (a runner, a box with no sound server) the mixer
+;;; The audio rule (worker-instructions): it opens the device only with
+;;; PULSE_SINK set, e.g. PULSE_SINK=worker-null (a null sink), so a run never
+;;; reaches the desktop's speakers; without it, it says SETUP and checks
+;;; nothing. Without an audio device (a runner, a box with no sound server) the mixer
 ;;; does not open: it says so and checks nothing. The pure routing rules are
 ;;; test-cue-path's.
 
 (import (sigil test)
+        (sigil process)
         (engine mixer))
 
-(define OPEN (mixer-open!))
+(define SINK (let ((s (getenv "PULSE_SINK"))) (and s (not (string=? s "")) s)))
+(define OPEN (and SINK (mixer-open!)))
 (define (plays) (let ((e (assq 'cue-plays (mixer-stats)))) (and e (cdr e))))
 (define SILENCE (make-bytevector (* 4 4410) 0))   ; 0.1 s of mono zeros at 44100
 
@@ -36,8 +41,8 @@
 
 (test-group "native cues, on the device"
   (if (not OPEN)
-      (test "no audio device: nothing checked (see the header)"
-        (display "native-cues: SETUP no audio device, nothing checked") (newline)
+      (test "no PULSE_SINK, or no audio device: nothing checked (see the header)"
+        (display (if SINK "native-cues: SETUP no audio device, nothing checked" "native-cues: SETUP no PULSE_SINK set (the audio rule), nothing checked")) (newline)
         (assert-true #t))
       (begin
         (test "the device plays cues ('device)"
