@@ -1,0 +1,63 @@
+;;; D40's pause clock ((harkfell audio) audio-now), driven by a hand clock:
+;;; the sound's clock leaves out the time paused, from the end of the hold's
+;;; fade (HOLD-FADE-S) to the resume, so ramps, the hush and the moments'
+;;; timers wait while the game is paused and go on where they stopped.
+;;;
+;;;   running      audio-now follows the wall clock
+;;;   the fade     paused, it still runs for HOLD-FADE-S (the fade plays)
+;;;   held         then it stands still, however long the pause
+;;;   resumed      it goes on from where it stood, and keeps the offset
+;;;   twice        a second pause or resume does nothing; two pauses add up
+
+(import (sigil test)
+        (engine mixer)
+        (harkfell audio))
+
+(define T 1000.0)
+(audio-set-wall-clock! (lambda () T))
+(define (at! t) (set! T t))
+(define (near? a b) (< (abs (- a b)) 1e-9))
+
+(at! 1000.0)
+(define A-RUN (audio-now))
+(at! 1001.5)
+(define A-RUN2 (audio-now))
+(audio-pause!)
+(define PAUSED (audio-paused?))
+(at! 1001.55)
+(define A-FADE (audio-now))                  ; inside the 0.12 s fade
+(at! 1011.5)
+(define A-HELD (audio-now))                  ; ten seconds later
+(audio-pause!)                               ; a second pause: nothing
+(at! 1031.5)
+(define A-HELD2 (audio-now))
+(audio-resume!)
+(define A-RESUMED (audio-now))
+(audio-resume!)                              ; a second resume: nothing
+(at! 1032.5)
+(define A-AFTER (audio-now))
+(define RUNNING (audio-paused?))
+;; a second pause, 5 s long: the two exclusions add up
+(audio-pause!)
+(at! 1037.5)
+(audio-resume!)
+(at! 1038.0)
+(define A-TWO (audio-now))
+
+(test-group "the pause clock (D40)"
+  (test "running, the sound's clock follows the wall clock"
+    (assert-true (near? 1000.0 A-RUN))
+    (assert-true (near? 1001.5 A-RUN2)))
+  (test "paused, it runs through the hold's fade"
+    (assert-true PAUSED)
+    (assert-true (near? 1001.55 A-FADE)))
+  (test "then it stands still at the fade's end, however long the pause"
+    (assert-true (near? (+ 1001.5 HOLD-FADE-S) A-HELD))
+    (assert-true (near? (+ 1001.5 HOLD-FADE-S) A-HELD2)))
+  (test "resumed, it goes on from where it stood"
+    (assert-true (near? (+ 1001.5 HOLD-FADE-S) A-RESUMED))
+    (assert-true (near? (+ 1002.5 HOLD-FADE-S) A-AFTER))
+    (assert-false RUNNING))
+  (test "a second pause's exclusion adds to the first"
+    ;; 30 s paused less the fade, then 5 s less the fade
+    (assert-true (near? (- 1038.0 (- 30.0 HOLD-FADE-S) (- 5.0 HOLD-FADE-S)) A-TWO))))

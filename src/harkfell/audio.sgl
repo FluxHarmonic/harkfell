@@ -31,7 +31,7 @@
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
-          audio-pause! audio-resume! audio-paused?
+          audio-pause! audio-resume! audio-paused? audio-set-wall-clock!
           audio-carry! audio-tone-room! audio-lines world-place room-moment-name
           audio-sound-door! frame-event! save-extras restore-extras!)
 
@@ -39,7 +39,11 @@
     (define *say* (lambda parts #f))
     (define *last* #f)
 
-    (define (wall-now) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+    ;; The wall clock the sound runs on; a test drives it by hand
+    ;; (audio-set-wall-clock!, test-pause-clock).
+    (define *wall-clock* (lambda () (/ (current-jiffy) (* 1.0 (jiffies-per-second)))))
+    (define (wall-now) (*wall-clock*))
+    (define (audio-set-wall-clock! f) (set! *wall-clock* f))
 
     ;; D40: the game pauses when it loses focus, and the sound with it. The
     ;; sound's clock (audio-now) leaves out the time paused, from the end of
