@@ -29,17 +29,23 @@
 # no wrangler.json or .wrangler/deploy redirect in any parent directory can
 # win: wrangler looks for wrangler.json up the tree before wrangler.jsonc), the
 # copies are checked against the manifest, the wasm is moved out to R2
-# (uploaded with --remote, read back, compared), the copies are checked AGAIN
+# (scripts/r2-s3: uploaded, read back, compared), the copies are checked AGAIN
 # right before the deploy, and wrangler runs from that directory.
 #
 # Without --preview, the same deploy directory goes first to the preview
 # branch and scripts/verify-live.mjs checks its pages.dev URL; production is
 # deployed only if that is green, and then checked the same way.
 #
-# Needs: wrangler on PATH and logged in (or CLOUDFLARE_API_TOKEN with the
-# scopes scripts/cloudflare-setup names), and the project and bucket that
+# Needs: wrangler, curl and jq on PATH; CLOUDFLARE_API_TOKEN and
+# CLOUDFLARE_ACCOUNT_ID for the PUBLISH token scripts/cloudflare-setup names
+# (eval "$(~/Ops/scripts/cf-env harkfell)"): wrangler uses it for the Pages
+# deploy, scripts/r2-s3 for the wasm; and the project and bucket that
 # scripts/cloudflare-setup --create makes. Never touches DNS or the project's
 # settings.
+#
+# --dry-run leaves nothing on Cloudflare. With the credentials set it makes ONE
+# read-only request, a HEAD of the wasm's key, to show the token reaches the
+# bucket (present or absent, either is fine; a refusal fails the dry run).
 set -eu
 cd "$(dirname "$0")/.." || exit 1
 say() { echo "publish-web: $*" >&2; }   # stderr: deploy() returns its URL on stdout
@@ -148,30 +154,43 @@ NFILES="$(find "$D/tree" -type f | wc -l)"
 WANT_NOWASM="$(printf '%s\n' "$WANT" | grep -v "  $KEY\$")"
 
 if [ "$DRY" = 1 ]; then
-  say "dry run: would put $KEY ($(stat -c%s "$WORK/harkfell.wasm") bytes) in R2 bucket $BUCKET (--remote), read it back and compare"
+  if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+    set +e; scripts/r2-s3 head "$BUCKET" "$KEY" 2> "$WORK/r2.log"; hrc=$?; set -e
+    case "$hrc" in
+      0) say "dry run: R2 read-only check: $BUCKET/$KEY is already there (the token reads the bucket)" ;;
+      3) say "dry run: R2 read-only check: $BUCKET/$KEY is absent (the token reads the bucket)" ;;
+      *) cat "$WORK/r2.log" >&2; say "dry run: REFUSED: the token cannot read $BUCKET (r2-s3 rc $hrc); a publish would fail"; exit 1 ;;
+    esac
+  else
+    say "dry run: CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID not set, so R2 was not checked"
+  fi
+  say "dry run: would put $KEY ($(stat -c%s "$WORK/harkfell.wasm") bytes) in R2 bucket $BUCKET (scripts/r2-s3), read it back and compare"
   say "dry run: would deploy $NFILES files ($(du -sh "$D/tree" | cut -f1)) plus functions/ from $D to Pages project $PROJECT: branch preview, verify-live on its URL$([ "$ONLY_PREVIEW" = 1 ] || echo ", then branch master and verify-live again")"
-  say "dry run: nothing left the box"
+  say "dry run: nothing was written anywhere"
   exit 0
 fi
 
 command -v wrangler > /dev/null || { say "wrangler not on PATH"; exit 1; }
-# 4. the wasm to R2. --remote on every call: wrangler 4's r2 object commands
-# talk to a LOCAL simulator by default, and a publish that wrote there would
-# report success and serve nothing (Crash's wasm-to-r2 found this). An absent
-# key makes `get` exit non-zero; so does an auth or network failure, which
-# then fails the put loudly. The read-back compare gates both branches.
-if (cd "$D" && wrangler r2 object get "$BUCKET/$KEY" --remote --file "$WORK/back.wasm") > "$WORK/r2.log" 2>&1; then
+[ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || { say "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set (eval \"\$(~/Ops/scripts/cf-env harkfell)\")"; exit 1; }
+# 4. the wasm to R2, through R2's S3 API (scripts/r2-s3): the token holds
+# Bucket Item Read/Write on this bucket only, and wrangler's `r2 object` REST
+# path refuses such a token. r2-s3 exits 3 only for an absent key, so a
+# refused or failed read is never taken as "absent, put it". The read-back
+# compare gates both branches; nothing is ever deleted or overwritten.
+r2_get() { set +e; scripts/r2-s3 get "$BUCKET" "$KEY" "$WORK/back.wasm" 2>> "$WORK/r2.log"; rc=$?; set -e; return $rc; }
+: > "$WORK/r2.log"
+if r2_get; then
   say "$KEY is already in $BUCKET"
-else
-  (cd "$D" && wrangler r2 object put "$BUCKET/$KEY" --remote --file "$WORK/harkfell.wasm" --content-type application/wasm) > "$WORK/r2.log" 2>&1 \
-    || { cat "$WORK/r2.log"; say "the R2 upload failed; nothing deployed"; exit 1; }
-  (cd "$D" && wrangler r2 object get "$BUCKET/$KEY" --remote --file "$WORK/back.wasm") >> "$WORK/r2.log" 2>&1 \
-    || { cat "$WORK/r2.log"; say "the R2 read-back failed; nothing deployed"; exit 1; }
+elif [ "$rc" = 3 ]; then
+  scripts/r2-s3 put "$BUCKET" "$KEY" "$WORK/harkfell.wasm" application/wasm 2>> "$WORK/r2.log" \
+    || { cat "$WORK/r2.log" >&2; say "the R2 upload failed; nothing deployed"; exit 1; }
+  r2_get || { cat "$WORK/r2.log" >&2; say "the R2 read-back failed (r2-s3 rc $rc); nothing deployed"; exit 1; }
   say "put $KEY ($(stat -c%s "$WORK/harkfell.wasm") bytes)"
+else
+  cat "$WORK/r2.log" >&2; say "REFUSED: could not read $BUCKET/$KEY (r2-s3 rc $rc: refused or failed, not absent); nothing deployed"; exit 1
 fi
 cmp -s "$WORK/harkfell.wasm" "$WORK/back.wasm" || { say "REFUSED: the object at $BUCKET/$KEY is not the verified wasm; nothing deployed"; exit 1; }
 say "R2 holds the verified wasm at $KEY (read back, identical)"
-rm -rf "$D/.wrangler"   # wrangler's local state from the r2 calls, never deployed
 
 deploy() {   # branch -> prints the deployment URL on the last line
   got="$(scripts/tree-manifest "$D/tree" "$D")" || { say "REFUSED: tree-manifest refused the deploy directory"; exit 1; }
