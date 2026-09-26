@@ -1050,3 +1050,24 @@ _...............
 4444444444444433
 4444444444444432
 3444444444444322
+
+# The upward icicle (D43, Behind the Fall): one icicle growing up from the
+# floor, clear ice veined with a violet no region uses (h, baked as
+# upward-icicle@h7). 6 x 14, its bottom row on the floor. No thing draws it
+# yet: SYSTEMS' (upward-icicle at: (C R)) is not built; this is its frame.
+
+= upward-icicle
+......
+..h...
+..4...
+..3...
+..h4..
+..34..
+.h34..
+.234..
+.2h4h.
+.2343.
+.2342.
+h23432
+123421
+123421

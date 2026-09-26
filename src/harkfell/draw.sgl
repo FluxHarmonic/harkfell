@@ -779,6 +779,24 @@
           (lambda (n) (slot (case n ((ground-4) 'ground-3) ((ground-3) 'ground-2) ((ground-2) 'ground-1) (else n))))
           slot))
 
+
+    ;; Light shafts through the trunks at the wood's edge (the bible's
+    ;; "Moving pictures"): three broad bands of the low sun slanting down
+    ;; from the upper left, below the far ridge, lighting what they cross a
+    ;; step as a dither (never a wash), as strong as the room's sun and
+    ;; breathing slowly. In the light pass (B, additive).
+    (define SHAFTS (list 30 150 280))
+    (define (draw-shafts! rm t)
+      (let ((sun (room-sun rm)))
+        (when (and (> sun 0.0) (not (under? rm)))
+          (paint-light! (* sun (+ 0.09 (* 0.03 (sin (* t 0.004))))))
+          (for-each (lambda (x0)
+                      (let rows ((y 64))
+                        (when (< y VIEW-H)
+                          (draw-filled-rect (+ x0 (quotient* (- y 64) 2)) y 16 2)
+                          (rows (+ y 2)))))
+                    SHAFTS))))
+
     ;; --- Glasswood's water and weather ---
 
     ;; Deep snow: a drift (the sheet's drift-a, -b) over about half the bare
@@ -1150,6 +1168,7 @@
                   (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) moths)
                   (draw-moth-light! moths b rm ox oy t)
                   (draw-glints! t)
+                  (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
                             *flashes*)))
               (draw-glint-cores! t)
