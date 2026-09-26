@@ -68,6 +68,20 @@ Fifteen rooms east of the first block, to twenty-two. The surface cannot pass th
 
 Three rows: the surface (y 3) is sky and reeds, the under-fen (y 4) is roots and still water, the drowned rooms (y 5) are the old people's steps and the bell they sank. The bounds are x 8 to 17, y 3 to 5.
 
+## Glasswood
+
+**Where.** West of the Hollow and lower, at negative x (bounds x -6 to 0, y 3 to 6): a birch wood caught by an ice storm, every twig sleeved in clear ice. You come down into it through an old amber stone door at Scree End, keyed to H2 (D41). The region's bible and its 22-room map live in the notes (topics/harkfell-glasswood-bible, topics/harkfell-glasswood-map), ruled by David on 2026-09-26 (D41 to D46).
+
+**Written so far (phase 1).** The negative-coordinates probe: The Scree (x0y3), through the door from Scree End, and First Sight (x-1y3), the first room west of x 0. Both are drafts to be redrawn with the rest of the region; their south and west edges stay closed until their neighbours exist. The palette, tiles and bed are the Hollow's placeholders until the look and sound tracks land.
+
+**What the region's rooms may use** (the systems built for it, topics/harkfell-glasswood-systems):
+- **Falling ice**, `(icicle at: (C R))` in `things:`: it shivers and rings when you come within four tiles of its column below it, and lands when a runner who kept going would be under it. Hang it from `#` or `%`, over open floor of `#` or `%` with at least one cell to fall, and with a standing place beside its foot: the content gate checks all three.
+- **Drop-through**: down and jump on `=` drops through it (the Branch Stair's birch branches).
+- **The snow owl** (`snow-owl`, perches and watches you, lifts off if you rush it; carrying H3 it calls a falling fifth) and **the snow vole** (`snow-vole`, comes up when you stand still).
+- **`light:`** below 1 for the dark caves, where moths drawn to H3 (`drawn: 3`) light the way.
+- **`moment:` as a list**, for the start room's second homecoming (`hollow-fifth`).
+- A shut stone whose note you carry calls you from up to three rooms away (D45): no room field; every stone does it.
+
 ## Rulings
 
 None yet. They arrive with D-numbers from `topics/harkfell-phase-plan` in the notes.
