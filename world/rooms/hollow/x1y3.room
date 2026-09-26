@@ -3,7 +3,7 @@
   region: hollow
   at: (1 3)
   title: "Scree End"
-  intent: "the Hollow's west edge, where scree falls into mist and birches stand far off: the way to Glasswood, not yet"
+  intent: "the Hollow's west edge, where an old stone door opens onto scree falling into mist, and birches stand far off"
   bed: (wind 0.6 water 0.2 hum 0.1)
   grid:
   ("#########################"
@@ -14,10 +14,14 @@
    "##                       "
    "#                        "
    "#                  | |  |"
-   "#   |     |    ##########"
-   "#   ||||  ###############"
+   "##  |     |    ##########"
+   " o  ||||  ###############"
    "#########################")
-  things: ((reedling flock: 4 zone: reeds))
+  things: ((reedling flock: 4 zone: reeds)
+           (ring-stone at: (1 9) overtone: 2))
   decor: auto)
 ;; The land steps down west to the world's edge, under the crag that holds
-;; Moth Hollow. What lies beyond is a view: the birch wood is Glasswood's.
+;; Moth Hollow. D41: the old amber door at (1,9), keyed to H2 and humming
+;; D3 from the first minute, opens onto The Scree (glasswood:0,3); the edge
+;; itself is open at (0,9), since a ring-stone is solid and a listed border
+;; must be open.

@@ -1,0 +1,145 @@
+;;; Negative room coordinates (Glasswood lies at x -6..0; the bible's first
+;;; probe, phase 1 of the Glasswood row). On the real world, with The Scree
+;;; (glasswood:0,3) and First Sight (glasswood:-1,3) joined to the Hollow's
+;;; Scree End through the old amber door (D41):
+;;;
+;;;   the map     the world loads clean, its origin is x -1, and a body in
+;;;               the first column of rooms is in glasswood:-1,3
+;;;   the seam    a body walking west along The Scree's shoulder crosses into
+;;;               First Sight (x 0 to x -1)
+;;;   a door      "glasswood:-1,3" parses, and shell-goto! (the path the web's
+;;;               ?room= and the native --room take) puts the body there,
+;;;               with &at too
+;;;   the gate    carrying nothing Scree End's door stays shut; carrying H2 it
+;;;               rings, sinks and opens, and the body walks west through it
+;;;               into The Scree
+;;;   the save    a save made in First Sight goes through the store (written,
+;;;               read back) and restores to the same room and cell
+;;;
+;;; What would make these red: a room key or filename that drops the sign, a
+;;; slot computed with truncation instead of floor, a save that keeps global
+;;; cells (the origin moved from x 1 to x -1 with this region).
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (sigil time)
+        (engine tilemap)
+        (engine worldmap)
+        (engine body)
+        (engine reach)
+        (substratic store kv)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell save)
+        (harkfell shell))
+
+(define SRC (read-world-source "world"))
+(define CT (load-content SRC))
+(define TM (worldmap-tiles (content-map CT)))
+
+(define (global x y c r) (local->global CT (content-room CT x y) c r))
+
+(define (world-standing x y c r carry)
+  (let ((g (global x y c r)))
+    (world-populate (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g)))
+                    (content-stones CT) (content-pickups CT) carry)))
+
+(define (ticks w in n news)
+  (if (= n 0)
+      (cons w news)
+      (let* ((w (world-tick w in))
+             (p (world-take-news w)))
+        (ticks (cdr p) in (- n 1) (append news (car p))))))
+
+(define LEFT (intent h: -1 v: 0 jump: #f press: #f))
+(define (room-at w) (let ((p (world-room w))) (list (placed-x p) (placed-y p))))
+(define (kinds news) (map car news))
+
+;; --- the map --------------------------------------------------------------------------
+(test-group "negative: the map"
+  (test "the world loads clean, with both Glasswood rooms"
+    (assert-equal '() (content-problems CT))
+    (assert-true (content-room CT 0 3))
+    (assert-true (content-room CT -1 3)))
+  (test "the world map's origin is x -1 (Glasswood moved it west from x 1)"
+    (assert-equal -1 (worldmap-x0 (content-map CT))))
+  (test "a pixel in the first column of rooms is in glasswood:-1,3, the next in glasswood:0,3"
+    (let ((wm (content-map CT)))
+      (assert-equal '(-1 3) (let ((p (worldmap-room-at-px wm 10.0 (+ 10.0 (* 176 (- 3 (worldmap-y0 wm))))))) (list (placed-x p) (placed-y p))))
+      (assert-equal '(0 3) (let ((p (worldmap-room-at-px wm 410.0 (+ 10.0 (* 176 (- 3 (worldmap-y0 wm))))))) (list (placed-x p) (placed-y p))))))
+  (test "room labels carry the sign"
+    (assert-equal "glasswood:-1,3" (room-label (content-room CT -1 3)))))
+
+;; --- the seam ---------------------------------------------------------------------------
+;; The Scree's shoulder (standing row 5) runs on west into First Sight's.
+(define WEST (ticks (world-standing 0 3 3 5 '(2)) LEFT 90 '()))
+
+(test-group "negative: the seam"
+  (test "a body walking west on The Scree's shoulder crosses into First Sight"
+    (assert-equal '(-1 3) (room-at (car WEST)))))
+
+;; --- the gate: Scree End's amber door ------------------------------------------------------
+(define DOOR (global 1 3 1 9))
+(define (door-stone w) (find (lambda (s) (equal? (stone-cell s) DOOR)) (world-stones w)))
+(define SHUT (ticks (world-standing 1 3 3 9 '()) LEFT 200 '()))
+(define OPEN (ticks (world-standing 1 3 3 9 '(2)) NOTHING 150 '()))
+(define THROUGH (ticks (car OPEN) LEFT 60 '()))
+
+(test-group "negative: the amber door"
+  (test "it is a ring-stone keyed to H2 at Scree End (1,9)"
+    (assert-true (door-stone (world-standing 1 3 3 9 '())))
+    (assert-equal 2 (stone-overtone (door-stone (world-standing 1 3 3 9 '())))))
+  (test "carrying nothing it stays shut and the body stays in Scree End"
+    (assert-equal 'shut (stone-state (door-stone (car SHUT))))
+    (assert-equal '(1 3) (room-at (car SHUT))))
+  (test "carrying H2 it rings, sinks and opens"
+    (assert-equal '(ring sink open) (filter (lambda (k) (memq k '(ring sink open))) (kinds (cdr OPEN))))
+    (assert-equal 'air (tilemap-ref (world-tiles (car OPEN)) (car DOOR) (cdr DOOR))))
+  (test "and the body walks west through it into The Scree"
+    (assert-equal '(0 3) (room-at (car THROUGH)))))
+
+;; --- a door (?room=, --room) and the save, through the shell --------------------------------
+(define DIR (string-append "/tmp/harkfell-test-negative-" (number->string (current-jiffy))))
+(shell-boot!)
+(set-store-root! DIR)
+(store-remove! SAVE-KEY)
+(shell-load-content! SRC)
+(define WENT (shell-goto! "glasswood:-1,3"))
+(define LABEL (shell-room-label))
+(define BODY (world-body (shell-world)))
+(define WENT-AT (shell-goto! "glasswood:-1,3" (cons 20 5)))
+(define LABEL-AT (shell-room-label))
+(define BODY-AT (world-body (shell-world)))
+
+;; 30.5, not 30.0: a float with no fraction prints as 30 and reads back exact,
+;; which equal? tells apart (measured here; the A4 gotcha), and is not what
+;; this test is about.
+(define SAVED (save-datum CT BODY-AT '(2) (content-stones CT) '() 30.5))
+(define STORED (begin (store-write-datum! "negative-probe" SAVED) (store-read-datum "negative-probe")))
+(define BACK (and STORED (save-restore CT STORED)))
+
+(test-group "negative: a door"
+  (test "the key parses with its sign"
+    (assert-equal '(glasswood -1 3) (parse-room-key "glasswood:-1,3")))
+  (test "shell-goto! puts the body in glasswood:-1,3"
+    (assert-true WENT)
+    (assert-equal "glasswood:-1,3" LABEL))
+  (test "with &at=20,5 the body stands in that cell"
+    (assert-true WENT-AT)
+    (assert-equal "glasswood:-1,3" LABEL-AT)
+    (assert-equal (global -1 3 20 5) (rest-cell TM HARKFELL-FEEL BODY-AT))))
+
+(test-group "negative: the save"
+  (test "the save names the room with its sign"
+    (assert-equal '(room glasswood -1 3) (assq 'room (cddr SAVED))))
+  (test "it goes through the store and comes back"
+    (assert-equal SAVED STORED))
+  (test "and restores to the same room and cell, forgiving nothing"
+    (assert-true (restored? BACK))
+    (assert-equal (global -1 3 20 5) (restored-cell BACK))
+    (assert-equal '() (restored-notes BACK))))

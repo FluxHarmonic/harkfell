@@ -1,0 +1,25 @@
+;;; world/regions/glasswood.map - Glasswood's rooms, laid out, with one
+;;; intent each: topics/harkfell-glasswood-map, ruled by David 2026-09-26
+;;; (D41-D46). West of the Hollow and lower, at negative x.
+;;;
+;;; PHASE 1: only the negative-coordinates probe's two rooms, The Scree (A)
+;;; and First Sight (B), joined to the Hollow's Scree End through the old
+;;; amber door. The other twenty come in phase 2, with the full layout:
+;;;
+;;;   x-6  x-5  x-4  x-3  x-2  x-1  x0
+;;;   J -  I -  H -  G -  F    B -  A      y3  the crowns (sky above)
+;;;        |    |         |    |    |
+;;;   N -  M -  L -  K -  E -  D -  C      y4  the wood floor
+;;;        |                        #
+;;;   P -  O #  Q -  R -  S -  U -  V      y5  the fall's foot, the glass caves
+;;;                  |
+;;;                  T                     y6  the Ice Well
+(map
+  region: glasswood
+  origin: (-1 3)
+  layout:
+  ("B-A")
+  rooms:
+  ((A "The Scree" "through the old stone door, scree falls away west into mist, and the birches glitter far below")
+   (B "First Sight" "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath"))
+  borders: ((A east)))

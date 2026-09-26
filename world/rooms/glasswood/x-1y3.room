@@ -1,0 +1,23 @@
+;; world/rooms/glasswood/x-1y3.room
+(room
+  region: glasswood
+  at: (-1 3)
+  title: "First Sight"
+  intent: "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath"
+  bed: (wind 0.7 water 0.1 hum 0.1)
+  grid:
+  ("#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "%%%%%%%%%%%%%%%%%%%%%%%%%"
+   "%%%%%%%%%%%%%%%%%%%%%%%%%"
+   "%%%%%%%%%%%%%%%%%%%%%%%%%"
+   "%%%%%%%%%%%%%%%%%%%%%%%%%"
+   "#########################")
+  decor: auto)
+;; PROBE DRAFT (phase 1): the first room at a negative coordinate. A flat
+;; shoulder under the open sky. The drop into the Icicle Walk (x-1y4) and
+;; the way west to the Branch Stair (x-2y3) come with those rooms.

@@ -80,6 +80,29 @@
   wander: (stones-remember)
   gives: ())
 
+;; Glasswood (0.2, topics/harkfell-glasswood-bible and -map, D41-D46): a
+;; birch wood caught by an ice storm, west of the Hollow and lower, at
+;; negative x. You come down into it through the old amber door at Scree
+;; End (H2); H3 lies in the Old Birch at its far west corner. PHASE 1 holds
+;; only the negative-coordinates probe (The Scree, First Sight). PLACEHOLDERS
+;; until the look and sound tracks land: the Hollow's palette roles and
+;; tiles, and its bed (SOUND's glasswood-bed, channels wind water chimes
+;; drone); gives: H3 once the Old Birch is written.
+(region glasswood
+  name: "Glasswood"
+  bounds: ((-6 3) (0 6))
+  overtone: 3
+  bed: "hollow-bed"
+  bed-channels: (wind water hum drone)
+  mode: lydian
+  palette: (hol-sky-1 hol-sky-2 hol-sky-3 hol-sky-4 hol-stone-1 hol-stone-2 hol-stone-3 hol-stone-4
+            hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
+  tiles: hollow
+  roster: ()
+  moments: ()
+  wander: ()
+  gives: ())
+
 (region reedfen
   name: "Reedfen"
   bounds: ((8 3) (17 5))

@@ -1,0 +1,25 @@
+;; world/rooms/glasswood/x0y3.room
+(room
+  region: glasswood
+  at: (0 3)
+  title: "The Scree"
+  intent: "through the old stone door, scree falls away west into mist, and the birches glitter far below"
+  bed: (wind 0.8 water 0.1 hum 0.1)
+  grid:
+  ("                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "%%%%%                   #"
+   "%%%%%%%%                #"
+   "%%%%%%%%%%%%            #"
+   "%%%%%%%%%%%%%%%%         "
+   "#########################")
+  decor: auto)
+;; PROBE DRAFT (phase 1, the negative-coordinates probe): the door from
+;; Scree End comes in at the bottom right (24,9); rough scree steps up west
+;; to the shoulder that runs on into First Sight. The south edge stays
+;; closed until the Scree Foot (x0y4) is written; the room is redrawn with
+;; the rest of Glasswood.
