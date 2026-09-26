@@ -107,7 +107,7 @@
 
 (package
   name: "harkfell"
-  version: "0.1.0"
+  version: "0.1.1"
   sigil: "0.22.9"   ; 300d5ddd: the C-path size fix (the web wasm about 70% smaller); 0.22.8 (26cf03de) brought the native helper-recogniser miscompile fixes, the NaN fix, R7RS in core, the wasm export limit, and %hygiene-cell
   description: "A quiet exploration platformer about carrying lost harmonics home"
   license: "GPL-3.0-or-later"
