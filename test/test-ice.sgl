@@ -114,6 +114,8 @@
     (assert-true (says? '("#########" "#       #" "#       #" "#       #" "#########") 4 2 "does not hang from rock")))
   (test "an icicle under a false wall is red"
     (assert-true (says? '("#########" "#   +   #" "#       #" "#       #" "#########") 4 2 "does not hang from rock")))
+  (test "an icicle placed inside rock is red"
+    (assert-true (says? '("#########" "#   %   #" "#   #   #" "#       #" "#########") 4 2 "is not in air")))
   (test "control: an icicle under rough rock is green"
     (assert-true (ok? '("#########" "#   %   #" "#       #" "#       #" "#########") 4 2))))
 
