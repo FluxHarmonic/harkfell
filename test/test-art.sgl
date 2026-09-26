@@ -23,6 +23,9 @@
         (sigil list)
         (sigil string)
         (engine body)
+        (engine room)
+        (harkfell rooms)
+        (harkfell feel)
         (harkfell palette)
         (harkfell atlas)
         (harkfell art cells)
@@ -35,6 +38,24 @@
 (define (string-prefix? p s)
   (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
 (define (drop l n) (if (= n 0) l (drop (cdr l) (- n 1))))
+
+;; Rough rock at column 6 from row 3 to the floor, a shelf on top (test-verbs'
+;; ROUGH): the wall the climb test climbs.
+(define CLIMB-WALL
+  (list "##########"
+        "#........#"
+        "#........#"
+        "#.....%%%#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "#.....%..#"
+        "##########"))
+(define (distinct l)
+  (let loop ((l l) (acc '()))
+    (cond ((null? l) acc) ((member (car l) acc) (loop (cdr l) acc)) (else (loop (cdr l) (cons (car l) acc))))))
 
 (define WORLD (load-content (read-world-source "world")))
 (define LOOK (load-content (read-world-source "test/fixtures/worlds/look")))
@@ -176,8 +197,32 @@
       (assert-equal "jump-a" (player-frame (b 'air 0.0 -4.0) 10))
       (assert-true (string-prefix? "fall-" (player-frame (b 'air 0.0 3.0) 10)))
       (assert-equal "cling-a" (player-frame (b 'cling 0.0 0.0) 10))
-      (assert-true (string-prefix? "climb-" (player-frame (b 'cling 0.0 -0.75) 10)))
-      (assert-equal "swim-a" (player-frame (b 'swim 0.0 0.0) 10)))))
+      (assert-equal "swim-a" (player-frame (b 'swim 0.0 0.0) 10))))
+  ;; Playtest 1 #5: a climb moves the body's y with vy held at 0, so the
+  ;; pose follows y from tick to tick. Holding still, it is the cling.
+  (test "clinging: a climb frame while y changes from tick to tick, the cling while it holds"
+    (let ((c (lambda (y) (body x: 40.0 y: y mode: 'cling vx: 0.0 vy: 0.0))))
+      (player-frame (body x: 40.0 y: 40.0 mode: 'ground vx: 0.0 vy: 0.0) 100)
+      (assert-equal "cling-a" (player-frame (c 40.0) 101))
+      (assert-true (string-prefix? "climb-" (player-frame (c 39.25) 102)))
+      (assert-true (string-prefix? "climb-" (player-frame (c 39.25) 102)))
+      (assert-equal "cling-a" (player-frame (c 39.25) 103))))
+  ;; The same through the physics: a body climbing CLIMB-WALL with up held,
+  ;; then holding still, each tick's body drawn at its tick. It walks into the
+  ;; wall on ticks 0-6 and grabs at tick 7 (a trace of this run).
+  (test "the physics' climb shows paw over paw; its hold shows the cling"
+    (let* ((tm (room-tiles (parse-harkfell-room CLIMB-WALL)))
+           (hist (let loop ((bd (body (body-at 84.0 146.0) mode: 'ground)) (tick 0) (acc '()))
+                   (if (= tick 60)
+                       (reverse acc)
+                       (let ((bd (body-step bd (if (< tick 20) (intent h: 1 v: -1) (intent)) tm HARKFELL-FEEL)))
+                         (loop bd (+ tick 1) (cons (cons tick bd) acc))))))
+           (frames (map (lambda (e) (cons (car e) (player-frame (cdr e) (car e)))) hist))
+           (in (lambda (lo hi) (map cdr (filter (lambda (e) (and (<= lo (car e)) (< (car e) hi))) frames)))))
+      (assert-true (every (lambda (e) (eq? (body-mode (cdr e)) 'cling)) (filter (lambda (e) (<= 7 (car e) 59)) hist)))
+      (assert-true (every (lambda (f) (string-prefix? "climb-" f)) (in 8 20)))
+      (assert-true (<= 2 (length (distinct (in 8 20)))))
+      (assert-true (every (lambda (f) (string=? "cling-a" f)) (in 21 60))))))
 
 (test-group "art: the start screen, the card, the type (D32-D34)"
   (test "the card fades in over 1.2 s, holds, and is gone by CARD-SECONDS"

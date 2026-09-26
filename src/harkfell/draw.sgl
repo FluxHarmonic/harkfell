@@ -535,11 +535,28 @@
 
     (define (step-of v per n) (modulo (floor-int (/ v per)) n))
 
+    ;; Climbing is read from the body's height changing between ticks, not
+    ;; from vy: a held climbable wall moves the body by its y and keeps vy at
+    ;; 0 ((engine body)'s cling-step), so a vy test never saw a climb and the
+    ;; climb frames never showed (playtest 1 #5). Keyed by the world's tick:
+    ;; a draw that repeats a tick keeps that tick's answer.
+    (define *climb-t* #f)          ; the tick last looked at, while clinging
+    (define *climb-y* #f)          ; the body's y at that tick
+    (define *climbing* #f)         ; did y change into that tick
+    (define (climbing? b t)
+      (unless (eqv? t *climb-t*)
+        (set! *climbing* (and *climb-y* (not (= (body-y b) *climb-y*))))
+        (set! *climb-t* t)
+        (set! *climb-y* (body-y b)))
+      *climbing*)
+    (define (not-clinging!) (set! *climb-t* #f) (set! *climb-y* #f) (set! *climbing* #f))
+
     (define (player-frame b t)
       (let ((vx (body-vx b)) (vy (body-vy b)))
+        (unless (eq? (body-mode b) 'cling) (not-clinging!))
         (case (body-mode b)
           ((swim) (if (or (> (abs vx) 0.2) (> (abs vy) 0.3)) (vector-ref SWIM-FRAMES (step-of t 8 4)) "swim-a"))
-          ((cling) (if (> (abs vy) 0.05) (vector-ref CLIMB-FRAMES (step-of (body-y b) 3.0 4)) "cling-a"))
+          ((cling) (if (climbing? b t) (vector-ref CLIMB-FRAMES (step-of (body-y b) 3.0 4)) "cling-a"))
           ((ground)
            (cond ((> (abs vx) 0.15) (vector-ref RUN-FRAMES (step-of (body-x b) 3.5 6)))
                  ((< (modulo t 347) 9) "idle-c")
