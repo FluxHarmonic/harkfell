@@ -42,7 +42,7 @@ if [ -n "$dirty" ]; then
 fi
 SHA=$(git rev-parse --short=12 HEAD)
 FULL=$(git rev-parse HEAD)
-SIGIL_V=$(sed -n 's/^  sigil: "\([0-9.]*\)"$/\1/p' package.sgl | head -1)
+SIGIL_V=$(git show HEAD:package.sgl | sed -n 's/^ *sigil: *"\([0-9][0-9.]*\)".*/\1/p' | head -1)
 case "$SIGIL_V" in [0-9]*.[0-9]*.[0-9]*) ;; *) say "cannot read package.sgl's sigil version ('$SIGIL_V')"; exit 125 ;; esac
 say "job $JOB on HEAD $SHA ($FULL), sigil $SIGIL_V"
 
