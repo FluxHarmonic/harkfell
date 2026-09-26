@@ -95,7 +95,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
@@ -141,13 +141,17 @@ function leakedChromes() {
 { const l = leakedChromes(); if (l.length) { console.log(`SETUP-FAILED: a harkfell-verify chrome is still alive: pids ${l.join(" ")}`); process.exit(2); } }
 
 const udd = fs.mkdtempSync("/tmp/harkfell-verify-chrome-");
+// The audio rule (worker-instructions): the page's audio goes to a null sink,
+// never the desktop's device; --mute-audio alone still opens a stream on it,
+// and a PULSE_SINK naming a sink that does not exist falls back to the default.
+spawnSync("sh", ["-c", "pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null >/dev/null 2>&1 || true"]);
 const chrome = spawn("google-chrome", [
-  "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
+  "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--mute-audio",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--ignore-gpu-blocklist",
   `--remote-debugging-port=${CDP}`, `--user-data-dir=${udd}`,
   "--window-size=1000,760", "about:blank",
-], { stdio: "ignore", detached: true });
+], { stdio: "ignore", detached: true, env: { ...process.env, PULSE_SINK: "worker-null", PIPEWIRE_NODE: "worker-null" } });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function killChromeGroup(sig) { try { process.kill(-chrome.pid, sig); } catch { /* gone */ } }

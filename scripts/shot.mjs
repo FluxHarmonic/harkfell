@@ -26,7 +26,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
@@ -58,6 +58,8 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(PORT, "127.0.0.1", r));
 
 const udd = fs.mkdtempSync("/tmp/harkfell-shot-chrome-");
+// the null sink must exist: a PULSE_SINK naming none falls back to the default device
+spawnSync("sh", ["-c", "pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null >/dev/null 2>&1 || true"]);
 const chrome = spawn("google-chrome", [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--mute-audio",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
