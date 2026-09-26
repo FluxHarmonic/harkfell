@@ -244,6 +244,8 @@ run_sabotage() {
   plant green-role world/world.sgl '{ sub(/\(glw-ice-3 "#8ba3c2"/, "(glw-ice-3 \"#6fb86a\""); print }' leg_art "no Glasswood role has a green hue" || fail=1
   plant no-dark src/harkfell/render.sgl '{ sub(/\(if \(and \(number\? light\) \(< light 1\.0\)\)/, "(if #f"); print }' leg_palette_rebuilt "RED dark" || fail=1
   plant no-moth-light src/harkfell/draw.sgl '{ sub(/\(a \(\* \(\/ unit 3\.0\) g\)\)\)/, "(a 0.0))"); print }' leg_palette_rebuilt "RED moth light" || fail=1
+  # David's ruling on stones (2026-09-27): no effect shifts a harmonic's colour
+  plant dark-shifts-h4 src/harkfell/palette.sgl "{ sub(/\\(cons 'fur-1 'fur-2\\) \\(cons 'fur-2 'ground-2\\)\\)\\)/, \"(cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2) (cons 'h4 'ground-2)))\"); print }" leg_art "every lookup leaves the harmonics' colours as they are" || fail=1
   return $fail
 }
 

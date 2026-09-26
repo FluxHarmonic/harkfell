@@ -125,7 +125,15 @@
                           table))
               (list WATER DEEP REFLECT LIT)))
   (test "sky under water turns to the water's colour (the water reads as water)"
-    (assert-equal (slot-of 'water) (lookup WATER (slot-of 'sky-2)))))
+    (assert-equal (slot-of 'water) (lookup WATER (slot-of 'sky-2))))
+  ;; David, 2026-09-27: a stone's body may take its region's colours, but the
+  ;; harmonics' colours are meaningful: no effect (water, depth, mirror,
+  ;; light, the dark) may shift one
+  (test "every lookup leaves the harmonics' colours as they are"
+    (for-each (lambda (table)
+                (for-each (lambda (h) (assert-equal (slot-of h) (lookup table (slot-of h))))
+                          (list 'h2 'h3 'h4 'h5 'h7)))
+              (list WATER DEEP REFLECT LIT DARK))))
 
 (test-group "art: autotiling"
   (test "an overlay keeps under '.', erases under '_', replaces elsewhere"

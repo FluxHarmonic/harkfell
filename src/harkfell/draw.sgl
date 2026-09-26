@@ -645,6 +645,7 @@
         (with-render-target *solid-rt*
           (set-blend-mode 'normal)
           (draw-solids! rm)
+          (draw-drifts! rm)
           (draw-sun-on-branches! rm)
           (draw-water-bed! rm))
         (with-render-target *foliage-rt*
@@ -669,9 +670,13 @@
       (if (not (glasswood-sheet? rm))
           '()
           (let ((acc '()) (sun (room-sun rm)))
-            (each-tile rm (lambda (m) (memq m (list 'ledge 'rock)))
+            ;; along the tops of glazed branches and ice, and the ice crust on
+            ;; open water (room-crusts' cells)
+            (each-tile rm (lambda (m) (or (memq m (list 'ledge 'rock))
+                                          (and (eq? m 'water) (not (under? rm)))))
                        (lambda (mat x y m gc gr)
-                         (when (not (mask-has? m MASK-UP))
+                         (when (and (not (mask-has? m MASK-UP))
+                                    (or (not (eq? mat 'water)) (not (material-at gc (- gr 1)))))
                            (for-each (lambda (dx)
                                        (let ((ph (tile-variant (+ gc dx) gr 97)))
                                          (set! acc (cons (list (+ x dx) y (* 1.0 ph) (< (modulo (* ph 7) 10) (* 10.0 sun))) acc))))
@@ -762,7 +767,33 @@
                              (sun-pixel! (+ x c) y gc (+ (* 16 gr) c) (* (if (eq? mat 'ledge) 0.22 0.06) sun))
                              (cols (+ c 1))))))))))
 
+    ;; A ring-stone's slots in its room (David's ruling, 2026-09-27: "The
+    ;; stone colors can be unique to each area but the colors are
+    ;; meaningful"). The body may take the region's own colours; the glyph's
+    ;; harmonic colours (h2..h7) are world-wide slots, the same in every
+    ;; region and under any light: (DARK and LIT leave them as they are). In
+    ;; Glasswood the body is a step darker, ice in shade with an ice edge, so
+    ;; a blue or green glyph reads against it.
+    (define (stone-slot rm)
+      (if (glasswood-sheet? rm)
+          (lambda (n) (slot (case n ((ground-4) 'ground-3) ((ground-3) 'ground-2) ((ground-2) 'ground-1) (else n))))
+          slot))
+
     ;; --- Glasswood's water and weather ---
+
+    ;; Deep snow: a drift (the sheet's drift-a, -b) over about half the bare
+    ;; tops of glass ice in a room under the sky, rising four pixels above
+    ;; the tile, baked into the solid layer (snow does not sway).
+    (define (draw-drifts! rm)
+      (when (and (glasswood-sheet? rm) (not (under? rm)))
+        (let ((cells (filter (lambda (i) i) (list (ice-cell "drift-a") (ice-cell "drift-b")))))
+          (when (pair? cells)
+            (set-color 1.0 1.0 1.0 1.0)
+            (each-tile rm (lambda (m) (eq? m 'rock))
+                       (lambda (mat x y m gc gr)
+                         (let ((k (tile-variant (+ gc 11) gr (* 2 (length cells)))))
+                           (when (and (< k (length cells)) (not (material-at gc (- gr 1))))
+                             (atlas-draw! (list-ref cells k) x (- y 4) 1)))))))))
 
     ;; The bed under Glasswood's water, drawn into the solid layer so the
     ;; water pass sees it through the water (stones, dark ice, silt): the
@@ -775,8 +806,12 @@
             (set-color 1.0 1.0 1.0 1.0)
             (each-tile rm (lambda (m) (eq? m 'water))
                        (lambda (mat x y m gc gr)
-                         (unless (mask-has? m MASK-DOWN)
-                           (atlas-draw! (list-ref cells (tile-variant gc gr (length cells))) x y 1))))))))
+                         (if (mask-has? m MASK-DOWN)
+                             ;; above the bed, dark water: the water's own colour
+                             ;; shows only as the resolve's dither through it
+                             (let ((d (ice-cell "water-deep")))
+                               (when d (atlas-draw! d x y 1)))
+                             (atlas-draw! (list-ref cells (tile-variant gc gr (length cells))) x y 1))))))))
 
     ;; A crust of clear ice across open water in daylight (the frozen tarn,
     ;; the pools under the sky): on each water cell with air above it, in a
@@ -1072,7 +1107,7 @@
               (for-each (lambda (st)
                           (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                  (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
-                            (when (in-room? x y) (draw-stone st x y t (world-carry w) slot))))
+                            (when (in-room? x y) (draw-stone st x y t (world-carry w) (stone-slot rm)))))
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
