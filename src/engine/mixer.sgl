@@ -15,16 +15,18 @@
 ;;; it is started (an open sink with nothing pushed counts starved frames)
 ;;; and closes once it has ended and played out.
 ;;;
-;;; CUES are mono float buffers played once with a gain and a pan. On the
-;;; web they are the audio bridge's cues (sigil-wasm-audio's load-audio-cue
-;;; and play-audio-cue): uploaded on their first play and mixed in the
-;;; AudioWorklet from its next render quantum, so a cue waits for no ring.
-;;; Natively and headless (sigil-audio 0.12.2 has no cues), and on the web
-;;; when (mixer-set-cue-path! 'ring) asks, they are mixed into one shallow
-;;; sink of their own (the cue path of Crash's audio ticket, option B: a
-;;; cue's latency is the cue sink's depth, CUE-DEPTH-S, not the sources').
+;;; CUES are mono float buffers played once with a gain and a pan. They are
+;;; the sink's cues (sigil-audio 0.13.0's load-audio-cue and play-audio-cue):
+;;; uploaded as they are made, and mixed at output time, so a cue waits for
+;;; no ring. On the web that is the audio bridge's AudioWorklet, from its
+;;; next render quantum; natively the device callback, from its next period.
+;;; When the sink cannot give the cue its gains (below), when a play is
+;;; refused (16 at once natively), and when (mixer-set-cue-path! 'ring) asks,
+;;; they are mixed into one shallow sink of their own instead (the cue path
+;;; of Crash's audio ticket, option B: a cue's latency is the cue sink's
+;;; depth, CUE-DEPTH-S, not the sources'). Headless there is neither.
 ;;; Both paths give the same two gains: equal-power with a sqrt 2 make-up,
-;;; which the bridge's balance pan reproduces exactly (cue-balance).
+;;; which the sink's balance pan reproduces exactly (cue-balance).
 ;;;
 ;;;   (mixer-open! rate-hint)        open the context and the cue sink; #t when sound is possible
 ;;;   (mixer-open-headless! rate tap)   no sinks: sources pulled to the clock, blocks to the tap
@@ -58,26 +60,15 @@
           (sigil time)
           (sigil audio sink))
 
-  ;; the web's cue path: the bridge's cues (sigil-wasm-audio 0.22.7 on)
-  (cond-expand
-    (wasm (import (only (sigil browser audio-sink)
-                        load-audio-cue play-audio-cue stop-audio-cues! audio-cue-mode audio-cue-lag)))
-    (else))
-  (cond-expand
-    (wasm (begin
-            (define BRIDGE-CUES? #t)
-            (define (bridge-load bv) (load-audio-cue bv channels: 1))
-            (define (bridge-play c vol pan) (play-audio-cue c volume: vol pan: pan))
-            (define (bridge-stop!) (stop-audio-cues!))
-            (define (bridge-mode) (audio-cue-mode))
-            (define (bridge-lag) (audio-cue-lag))))
-    (else (begin
-            (define BRIDGE-CUES? #f)
-            (define (bridge-load bv) #f)
-            (define (bridge-play c vol pan) #f)
-            (define (bridge-stop!) #f)
-            (define (bridge-mode) #f)
-            (define (bridge-lag) #f))))
+  ;; The sink's cues (sigil-audio 0.13.0): the audio bridge's worklet on the
+  ;; web (sigil-wasm-audio 0.22.7 on), the device callback natively.
+  (begin
+    (define BRIDGE-CUES? #t)
+    (define (bridge-load bv) (load-audio-cue bv channels: 1))
+    (define (bridge-play c vol pan) (play-audio-cue c volume: vol pan: pan))
+    (define (bridge-stop!) (stop-audio-cues!))
+    (define (bridge-mode) (audio-cue-mode))
+    (define (bridge-lag) (audio-cue-lag)))
 
   (export mixer-open! mixer-open-headless! mixer-resume! mixer-rate mixer-open? mixer-state
           mixer-add! mixer-find mixer-remove! mixer-rename! mixer-sources
@@ -458,8 +449,8 @@
     ;; --- cues ---------------------------------------------------------------------------------
     ;; A cue: mono f32 samples (a bytevector) and its frame count, at the mixer's rate.
     (define-struct cue (floats) (frames))
-    ;; On the web a cue is uploaded to the bridge as it is made, so the worklet
-    ;; has it (and has loaded) long before the first play; a cue made before
+    ;; A cue is uploaded to the sink as it is made, so the sink (and the web's
+    ;; worklet) has it long before the first play; a cue made before
     ;; the context is open uploads on its first play instead.
     (define (make-cue floats frames)
       (let ((c (cue floats: floats frames: frames)))
@@ -484,8 +475,8 @@
             ((>= gr gl) (cons gr (- 1.0 (/ gl gr))))
             (else (cons gl (- (/ gr gl) 1.0)))))
 
-    ;; 'bridge (the web's default) or 'ring (natively and headless always;
-    ;; on the web, a door to hear and measure the old path)
+    ;; 'bridge (the sink's cues, the default) or 'ring (a door to hear and
+    ;; measure the old path; ?sound=cues:ring, --sound cues:ring)
     (define *cue-path* (if BRIDGE-CUES? 'bridge 'ring))
     (define (mixer-cue-path) *cue-path*)
     (define (mixer-set-cue-path! p) (set! *cue-path* (if (and BRIDGE-CUES? (eq? p 'bridge)) 'bridge 'ring)))
@@ -502,13 +493,14 @@
               (set! *bridge-cues* (cons (cons c h) *bridge-cues*))
               h))))
 
-    ;; A play goes to the bridge only when the bridge gives the same two
-    ;; gains: its worklet is running (the buffer-source path, and 'pending
-    ;; while the worklet loads, pan with a StereoPannerNode, which is another
-    ;; law: up to +5 dB on the near side), and the volume fits the bridge's
+    ;; A play goes to the sink only when the sink gives the same two
+    ;; gains: the web's worklet or the native device is playing it (the web's
+    ;; buffer-source path, and 'pending while the worklet loads, pan with a
+    ;; StereoPannerNode, which is another law: up to +5 dB on the near side),
+    ;; and the volume fits the sink's
     ;; clamp at 1.0 (the equal-power near side reaches gain x 1.414). Anything
     ;; else, and a cue whose upload failed, plays on the ring.
-    (define (cue-bridge-ok? vol mode) (and (eq? mode 'worklet) (<= vol 1.0)))
+    (define (cue-bridge-ok? vol mode) (and (memq mode (list 'worklet 'device)) (<= vol 1.0) #t))
 
     ;; pan -1 (left) .. 1 (right), equal-power
     (define (mixer-cue! c gain pan)

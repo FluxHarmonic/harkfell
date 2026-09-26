@@ -7,8 +7,8 @@
 ;;; lands on exactly cue-gains' two gains, at every pan: moving the cues
 ;;; to the worklet must not change what a panned cue sounds like.
 ;;;
-;;; Natively and headless the path is the ring (sigil-audio 0.12.2 has no
-;;; cues), and asking for the bridge there keeps the ring.
+;;; The path is the sink's cues on both targets (sigil-audio 0.13.0: the
+;;; worklet on the web, the device natively), and the ring door switches it.
 
 (import (sigil test)
         (sigil list)
@@ -52,18 +52,21 @@
     (assert-equal (cons 0.0 0.0) (cue-balance 0.0 0.0))))
 
 (test-group "cues: the path"
-  (test "natively and headless the cues take the ring, and the bridge cannot be asked for"
+  (test "the sink's cues are the default on both targets, and the ring door switches to the ring and back"
+    (assert-equal 'bridge (mixer-cue-path))
+    (mixer-set-cue-path! 'ring)
     (assert-equal 'ring (mixer-cue-path))
     (mixer-set-cue-path! 'bridge)
-    (assert-equal 'ring (mixer-cue-path))))
+    (assert-equal 'bridge (mixer-cue-path))))
 
 ;; The review (0.1.1): a play the bridge would give other gains goes to the
 ;; ring: the bridge's clamp at 1.0 (the equal-power near side reaches
 ;; gain x 1.414), and its paths other than the worklet (a StereoPannerNode).
 (test-group "cues: when the bridge is used"
-  (test "the worklet at a volume within its clamp: the bridge"
+  (test "the worklet, or the native device, at a volume within its clamp: the sink"
     (assert-true (cue-bridge-ok? 0.97 'worklet))
-    (assert-true (cue-bridge-ok? 1.0 'worklet)))
+    (assert-true (cue-bridge-ok? 1.0 'worklet))
+    (assert-true (cue-bridge-ok? 0.97 'device)))
   (test "over the clamp: the ring (gain 1.0 hard right needs 1.414)"
     (let* ((g (cue-gains 1.0 1.0)) (vp (cue-balance (car g) (cdr g))))
       (assert-true (> (car vp) 1.0))

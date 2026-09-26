@@ -161,10 +161,11 @@
     (from-git url: sigil-repo package: "sigil-wasm-gles3" version: ">=0.22.8" configs: '(web))
     (from-git url: sigil-repo package: "sigil-browser" version: ">=0.22.8" configs: '(web))
     ;; A2, the sound: the tune model and the live player (0.7.0 has the bed
-    ;; nodes and kinds), and the sink (sokol natively, the WebAudio bridge on
-    ;; the web).
-    (from-git url: "codeberg:sigil/motif" version: "^0.7.0")
-    (from-git url: "codeberg:sigil/sigil-audio" version: "^0.12.2")
+    ;; nodes and kinds), and the sink (miniaudio natively, the WebAudio bridge on
+    ;; the web). motif 0.8.0 widens its sigil-audio range to <0.14, so
+    ;; sigil-audio 0.13.0 gives native builds the cues ((engine mixer)).
+    (from-git url: "codeberg:sigil/motif" version: "^0.8.0")
+    (from-git url: "codeberg:sigil/sigil-audio" version: "^0.13.0")
     (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.8" configs: '(web)))
 
   dev-dependencies: (list

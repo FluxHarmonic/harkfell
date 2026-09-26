@@ -1,0 +1,53 @@
+;;; Native cues through the device (sigil-audio 0.13.0, (engine mixer)), on
+;;; the real audio device: the cue is silent (zeros), so nothing is heard.
+;;;
+;;;   on the device    a cue at a volume the device's balance law can give is
+;;;                    played by the device callback (a sink play is counted),
+;;;                    not mixed into the cue ring
+;;;   over the clamp   a cue whose equal-power near side needs more than 1.0
+;;;                    goes to the ring instead (its voice appears there)
+;;;   the ring door    with the path set to the ring, a cue goes to the ring
+;;;
+;;; Without an audio device (a runner, a box with no sound server) the mixer
+;;; does not open: it says so and checks nothing. The pure routing rules are
+;;; test-cue-path's.
+
+(import (sigil test)
+        (engine mixer))
+
+(define OPEN (mixer-open!))
+(define (plays) (let ((e (assq 'cue-plays (mixer-stats)))) (and e (cdr e))))
+(define SILENCE (make-bytevector (* 4 4410) 0))   ; 0.1 s of mono zeros at 44100
+
+(define MODE #f)
+(define P0 #f) (define P1 #f) (define R1 #f) (define P2 #f) (define R2 #f) (define P3 #f) (define R3 #f)
+(when OPEN
+  (let ((c (make-cue SILENCE 4410)))
+    (set! MODE (let ((e (assq 'cue-mode (mixer-stats)))) (and e (cdr e))))
+    (set! P0 (plays))
+    (mixer-cue! c 0.5 0.3)                         ; on the device
+    (set! P1 (plays)) (set! R1 (mixer-cue-count))
+    (mixer-cue! c 1.0 1.0)                         ; needs 1.414: the ring
+    (set! P2 (plays)) (set! R2 (mixer-cue-count))
+    (mixer-set-cue-path! 'ring)
+    (mixer-cue! c 0.5 0.3)                         ; the door: the ring
+    (set! P3 (plays)) (set! R3 (mixer-cue-count))
+    (mixer-set-cue-path! 'bridge)))
+
+(test-group "native cues, on the device"
+  (if (not OPEN)
+      (test "no audio device: nothing checked (see the header)"
+        (display "native-cues: SETUP no audio device, nothing checked") (newline)
+        (assert-true #t))
+      (begin
+        (test "the device plays cues ('device)"
+          (assert-equal 'device MODE))
+        (test "a cue within the clamp is a device play, not a ring voice"
+          (assert-equal (+ P0 1) P1)
+          (assert-equal 0 R1))
+        (test "a cue over the clamp goes to the ring"
+          (assert-equal P1 P2)
+          (assert-equal 1 R2))
+        (test "the ring door sends a cue to the ring"
+          (assert-equal P2 P3)
+          (assert-equal 2 R3)))))
