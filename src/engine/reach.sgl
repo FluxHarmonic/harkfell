@@ -153,10 +153,6 @@
              (kind-floor? (tilemap-ref tm c (+ r 1)))
              (not (kind-brittle? (tilemap-ref tm c (+ r 1)))))))
 
-    ;; A cell whose floor is thin ice: open, over a brittle tile.
-    (define (over-brittle? tm c r)
-      (and (kind-brittle? (tilemap-ref tm c (+ r 1)))
-           (not (kind-solid? (tilemap-ref tm c r)))))
 
     ;; Every standable cell, as (c . r), in reading order.
     (define (standable-cells tm)
@@ -691,21 +687,18 @@
           ;; (so every neighbour on a floor is an edge), and at the first
           ;; airborne tick off an edge (dropping straight, or turning back to
           ;; the face just walked off); then on, holding the direction, to
-          ;; WALK-MAX. Thin ice: a walk that has crossed a cell over a brittle
-          ;; floor also releases on entering the first standable cell past it
-          ;; (the far bank), since nothing on the ice is a place to stop. A
-          ;; tilemap with no brittle tile walks exactly as before.
+          ;; WALK-MAX. (Thin ice needs no walk of its own: holding on to WALK-MAX,
+          ;; 60 ticks, carries a body about four cells from rest, as far as it can
+          ;; go on thin ice before BRITTLE-TICKS, and the settle there lands on the
+          ;; far bank. A far-bank stop was tried and changed no edge: sabotage S3.)
           (let ((c0 (car (body-cell tm f b0))))
             (for-each
               (lambda (h)
-                (let walk ((b b0) (rev '()) (t 0) (stops 0) (off #f) (iced #f))
+                (let walk ((b b0) (rev '()) (t 0) (stops 0) (off #f))
                   (when b
-                    (let* ((cell (body-cell tm f b))
-                           (cc (car cell))
+                    (let* ((cc (car (body-cell tm f b)))
                            (moved (* h (- cc c0)))
-                           (on-ice (over-brittle? tm cc (cdr cell)))
-                           (bank? (and iced (not on-ice) (> moved stops) (standable? tm cc (cdr cell))))
-                           (stop? (or (and (> moved stops) (<= moved WALK-CELLS)) bank?))
+                           (stop? (and (> moved stops) (<= moved WALK-CELLS)))
                            (off? (and (not off) (eq? (body-mode b) 'air))))
                       (when stop? (settle from b rev))
                       (when off?
@@ -717,8 +710,7 @@
                              (let ((in (make-intent* h 0 #f #f)))
                                (walk (step b in) (cons in rev) (+ t 1)
                                      (if stop? moved stops)
-                                     (or off off?)
-                                     (and (not bank?) (or iced on-ice)))))
+                                     (or off off?))))
                             (else (settle from b rev)))))))
               (list -1 1)))
           ;; D31: the drop through one-way ledges (down and jump), straight or
