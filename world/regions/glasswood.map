@@ -19,30 +19,33 @@
 ;;; shared edge and the edge itself is open. The caves are entered only
 ;;; carrying H3.
 ;;;
-;;; WRITTEN SO FAR: the probe rooms (A, B), batch 1 (the caves and the
-;;; fall's foot: O, P, Q, R, S, T, U, V) and batch 2 (the crowns and the
-;;; secret: F, G, H, I, J, N). Until batch 3 writes the floor (A-E, K-M),
-;;; the edges onto it are closed: O's top, V's top, the bottoms of F, H
-;;; and I, and N's east edge (each room's comment says UNTIL BATCH 3).
+;;; ALL 22 ROOMS ARE WRITTEN (the ROOMS slice, 2026-09-27). Behind the Fall
+;;; waits for SYSTEMS' upward icicle (D43).
 (map
   region: glasswood
   origin: (-6 3)
   layout:
   ("J-I-H-G-F B-A"
-   "             "
-   "N            "
-   "             "
+   "  | |   | | |"
+   "N-M-L-K-E-D-C"
+   "  |         |"
    "P-O-Q-R-S-U-V"
    "        |    "
    "        T    ")
   rooms:
   ((A "The Scree" "through the old stone door, scree falls away west into mist, and the birches glitter far below")
    (B "First Sight" "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath")
+   (C "Scree Foot" "the foot of the scree, where a pale green stone is set in the rock: a door you cannot open yet")
+   (D "Icicle Walk" "the first falling ice: icicles over the path, and one that rings, shivers and falls where a hit costs a few steps")
+   (E "Owl's Watch" "a snow owl on a high branch turns its head to follow you: a breath at the foot of the branches")
    (F "Branch Stair" "birch branches like the rungs of a ladder, up out of the snow into the light, and down again through them")
    (G "The Crowns" "the tops of the wood under the whole sky, every twig in glass and clinking in the wind: a breath")
    (H "Crown Gap" "a gap between two crowns taken at a run; miss, and you drop onto the frozen tarn")
    (I "Fall's Head" "where the stream froze as it went over the edge, and the note you are following comes up from below")
    (J "The Last Birches" "the wood's far edge under the whole sky, looking west over a white valley nobody has walked: a breath")
+   (K "Icicle Gallery" "a long overhang hung with icicles: listen for each one, wait, and go")
+   (L "The Frozen Tarn" "a tarn frozen clear as glass, with stones the old people sank lying under the ice: stand still and it sings")
+   (M "The Frozen Fall" "a waterfall frozen mid-fall: glass on one side, rough rock on the other, and a chimney between them")
    (N "Behind the Fall" "a hollow behind the frozen curtain that a careful eye finds, where one icicle grows upward and hums a note no stone has")
    (O "The Old Birch" "at the foot of the fall, the oldest birch in the wood, hollow, where the moths winter, and the note you followed among them")
    (P "Snow Hollow" "a hollow of deep snow beside the old birch, where voles come up to look at you if you stand still: a breath")

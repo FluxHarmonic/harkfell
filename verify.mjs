@@ -42,7 +42,7 @@
 //              Chrome delivers CDP touches ~90 ms late, so the latency legs
 //              prove the readout works, not what a phone measures)
 //   world      (A1) the page hands over the baked world and it loads clean:
-//              "harkfell: world 56 files, 0 problems" (52 rooms, three maps
+//              "harkfell: world 62 files, 0 problems" (58 rooms, three maps
 //              and world.sgl: WORLD_FILES), and a plain boot enters the world's start
 //              (hollow:4,3)
 //   door       (A1) ?room=reedfen:10,4 boots into that room ("harkfell: room
@@ -102,7 +102,7 @@ const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
 // and y 6 (the Ice Well).
 const X0 = -6, X1 = 17, Y0 = 2, Y1 = 6;
 const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
-const WORLD_FILES = 52 + 3 + 1;   // rooms, maps, world.sgl (52: the Hollow, Reedfen and Glasswood written so far)
+const WORLD_FILES = 58 + 3 + 1;   // rooms, maps, world.sgl (58: the Hollow 14, Reedfen 22, Glasswood 22)
 const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`;   // rooms at 1/4, a 2 px gap
 const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");

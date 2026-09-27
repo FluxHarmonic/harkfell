@@ -1,0 +1,23 @@
+;; world/rooms/glasswood/x-4y4.room
+(room
+  region: glasswood
+  at: (-4 4)
+  title: "The Frozen Tarn"
+  intent: "a tarn frozen clear as glass, with stones the old people sank lying under the ice: stand still and it sings"
+  bed: (wind 0.3 water 0.3 hum 0.3 drone 0.5)
+  grid:
+  ("     |             |    #"
+   "     |             |    #"
+   "     |             |    #"
+   "     |             |    #"
+   "     |             |    #"
+   "     |             |     "
+   "     |             |     "
+   "     |             |     "
+   "#########################"
+   "#######~~~~~~~~~~~#######"
+   "#########################")
+  decor: auto)
+;; The tarn, glass over dark water, between two birches on its shores;
+;; open above to the Crown Gap (a miss lands here). Its moment,
+;; singing-ice (still: 8), is named when SOUND writes the tune.

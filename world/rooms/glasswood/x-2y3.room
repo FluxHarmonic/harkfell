@@ -16,7 +16,7 @@
    "### |     |            ##"
    "### |     |            ##"
    "### |=====|            ##"
-   "#########################")
+   "### |     |            ##")
   decor: auto)
 ;; Two birches (columns 4 and 10) with branches between them like the
 ;; rungs of a ladder, three rows apart: from the Owl's Watch below (its
@@ -26,4 +26,3 @@
 ;; drop through each rung (down and jump) or a step off the branch.
 ;; The east wall (columns 23-24) is the Scree's shoulder: nothing joins
 ;; First Sight here.
-;; UNTIL BATCH 3: the bottom row is rock until the Owl's Watch (x-2y4) is written below; then it opens under the stair.

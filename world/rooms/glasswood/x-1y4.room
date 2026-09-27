@@ -1,0 +1,26 @@
+;; world/rooms/glasswood/x-1y4.room
+(room
+  region: glasswood
+  at: (-1 4)
+  title: "Icicle Walk"
+  intent: "the first falling ice: icicles over the path, and one that rings, shivers and falls where a hit costs a few steps"
+  bed: (wind 0.4 water 0.1 hum 0.2 drone 0.4)
+  grid:
+  ("##   |   |   ############"
+   "##   |   |   ############"
+   "##   |   |   ############"
+   "##   |   |   ############"
+   "     |   |   ############"
+   "     |   |               "
+   "     |   |               "
+   "     |   |               "
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((icicle at: (20 5)) (icicle at: (17 5)) (icicle at: (14 5)))
+  decor: auto)
+;; The first falling ice (the bible's "Harm"): three icicles under the
+;; overhang near the way in from the Scree Foot (columns 20, 17, 14). The
+;; first tells as you come in; stop and it shatters in front of you, keep
+;; going and it lands on you, and you are back at the room's edge. West
+;; the ground opens to the sky under First Sight's lip.

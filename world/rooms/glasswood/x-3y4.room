@@ -1,0 +1,24 @@
+;; world/rooms/glasswood/x-3y4.room
+(room
+  region: glasswood
+  at: (-3 4)
+  title: "Icicle Gallery"
+  intent: "a long overhang hung with icicles: listen for each one, wait, and go"
+  bed: (wind 0.3 water 0.1 hum 0.2 drone 0.5)
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#     #       #         #"
+   "                         "
+   "                         "
+   "                         "
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((icicle at: (3 4)) (icicle at: (9 4)) (icicle at: (12 4)) (icicle at: (17 4)) (icicle at: (21 4)))
+  decor: auto)
+;; Under the Crowns' ridge: a long low overhang with five icicles (columns
+;; 3, 9, 12, 17, 21) and two stubs of rock between. Listen for each one,
+;; wait while it falls, and go.

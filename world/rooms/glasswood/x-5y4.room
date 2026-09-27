@@ -1,0 +1,26 @@
+;; world/rooms/glasswood/x-5y4.room
+(room
+  region: glasswood
+  at: (-5 4)
+  title: "The Frozen Fall"
+  intent: "a waterfall frozen mid-fall: glass on one side, rough rock on the other, and a chimney between them"
+  bed: (wind 0.4 water 0.4 hum 0.2 drone 0.5)
+  grid:
+  ("####  %   |          |   "
+   "####  %   |          |   "
+   "####  %   |          |   "
+   "####  %   |          |   "
+   "####  %   |          |   "
+   "++++      |          |   "
+   "++++      |          |   "
+   "++++      |          |   "
+   "####  %##################"
+   "####  %##################"
+   "####  %##################")
+  decor: auto)
+;; The frozen fall: its glass is column 3, the rough rock column 6, the
+;; chimney between them (columns 4-5) from Fall's Head above down to the
+;; Old Birch below. East the floor runs to the tarn, open above to the
+;; crowns; the rough rock's east face (rows 0-4) climbs to Fall's Head.
+;; West, across the chimney's mouth, the fall's curtain at rows 5-7 is a
+;; false wall (columns 0-3) into Behind the Fall.

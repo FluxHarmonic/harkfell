@@ -6,18 +6,20 @@
   intent: "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath"
   bed: (wind 0.7 water 0.1 hum 0.1)
   grid:
-  ("#                        "
-   "#                        "
-   "#                        "
-   "#                        "
-   "#                        "
-   "#                        "
-   "%%%%%%%%%%%%%%%%%%%%%%%%%"
-   "%%%%%%%%%%%%%%%%%%%%%%%%%"
-   "%%%%%%%%%%%%%%%%%%%%%%%%%"
-   "%%%%%%%%%%%%%%%%%%%%%%%%%"
-   "#########################")
+  ("##                       "
+   "##                       "
+   "##                       "
+   "##                       "
+   "##                       "
+   "##                       "
+   "##           %%%%%%%%%%%%"
+   "##           %%%%%%%%%%%%"
+   "##           %%%%%%%%%%%%"
+   "##           %%%%%%%%%%%%"
+   "##           ############")
   decor: auto)
-;; PROBE DRAFT (phase 1): the first room at a negative coordinate. A flat
-;; shoulder under the open sky. The drop into the Icicle Walk (x-1y4) and
-;; the way west to the Branch Stair (x-2y3) come with those rooms.
+;; The shoulder (columns 13-24) ends over nothing: stand at its lip and
+;; the whole wood is below. West of the lip the ground falls away
+;; (columns 2-12) into the Icicle Walk. Nothing joins the Branch Stair to
+;; the west (columns 0-1 are rock to the sky). Its moment, the-ice-rings
+;; (first visit), is named when SOUND writes the tune.

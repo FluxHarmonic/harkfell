@@ -14,11 +14,13 @@
    " |#|                 |#| "
    "##### |           | #####"
    "#######         #########"
-   "#########       o    o###"
+   "#########       o    o o#"
    "#########################"
    "#########################")
   things: ((ring-stone at: (16 8) overtone: 2)
            (ring-stone at: (21 8) overtone: 3)
+           (ring-stone at: (23 8) overtone: 4)
+           (lantern-moth at: (19 6) count: 3 drawn: 3)
            (lantern-moth at: (11 5) count: 4 drawn: 2))
   moment: (tune: hollow-answers when: first-visit carrying: 2)
   decor: auto)
@@ -27,3 +29,8 @@
 ;; behind it the H3 stone (21,8), pale green, stays shut: the way down to
 ;; the Underhum, directly below, shown and sealed. Two old standing stones
 ;; stand on the rims (columns 2 and 22).
+;; Glasswood (D44): carrying H3 home, the green stone sinks too, and behind
+;; it, in a one-cell pocket (22,8), a cold blue stone (23,8), keyed to H4,
+;; stays shut: amber, green, blue. A few moths drawn to H3 gather at the
+;; green stone. Its second moment, hollow-fifth (first visit, carrying: 3),
+;; is listed after hollow-answers when SOUND writes the tune.

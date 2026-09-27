@@ -12,14 +12,16 @@
    "                        #"
    "                        #"
    "                        #"
-   "%%%%%                   #"
-   "%%%%%%%%                #"
-   "%%%%%%%%%%%%            #"
-   "%%%%%%%%%%%%%%%%         "
-   "#########################")
+   "%%%%%%%%%% %%%%%%%%%    #"
+   "%%%%%%%%%%        %%    #"
+   "%%%%%%%%%%        %%    #"
+   "%%%%%%%%%%               "
+   "%%%%%%%%%%          #####")
   decor: auto)
-;; PROBE DRAFT (phase 1, the negative-coordinates probe): the door from
-;; Scree End comes in at the bottom right (24,9); rough scree steps up west
-;; to the shoulder that runs on into First Sight. The south edge stays
-;; closed until the Scree Foot (x0y4) is written; the room is redrawn with
-;; the rest of Glasswood.
+;; The door from Scree End comes in at the bottom right (24,9) onto a
+;; ledge (columns 20-24). West of it the scree falls away (columns 10-19)
+;; into the Scree Foot below. Over the fall a rib of rimed rock (row 6)
+;; runs from the ledge's rough end (columns 18-19, climbed from the ledge)
+;; west to the scree's shoulder (columns 0-9), which runs on into First
+;; Sight. The shoulder's rough east face (column 9) is the climb back up
+;; from the Scree Foot, with a hop over the slot at column 10.

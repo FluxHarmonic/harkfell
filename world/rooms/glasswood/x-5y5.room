@@ -6,7 +6,7 @@
   intent: "at the foot of the fall, the oldest birch in the wood, hollow, where the moths winter, and the note you followed among them"
   bed: (wind 0.1 water 0.4 hum 0.4 drone 0.8)
   grid:
-  ("#########################"
+  ("####  %##################"
    "####  %#######      #####"
    "####  %####     ||| #####"
    "####  %#        ||| #####"
@@ -23,8 +23,7 @@
   decor: auto)
 ;; The foot of the frozen fall. The chimney comes down at columns 4-5
 ;; between the fall's glass (column 3) and the rough rock (column 6,
-;; climbable back up from the floor); its top stays closed until The
-;; Frozen Fall (x-5y4) is written above.
+;; climbable back up from the floor), from the Frozen Fall above.
 ;; The Old Birch is the three-wide trunk (columns 16-18, rows 2-7), its
 ;; hollow in the fifth row; H3 lies at its foot among the moths' cloud.
 ;; The green stone (20,5) is the door to the Glass Chute: taking H3 at

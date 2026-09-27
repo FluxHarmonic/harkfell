@@ -63,9 +63,9 @@
 (test-group "gates: the world has one stone and one harmonic"
   (test "the world loads clean"
     (assert-equal '() (content-problems CT)))
-  (test "six ring-stones: the Old Stone's, the bowl's and Scree End's door (D41) keyed to 2; the one under the bowl and the Old Birch's (Glasswood) to 3; the Ice Well's to 4"
-    (assert-equal 6 (length (content-stones CT)))
-    (assert-equal '(2 2 2 3 3 4) (list-sort < (map stone-overtone (content-stones CT))))
+  (test "eight ring-stones: the Old Stone's, the bowl's and Scree End's door (D41) keyed to 2; the one under the bowl, the Old Birch's and the Scree Foot's (Glasswood) to 3; the Ice Well's and the bowl's pocket's (D44) to 4"
+    (assert-equal 8 (length (content-stones CT)))
+    (assert-equal '(2 2 2 3 3 3 4 4) (list-sort < (map stone-overtone (content-stones CT))))
     (assert-true (the-stone (world-standing 10 3 18 8 '())))
     (assert-equal 2 (stone-overtone (the-stone (world-standing 10 3 18 8 '())))))
   (test "two pickups: H2 on the Far Mound (A4 moved it there from the Drowned Channel), H3 at the Old Birch (Glasswood)"
