@@ -1073,6 +1073,22 @@
                                   (when (>= k 3) (draw-filled-rect (+ x 11) (+ y 1) 4 1) (draw-filled-rect (+ x 5) (+ y 3) 1 2))))))))
                       (room-thin-ice rm))))))
 
+    ;; The meltwater under thin ice keeps the water's glow in the dark, so where
+    ;; the moth light has not reached it, it would show the ice from across the
+    ;; room (contact sheet 5, Root Ice). After the water pass, the water cell
+    ;; under each unseen thin-ice cell is painted as shadowed rock.
+    (define (cover-thin-water! w ox oy)
+      (let* ((p (world-room w)) (rm (and p (placed-data p))))
+        (when (and rm (moth-lit? rm))
+          (let ((seen? (seen-fn w)))
+            (set-blend-mode 'normal)
+            (paint! 'ground-1)
+            (for-each (lambda (cr)
+                        (let ((x (* TILE (car cr))) (y (* TILE (+ (cdr cr) 1))))
+                          (unless (seen? (+ ox x 8) (+ oy (* TILE (cdr cr)) 8))
+                            (draw-filled-rect x y TILE TILE))))
+                      (room-thin-ice rm))))))
+
     (define (draw-ice! w ox oy t)
       (let ((is (world-ice w))
             (seen? (seen-fn w)))
@@ -1151,7 +1167,8 @@
     ;; not from their glow alone, and a dark room starts a step darker than
     ;; its light: (black), the step lifting as the moths arrive (room-dark-
     ;; extra). The rings cancel the whole of it. Your own body keeps a faint
-    ;; light of the extra step, so you see yourself in the black; it fades as
+    ;; light of two steps while the extra one is there, so you see yourself in
+    ;; the black (one step left it near black, contact sheet 5); it fades as
     ;; the extra does (the review: a whole step left a lit spot on the body
     ;; once the moths had come).
     (define (draw-moth-light! moths b rm ox oy t)
@@ -1162,7 +1179,7 @@
           (let* ((unit (/ dark DARK-GAIN))
                  (drawn (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths))
                  (cx (- (car c) ox)) (cy (- (cdr c) oy 4)))
-            (light-disc! (- (car c) ox) (- (cdr c) oy) 8.0 (/ (min 1.0 (room-dark-extra rm arr)) DARK-GAIN))
+            (light-disc! (- (car c) ox) (- (cdr c) oy) 8.0 (/ (* 2.0 (min 1.0 (room-dark-extra rm arr))) DARK-GAIN))
             (for-each (lambda (c)
                         (unless (eq? (critter-state c) 'drawn)
                           (light-disc! (- (critter-x c) ox) (- (critter-y c) oy) 9.0
@@ -1238,6 +1255,7 @@
                         (filter (lambda (c) (not ((kind? 'moth) c))) cs))
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (draw-water! rm)
+              (cover-thin-water! w ox oy)
               (draw-crusts!)
               (draw-snow! rm t)
               (for-each (lambda (c) (draw-critter c ox oy t slot)) (filter eyes? cs))
