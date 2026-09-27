@@ -26,7 +26,8 @@
         (harkfell content)
         (harkfell source)
         (harkfell check)
-        (harkfell feel))
+        (harkfell feel)
+        (harkfell shell))
 
 (define SRC (read-world-source "test/fixtures/worlds/thin"))
 (define CT (load-content SRC))
@@ -237,3 +238,20 @@
     (let ((ps (thin-ice-placement-problems GRID 5 3)))
       (assert-equal 1 (length ps))
       (assert-true (says? ps "no open cell above")))))
+
+;; The door (?room=...&at=C,R, shell-goto!): a cell in rock, or over thin ice,
+;; is refused; the rock beside the ice is taken. (The review's fix; its first
+;; version refused only the ice and let rock through, which verify.mjs's door
+;; leg caught on a runner.)
+(shell-boot!)
+(shell-load-content! SRC)
+(define DOOR-ROCK (shell-goto! "thinfen:0,0" (cons 13 8)))
+(define DOOR-ICE (shell-goto! "thinfen:0,0" (cons 13 7)))
+(define DOOR-BANK (shell-goto! "thinfen:0,0" (cons 10 7)))
+(test-group "thin ice: the door"
+  (test "into rock: refused"
+    (assert-false DOOR-ROCK))
+  (test "over thin ice: refused"
+    (assert-false DOOR-ICE))
+  (test "on the rock beside it: taken (the control)"
+    (assert-true DOOR-BANK)))

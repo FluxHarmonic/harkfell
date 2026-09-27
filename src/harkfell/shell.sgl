@@ -344,9 +344,9 @@
                         (if at
                             (and (< -1 (car at) ROOM-COLS) (< -1 (cdr at) ROOM-ROWS)
                                  (let ((ch (room-char rm (car at) (cdr at))))
-                                   (not (memq (char-kind ch) (list 'solid 'climbable 'ledge 'hazard)))
-                                   ;; nor over thin ice (a return there would crack it again)
-                                   (not (member (cons (car at) (+ (cdr at) 1)) (room-thin-ice rm))))
+                                   (and (not (memq (char-kind ch) (list 'solid 'climbable 'ledge 'hazard)))
+                                        ;; nor over thin ice (a return there would crack it again)
+                                        (not (member (cons (car at) (+ (cdr at) 1)) (room-thin-ice rm)))))
                                  (local->global *content* rm (car at) (cdr at)))
                             (room-start-cell *content* rm)))))
         (and cell
