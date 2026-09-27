@@ -74,6 +74,7 @@
           region-rooms
           thing-kw thing-at room-things-of grid-standable?
           icicle-floor-row icicle-placement-problems
+          room-thin-ice thin-ice-placement-problems
           moment-forms moment-kw room-moments moment-key)
 
   (begin
@@ -268,6 +269,39 @@
                                            (cell-name c stand-r) " has no standing neighbour on the same floor)"))
                       '())))
         (append hung ground way)))
+
+    ;; --- Glasswood: thin ice ----------------------------------------------------------------
+    ;;
+    ;; A thin-ice thing, (thin-ice at: (C R)), makes its # cell BRITTLE: solid
+    ;; to the physics, and standing on it (on it alone) for BRITTLE-TICKS
+    ;; ((harkfell feel)) cracks it, which is a soft return ((engine body)'s
+    ;; crack, a hazard). The reach checker never rests on it ((engine reach)'s
+    ;; standable?), so a way over it must be crossed in one go. Placement, a
+    ;; problem each when it fails:
+    ;;   ice      its cell is # (glass ice), in the grid
+    ;;   over     the cell under it is ~ (meltwater: what you fall into)
+    ;;   a floor  the cell above it is open (air, reeds or a false wall), so it
+    ;;            is walked on
+
+    ;; The room's thin-ice cells, ((c . r) ...).
+    (define (room-thin-ice rm)
+      (map (lambda (a) (cons (car a) (cadr a)))
+           (filter int-pair?
+                   (map (lambda (t) (thing-kw t "at"))
+                        (filter (lambda (t) (and (pair? t) (eq? (car t) 'thin-ice))) (room-things rm))))))
+
+    (define (thin-ice-placement-problems grid c r)
+      (let* ((here (grid-char grid c r))
+             (below (grid-char grid c (+ r 1)))
+             (above (grid-char grid c (- r 1)))
+             (at (cell-name c r)))
+        (append
+          (if (and here (char=? here #\#)) '()
+              (list (string-append "thin-ice at: " at " is not on # (ice: its own cell must be glass ice)")))
+          (if (and below (char=? below #\~)) '()
+              (list (string-append "thin-ice at: " at " is not over ~ (over: the cell under it must be meltwater)")))
+          (if (and above (or (ice-air? above) (char=? above #\+))) '()
+              (list (string-append "thin-ice at: " at " has no open cell above it (a floor: it is walked on)"))))))
 
     ;; --- a room's fixed moments (Glasswood: moment: as a list) -----------------------------
     ;; A room's moment: field is one moment, (tune: NAME when: first-visit ...),
@@ -506,6 +540,12 @@
                                                             (map (lambda (u) (let ((b (and (pair? u) (eq? (car u) (quote icicle)) (thing-kw u "at"))))
                                                                                (and (int-pair? b) (not (equal? b a)) (cons (car b) (cadr b)))))
                                                                  things)))))))
+                            ((eq? (car t) 'thin-ice)          ; Glasswood: thin ice, on no roster
+                             (let ((a (thing-kw t "at")))
+                               (if (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
+                                   (add! (string-append "things: thin-ice at: " (datum->string a) " is not a cell of the grid") "things")
+                                   (for-each (lambda (m) (add! (string-append "things: " m) "things"))
+                                             (thin-ice-placement-problems (roomfile-grid rf) (car a) (cadr a))))))
                             ((and reg (not (memq (car t) (or (region-field reg 'roster) '()))))
                              (add! (string-append "things: " (symbol->string (car t)) " is not on "
                                                   (symbol->string region-sym) "'s roster")
@@ -674,6 +714,11 @@
                 (vector-set! cells (+ c (* r ROOM-COLS)) (char-kind (room-char rm c r)))
                 (cl (+ c 1))))
             (loop (+ r 1))))
+        ;; Glasswood's thin ice: a thin-ice thing's # cell is brittle
+        (for-each (lambda (cr)
+                    (when (char=? (room-char rm (car cr) (cdr cr)) #\#)
+                      (vector-set! cells (+ (car cr) (* (cdr cr) ROOM-COLS)) 'brittle)))
+                  (room-thin-ice rm))
         (placed x: (room-x rm) y: (room-y rm)
                 tiles: (tilemap tm cells: cells)
                 data: rm)))

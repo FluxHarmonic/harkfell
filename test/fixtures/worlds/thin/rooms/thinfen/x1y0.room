@@ -1,0 +1,18 @@
+(room
+  region: thinfen
+  at: (1 0)
+  title: "Thin Seam"
+  intent: "thin ice just past the seam"
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "#########################"
+   "~~~~~~###################"
+   "#########################")
+  things: ((thin-ice at: (0 8)) (thin-ice at: (1 8)) (thin-ice at: (2 8)) (thin-ice at: (3 8)) (thin-ice at: (4 8)) (thin-ice at: (5 8))))

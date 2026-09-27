@@ -48,9 +48,15 @@
 ;;;   hazard     a hazard tile under the box (shrunk by HAZARD-INSET) or a
 ;;;              fall out of the map's bottom adds 'hazard to the tick's
 ;;;              events. What happens then is the game's.
+;;;   crack      (thin ice, Glasswood) standing on BRITTLE tiles alone (every
+;;;              tile under the feet brittle) counts the body's BRITTLE ticks,
+;;;              and anything else (the air, rock, a ledge, water) sets them
+;;;              back to 0. At the feel's BRITTLE-TICKS the tick's events add
+;;;              'crack and 'hazard: the ice gives, and the game treats it as
+;;;              a hazard. A feel with no BRITTLE-TICKS (#f) never cracks.
 ;;;
 ;;; Each tick's EVENTS are a list of symbols: jump wall-jump land grab
-;;; mantle let-go splash drop hazard. The game reads them for sound and effects
+;;; mantle let-go splash drop hazard crack. The game reads them for sound and effects
 ;;; and the tests read them to see a verb happen.
 ;;;
 ;;; Pure: no platform, no drawing, no randomness. Only + - * / and
@@ -72,12 +78,13 @@
           feel-wall-kick-x feel-wall-jump-v feel-wall-lock
           feel-climb feel-mantle-v feel-mantle-x feel-mantle-lock
           feel-swim feel-swim-accel feel-sink feel-water-jump-v feel-water-damp
-          feel-hazard-inset
+          feel-hazard-inset feel-brittle-ticks
           intent intent? intent-h intent-v intent-jump intent-press
           NO-INTENT
           body body? body-at
           body-x body-y body-vx body-vy body-mode body-side body-facing
           body-coyote body-buffer body-lock body-jumping body-cut body-events
+          body-brittle
           body-step body-grounded? body-center body-in-water?)
 
   (begin
@@ -113,7 +120,8 @@
       (sink default: 0.25)
       (water-jump-v default: 4.0)
       (water-damp default: 0.35)
-      (hazard-inset default: 2.0))
+      (hazard-inset default: 2.0)
+      (brittle-ticks default: #f))  ; thin ice gives after this many ticks stood on
 
     ;; --- the input ------------------------------------------------------------
 
@@ -133,7 +141,7 @@
     ;; side: the wall held (cling), -1 or 1. facing: -1 or 1. coyote,
     ;; buffer, lock: ticks left. jumping: a button jump still rising with
     ;; jump held. cut: that rise was let go (the heavier gravity). events:
-    ;; this tick's.
+    ;; this tick's. brittle: ticks stood on brittle tiles alone, unbroken.
     (define-struct body
       (x default: 0.0)
       (y default: 0.0)
@@ -147,7 +155,8 @@
       (lock default: 0)
       (jumping default: #f)
       (cut default: #f)
-      (events default: '()))
+      (events default: '())
+      (brittle default: 0))
 
     ;; A body at rest at x y.
     (define (body-at x y)
@@ -215,7 +224,8 @@
              (b (cond ((body-in-water? b tm f) (swim-step b in tm f))
                       ((eq? (body-mode b) 'cling) (cling-step b in tm f))
                       (else (platform-step b in tm f))))
-             (b (hazard-check b tm f)))
+             (b (hazard-check b tm f))
+             (b (brittle-check b tm f)))
         (body b
               buffer: (max 0 (- (body-buffer b) 1))
               lock: (max 0 (- (body-lock b) 1)))))
@@ -437,4 +447,21 @@
         (if (or (box-any? tm (+ (body-x b) i) (+ (body-y b) i) w h kind-hazard?)
                 (> (body-y b) (tilemap-height tm)))
             (add-event b 'hazard)
+            b)))
+
+    ;; Thin ice: standing with every tile under the feet brittle counts a
+    ;; tick; anything else sets the count back to 0. At BRITTLE-TICKS the ice
+    ;; gives: 'crack and 'hazard. The strip is body-grounded?'s.
+    (define (brittle-check b tm f)
+      (let* ((lim (feel-brittle-ticks f))
+             (bottom (+ (body-y b) (feel-box-h f)))
+             (on (and lim
+                      (eq? (body-mode b) 'ground)
+                      (box-any? tm (body-x b) bottom (feel-box-w f) 0.001 kind-brittle?)
+                      (not (box-any? tm (body-x b) bottom (feel-box-w f) 0.001
+                                     (lambda (k) (or (kind-ledge? k) (and (kind-solid? k) (not (kind-brittle? k)))))))))
+             (n (if on (+ (body-brittle b) 1) 0))
+             (b (body b brittle: n)))
+        (if (and on (>= n lim))
+            (add-event (add-event b 'crack) 'hazard)
             b)))))

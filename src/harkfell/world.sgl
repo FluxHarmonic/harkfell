@@ -144,11 +144,15 @@
 
     (define (grounded? b) (eq? (body-mode b) 'ground))
 
+    ;; Ground to come back to: grounded, and not on thin ice alone (a return
+    ;; onto thin ice would crack it again: Glasswood).
+    (define (firm? b) (and (grounded? b) (= (body-brittle b) 0)))
+
     ;; A body kept to return to is kept at rest (A0's entry always was): a
     ;; return to a lip while still running would carry the body straight
     ;; back over it.
     (define (at-rest b)
-      (body b vx: 0.0 vy: 0.0 jumping: #f cut: #f coyote: 0 buffer: 0 lock: 0 events: '()))
+      (body b vx: 0.0 vy: 0.0 jumping: #f cut: #f coyote: 0 buffer: 0 lock: 0 events: (quote ()) brittle: 0))
 
     ;; After a play tick: a room change sets the new room's entry (the body,
     ;; on foot; else the last grounded body, provisionally), and a standing
@@ -158,12 +162,12 @@
              (c (body-center b HARKFELL-FEEL))
              (p (worldmap-room-at-px (world-wm w) (car c) (cdr c)))
              (w (if (and p (not (same-room? p (world-room w))))
-                    (if (grounded? b)
+                    (if (firm? b)
                         (world w room: p entry: (at-rest b) provisional: #f entered: (+ (world-entered w) 1))
                         (world w room: p entry: (or (world-ground w) (world-entry w)) provisional: #t
                                entered: (+ (world-entered w) 1)))
                     w)))
-        (if (grounded? b)
+        (if (firm? b)
             (let ((r (at-rest b)))
               (world w ground: r
                      entry: (if (world-provisional w) r (world-entry w))
@@ -256,7 +260,8 @@
       (let ((w (world w ticks: (+ (world-ticks w) 1))))
         (case (world-phase w)
           ((play)
-           (let ((b (body-step (world-body w) in (world-tiles w) HARKFELL-FEEL)))
+           (let* ((b (body-step (world-body w) in (world-tiles w) HARKFELL-FEEL))
+                  (w (thin-ice-news w b)))
              (if (memq 'hazard (body-events b))
                  (world w body: b phase: 'dark timer: DIM-TICKS)
                  (follow-room (world w body: b)))))
@@ -272,6 +277,20 @@
            (if (<= (world-timer w) 1)
                (world w phase: 'play timer: 0)
                (world w timer: (- (world-timer w) 1)))))))
+
+    ;; Thin ice ((engine body)'s brittle count): news (ice creak x y) at a
+    ;; third and two thirds of BRITTLE-TICKS stood on it, (ice crack x y) when
+    ;; it gives (the director's cues ice-creak and ice-crack, the sound
+    ;; track's; the look draws the cracks from the count). x y: the body's
+    ;; centre.
+    (define (thin-ice-news w b)
+      (let* ((n (body-brittle b))
+             (third (quotient BRITTLE-TICKS 3))
+             (c (body-center b HARKFELL-FEEL))
+             (item (lambda (k) (list 'ice k (car c) (cdr c)))))
+        (cond ((memq 'crack (body-events b)) (world w news: (append (world-news w) (list (item 'crack)))))
+              ((or (= n third) (= n (* 2 third))) (world w news: (append (world-news w) (list (item 'creak)))))
+              (else w))))
 
     ;; Back to the current room's entry at once (the R key).
     (define (world-reset w)

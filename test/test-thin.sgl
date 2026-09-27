@@ -1,0 +1,199 @@
+;;; Thin ice (Glasswood, David's challenge-and-danger ruling 2026-09-27: thin
+;;; ice over meltwater that cracks if you stand on it too long; cold water,
+;;; the room resets). On the fixture world test/fixtures/worlds/thin (three
+;;; cells of thin ice at (12..14, 8) in a flat floor) and its real physics:
+;;;
+;;;   the room     a thin-ice thing makes its # cell brittle in the tilemap,
+;;;                and the default door never stands you on it
+;;;   the physics  standing on thin ice alone counts ticks; at BRITTLE-TICKS
+;;;                (and not a tick before) the tick's events add crack and
+;;;                hazard. A body half on rock never counts; the air sets the
+;;;                count back to 0; a feel with no BRITTLE-TICKS never cracks
+;;;   the world    stood on too long it cracks: news (ice creak) twice, then
+;;;                (ice crack), and a soft return onto firm ground; walked
+;;;                over in one go, it holds
+;;;   placement    on #, over ~, open above: each a problem when it fails
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine tilemap)
+        (engine worldmap)
+        (engine body)
+        (engine reach)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel))
+
+(define SRC (read-world-source "test/fixtures/worlds/thin"))
+(define CT (load-content SRC))
+(define TM (worldmap-tiles (content-map CT)))
+(define RM (content-room CT 0 0))
+(define (g c r) (local->global CT RM c r))
+(define (kind-at c r) (let ((x (g c r))) (tilemap-ref TM (car x) (cdr x))))
+
+(define STILL (intent h: 0 v: 0 jump: #f press: #f))
+(define RIGHT (intent h: 1 v: 0 jump: #f press: #f))
+(define JUMP (intent h: 0 v: 0 jump: #t press: #t))
+
+;; The body standing in local cell (c, r), and n ticks of intent in from there:
+;; the list of bodies, one a tick.
+(define (standing c r) (let ((x (g c r))) (stand-body TM HARKFELL-FEEL (car x) (cdr x))))
+(define (ticks b in n f)
+  (let loop ((b b) (k 0) (acc '()))
+    (if (= k n) (reverse acc)
+        (let ((b2 (body-step b (if (procedure? in) (in k) in) TM f)))
+          (loop b2 (+ k 1) (cons b2 acc))))))
+(define (cracked-at bodies)
+  (let loop ((bs bodies) (k 1))
+    (cond ((null? bs) #f)
+          ((memq 'crack (body-events (car bs))) k)
+          (else (loop (cdr bs) (+ k 1))))))
+
+;; --- the room ---------------------------------------------------------------------------
+(test-group "thin ice: the room"
+  (test "the world loads clean, and the thin-ice cells are brittle, their neighbours rock"
+    (assert-equal '() (content-problems CT))
+    (assert-equal 'brittle (kind-at 12 8))
+    (assert-equal 'brittle (kind-at 14 8))
+    (assert-equal 'solid (kind-at 11 8))
+    (assert-equal 'solid (kind-at 15 8)))
+  (test "a cell over thin ice is not a place to stand; over rock beside it, it is"
+    (let ((a (g 13 7)) (b (g 11 7)))
+      (assert-false (standable? TM (car a) (cdr a)))
+      (assert-true (standable? TM (car b) (cdr b)))))
+  (test "the default door never stands you on it (the room's standable cells skip the ice)"
+    (let ((cells (room-standable-cells CT RM)))
+      (assert-true (pair? cells))
+      (assert-false (member (g 12 7) cells))
+      (assert-false (member (g 13 7) cells))
+      (assert-false (member (g 14 7) cells)))))
+
+;; --- the physics ------------------------------------------------------------------------
+(define STOOD (ticks (standing 13 7) STILL 90 HARKFELL-FEEL))
+;; the box straddling rock (column 11) and thin ice (column 12)
+(define STRADDLE (ticks (let ((b (standing 11 7))) (body b x: (+ (body-x b) 8.0))) STILL 150 HARKFELL-FEEL))
+;; stand 40 ticks, jump, and stand again: the count starts over on landing
+(define HOPPED (ticks (standing 13 7) (lambda (k) (if (= k 40) JUMP STILL)) 150 HARKFELL-FEEL))
+(define UNFELT (ticks (standing 13 7) STILL 200 (feel HARKFELL-FEEL brittle-ticks: #f)))
+
+(test-group "thin ice: the physics"
+  (test "stood on, it gives at BRITTLE-TICKS exactly: crack and hazard on tick 60, nothing before"
+    (assert-equal 60 BRITTLE-TICKS)
+    (assert-equal BRITTLE-TICKS (cracked-at STOOD))
+    (assert-true (memq 'hazard (body-events (list-ref STOOD (- BRITTLE-TICKS 1)))))
+    (assert-false (memq 'hazard (body-events (list-ref STOOD (- BRITTLE-TICKS 2)))))
+    (assert-equal (- BRITTLE-TICKS 1) (body-brittle (list-ref STOOD (- BRITTLE-TICKS 2)))))
+  (test "half on rock it never counts (the rock holds you)"
+    (assert-true (< (body-x (car STRADDLE)) (* 16.0 (car (g 12 7)))))
+    (assert-true (> (+ (body-x (car STRADDLE)) 8.0) (* 16.0 (car (g 12 7)))))
+    (assert-false (cracked-at STRADDLE))
+    (assert-equal 0 (body-brittle (list-ref STRADDLE 149))))
+  (test "the air sets the count back: a hop at tick 40 and it has not cracked by tick 60"
+    (assert-true (> (length (filter (lambda (b) (= 0 (body-brittle b))) HOPPED)) 10))
+    (assert-true (> (cracked-at HOPPED) 60)))
+  (test "a feel with no BRITTLE-TICKS never cracks, and never counts"
+    (assert-false (cracked-at UNFELT))
+    (assert-equal 0 (body-brittle (list-ref UNFELT 199)))))
+
+;; --- the world --------------------------------------------------------------------------
+(define (world-standing c r)
+  (let ((x (g c r)))
+    (world-populate (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car x) (cdr x))) '() '() '())))
+
+(define (run w policy n)
+  (let loop ((w w) (k 0) (acc '()))
+    (if (= k n)
+        (cons w (reverse acc))
+        (let* ((w (world-tick w (policy k w)))
+               (p (world-take-news w)))
+          (loop (cdr p) (+ k 1) (append (reverse (map (lambda (item) (cons k item)) (car p))) acc))))))
+
+(define (ice-news log what) (filter (lambda (e) (and (eq? (cadr e) 'ice) (eq? (caddr e) what))) log))
+(define (col-of w) (exact (floor (/ (car (body-center (world-body w) HARKFELL-FEEL)) 16))))
+
+;; Walk from (4,7) until the body's centre is over the middle of the ice, stop,
+;; and stand there.
+(define LINGER (run (world-standing 4 7)
+                    (lambda (k w) (if (< (col-of w) (car (g 13 7))) RIGHT STILL))
+                    240))
+;; Walk from (4,7) right over the ice to the far wall, never stopping.
+(define CROSS (run (world-standing 4 7) (lambda (k w) RIGHT) 150))
+
+(test-group "thin ice: the world"
+  (test "stood on too long it creaks twice, then cracks: a soft return"
+    (assert-equal 2 (length (ice-news (cdr LINGER) 'creak)))
+    (assert-true (>= (length (ice-news (cdr LINGER) 'crack)) 1))
+    (assert-true (>= (world-returns (car LINGER)) 1)))
+  (test "the return is onto firm ground: the entry is not over the ice"
+    (let* ((e (world-entry (car LINGER)))
+           (c (exact (floor (/ (car (body-center e HARKFELL-FEEL)) 16)))))
+      (assert-true (< c (car (g 12 7))))))
+  (test "walked over in one go it holds: no crack, no return, and the body is past it"
+    (assert-equal '() (ice-news (cdr CROSS) 'crack))
+    (assert-equal 0 (world-returns (car CROSS)))
+    (assert-true (> (col-of (car CROSS)) (car (g 14 7))))))
+
+;; Across the seam in the air onto thin ice: run east from (4,7), jump at column
+;; 23 (it lands at x 412, on the second room's first two cells of thin ice),
+;; hold east until standing in the second room, then stand still for good.
+;; The new room's entry is provisional (entered in the air) until the body
+;; first stands, and standing on thin ice must not settle it: the return goes
+;; to the last firm ground, and standing there nothing cracks again. (With the
+;; entry settled on the ice, every return cracks it again: one return a
+;; second and a quarter.)
+(define (seam-policy)
+  (let ((landed #f) (pressed #f))
+    (lambda (k w)
+      (let* ((p (world-room w)) (in-b (and p (= 1 (placed-x p))))
+             (b (world-body w)))
+        (when (and in-b (eq? (body-mode b) 'ground)) (set! landed #t))
+        (cond (landed STILL)
+              ((and (not pressed) (>= (col-of w) 23))
+               (set! pressed #t)
+               (intent h: 1 v: 0 jump: #t press: #t))
+              (pressed (intent h: 1 v: 0 jump: #t press: #f))
+              (else RIGHT))))))
+(define SEAM (run (world-standing 4 7) (seam-policy) 600))
+
+(test-group "thin ice: a return is never onto it"
+  (test "the jump lands on the thin ice past the seam, and it cracks"
+    (assert-true (pair? (ice-news (cdr SEAM) 'crack))))
+  (test "one return, to firm ground, and standing there it never cracks again"
+    (assert-equal 1 (world-returns (car SEAM)))
+    (assert-equal 1 (length (ice-news (cdr SEAM) 'crack)))
+    (assert-equal 0 (body-brittle (world-body (car SEAM))))))
+
+;; --- placement --------------------------------------------------------------------------
+;; (10,3) is the control: # over ~ at (10,4), open above. (5,3) is # over ~ at
+;; (5,4) under the rock at (5,2). (14,3) is # over rock. (10,1) is air.
+(define GRID
+  (list "#########################"
+        "#                       #"
+        "#   ####                #"
+        "#########################"
+        "#####~####~##############"
+        "#########################"
+        "#########################"
+        "#########################"
+        "#########################"
+        "#########################"
+        "#########################"))
+
+(define (says? ps s) (and (find (lambda (p) (string-contains? p s)) ps) #t))
+
+(test-group "thin ice: placement"
+  (test "on #, over ~, open above: no problem (the control)"
+    (assert-equal '() (thin-ice-placement-problems GRID 10 3)))
+  (test "not on #: red, naming it"
+    (assert-true (says? (thin-ice-placement-problems GRID 10 1) "is not on #")))
+  (test "over rock, not meltwater: red, and only that"
+    (let ((ps (thin-ice-placement-problems GRID 14 3)))
+      (assert-equal 1 (length ps))
+      (assert-true (says? ps "is not over ~"))))
+  (test "under rock (not a floor): red, and only that"
+    (let ((ps (thin-ice-placement-problems GRID 5 3)))
+      (assert-equal 1 (length ps))
+      (assert-true (says? ps "no open cell above")))))

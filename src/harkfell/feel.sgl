@@ -31,7 +31,7 @@
 (define-library (harkfell feel)
   (import (engine body))
 
-  (export TILE RUN-TILES-PER-S ACCEL-TICKS HELD-HEIGHT APEX-TICKS
+  (export TILE RUN-TILES-PER-S ACCEL-TICKS HELD-HEIGHT APEX-TICKS BRITTLE-TICKS
           HARKFELL-FEEL feel-with-run)
 
   (begin
@@ -43,6 +43,9 @@
     (define ACCEL-TICKS 15)
     (define HELD-HEIGHT 52.0)            ; 3.25 tiles
     (define APEX-TICKS 20.0)             ; 0.333 s
+    ;; Thin ice (Glasswood): it gives after a second stood on (a walk from
+    ;; rest crosses about four tiles of it in that time; a run, five).
+    (define BRITTLE-TICKS 60)
 
     (define RUN (/ (* RUN-TILES-PER-S TILE) 60.0))
     (define GRAVITY (/ (* 2.0 HELD-HEIGHT) (* APEX-TICKS (- APEX-TICKS 1.0))))
@@ -78,7 +81,8 @@
             sink: 0.25
             water-jump-v: 4.0
             water-damp: 0.35
-            hazard-inset: 2.0))
+            hazard-inset: 2.0
+            brittle-ticks: BRITTLE-TICKS))
 
     ;; The feel with the one speed changed and everything else kept (the
     ;; envelope's sabotage raises it by a third).

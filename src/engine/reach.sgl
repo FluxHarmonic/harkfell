@@ -142,13 +142,21 @@
     ;; A cell a body can stand in: not rock, water or hazard (a one-way
     ;; ledge's own cell counts: a body passes into it from below and can stand
     ;; there on whatever is under it), inside the map, with a floor (rock or
-    ;; ledge) under it.
+    ;; ledge) under it. Thin ice (a BRITTLE floor) is not a place to stand:
+    ;; a body at rest on it gives it way ((engine body)'s crack), so a cell
+    ;; over it is crossed, never rested in.
     (define (standable? tm c r)
       (let ((k (tilemap-ref tm c r)))
         (and (>= c 0) (< c (tilemap-cols tm))
              (>= r 0) (< r (- (tilemap-rows tm) 1))
              (not (or (kind-solid? k) (kind-water? k) (kind-hazard? k)))
-             (kind-floor? (tilemap-ref tm c (+ r 1))))))
+             (kind-floor? (tilemap-ref tm c (+ r 1)))
+             (not (kind-brittle? (tilemap-ref tm c (+ r 1)))))))
+
+    ;; A cell whose floor is thin ice: open, over a brittle tile.
+    (define (over-brittle? tm c r)
+      (and (kind-brittle? (tilemap-ref tm c (+ r 1)))
+           (not (kind-solid? (tilemap-ref tm c r)))))
 
     ;; Every standable cell, as (c . r), in reading order.
     (define (standable-cells tm)
@@ -505,7 +513,7 @@
         ;; What makes two representatives the same state.
         (define (rep-sig b)
           (list (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b) (body-facing b)
-                (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b) (body-cut b)))
+                (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b) (body-cut b) (body-brittle b)))
 
         (define (key kind c r) (+ kind (* NKINDS (cell-index tm c r))))
         (define (key-kind k) (modulo k NKINDS))
@@ -683,15 +691,21 @@
           ;; (so every neighbour on a floor is an edge), and at the first
           ;; airborne tick off an edge (dropping straight, or turning back to
           ;; the face just walked off); then on, holding the direction, to
-          ;; WALK-MAX
+          ;; WALK-MAX. Thin ice: a walk that has crossed a cell over a brittle
+          ;; floor also releases on entering the first standable cell past it
+          ;; (the far bank), since nothing on the ice is a place to stop. A
+          ;; tilemap with no brittle tile walks exactly as before.
           (let ((c0 (car (body-cell tm f b0))))
             (for-each
               (lambda (h)
-                (let walk ((b b0) (rev '()) (t 0) (stops 0) (off #f))
+                (let walk ((b b0) (rev '()) (t 0) (stops 0) (off #f) (iced #f))
                   (when b
-                    (let* ((cc (car (body-cell tm f b)))
+                    (let* ((cell (body-cell tm f b))
+                           (cc (car cell))
                            (moved (* h (- cc c0)))
-                           (stop? (and (> moved stops) (<= moved WALK-CELLS)))
+                           (on-ice (over-brittle? tm cc (cdr cell)))
+                           (bank? (and iced (not on-ice) (> moved stops) (standable? tm cc (cdr cell))))
+                           (stop? (or (and (> moved stops) (<= moved WALK-CELLS)) bank?))
                            (off? (and (not off) (eq? (body-mode b) 'air))))
                       (when stop? (settle from b rev))
                       (when off?
@@ -703,7 +717,8 @@
                              (let ((in (make-intent* h 0 #f #f)))
                                (walk (step b in) (cons in rev) (+ t 1)
                                      (if stop? moved stops)
-                                     (or off off?))))
+                                     (or off off?)
+                                     (and (not bank?) (or iced on-ice)))))
                             (else (settle from b rev)))))))
               (list -1 1)))
           ;; D31: the drop through one-way ledges (down and jump), straight or

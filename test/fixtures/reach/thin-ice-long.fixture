@@ -1,0 +1,24 @@
+;; Glasswood's thin ice: the same corridor, twelve cells of it. Walking over
+;; takes longer than BRITTLE-TICKS (60) on the ice, so it cracks under any
+;; walk (a hazard), and nothing over it is a place to rest: the far bank is
+;; unreachable. Its control, thin-ice-long-control, is this grid with no
+;; brittle: cells, and is reachable: the red here is the thin ice's.
+(fixture
+  name: "thin ice, twelve cells: it cracks before the far bank"
+  expect: unreachable
+  why: "BRITTLE-TICKS: a second stood on thin ice and it gives"
+  start: (3 7)
+  target: ((21 7))
+  brittle: ((6 8) (7 8) (8 8) (9 8) (10 8) (11 8) (12 8) (13 8) (14 8) (15 8) (16 8) (17 8))
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#                       #"
+   "#########################"
+   "######~~~~~~~~~~~~#######"
+   "#########################"))

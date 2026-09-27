@@ -1,0 +1,25 @@
+;; Glasswood's thin ice: a corridor one tile tall (no jump clears anything)
+;; with three cells of thin ice in its floor (brittle: over meltwater). No
+;; cell over the ice is a place to rest, so the only way over is a walk
+;; that keeps going to the far bank: (engine reach)'s walk releases on
+;; entering the first standable cell past the ice. Three cells from rest
+;; take about 40 ticks on the ice, under BRITTLE-TICKS (60). Both ways.
+(fixture
+  name: "thin ice, three cells, walked over in one go"
+  expect: reachable
+  why: "thin ice is crossed, never rested on; three cells walk over in under a second"
+  start: (5 7)
+  target: ((18 7))
+  brittle: ((10 8) (11 8) (12 8))
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#                       #"
+   "#########################"
+   "##########~~~############"
+   "#########################"))

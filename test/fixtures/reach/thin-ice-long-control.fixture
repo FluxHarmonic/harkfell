@@ -1,0 +1,21 @@
+;; Control for thin-ice-long: the same corridor with glass ice, not thin ice
+;; (no brittle: cells). Every cell is a place to rest, so the far bank is
+;; reached, a few cells at a time.
+(fixture
+  name: "the long corridor with ordinary ice (thin-ice-long's control)"
+  expect: reachable
+  why: "without thin ice the corridor is a walk"
+  start: (3 7)
+  target: ((21 7))
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#                       #"
+   "#########################"
+   "######~~~~~~~~~~~~#######"
+   "#########################"))

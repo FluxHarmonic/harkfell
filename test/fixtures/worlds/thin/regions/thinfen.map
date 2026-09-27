@@ -1,0 +1,8 @@
+(map
+  region: thinfen
+  origin: (0 0)
+  layout:
+  ("A-B")
+  rooms:
+  ((A "Thin Ice" "three cells of thin ice in a flat floor")
+   (B "Thin Seam" "thin ice just past the seam")))

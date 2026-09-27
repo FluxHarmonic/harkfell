@@ -1,7 +1,7 @@
 ;;; (engine tilemap) - A grid of tile kinds.
 ;;;
 ;;; A tilemap is a width x height grid of square tiles, each holding a KIND
-;;; symbol. The engine gives four kinds a meaning (the rest are the game's
+;;; symbol. The engine gives these kinds a meaning (the rest are the game's
 ;;; to use, and read as empty space to the collision code):
 ;;;
 ;;;   solid       blocks movement on every side
@@ -11,6 +11,8 @@
 ;;;               through its sides)
 ;;;   water       a body inside it swims
 ;;;   hazard      touching it is the game's business (a soft return, say)
+;;;   brittle     blocks like solid (thin ice): what standing on it for too
+;;;               long does is (engine body)'s BRITTLE-TICKS and the game's
 ;;;
 ;;;   and air, the default, which is nothing.
 ;;;
@@ -28,7 +30,7 @@
           tilemap-ref tilemap-set tilemap-width tilemap-height
           tile-at px->col
           kind-solid? kind-climbable? kind-ledge? kind-floor?
-          kind-water? kind-hazard?)
+          kind-water? kind-hazard? kind-brittle?)
 
   (begin
     (define-struct tilemap
@@ -70,10 +72,13 @@
     (define (tile-at tm x y)
       (tilemap-ref tm (px->col tm x) (px->col tm y)))
 
-    (define (kind-solid? k) (or (eq? k 'solid) (eq? k 'climbable)))
+    (define (kind-solid? k) (or (eq? k 'solid) (eq? k 'climbable) (eq? k 'brittle)))
     (define (kind-climbable? k) (eq? k 'climbable))
     (define (kind-ledge? k) (eq? k 'ledge))
     ;; Something a body can stand on: solid from above.
     (define (kind-floor? k) (or (kind-solid? k) (eq? k 'ledge)))
     (define (kind-water? k) (eq? k 'water))
-    (define (kind-hazard? k) (eq? k 'hazard))))
+    (define (kind-hazard? k) (eq? k 'hazard))
+    ;; Thin ice (Glasswood): solid to the collision, and a body grounded on it
+    ;; alone counts the ticks ((engine body), BRITTLE-TICKS).
+    (define (kind-brittle? k) (eq? k 'brittle))))

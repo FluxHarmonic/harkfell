@@ -1,0 +1,19 @@
+;;; A one-room fixture world for thin ice (Glasswood; test/test-thin.sgl): a
+;;; flat floor with three cells of thin ice in it at (12..14, 8), over
+;;; meltwater; east of it a second room whose floor starts with five cells of
+;;; thin ice (0..5, 8) from the seam, for the entry's rule (a return is never onto
+;;; thin ice). The thin-ice thing is on no region's roster.
+(start region: thinfen room: (0 0) cell: (4 7))
+
+(palette
+  (sky-1 "#8fa3b3" "sky") (stone-1 "#5d5a55" "rock") (stone-2 "#7a766f" "rock lit"))
+
+(region thinfen
+  name: "Thin fen"
+  bounds: ((0 0) (1 0))
+  bed: "reedfen-bed"
+  bed-channels: (wind water reeds drone)
+  palette: (sky-1 stone-1 stone-2)
+  roster: ()
+  moments: ()
+  gives: ())

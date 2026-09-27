@@ -108,7 +108,9 @@
     (define (cell-str c) (string-append "(" (number->string (car c)) "," (number->string (cdr c)) ")"))
 
     ;; A room's grid (world legend) as a tilemap; the edge outside is rock.
-    (define (fixture-tilemap rows)
+    ;; brittle (optional): cells, (c . r), made thin ice (Glasswood; a
+    ;; fixture's brittle: field), as a thin-ice thing makes them in a room.
+    (define (fixture-tilemap rows . brittle)
       (let* ((tm (make-tilemap (string-length (car rows)) (length rows) TILE))
              (cells (vector-copy (tilemap-cells tm))))
         (let loop ((rs rows) (r 0))
@@ -118,6 +120,8 @@
                 (vector-set! cells (+ c (* r (string-length (car rows)))) (char-kind (string-ref (car rs) c)))
                 (cl (+ c 1))))
             (loop (cdr rs) (+ r 1))))
+        (for-each (lambda (b) (vector-set! cells (+ (car b) (* (cdr b) (string-length (car rows)))) 'brittle))
+                  (if (pair? brittle) (car brittle) '()))
         (tilemap tm cells: cells)))
 
 
@@ -131,12 +135,15 @@
                          (if (roomfile-ok? rf) (check-grid rf ROOM-COLS ROOM-ROWS LEGEND-CHARS) '())))
              (expect (roomfile-field rf 'expect))
              (start (roomfile-field rf 'start))
-             (target (roomfile-field rf 'target)))
+             (target (roomfile-field rf 'target))
+             (brittle (roomfile-field rf 'brittle '())))
         (cond ((not (null? ps)) (cons #f ps))
               ((not (memq expect (list 'reachable 'unreachable 'trap 'water-trap)))
                (cons #f (list (problem path: path line: (field-line text "expect") message: "expect: is not reachable, unreachable, trap or water-trap"))))
               ((not (int-pair? start))
                (cons #f (list (problem path: path line: (field-line text "start") message: "start: is not (C R)"))))
+              ((not (and (list? brittle) (every int-pair? brittle)))
+               (cons #f (list (problem path: path line: (field-line text "brittle") message: "brittle: is not ((C R) ...)"))))
               ((not (and (list? target) (pair? target) (every int-pair? target)))
                (cons #f (list (problem path: path line: (field-line text "target") message: "target: is not ((C R) ...)"))))
               (else
@@ -145,7 +152,8 @@
                            expect
                            (cons (car start) (cadr start))
                            (map (lambda (p) (cons (car p) (cadr p))) target)
-                           (roomfile-grid rf))
+                           (roomfile-grid rf)
+                           (map (lambda (p) (cons (car p) (cadr p))) brittle))
                      '())))))
 
     (define (every pred l) (or (null? l) (and (pred (car l)) (every pred (cdr l)))))
@@ -154,8 +162,8 @@
     ;; edges: (graph reached returning water-trapped), each a list of targets:
     ;; reached from start, reached and leading back to start, and (for water
     ;; targets) water the search entered with no way back.
-    (define (targets-reached rows start targets accept?)
-      (let* ((tm (fixture-tilemap rows))
+    (define (targets-reached rows start targets accept? . brittle)
+      (let* ((tm (apply fixture-tilemap rows brittle))
              (g (reach-search tm HARKFELL-FEEL (list start) accept?))
              (fwd (reach-forward g (list start)))
              (back (reach-backward g (list start)))
@@ -173,7 +181,7 @@
     (define (run-fixture fx explore?)
       (let* ((path (list-ref fx 0)) (name (list-ref fx 1)) (expect (list-ref fx 2))
              (start (list-ref fx 3)) (targets (list-ref fx 4)) (rows (list-ref fx 5))
-             (r (targets-reached rows start targets witness-lands?))
+             (r (targets-reached rows start targets witness-lands? (if (> (length fx) 6) (list-ref fx 6) '())))
              (g (car r))
              (reached (cadr r))
              (returning (caddr r))
@@ -200,7 +208,7 @@
              ", refused " (number->string (cdr (assq 'rejected stats)))
              " (" (number->string (cdr (assq 'unrealized stats))) " not realized)")
         (when explore?
-          (let ((r2 (targets-reached rows start targets #f)))
+          (let ((r2 (targets-reached rows start targets #f (if (> (length fx) 6) (list-ref fx 6) (quote ())))))
             (say "  explore: with no replay, reached " (string-join (map cell-str (cadr r2)) " ")
                  (if (null? (cadr r2)) "none" ""))))
         ok))
