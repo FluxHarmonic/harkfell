@@ -1,0 +1,24 @@
+;; world/rooms/glasswood/x-6y3.room
+(room
+  region: glasswood
+  at: (-6 3)
+  title: "The Last Birches"
+  intent: "the wood's far edge under the whole sky, looking west over a white valley nobody has walked: a breath"
+  bed: (wind 0.9 water 0.0 hum 0.1 drone 0.3)
+  grid:
+  ("#      |       |         "
+   "#      |       |         "
+   "#      |       |         "
+   "#      |       |         "
+   "#      |       |         "
+   "###### |     =====       "
+   "##########     |     ####"
+   "##########     |     ####"
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((snow-owl at: (15 4)))
+  decor: auto)
+;; The wood's west edge: a knoll (columns 1-5) to stand on and look west,
+;; and a dip under the last birch, where the owl sits on its branch.
+;; Nothing below joins (Behind the Fall is hidden in the rock).

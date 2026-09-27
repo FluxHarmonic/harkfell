@@ -1,0 +1,25 @@
+;; world/rooms/glasswood/x-3y3.room
+(room
+  region: glasswood
+  at: (-3 3)
+  title: "The Crowns"
+  intent: "the tops of the wood under the whole sky, every twig in glass and clinking in the wind: a breath"
+  bed: (wind 0.9 water 0.0 hum 0.1 drone 0.3)
+  grid:
+  ("   |        |       |    "
+   "   |        |       |    "
+   "   |        |       |    "
+   "   |        |       |    "
+   "   |        |       |    "
+   "   |      =====     |    "
+   "########    |    ########"
+   "########    |    ########"
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((snow-owl at: (12 4)))
+  decor: auto)
+;; A ridge of glazed rock over the Icicle Gallery's overhang (nothing
+;; joins it below), level with the crowns of the wood. A dip in the
+;; middle under one birch; the owl sits on its branch (12,5), a held jump
+;; up from the dip. A breath under the whole sky.

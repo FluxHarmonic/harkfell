@@ -19,17 +19,18 @@
 ;;; shared edge and the edge itself is open. The caves are entered only
 ;;; carrying H3.
 ;;;
-;;; WRITTEN SO FAR: the probe rooms (A, B) and batch 1, the caves and the
-;;; fall's foot (O, P, Q, R, S, T, U, V). O's top (the chimney down from
-;;; M) and V's top (the shaft up to C's stone) stay closed until M and C
-;;; are written.
+;;; WRITTEN SO FAR: the probe rooms (A, B), batch 1 (the caves and the
+;;; fall's foot: O, P, Q, R, S, T, U, V) and batch 2 (the crowns and the
+;;; secret: F, G, H, I, J, N). Until batch 3 writes the floor (A-E, K-M),
+;;; the edges onto it are closed: O's top, V's top, the bottoms of F, H
+;;; and I, and N's east edge (each room's comment says UNTIL BATCH 3).
 (map
   region: glasswood
   origin: (-6 3)
   layout:
-  ("          B-A"
+  ("J-I-H-G-F B-A"
    "             "
-   "             "
+   "N            "
    "             "
    "P-O-Q-R-S-U-V"
    "        |    "
@@ -37,6 +38,12 @@
   rooms:
   ((A "The Scree" "through the old stone door, scree falls away west into mist, and the birches glitter far below")
    (B "First Sight" "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath")
+   (F "Branch Stair" "birch branches like the rungs of a ladder, up out of the snow into the light, and down again through them")
+   (G "The Crowns" "the tops of the wood under the whole sky, every twig in glass and clinking in the wind: a breath")
+   (H "Crown Gap" "a gap between two crowns taken at a run; miss, and you drop onto the frozen tarn")
+   (I "Fall's Head" "where the stream froze as it went over the edge, and the note you are following comes up from below")
+   (J "The Last Birches" "the wood's far edge under the whole sky, looking west over a white valley nobody has walked: a breath")
+   (N "Behind the Fall" "a hollow behind the frozen curtain that a careful eye finds, where one icicle grows upward and hums a note no stone has")
    (O "The Old Birch" "at the foot of the fall, the oldest birch in the wood, hollow, where the moths winter, and the note you followed among them")
    (P "Snow Hollow" "a hollow of deep snow beside the old birch, where voles come up to look at you if you stand still: a breath")
    (Q "Glass Chute" "behind a green stone, the fall's pool drains under the wood down a chute of clear ice, into the dark")

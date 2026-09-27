@@ -1,0 +1,27 @@
+;; world/rooms/glasswood/x-4y3.room
+(room
+  region: glasswood
+  at: (-4 3)
+  title: "Crown Gap"
+  intent: "a gap between two crowns taken at a run; miss, and you drop onto the frozen tarn"
+  bed: (wind 0.8 water 0.1 hum 0.1 drone 0.3)
+  grid:
+  ("     |             |     "
+   "     |             |     "
+   "     |             |     "
+   "     |             |     "
+   "     |             |     "
+   "     |             |     "
+   "===========   ==========#"
+   "     |             |    #"
+   "     |             |    #"
+   "     |             |    #"
+   "#########################")
+  decor: auto)
+;; Two crowns of glazed branches (row 6) with a gap of three (columns
+;; 11-13) between them: the envelope's edge, taken at a run from either
+;; side. Under both is the Frozen Tarn (x-4y4): a miss, or a drop through
+;; the branches, lands you on the ice. The far side is also reached up the
+;; frozen fall, so the gap is proved on its own in a probe world cut from
+;; the Crowns and this room (the Session Log).
+;; UNTIL BATCH 3: the bottom row is rock until the Frozen Tarn (x-4y4) is written below; then a miss falls through.

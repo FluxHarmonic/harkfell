@@ -1,0 +1,27 @@
+;; world/rooms/glasswood/x-5y3.room
+(room
+  region: glasswood
+  at: (-5 3)
+  title: "Fall's Head"
+  intent: "where the stream froze as it went over the edge, and the note you are following comes up from below"
+  bed: (wind 0.7 water 0.3 hum 0.2 drone 0.4)
+  grid:
+  ("          |          |   "
+   "          |          |   "
+   "          |          |   "
+   "          |          |   "
+   "          |          |   "
+   "          |          |   "
+   "####  %=================="
+   "####  %   |          |   "
+   "####  %   |          |   "
+   "####  %   |          |   "
+   "#########################")
+  decor: auto)
+;; The stream froze on the shelf (columns 0-3) and its fall is the glass
+;; wall (column 3) going down through the Frozen Fall to the Old Birch.
+;; Between the glass and the rough rock (column 6) is the chimney
+;; (columns 4-5), two wide: a hop across its mouth, or the way down. East
+;; the crowns run on to the Crown Gap over the Frozen Fall's floor. H3's
+;; tone comes up from below.
+;; UNTIL BATCH 3: the bottom row is rock until the Frozen Fall (x-5y4) is written below; then the chimney and the crowns open down.

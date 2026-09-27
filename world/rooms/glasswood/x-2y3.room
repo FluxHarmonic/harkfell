@@ -1,0 +1,29 @@
+;; world/rooms/glasswood/x-2y3.room
+(room
+  region: glasswood
+  at: (-2 3)
+  title: "Branch Stair"
+  intent: "birch branches like the rungs of a ladder, up out of the snow into the light, and down again through them"
+  bed: (wind 0.6 water 0.1 hum 0.1 drone 0.3)
+  grid:
+  ("    |     |            ##"
+   "    |     |            ##"
+   "    |     |            ##"
+   "    |     |            ##"
+   "    |     |            ##"
+   "    |     |            ##"
+   "###=======|            ##"
+   "### |     |            ##"
+   "### |     |            ##"
+   "### |=====|            ##"
+   "#########################")
+  decor: auto)
+;; Two birches (columns 4 and 10) with branches between them like the
+;; rungs of a ladder, three rows apart: from the Owl's Watch below (its
+;; rungs at rows 4 and 1) up through this room's (rows 9 and 6), a held
+;; jump each (D31: up through a one-way ledge). The top rung runs on west
+;; as a branch to the ridge (columns 0-2) and the Crowns. Down again is a
+;; drop through each rung (down and jump) or a step off the branch.
+;; The east wall (columns 23-24) is the Scree's shoulder: nothing joins
+;; First Sight here.
+;; UNTIL BATCH 3: the bottom row is rock until the Owl's Watch (x-2y4) is written below; then it opens under the stair.
