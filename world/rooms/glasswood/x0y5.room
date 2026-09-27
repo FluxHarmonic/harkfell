@@ -5,7 +5,7 @@
   title: "Cave Mouth"
   intent: "the caves' east end, black until you carry a light: a green stone that rings and opens as you come carrying H3, and the climb up to the scree"
   bed: (wind 0.1 water 0.5 hum 0.4 drone 0.7)
-  light: 0.5
+  light: 0.33
   grid:
   ("################    #####"
    "###############%    %####"

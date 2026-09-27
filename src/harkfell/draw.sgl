@@ -1214,6 +1214,16 @@
     ;; shivers, a flash of the whole dark every four ticks. Light pass.
     (define (draw-icicle-glints! w rm ox oy t)
       (let ((is (world-ice w)))
+        ;; and a shut ring-stone's glyph glows faintly, so the door you cannot
+        ;; open yet reads in the black (the Cave Mouth, the dark before H3)
+        (when (moth-lit? rm)
+          (for-each (lambda (st)
+                      (when (eq? (stone-state st) 'shut)
+                        (let* ((cell (stone-cell st)) (s (tilemap-size (world-tiles w)))
+                               (x (+ (- (* s (car cell)) ox) 8.0)) (y (+ (- (* s (cdr cell)) oy) 8.0)))
+                          (when (in-room? x y)
+                            (light-disc! x y 6.0 (/ (+ 1.6 (* 0.4 (sin (* t 0.05)))) DARK-GAIN))))))
+                    (world-stones w)))
         (when (and is (moth-lit? rm))
           (let* ((dark (+ (dark-steps (room-light rm)) DARK-EXTRA))
                  (unit (/ 1.0 DARK-GAIN)))
