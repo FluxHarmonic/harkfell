@@ -21,6 +21,7 @@
         (engine worldmap)
         (engine body)
         (engine reach)
+        (engine roomfile)
         (harkfell world)
         (harkfell content)
         (harkfell source)
@@ -127,10 +128,6 @@
     (assert-equal 2 (length (ice-news (cdr LINGER) 'creak)))
     (assert-true (>= (length (ice-news (cdr LINGER) 'crack)) 1))
     (assert-true (>= (world-returns (car LINGER)) 1)))
-  (test "the return is onto firm ground: the entry is not over the ice"
-    (let* ((e (world-entry (car LINGER)))
-           (c (exact (floor (/ (car (body-center e HARKFELL-FEEL)) 16)))))
-      (assert-true (< c (car (g 12 7))))))
   (test "walked over in one go it holds: no crack, no return, and the body is past it"
     (assert-equal '() (ice-news (cdr CROSS) 'crack))
     (assert-equal 0 (world-returns (car CROSS)))
@@ -165,6 +162,49 @@
     (assert-equal 1 (world-returns (car SEAM)))
     (assert-equal 1 (length (ice-news (cdr SEAM) 'crack)))
     (assert-equal 0 (body-brittle (world-body (car SEAM))))))
+
+;; Started ON the ice (as a door's &at would put you, or a live reload): the
+;; entry is on the ice. Step west onto rock, stand there, come back to the
+;; middle of the ice and stand still for good. Standing on rock replaces an
+;; entry on thin ice, so the one crack sends you to rock and it never cracks
+;; again. (With the entry left on the ice, each return cracks it again.)
+(define (off-and-back-policy)
+  (let ((phase 'off) (k0 0))
+    (lambda (k w)
+      (case phase
+        ((off) (if (<= (col-of w) (car (g 10 7))) (begin (set! phase 'rest) (set! k0 k) STILL)
+                   (intent h: -1 v: 0 jump: #f press: #f)))
+        ((rest) (if (> (- k k0) 20) (begin (set! phase 'back) RIGHT) STILL))
+        ((back) (if (>= (col-of w) (car (g 13 7))) (begin (set! phase 'stay) STILL) RIGHT))
+        (else STILL)))))
+(define AT-ICE (run (world-standing 13 7) (off-and-back-policy) 400))
+
+(test-group "thin ice: an entry on it is replaced by firm ground"
+  (test "started on the ice, it cracks once you come back and linger: one return, to firm ground"
+    (assert-equal 1 (world-returns (car AT-ICE)))
+    (assert-equal 1 (length (ice-news (cdr AT-ICE) 'crack)))
+    ;; the entry is firm: not on thin ice alone (it may straddle rock and ice,
+    ;; which holds)
+    (assert-false (on-brittle? (world-entry (car AT-ICE)) TM HARKFELL-FEEL))))
+
+;; A room's start: over thin ice is a content problem.
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a) (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+(define (with-start c r)
+  (map (lambda (e) (if (string-contains? (car e) "thinfen/x0y0.room")
+                       (cons (car e) (swap (cdr e) "  things: " (string-append "  start: (" (number->string c) " " (number->string r) ")\n  things: ")))
+                       e))
+       SRC))
+(define (problems src) (map problem-message (content-problems (load-content src))))
+(test-group "thin ice: a room's start"
+  (test "start: over thin ice is red, naming it"
+    (assert-true (find (lambda (p) (string-contains? p "stands on thin ice")) (problems (with-start 13 7)))))
+  (test "start: over rock beside it is clean (the control)"
+    (assert-equal '() (problems (with-start 10 7)))))
 
 ;; --- placement --------------------------------------------------------------------------
 ;; (10,3) is the control: # over ~ at (10,4), open above. (5,3) is # over ~ at

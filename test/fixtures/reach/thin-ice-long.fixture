@@ -1,7 +1,10 @@
 ;; Glasswood's thin ice: the same corridor, twelve cells of it. Walking over
-;; takes longer than BRITTLE-TICKS (60) on the ice, so it cracks under any
-;; walk (a hazard), and nothing over it is a place to rest: the far bank is
-;; unreachable. Its control, thin-ice-long-control, is this grid with no
+;; takes longer than BRITTLE-TICKS (60) on the ice, so a walk cracks it,
+;; and nothing over it is a place to rest: to the checker the far bank is
+;; unreachable. (A player who hops keeps resetting the count and can cross;
+;; the checker never chains hops without a rest, so it reports this
+;; unreachable: the safe direction, but thin ice is no barrier.) Its control,
+;; thin-ice-long-control, is this grid with no
 ;; brittle: cells, and is reachable: the red here is the thin ice's.
 (fixture
   name: "thin ice, twelve cells: it cracks before the far bank"

@@ -1031,11 +1031,11 @@
     ;; shaking a pixel either way while it shivers (D10: the tell is seen as
     ;; well as heard), falling as it hung, and shards on the floor where it
     ;; landed, flying then fewer.
-    ;; Seen: in daylight everything; in a dark room (light: under 1) only
+    ;; Seen: everything, except in a moth-lit room (moth-lit?): there only
     ;; inside the moth light round the body (moth-light-radius). x y: map px.
     (define (seen-fn w)
       (let* ((p (world-room w)) (rm (and p (placed-data p))))
-        (if (not (and rm (< (room-light rm) 1.0)))
+        (if (not (and rm (moth-lit? rm)))
             (lambda (x y) #t)
             (let* ((cs (world-critters w))
                    (moths (filter (lambda (c) (eq? (critter-kind c) 'moth)) (if cs (critters-list cs) '())))
@@ -1151,7 +1151,9 @@
     ;; not from their glow alone, and a dark room starts a step darker than
     ;; its light: (black), the step lifting as the moths arrive (room-dark-
     ;; extra). The rings cancel the whole of it. Your own body keeps a faint
-    ;; light of one step, so you see yourself in the black.
+    ;; light of the extra step, so you see yourself in the black; it fades as
+    ;; the extra does (the review: a whole step left a lit spot on the body
+    ;; once the moths had come).
     (define (draw-moth-light! moths b rm ox oy t)
       (let* ((c (body-center b HARKFELL-FEEL))
              (arr (moth-arrival moths (car c) (cdr c)))
@@ -1160,7 +1162,7 @@
           (let* ((unit (/ dark DARK-GAIN))
                  (drawn (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths))
                  (cx (- (car c) ox)) (cy (- (cdr c) oy 4)))
-            (light-disc! (- (car c) ox) (- (cdr c) oy) 8.0 (/ 1.0 DARK-GAIN))
+            (light-disc! (- (car c) ox) (- (cdr c) oy) 8.0 (/ (min 1.0 (room-dark-extra rm arr)) DARK-GAIN))
             (for-each (lambda (c)
                         (unless (eq? (critter-state c) 'drawn)
                           (light-disc! (- (critter-x c) ox) (- (critter-y c) oy) 9.0
@@ -1172,12 +1174,19 @@
                 (for-each (lambda (r) (light-disc! cx cy (* r (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 arr))) a))
                           MOTH-RINGS)))))))
 
-    ;; The extra dark of a dark room (light: under 1) before its moths arrive:
-    ;; one step (black) with none of them near, lifting as they come; 0 in
-    ;; daylight. arr: moth-arrival.
+    ;; A room the moth light navigates: darker than daylight (room-dark?) and
+    ;; with moths drawn to some harmonic. Only these start black and show their
+    ;; hazards only in the light; a dark room with no moths (Behind the Fall, at
+    ;; the blue hour) keeps the dark its light: gives (the review: it was two
+    ;; steps down for good).
+    (define (moth-lit? rm) (and (room-dark? rm) (room-has-drawn-moths? rm)))
+
+    ;; The extra dark of a moth-lit room before its moths arrive: one step
+    ;; (black) with none of them near, lifting as they come; 0 anywhere else.
+    ;; arr: moth-arrival.
     (define DARK-EXTRA 1.0)
     (define (room-dark-extra rm arr)
-      (if (> (dark-steps (room-light rm)) 0.0)
+      (if (moth-lit? rm)
           (* DARK-EXTRA (- 1.0 (min 1.0 arr)))
           0.0))
 

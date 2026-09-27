@@ -170,7 +170,11 @@
         (if (firm? b)
             (let ((r (at-rest b)))
               (world w ground: r
-                     entry: (if (world-provisional w) r (world-entry w))
+                     ;; a provisional entry settles here, and so does one standing on thin
+                     ;; ice (a door's &at, a reload: the review), so a return is never onto it
+                     entry: (if (or (world-provisional w)
+                                    (and (world-entry w) (on-brittle? (world-entry w) (world-tiles w) HARKFELL-FEEL)))
+                                r (world-entry w))
                      provisional: #f))
             w)))
 

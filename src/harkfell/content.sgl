@@ -74,7 +74,7 @@
           region-rooms
           thing-kw thing-at room-things-of grid-standable?
           icicle-floor-row icicle-placement-problems
-          room-thin-ice thin-ice-placement-problems
+          room-thin-ice thin-ice-placement-problems room-dark? room-has-drawn-moths?
           moment-forms moment-kw room-moments moment-key)
 
   (begin
@@ -282,6 +282,16 @@
     ;;   over     the cell under it is ~ (meltwater: what you fall into)
     ;;   a floor  the cell above it is open (air, reeds or a false wall), so it
     ;;            is walked on
+
+    ;; A room darker than daylight to the palette pass: its light: gives at least
+    ;; half a dark step ((harkfell render) dark-steps: 3 (1 - light), rounded to
+    ;; a half step, so under 11/12). The moths, the drawing and the hazards'
+    ;; visibility all use this one test (the review: they disagreed above 0.917).
+    (define (room-dark? rm) (< (room-light rm) (/ 11.0 12.0)))
+
+    ;; Moths in the room drawn to some harmonic (what lifts a dark room's black).
+    (define (room-has-drawn-moths? rm)
+      (and (find (lambda (t) (thing-kw t "drawn")) (room-things-of rm (quote lantern-moth))) #t))
 
     ;; The room's thin-ice cells, ((c . r) ...).
     (define (room-thin-ice rm)
@@ -671,7 +681,13 @@
                 (add! "decor: is neither auto nor none" "decor")))
             (let ((s (roomfile-field rf 'start)))
               (when (and s (not (and (int-pair? s) (< -1 (car s) ROOM-COLS) (< -1 (cadr s) ROOM-ROWS))))
-                (add! "start: is not (C R) inside the grid" "start")))
+                (add! "start: is not (C R) inside the grid" "start"))
+              ;; Glasswood: a start over thin ice would be a return onto it (the review)
+              (when (and (int-pair? s)
+                         (find (lambda (t) (and (pair? t) (eq? (car t) (quote thin-ice))
+                                                (equal? (thing-kw t "at") (list (car s) (+ (cadr s) 1)))))
+                               (let ((t (roomfile-field rf (quote things) (quote ())))) (if (list? t) t (quote ())))))
+                (add! (string-append "start: " (datum->string s) " stands on thin ice") "start")))
             (let ((u (roomfile-field rf 'unreached '())))
               (unless (and (list? u) (every (lambda (p) (and (int-pair? p) (< -1 (car p) ROOM-COLS) (< -1 (cadr p) ROOM-ROWS))) u))
                 (add! "unreached: is not ((C R) ...) with cells inside the grid" "unreached"))))

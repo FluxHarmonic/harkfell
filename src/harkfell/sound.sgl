@@ -1299,7 +1299,8 @@
         (case k
           ((ledge) (if (eq? r 'reedfen) 'wood 'stone))
           ((climbable) 'stone)
-          ((solid) (case r ((reedfen) 'fen) ((hollow) 'grass) (else 'stone)))
+          ;; thin ice (brittle) steps as the region's rock does (the review: it was silent)
+          ((solid brittle) (case r ((reedfen) 'fen) ((hollow) 'grass) (else 'stone)))
           (else #f))))
 
     (define (move-cue! name gain pan)

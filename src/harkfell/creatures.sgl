@@ -160,7 +160,7 @@
         (let loop ((ts things) (i 0) (acc '()) (perches '()))
           (if (null? ts)
               (critters list: (reverse acc)
-                        dark: (< (room-light rm) 1.0)
+                        dark: (room-dark? rm)
                         perches: perches
                         stand: (map (lambda (cr) (feet (car cr) (cdr cr))) stand)
                         water: (map (lambda (cr) (cons (+ ox (* TILE (car cr)) (/ TILE 2.0)) (+ oy (* TILE (cdr cr)) 3.0))) water))

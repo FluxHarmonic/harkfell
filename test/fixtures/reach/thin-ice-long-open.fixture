@@ -1,15 +1,18 @@
 ;; Glasswood's thin ice with room to jump: twelve cells of it under five rows
 ;; of air. A jump from the bank lands a few cells onto the ice, and the far
-;; bank is still more running than a second on the ice allows, so any way
-;; over has the ice give under it (BRITTLE-TICKS). This is the fixture where
-;; the crack itself does the work in the checker: in the one-tile corridors
-;; (thin-ice-short, thin-ice-long) no walk lasts past WALK-MAX (60 ticks),
-;; so nothing would stay on the ice long enough to crack, and a checker that
-;; ignored the crack passed them all (sabotage S5).
+;; bank is still more running than a second on the ice allows, so to the
+;; checker it is unreachable. (In the game a player who hops again on each
+;; landing resets the count and can cross: the checker never chains hops
+;; without a rest, which is the safe direction, and thin ice is no barrier.)
+;; A regression case: with the crack switched off it stays unreachable
+;; today (sabotage S5b: no searched pattern stays on the ice long enough to
+;; crack, since walks end at WALK-MAX = BRITTLE-TICKS and a landing ends a
+;; trajectory). It goes red if a pattern is added that runs on after landing
+;; AND the crack is lost.
 (fixture
-  name: "thin ice, twelve cells under open air: jump on and run, and it gives"
+  name: "thin ice, twelve cells under open air: unreachable to the checker"
   expect: unreachable
-  why: "BRITTLE-TICKS: a jump buys three or four cells, not twelve"
+  why: "the checker never rests on thin ice or chains hops without a rest"
   start: (3 7)
   target: ((21 7))
   brittle: ((6 8) (7 8) (8 8) (9 8) (10 8) (11 8) (12 8) (13 8) (14 8) (15 8) (16 8) (17 8))

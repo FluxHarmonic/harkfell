@@ -84,7 +84,7 @@
           body body? body-at
           body-x body-y body-vx body-vy body-mode body-side body-facing
           body-coyote body-buffer body-lock body-jumping body-cut body-events
-          body-brittle
+          body-brittle on-brittle?
           body-step body-grounded? body-center body-in-water?)
 
   (begin
@@ -452,14 +452,19 @@
     ;; Thin ice: standing with every tile under the feet brittle counts a
     ;; tick; anything else sets the count back to 0. At BRITTLE-TICKS the ice
     ;; gives: 'crack and 'hazard. The strip is body-grounded?'s.
+    ;; Every tile under the feet brittle, and some: the body stands on thin ice
+    ;; alone (whatever its mode; brittle-check adds that it is grounded).
+    (define (on-brittle? b tm f)
+      (let ((bottom (+ (body-y b) (feel-box-h f))))
+        (and (box-any? tm (body-x b) bottom (feel-box-w f) 0.001 kind-brittle?)
+             (not (box-any? tm (body-x b) bottom (feel-box-w f) 0.001
+                            (lambda (k) (or (kind-ledge? k) (and (kind-solid? k) (not (kind-brittle? k))))))))))
+
     (define (brittle-check b tm f)
       (let* ((lim (feel-brittle-ticks f))
-             (bottom (+ (body-y b) (feel-box-h f)))
              (on (and lim
                       (eq? (body-mode b) 'ground)
-                      (box-any? tm (body-x b) bottom (feel-box-w f) 0.001 kind-brittle?)
-                      (not (box-any? tm (body-x b) bottom (feel-box-w f) 0.001
-                                     (lambda (k) (or (kind-ledge? k) (and (kind-solid? k) (not (kind-brittle? k)))))))))
+                      (on-brittle? b tm f)))
              (n (if on (+ (body-brittle b) 1) 0))
              (b (body b brittle: n)))
         (if (and on (>= n lim))

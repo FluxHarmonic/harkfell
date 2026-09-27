@@ -335,7 +335,7 @@
     ;; Into the room at "region:x,y" (at its door cell); #f if there is none.
     ;; at: optionally (c . r), a cell of that room to stand in instead of its
     ;; door (?room=...&at=C,R, --at C,R: any entrance, for testing). A cell in
-    ;; rock or a hazard, or outside the grid, is refused (#f).
+    ;; rock or a hazard, over thin ice, or outside the grid, is refused (#f).
     (define (shell-goto! key . at)
       (let* ((k (and *content* (parse-room-key key)))
              (rm (and k (content-room *content* (cadr k) (caddr k))))
@@ -344,7 +344,9 @@
                         (if at
                             (and (< -1 (car at) ROOM-COLS) (< -1 (cdr at) ROOM-ROWS)
                                  (let ((ch (room-char rm (car at) (cdr at))))
-                                   (not (memq (char-kind ch) (list 'solid 'climbable 'ledge 'hazard))))
+                                   (not (memq (char-kind ch) (list 'solid 'climbable 'ledge 'hazard)))
+                                   ;; nor over thin ice (a return there would crack it again)
+                                   (not (member (cons (car at) (+ (cdr at) 1)) (room-thin-ice rm))))
                                  (local->global *content* rm (car at) (cdr at)))
                             (room-start-cell *content* rm)))))
         (and cell

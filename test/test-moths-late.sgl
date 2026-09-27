@@ -79,11 +79,15 @@
     (assert-true (> 190.0 DRAW-R))
     (assert-true (find (lambda (m) (eq? (critter-state m) 'drawn)) (moths (car HALL))))))
 
-(define STONE (world-tick (world-standing 11 3 4 8 '(2)) STILL))
+;; Standing at (14,8), 48 px under the moths' home (14,5): inside MOTH-AWAY, so a
+;; set-back that fired by day would move them about 48 px off their home.
+(define STONE (world-tick (world-standing 11 3 14 8 '(2)) STILL))
 (test-group "moths: by day, as before"
+  (test "the body stands inside MOTH-AWAY of them (so the check can fail)"
+    (assert-true (< (nearest STONE) MOTH-AWAY)))
   (test "Behind the Stone's moths start at their home (not set back)"
-    (assert-true (every (lambda (m) (let ((h (critter-home m)))
-                                      (< (abs (- (critter-x m) (car h))) 20.0)))
+    (assert-true (every (lambda (m) (let* ((h (critter-home m)) (dx (- (critter-x m) (car h))) (dy (- (critter-y m) (cdr h))))
+                                      (< (sqrt (+ (* dx dx) (* dy dy))) 20.0)))
                         (moths STONE)))))
 
 (define (every p l) (or (null? l) (and (p (car l)) (every p (cdr l)))))
