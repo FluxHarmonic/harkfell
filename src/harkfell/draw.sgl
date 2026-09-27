@@ -1098,6 +1098,14 @@
           (for-each (lambda (ic)
                       (let* ((st (icicle-state ic))
                              (i (ice-cell (case st ((shiver) "icicle-shiver") ((fall) "icicle-fall") (else "icicle-hang")))))
+                        ;; unseen in the dark, a hanging icicle still shows its tip: two
+                        ;; pixels of lit ice that the glint (draw-icicle-glints!) lights
+                        (when (and (memq st '(hang shiver))
+                                   (not (seen? (+ (icicle-x ic) 3.0) (+ (icicle-y ic) 7.0))))
+                          (set-blend-mode 'normal)
+                          (paint! 'ground-4)
+                          (draw-filled-rect (+ (floor-int (- (icicle-x ic) ox)) 2) (+ (floor-int (- (icicle-y ic) oy)) 12) 2 2)
+                          (set-color 1.0 1.0 1.0 1.0))
                         (unless (or (eq? st 'gone) (not i)
                                     (not (seen? (+ (icicle-x ic) 3.0) (+ (icicle-y ic) 7.0))))
                           (atlas-draw! i
@@ -1198,6 +1206,27 @@
     ;; steps down for good).
     (define (moth-lit? rm) (and (room-dark? rm) (room-has-drawn-moths? rm)))
 
+    ;; Glints at the tips of a moth-lit room's hanging icicles, whether or not the
+    ;; moth light has reached them (David, playing b22a4d6: he ran into an icicle
+    ;; he never saw; the moth light's radius is smaller than the tell's four
+    ;; tiles, so in the dark you were always inside the tell before you could
+    ;; see the ice). A slow twinkle of about two steps while it hangs; while it
+    ;; shivers, a flash of the whole dark every four ticks. Light pass.
+    (define (draw-icicle-glints! w rm ox oy t)
+      (let ((is (world-ice w)))
+        (when (and is (moth-lit? rm))
+          (let* ((dark (+ (dark-steps (room-light rm)) DARK-EXTRA))
+                 (unit (/ 1.0 DARK-GAIN)))
+            (for-each (lambda (ic)
+                        (let ((st (icicle-state ic))
+                              (x (+ (- (icicle-x ic) ox) 3.0))
+                              (y (+ (- (icicle-y ic) oy) 13.0)))
+                          (case st
+                            ((hang) (light-disc! x y 2.5 (* unit (+ 1.6 (* 0.5 (sin (+ (* t 0.07) x)))))))
+                            ((shiver) (light-disc! x y 3.5 (* unit (if (odd? (quotient t 4)) dark 1.0))))
+                            (else #f))))
+                      (ices-list is))))))
+
     ;; The extra dark of a moth-lit room before its moths arrive: one step
     ;; (black) with none of them near, lifting as they come; 0 anywhere else.
     ;; arr: moth-arrival.
@@ -1281,6 +1310,7 @@
                             (world-pickups w))
                   (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) moths)
                   (draw-moth-light! moths b rm ox oy t)
+                  (draw-icicle-glints! w rm ox oy t)
                   (draw-glints! t)
                   (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
