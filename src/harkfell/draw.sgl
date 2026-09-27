@@ -1016,14 +1016,59 @@
     ;; shaking a pixel either way while it shivers (D10: the tell is seen as
     ;; well as heard), falling as it hung, and shards on the floor where it
     ;; landed, flying then fewer.
+    ;; Seen: in daylight everything; in a dark room (light: under 1) only
+    ;; inside the moth light round the body (moth-light-radius). x y: map px.
+    (define (seen-fn w)
+      (let* ((p (world-room w)) (rm (and p (placed-data p))))
+        (if (not (and rm (< (room-light rm) 1.0)))
+            (lambda (x y) #t)
+            (let* ((cs (world-critters w))
+                   (moths (filter (lambda (c) (eq? (critter-kind c) 'moth)) (if cs (critters-list cs) '())))
+                   (b (world-body w))
+                   (r (moth-light-radius moths b))
+                   (c (body-center b HARKFELL-FEEL)))
+              (lambda (x y)
+                (let ((dx (- x (car c))) (dy (- y (cdr c))))
+                  (<= (+ (* dx dx) (* dy dy)) (* r r))))))))
+
+    ;; Thin ice (the room's thin-ice things): meltwater showing through, a
+    ;; glazed crust on its top, and cracks under a body stood on it, one more
+    ;; a third of BRITTLE-TICKS. In a dark room only where the moth light is.
+    (define (draw-thin-ice! w ox oy seen?)
+      (let* ((p (world-room w)) (rm (and p (placed-data p))))
+        (when rm
+          (let ((crust (ice-cell "tarn-crust"))
+                (b (world-body w))
+                (n (body-brittle (world-body w))))
+            (for-each (lambda (cr)
+                        (let* ((x (* TILE (car cr))) (y (* TILE (cdr cr))))
+                          (when (seen? (+ ox x 8) (+ oy y 8))
+                            (set-blend-mode 'normal)
+                            (paint! 'water)
+                            (draw-filled-rect x (+ y 4) TILE (- TILE 4))
+                            (set-color 1.0 1.0 1.0 1.0)
+                            (when crust (atlas-draw! crust x y 1))
+                            ;; the cracks, under a body standing over this cell
+                            (let ((bx (- (+ (body-x b) 4.0) ox)))
+                              (when (and (> n 0) (<= x bx) (< bx (+ x TILE)))
+                                (paint! 'ground-1)
+                                (let ((k (+ 1 (quotient (* 3 n) BRITTLE-TICKS))))
+                                  (when (>= k 1) (draw-filled-rect (+ x 3) (+ y 1) 6 1))
+                                  (when (>= k 2) (draw-filled-rect (+ x 8) (+ y 2) 5 1) (draw-filled-rect (+ x 1) (+ y 3) 4 1))
+                                  (when (>= k 3) (draw-filled-rect (+ x 11) (+ y 1) 4 1) (draw-filled-rect (+ x 5) (+ y 3) 1 2))))))))
+                      (room-thin-ice rm))))))
+
     (define (draw-ice! w ox oy t)
-      (let ((is (world-ice w)))
+      (let ((is (world-ice w))
+            (seen? (seen-fn w)))
+        (draw-thin-ice! w ox oy seen?)
         (set-color 1.0 1.0 1.0 1.0)
         (when is
           (for-each (lambda (ic)
                       (let* ((st (icicle-state ic))
                              (i (ice-cell (case st ((shiver) "icicle-shiver") ((fall) "icicle-fall") (else "icicle-hang")))))
-                        (unless (or (eq? st 'gone) (not i))
+                        (unless (or (eq? st 'gone) (not i)
+                                    (not (seen? (+ (icicle-x ic) 3.0) (+ (icicle-y ic) 7.0))))
                           (atlas-draw! i
                                        (+ (floor-int (- (icicle-x ic) ox)) (if (eq? st 'shiver) (if (odd? (quotient t 2)) 1 -1) 0))
                                        (floor-int (- (icicle-y ic) oy))
@@ -1085,24 +1130,51 @@
     ;; room and the moths' own glows look as they do by day (a moth's glow
     ;; stacked on a brighter circle burned white).
     (define MOTH-RINGS (list 36.0 27.0 19.0))
+    ;; The challenge-and-danger pass (David, 2026-09-27: "I was never fully in
+    ;; the dark"): the circle is drawn from where the drawn moths ARE
+    ;; ((harkfell creatures) moth-arrival: their nearness times their glow),
+    ;; not from their glow alone, and a dark room starts a step darker than
+    ;; its light: (black), the step lifting as the moths arrive (room-dark-
+    ;; extra). The rings cancel the whole of it. Your own body keeps a faint
+    ;; light of one step, so you see yourself in the black.
     (define (draw-moth-light! moths b rm ox oy t)
-      (let ((dark (dark-steps (room-light rm))))
-        (when (and (> dark 0.0) (pair? moths))
+      (let* ((c (body-center b HARKFELL-FEEL))
+             (arr (moth-arrival moths (car c) (cdr c)))
+             (dark (+ (dark-steps (room-light rm)) (room-dark-extra rm arr))))
+        (when (> dark 0.0)
           (let* ((unit (/ dark DARK-GAIN))
-                 (drawn (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths)))
+                 (drawn (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths))
+                 (cx (- (car c) ox)) (cy (- (cdr c) oy 4)))
+            (light-disc! (- (car c) ox) (- (cdr c) oy) 8.0 (/ 1.0 DARK-GAIN))
             (for-each (lambda (c)
                         (unless (eq? (critter-state c) 'drawn)
                           (light-disc! (- (critter-x c) ox) (- (critter-y c) oy) 9.0
                                        (* 0.7 unit (max 0.3 (critter-glow c))))))
                       moths)
-            (when (pair? drawn)
-              (let* ((g (/ (apply + (map critter-glow drawn)) (length drawn)))
-                     (n (min 1.0 (/ (length drawn) 3.0)))
-                     (c (body-center b HARKFELL-FEEL))
-                     (cx (- (car c) ox)) (cy (- (cdr c) oy 4))
-                     (a (* (/ unit 3.0) g)))
-                (for-each (lambda (r) (light-disc! cx cy (* r (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 g))) a))
+            (when (and (pair? drawn) (> arr 0.0))
+              (let* ((n (min 1.0 (/ (length drawn) 3.0)))
+                     (a (* (/ unit 3.0) arr)))
+                (for-each (lambda (r) (light-disc! cx cy (* r (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 arr))) a))
                           MOTH-RINGS)))))))
+
+    ;; The extra dark of a dark room (light: under 1) before its moths arrive:
+    ;; one step (black) with none of them near, lifting as they come; 0 in
+    ;; daylight. arr: moth-arrival.
+    (define DARK-EXTRA 1.0)
+    (define (room-dark-extra rm arr)
+      (if (> (dark-steps (room-light rm)) 0.0)
+          (* DARK-EXTRA (- 1.0 (min 1.0 arr)))
+          0.0))
+
+    ;; The radius (px) the moth light shows things in, round the body: the
+    ;; outer ring's, as the moths have come. Falling ice and thin ice in a dark
+    ;; room are drawn only inside it (David: "you see hazards only as far as
+    ;; your light reaches"). 0 with no moths near.
+    (define (moth-light-radius moths b)
+      (let* ((c (body-center b HARKFELL-FEEL))
+             (arr (moth-arrival moths (car c) (cdr c)))
+             (n (min 1.0 (/ (length (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths)) 3.0))))
+        (if (> arr 0.0) (* (car MOTH-RINGS) (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 arr))) 0.0)))
 
     ;; Play into the current (index) pass: the room, its things, the body.
     (define (draw-play w)
@@ -1198,7 +1270,12 @@
         (resolve! (world-ticks w)
                   (max (world-dim w) (if (pair? black) (car black) 0.0))
                   (if rm (room-hue w) (slot-of 'h2))
-                  (if rm (room-light rm) 1.0))))
+                  (if rm (room-light rm) 1.0)
+                  (if rm
+                      (let ((c (body-center (world-body w) HARKFELL-FEEL))
+                            (cs (world-critters w)))
+                        (room-dark-extra rm (moth-arrival (if cs (critters-list cs) '()) (car c) (cdr c))))
+                      0.0))))
 
     ;; --- the overviews: the region sheet and the atlas ----------------------------------
 

@@ -1,0 +1,89 @@
+;;; The moths arrive late (David, 2026-09-27: "I was never fully in the dark";
+;;; ruled: a dark room starts black and the moths reach you over about 2 s).
+;;; On the real world, with the real world tick:
+;;;
+;;;   a dark room   Root Ice (light 0.25) entered carrying H3: on the first
+;;;                 tick every moth is at least MOTH-AWAY from you, and the
+;;;                 moth arrival (what the light and the dark's lifting are
+;;;                 drawn from) starts near 0 and passes 0.7 within 4 s
+;;;   no H3         the moths never come: the arrival stays 0 (the room
+;;;                 stays black: the dark room before H3)
+;;;   from afar     in Blue Hall a body 190 px from the moths' home still
+;;;                 draws them (a dark room's come from anywhere; by day
+;;;                 only from DRAW-R, 150 px)
+;;;   by day        Behind the Stone's moths (Reedfen, daylight) start at
+;;;                 their home, as they always did
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine worldmap)
+        (engine body)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell creatures))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+(define STILL (intent h: 0 v: 0 jump: #f press: #f))
+
+(define (world-standing x y c r carry)
+  (let ((g (local->global CT (content-room CT x y) c r)))
+    (world-populate (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g)))
+                    (content-stones CT) (content-pickups CT) carry)))
+
+(define (moths w) (filter (lambda (c) (eq? (critter-kind c) 'moth)) (critters-list (world-critters w))))
+(define (centre w) (body-center (world-body w) HARKFELL-FEEL))
+(define (arrival w) (let ((c (centre w))) (moth-arrival (moths w) (car c) (cdr c))))
+(define (nearest w)
+  (let ((c (centre w)))
+    (apply min (map (lambda (m) (let ((dx (- (critter-x m) (car c))) (dy (- (critter-y m) (cdr c))))
+                                  (sqrt (+ (* dx dx) (* dy dy)))))
+                    (moths w)))))
+;; The world after n still ticks, and the arrival at each tick.
+(define (still-run w n)
+  (let loop ((w w) (k 0) (acc '()))
+    (if (= k n) (cons w (reverse acc))
+        (let ((w (world-tick w STILL))) (loop w (+ k 1) (cons (arrival w) acc))))))
+
+(define ROOT (world-standing -1 5 15 7 '(2 3)))
+(define ROOT-1 (world-tick ROOT STILL))
+(define ROOT-RUN (still-run ROOT 240))
+(define ROOT-NO (still-run (world-standing -1 5 15 7 '(2)) 240))
+
+(test-group "moths: a dark room"
+  (test "Root Ice is dark, and its moths are drawn to H3"
+    (assert-true (< (room-light (content-room CT -1 5)) 1.0))
+    (assert-true (pair? (moths ROOT-1))))
+  (test "on the first tick every moth is at least MOTH-AWAY from you"
+    ;; set back, then one step of flight (at most 1.1 px a tick)
+    (assert-true (>= (nearest ROOT-1) (- MOTH-AWAY 2.0))))
+  (test "the arrival starts near 0 (the room is black) and passes 0.7 within 4 s"
+    (assert-true (< (list-ref (cdr ROOT-RUN) 20) 0.2))
+    (assert-true (> (list-ref (cdr ROOT-RUN) 239) 0.7)))
+  (test "and it takes more than a second: under 0.5 at tick 60"
+    (assert-true (< (list-ref (cdr ROOT-RUN) 60) 0.5))))
+
+(test-group "moths: without H3 they never come"
+  (test "the arrival is 0 on every tick for 4 s"
+    (assert-true (every (lambda (a) (= a 0.0)) (cdr ROOT-NO)))))
+
+;; Blue Hall's moths live at (12,3); from (1,8) that is about 190 px.
+(define HALL (still-run (world-standing -3 5 1 8 '(2 3)) 120))
+(test-group "moths: a dark room's come from anywhere"
+  (test "from 190 px (beyond DRAW-R) they are drawn to you within 2 s"
+    (assert-true (> 190.0 DRAW-R))
+    (assert-true (find (lambda (m) (eq? (critter-state m) 'drawn)) (moths (car HALL))))))
+
+(define STONE (world-tick (world-standing 11 3 4 8 '(2)) STILL))
+(test-group "moths: by day, as before"
+  (test "Behind the Stone's moths start at their home (not set back)"
+    (assert-true (every (lambda (m) (let ((h (critter-home m)))
+                                      (< (abs (- (critter-x m) (car h))) 20.0)))
+                        (moths STONE)))))
+
+(define (every p l) (or (null? l) (and (p (car l)) (every p (cdr l)))))

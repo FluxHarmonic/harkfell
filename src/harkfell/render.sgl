@@ -222,7 +222,8 @@
        "    float L = s.b;\n"
        "    float dk = u_dark - L * 5.0;\n"
        "    if (dk > 0.0) {\n"
-       "        if (dk > 1.0 + th) c = strip(7, ds);\n"
+       "        if (dk > 2.0 + th) c = vec3(0.0);\n"
+       "        else if (dk > 1.0 + th) c = strip(7, ds);\n"
        "        else if (dk > th) c = strip(6, ds);\n"
        "    }\n"
        "    L = L - u_dark / 5.0;\n"
@@ -381,13 +382,17 @@
     ;; Outside any pass.
     (define (resolve! t black hue . opt)
       (define light (if (pair? opt) (car opt) 1.0))
+      ;; extra (optional, 0 by default): steps of dark on top of the light's,
+      ;; up to 3 in all; a third step is black (a dark room before its moths
+      ;; arrive: (harkfell draw) room-dark-extra)
+      (define extra (if (and (pair? opt) (pair? (cdr opt))) (cadr opt) 0.0))
       (ensure-render!)
       (set-shader-uniform *resolve* 'u_size (list (inexact VIEW-W) (inexact INDEX-H)))
       (set-shader-uniform *resolve* 'u_view_h (inexact VIEW-H))
       (set-shader-uniform *resolve* 'u_t (inexact t))
       (set-shader-uniform *resolve* 'u_black (inexact black))
       (set-shader-uniform *resolve* 'u_hue (inexact hue))
-      (set-shader-uniform *resolve* (quote u_dark) (inexact (dark-steps light)))
+      (set-shader-uniform *resolve* (quote u_dark) (inexact (min 3.0 (+ (dark-steps light) extra))))
       (with-render-target *color-rt*
         (set-blend-mode 'none)
         (set-color 1.0 1.0 1.0 1.0)

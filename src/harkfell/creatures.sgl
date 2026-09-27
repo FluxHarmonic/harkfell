@@ -71,13 +71,17 @@
           critter critter? critter-kind critter-x critter-y critter-state critter-t
           critter-facing critter-frame critter-glow critter-drawn critter-anim critter-home critter-vx critter-vy
           critter-tx critter-ty
-          ALARM FLEE DRAW-R SONG-GAP)
+          ALARM FLEE DRAW-R SONG-GAP MOTH-AWAY moth-arrival)
 
   (begin
     (define TILE 16)
     (define ALARM 60.0)         ; px: a moving body this close lifts the flock
     (define FLEE 44.0)          ; px: a moving body this close makes a frog hop
-    (define DRAW-R 150.0)       ; px: moths come to you from this far
+    (define DRAW-R 150.0)       ; px: moths come to you from this far (in daylight; a dark room's come from anywhere)
+    ;; px: in a dark room (light: under 1) the moths start at least this far
+    ;; from where you come in, so the dark reads before they reach you (David,
+    ;; 2026-09-27: "the moths arrive late"; at their pace, about 2 s)
+    (define MOTH-AWAY 96.0)
     (define STILL-CALM 45)      ; ticks: standing still this long, you are calm
     (define SONG-STILL 80)      ; ticks still before a reedling sings back
     (define SONG-GAP 720)       ; ticks between songs (12 s)
@@ -118,6 +122,7 @@
       (song default: -100000)
       (sung default: #f)
       (lifted default: '())       ; flock ids lifted this approach (one flurry each)
+      (dark default: #f)          ; the room is darker than daylight (its light: under 1)
       (news default: '()))
 
     ;; --- random ----------------------------------------------------------------------
@@ -155,6 +160,7 @@
         (let loop ((ts things) (i 0) (acc '()) (perches '()))
           (if (null? ts)
               (critters list: (reverse acc)
+                        dark: (< (room-light rm) 1.0)
                         perches: perches
                         stand: (map (lambda (cr) (feet (car cr) (cdr cr))) stand)
                         water: (map (lambda (cr) (cons (+ ox (* TILE (car cr)) (/ TILE 2.0)) (+ oy (* TILE (cdr cr)) 3.0))) water))
@@ -230,13 +236,44 @@
     ;; the harmonics carried. playing: #f while the screen is dark.
     ;; speed: the body's speed, px/tick (MOVING and faster alarms them)
     (define MOVING 0.3)
+    ;; A dark room's moths, on its first step: any within MOTH-AWAY of the
+    ;; body is set back out to MOTH-AWAY along the line from the body through
+    ;; it (straight up when it is on the body), so the moths always come to
+    ;; you from the dark.
+    (define (moths-away cs bx by)
+      (critters cs
+                list: (map (lambda (c)
+                             (let* ((dx (- (critter-x c) bx)) (dy (- (critter-y c) by))
+                                    (d (sqrt (+ (* dx dx) (* dy dy)))))
+                               (cond ((not (eq? (critter-kind c) 'moth)) c)
+                                     ((>= d MOTH-AWAY) c)
+                                     ((< d 1.0) (critter c y: (- by MOTH-AWAY)))
+                                     (else (critter c x: (+ bx (* MOTH-AWAY (/ dx d)))
+                                                      y: (+ by (* MOTH-AWAY (/ dy d))))))))
+                           (critters-list cs))))
+
+    ;; How far the moths drawn to you have come, 0..1: each drawn moth by its
+    ;; nearness (1 within 30 px of (bx, by), 0 from 80 px) times its glow,
+    ;; averaged over the drawn moths; 0 when none is drawn. The moth light and
+    ;; the dark's lifting are drawn from it (the light is where the moths are).
+    (define (moth-arrival moths bx by)
+      (let ((drawn (filter (lambda (c) (and (eq? (critter-kind c) 'moth) (eq? (critter-state c) 'drawn))) moths)))
+        (if (null? drawn)
+            0.0
+            (/ (apply + (map (lambda (c)
+                               (let ((d (dist (critter-x c) (critter-y c) bx by)))
+                                 (* (critter-glow c) (max 0.0 (min 1.0 (/ (- 80.0 d) 50.0))))))
+                             drawn))
+               (length drawn)))))
+
     (define (critters-step cs bx by still carry playing . speed)
-      (let* ((clock (+ (critters-clock cs) 1))
+      (let* ((cs (if (and (critters-dark cs) (= (critters-clock cs) 0)) (moths-away cs bx by) cs))
+             (clock (+ (critters-clock cs) 1))
              (news '())
              (say! (lambda (kind x y) (set! news (cons (list 'call kind x y) news))))
              (calm (>= still STILL-CALM))
              (moving (and (pair? speed) (> (car speed) MOVING)))
-             (ctx (vector bx by still carry calm playing clock moving))
+             (ctx (vector bx by still carry calm playing clock moving (critters-dark cs)))
              ;; which flocks lift this tick: a moving body within ALARM of any perched bird
              (alarm-flocks
                (if (or (not moving) (not playing))
@@ -297,6 +334,7 @@
     (define (ctx-playing x) (vector-ref x 5))
     (define (ctx-clock x) (vector-ref x 6))
     (define (ctx-moving x) (vector-ref x 7))
+    (define (ctx-dark x) (vector-ref x 8))
 
     (define (clamp lo hi v) (max lo (min hi v)))
 
@@ -608,9 +646,10 @@
              (bx (ctx-bx ctx)) (by (ctx-by ctx))
              (home (critter-home c))
              (drawn (and (critter-drawn c) (memv (critter-drawn c) (ctx-carry ctx)) (ctx-playing ctx)
-                         (< (min (dist (critter-x c) (critter-y c) bx by)
-                                 (dist (car home) (cdr home) bx by))
-                            DRAW-R)))
+                         (or (ctx-dark ctx)
+                             (< (min (dist (critter-x c) (critter-y c) bx by)
+                                     (dist (car home) (cdr home) bx by))
+                                DRAW-R))))
              (k (critter-anim c))
              (ph (* 0.61 (modulo (critter-rng c) 1000)))
              (was (critter-state c)))

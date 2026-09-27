@@ -173,17 +173,19 @@ leg_palette() {
   frames=$((frames + 1))
   if check_colours "$S/shot-gmoth.png" "$S/allowed-glasswood" 1200x528+0+0; then :; else say "palette: RED glasswood:-1,5 carrying H3"; bad=1; fi
   # light: drawn: Root Ice is dark, more than half its frame the blue-black
-  # shadow (by day its ice wall is ice in shade, and none of it is shadow)
+  # shadow or black (by day its ice wall is ice in shade, and none of it is
+  # shadow). Since the challenge-and-danger pass a dark room with no moths near
+  # is a step darker still (black): without H3, Root Ice is mostly black.
   shadow="$(role_hex glw-ice-1)"
   [ -n "$shadow" ] || { say "palette: SETUP-FAILED (no glw-ice-1 in world/world.sgl)"; return 2; }
-  n_dark="$(count_hex "$S/shot-g-1,5.png" "$shadow" 1200x528+0+0)"
+  n_dark=$(( $(count_hex "$S/shot-g-1,5.png" "$shadow" 1200x528+0+0) + $(count_hex "$S/shot-g-1,5.png" 000000 1200x528+0+0) ))
   if [ "$n_dark" -gt 316800 ]; then :; else say "palette: RED dark: Root Ice has $n_dark of 633600 px in the shadow (want more than half)"; bad=1; fi
   # the moth light: carrying H3 the moths gather and light the box round
   # the body (at cell 15,7); without H3 (the body at the start, far off)
   # the same box is shadow
   box=120x120+684+300
-  lit_on="$(count_not_hex "$S/shot-gmoth.png" "$shadow" $box)"
-  lit_off="$(count_not_hex "$S/shot-g-1,5.png" "$shadow" $box)"
+  lit_on=$(( $(count_not_hex "$S/shot-gmoth.png" "$shadow" $box) - $(count_hex "$S/shot-gmoth.png" 000000 $box) ))
+  lit_off=$(( $(count_not_hex "$S/shot-g-1,5.png" "$shadow" $box) - $(count_hex "$S/shot-g-1,5.png" 000000 $box) ))
   if [ "$lit_on" -gt 6000 ] && [ "$lit_on" -gt $((3 * lit_off)) ]; then :; else
     say "palette: RED moth light: $lit_on of 14400 px lit round the body carrying H3, $lit_off without (want over 6000 and over three times)"; bad=1
   fi
