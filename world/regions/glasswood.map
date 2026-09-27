@@ -14,10 +14,10 @@
 ;;;                  |
 ;;;                  T                     y6  the Ice Well
 ;;;
-;;; C and V are joined through a green stone (H3), set in the Scree Foot one
-;;; cell in from the shared edge (the map draws it as an open join). The Glass
-;;; Chute's dark chamber is reached from the Old Birch without H3 (the dark
-;;; room before H3, 2026-09-27); its own green stone is the door to the caves.
+;;; C and V are joined through a hole in the Scree Foot's floor where you drop
+;;; from the Scree: the dark before H3 is on the way in (David, after playing
+;;; b22a4d6). The Cave Mouth's green stone is the door on to the caves; the
+;;; Glass Chute's is the door down its chute. Both open only carrying H3.
 ;;;
 ;;; ALL 22 ROOMS ARE WRITTEN (the ROOMS slice, 2026-09-27). Behind the Fall
 ;;; waits for SYSTEMS' upward icicle (D43).
@@ -35,7 +35,7 @@
   rooms:
   ((A "The Scree" "through the old stone door, scree falls away west into mist, and the birches glitter far below")
    (B "First Sight" "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath")
-   (C "Scree Foot" "the foot of the scree, where a pale green stone is set in the rock: a door you cannot open yet")
+   (C "Scree Foot" "the foot of the scree, where the ground opens into the dark: the first dark, before you have a light")
    (D "Icicle Walk" "the first falling ice: icicles over the path, and one that rings, shivers and falls where a hit costs a few steps")
    (E "Owl's Watch" "a snow owl on a high branch turns its head to follow you: a breath at the foot of the branches")
    (F "Branch Stair" "birch branches like the rungs of a ladder, up out of the snow into the light, and down again through them")
@@ -54,5 +54,5 @@
    (S "Meltwater" "a pool of meltwater under the ice, swum by the moths' light")
    (T "The Ice Well" "a well of clear ice going down from the meltwater to a cold blue stone: somewhere deeper, not yet")
    (U "Root Ice" "a low cave where the birches' roots hang down through the ice: a breath in the dark")
-   (V "Cave Mouth" "the caves' east end, a climb up to the back of the green stone, which rings and opens as you come carrying H3"))
+   (V "Cave Mouth" "the caves' east end, black until you carry a light: a green stone that rings and opens as you come carrying H3, and the climb up to the scree"))
   borders: ((A east)))

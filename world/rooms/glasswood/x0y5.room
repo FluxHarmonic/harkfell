@@ -3,25 +3,30 @@
   region: glasswood
   at: (0 5)
   title: "Cave Mouth"
-  intent: "the caves' east end, a climb up to the back of the green stone, which rings and opens as you come carrying H3"
+  intent: "the caves' east end, black until you carry a light: a green stone that rings and opens as you come carrying H3, and the climb up to the scree"
   bed: (wind 0.1 water 0.5 hum 0.4 drone 0.7)
   light: 0.5
   grid:
-  ("#################%  %####"
-   "#################%  %####"
-   "#        ########%  %####"
-   "         ########%  %####"
-   "                 %  %####"
-   "#######          %  %####"
-   "#########        %  %####"
-   "###########             #"
+  ("################    #####"
+   "###############%    %####"
+   "#        ######%    %####"
+   "         ######%    %####"
+   "            #  %    %####"
+   "#######     #  %    %####"
+   "#########   #  %    %####"
+   "########### o           #"
    "#############           #"
    "#########################"
    "#########################")
-  things: ((lantern-moth at: (15 6) count: 4 drawn: 3)
-           (icicle at: (14 4)))
+  things: ((ring-stone at: (12 7) overtone: 3)
+           (lantern-moth at: (18 5) count: 4 drawn: 3))
   decor: auto)
-;; In from Root Ice along the high passage (rows 3-4), down three steps
-;; into the chamber, and up the rough shaft (columns 18-19) to the back
-;; of the Scree Foot's green stone, which opens from this side carrying H3.
-;; An icicle hangs from the chamber's roof (14,4) on the way to the shaft.
+;; The dark before H3 (David, 2026-09-27, after playing b22a4d6: he never
+;; found the Glass Chute's chamber, because the tree and H3 stand between it
+;; and the fall). The Scree Foot's floor opens where you drop from the Scree
+;; (columns 16-19), so the way in falls into this chamber: black, the moths
+;; far off and not coming, and a green stone (12,7) humming A3 in the wall,
+;; shivering off-key at the H2 you carry. The rough shaft (walls 15 and 20)
+;; climbs back up. Carrying H3 you come to the stone from the other side,
+;; along the high passage from Root Ice (rows 3-4) and down the steps: it
+;; rings and opens, and the shaft is the way home.

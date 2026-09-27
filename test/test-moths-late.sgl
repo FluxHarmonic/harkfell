@@ -91,3 +91,20 @@
                         (moths STONE)))))
 
 (define (every p l) (or (null? l) (and (p (car l)) (every p (cdr l)))))
+
+;; The dark before H3 is on the way in (David, playing b22a4d6: he never found
+;; the Glass Chute's chamber). From the Scree's door ledge (0,3 at 22,9),
+;; carrying only H2 and walking west, the body falls through the Scree Foot's
+;; floor and comes to rest in the Cave Mouth (0,5): a moth-lit room whose
+;; moths do not come.
+(define LEFT (intent h: -1 v: 0 jump: #f press: #f))
+(define WAY-IN
+  (let loop ((w (world-standing 0 3 22 9 '(2))) (k 0))
+    (if (= k 240) w (loop (world-tick w LEFT) (+ k 1)))))
+(define (room-of w) (let ((p (world-room w))) (list (placed-x p) (placed-y p))))
+(test-group "moths: the dark before H3 is on the way in"
+  (test "walking west off the Scree's ledge lands you in the Cave Mouth"
+    (assert-equal '(0 5) (room-of WAY-IN)))
+  (test "which is dark, and its moths do not come carrying only H2"
+    (assert-true (room-dark? (content-room CT 0 5)))
+    (assert-equal 0.0 (arrival WAY-IN))))

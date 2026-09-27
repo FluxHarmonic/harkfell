@@ -3,7 +3,7 @@
   region: glasswood
   at: (0 4)
   title: "Scree Foot"
-  intent: "the foot of the scree, where a pale green stone is set in the rock: a door you cannot open yet"
+  intent: "the foot of the scree, where the ground opens into the dark: the first dark, before you have a light"
   bed: (wind 0.4 water 0.2 hum 0.3 drone 0.5)
   grid:
   ("%%%%%%%%%%          #####"
@@ -11,17 +11,15 @@
    "%%%%%%%%%%    |     #####"
    "%%%%%%%%%%    |     #####"
    "%%%%%%%%%%    |     #####"
-   "              |  ########"
-   "              |  #    ###"
-   "           ## |  o    ###"
-   "#################%  %####"
-   "###%%%%##########%  %####"
-   "#################%  %####")
-  things: ((ring-stone at: (17 7) overtone: 3))
+   "              |     #####"
+   "              |     #####"
+   "           ## |     #####"
+   "###%%%%########%    %####"
+   "###############%    %####"
+   "###############%    %####")
   decor: auto)
 ;; Under the scree's shoulder (its rough face, column 9, is the climb back
-;; up to the Scree). The pale green stone (17,7), keyed to H3, is the door
-;; of a small chamber over the Cave Mouth's shaft (columns 18-19): carrying
-;; H2 you pass within four tiles and it shivers off-key; coming up the
-;; shaft carrying H3 it rings from inside and opens, and stays open. Calls
-;; you from the caves (D45). West under the scree to the Icicle Walk.
+;; up to the Scree). Where you drop from the Scree's ledge the floor opens
+;; (columns 16-19) into the Cave Mouth's dark: the dark before H3 is on the
+;; way in. The rough walls of the hole (15 and 20) are the way back up, and
+;; the way home from the caves. West under the scree to the Icicle Walk.
