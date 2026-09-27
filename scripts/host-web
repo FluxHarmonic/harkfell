@@ -6,7 +6,9 @@
 #
 # After Crash The Stack's scripts/host-web and scripts/serve-web (master
 # e737d21), merged into one script:
-#   https  PORT_TLS (8797), cross-origin isolated (COOP/COEP), through
+#   https  PORT_TLS (8797), cross-origin isolated (COOP/COEP), taking
+#          ?playtest reports into build/playtest-reports/ (the http port
+#          takes none: capture on the https link), through
 #          scripts/serve-web-tls.mjs, with a self-signed certificate for the
 #          wg0 address in build/tls/ (made here with openssl through guix
 #          when missing; the phone taps through the warning once)
@@ -91,7 +93,8 @@ stop_port "$PORT_HTTP" sigil "serve --dir"
 rm -rf "$DST"
 cp -r "$SRC" "$DST"
 
-setsid node scripts/serve-web-tls.mjs "$DST" "$PORT_TLS" --isolate --log > "build/host-$PORT_TLS.log" 2>&1 &
+mkdir -p build/playtest-reports
+setsid node scripts/serve-web-tls.mjs "$DST" "$PORT_TLS" --isolate --log --reports build/playtest-reports > "build/host-$PORT_TLS.log" 2>&1 &
 echo $! > "build/host-$PORT_TLS.pid"
 setsid sigil serve --dir "$DST" --host "$HOST" --port "$PORT_HTTP" > "build/host-$PORT_HTTP.log" 2>&1 &
 echo $! > "build/host-$PORT_HTTP.pid"

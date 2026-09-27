@@ -6,7 +6,14 @@
 // --isolate; the S0 sketchbook runs its own instance on 8795.
 // Host a build directory over HTTPS on the WireGuard address, for the phone.
 //
-//   node scripts/serve-web-tls.mjs DIR PORT [--isolate]
+//   node scripts/serve-web-tls.mjs DIR PORT [--isolate] [--log] [--reports DIR]
+//
+// --reports DIR: the playtest reports (?playtest: F2 on the desktop, the report
+// button on a phone) are POSTed to .../playtest-report as JSON {report, png}
+// and written to DIR/<local time>[-N]/report.json and screenshot.png, one
+// line each in the log. Ported from Substratic's tools/serve.mjs (its host
+// and origin checks included) so a Harkfell host keeps COOP/COEP: David's
+// captures on b22a4d6 failed "NOT saved: HTTP 404" without it.
 //
 // A phone's Chrome allows AudioWorklet (and a service worker) only on a
 // secure context, and the plain-http wg0 host is not one, so a read there
@@ -40,6 +47,9 @@ if (!dir || !portArg) { console.error("usage: serve-web-tls.mjs DIR PORT [--isol
 const port = Number(portArg);
 const isolate = flags.includes("--isolate");
 const logging = flags.includes("--log");
+const reportsAt = flags.indexOf("--reports");
+const reports = reportsAt >= 0 && flags[reportsAt + 1] ? path.resolve(flags[reportsAt + 1]) : null;
+const MAX_BODY = 48 * 1024 * 1024;
 const root = path.resolve(dir);
 if (!fs.existsSync(path.join(root, "index.html"))) { console.error(`serve-web-tls: ${root}/index.html missing`); process.exit(1); }
 
@@ -65,11 +75,61 @@ function pack(fp, buf, st) {
   }
   return p;
 }
+
+// --- the playtest reports (from Substratic's tools/serve.mjs) ---
+function two(n) { return String(n).padStart(2, "0"); }
+function stamp() {
+  const d = new Date();
+  return `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+}
+function freeDir(base) { for (let n = 1; ; n++) { const d = n === 1 ? base : `${base}-${n}`; if (!fs.existsSync(d)) return d; } }
+function answer(res, code, obj) { res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(obj)); }
+function report(req, res) {
+  const chunks = [];
+  let size = 0;
+  req.on("data", (c) => { size += c.length; if (size > MAX_BODY) { answer(res, 413, { error: "report too large" }); req.destroy(); return; } chunks.push(c); });
+  req.on("end", () => {
+    if (res.writableEnded) return;
+    let body;
+    try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return answer(res, 400, { error: "not JSON" }); }
+    if (!body || typeof body.report !== "object" || body.report === null) return answer(res, 400, { error: "no report" });
+    let png = null;
+    if (typeof body.png === "string") {
+      const m = body.png.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
+      if (!m) return answer(res, 400, { error: "png is not a PNG data URL" });
+      png = Buffer.from(m[1], "base64");
+      if (png.length < 8 || png.readUInt32BE(0) !== 0x89504e47) return answer(res, 400, { error: "png is not a PNG" });
+    }
+    try {
+      const out = freeDir(path.join(reports, stamp()));
+      fs.mkdirSync(out, { recursive: true });
+      const r = Object.assign({}, body.report, { screenshot: png ? "screenshot.png" : null });
+      fs.writeFileSync(path.join(out, "report.json"), JSON.stringify(r, null, 2) + "\n");
+      if (png) fs.writeFileSync(path.join(out, "screenshot.png"), png);
+      console.log(`report ${new Date().toISOString()} ${req.socket.remoteAddress} ${out} ${JSON.stringify(r.note || "")}`);
+      answer(res, 200, { dir: path.join(path.basename(reports), path.basename(out)) });
+    } catch (err) { answer(res, 500, { error: String(err.message || err) }); }
+  });
+}
+function playtestReport(req, res) {
+  if (!reports) return answer(res, 404, { error: "this host takes no reports (no --reports)" });
+  // only this server's own pages: the Host names the wg0 address, an Origin
+  // (when sent) is that same host
+  let hostName = "";
+  try { hostName = new URL(`https://${req.headers.host || ""}`).hostname; } catch { /* answered below */ }
+  if (hostName !== host) return answer(res, 403, { error: "not this server's host" });
+  const origin = req.headers.origin;
+  if (origin) { let o = null; try { o = new URL(origin); } catch { /* "null" */ } if (!o || o.host !== req.headers.host) return answer(res, 403, { error: "another origin" }); }
+  if (req.method !== "POST") return answer(res, 405, { error: "POST a report" });
+  return report(req, res);
+}
+
 function warm(fp) { fs.stat(fp, (e, st) => { if (!e) fs.readFile(fp, (e2, buf) => { if (!e2) pack(fp, buf, st); }); }); }
 const server = https.createServer({ key, cert }, (req, res) => {
   if (logging) console.log(new Date().toISOString() + " " + req.socket.remoteAddress + " " + req.method + " " + req.url);
   const urlPath = decodeURIComponent(new URL(req.url, "https://x").pathname);
   if (urlPath === "/bench-report") { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
+  if (urlPath.endsWith("/playtest-report")) return playtestReport(req, res);
   let fp = path.normalize(path.join(root, urlPath));
   if (!fp.startsWith(root)) { res.writeHead(403); res.end(); return; }
   try { if (fs.statSync(fp).isDirectory()) fp = path.join(fp, "index.html"); } catch { /* falls to the read */ }
@@ -95,5 +155,5 @@ const server = https.createServer({ key, cert }, (req, res) => {
 });
 for (const f of fs.readdirSync(root)) if (/\.wasm$/.test(f)) warm(path.join(root, f));
 server.listen(port, host, () => {
-  console.log(`serve-web-tls: https://${host}:${port}/ serving ${root}${isolate ? " (COOP/COEP: isolated)" : " (not isolated)"}`);
+  console.log(`serve-web-tls: https://${host}:${port}/ serving ${root}${isolate ? " (COOP/COEP: isolated)" : " (not isolated)"}${reports ? ", reports to " + reports : ""}`);
 });
