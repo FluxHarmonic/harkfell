@@ -201,7 +201,11 @@
        "            c = (d > 20 || (d > 12 && th < float(d - 12) / 8.0)) ? strip(2, rs) : strip(1, rs);\n"
        ;; the water's own colour dithered through everything under the skin,
        ;; thicker with depth, so water reads over a dark wall as over sky
-       "            if (th < min(0.3 + float(d) * 0.012, 0.55)) { c = strip(0, 11); own = true; }\n"
+       ;; in a dark room the share thins with depth instead (the leader's dressing
+       ;; note: the Ice Well's water dithered, not one flat slab): shallow water
+       ;; glows, deep water goes dark
+       "            float share = (u_dark > 0.0) ? max(0.08, 0.45 - float(d) * 0.012) : min(0.3 + float(d) * 0.012, 0.55);\n"
+       "            if (th < share) { c = strip(0, 11); own = true; }\n"
        ;; the mirror of the world above: streaks on alternate rows, fading
        ;; out over seven, each row drifting sideways on its own
        "            if (d <= 7 && (d & 1) == 1 && th < 0.95 - float(d) * 0.11) {\n"
