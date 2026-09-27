@@ -54,37 +54,46 @@
     (assert-true (< (abs (- (body-x AFTER) (body-x BEFORE))) 0.01))
     (assert-equal 'open STONE-AFTER-1)))
 
-;; A reload that moves the map's origin (Glasswood's rooms are written room by
-;; room, each further west, under live reload). A room added at x -2 moves the
-;; origin from x -1 to x -2, every global cell 25 columns east; the body must
-;; stay in the Old Stone and the opened stone stay open (the review of phase 1:
-;; the body went one room west and the stone read shut).
+;; A reload that moves the map's origin (a room added west of the westmost
+;; room, under live reload, moves every global cell east). The world already
+;; reaches x -6 (Glasswood's west edge), so the reload adds a probe region of
+;; one sealed room at x -8: world.sgl with the region, its map and its room in
+;; one reload. It moves the origin from x -6 to x -8, every global cell 50
+;; columns east; the body must stay in the Old Stone and the opened stone stay
+;; open (the review of phase 1: the body went one room west and the stone
+;; read shut). The probe region names none of Glasswood's rooms, so the
+;; Glasswood batches do not break it.
 (define WEST-ROOM
   (string-append
-    "(room\n  region: glasswood\n  at: (-2 3)\n  title: \"Probe West\"\n  intent: \"a sealed room west of First Sight\"\n  grid:\n  ("
+    "(room\n  region: probe\n  at: (-8 3)\n  title: \"Probe West\"\n  intent: \"a sealed room west of the world\"\n  grid:\n  ("
     "\"#########################\"\n   \"#                       #\"\n   \"#                       #\"\n   \"#                       #\"\n"
     "   \"#                       #\"\n   \"#                       #\"\n   \"#                       #\"\n   \"#                       #\"\n"
     "   \"#                       #\"\n   \"#########################\"\n   \"#########################\"))\n"))
 (define WEST-MAP
   (string-append
-    "(map\n  region: glasswood\n  origin: (-2 3)\n  layout:\n  (\"C B-A\" \"     \" \"     \" \"     \" \"  U  \")\n  rooms:\n"
-    "  ((A \"The Scree\" \"through the old stone door, scree falls away west into mist, and the birches glitter far below\")\n"
-    "   (B \"First Sight\" \"the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath\")\n"
-    "   (C \"Probe West\" \"a sealed room west of First Sight\")\n"
-    "   (U \"Root Ice\" \"a low cave where the birches' roots hang down through the ice: a breath in the dark\"))\n  borders: ((A east)))\n"))
+    "(map\n  region: probe\n  origin: (-8 3)\n  layout:\n  (\"A\")\n  rooms:\n"
+    "  ((A \"Probe West\" \"a sealed room west of the world\")))\n"))
+(define WEST-WORLD
+  (string-append
+    (cdr (assoc "world/world.sgl" SRC))
+    "\n(region probe\n  name: \"Probe\"\n  bounds: ((-8 3) (-8 3))\n  bed: \"hollow-bed\"\n  bed-channels: (wind water hum drone)\n"
+    "  palette: (glw-sky-1 glw-sky-2 glw-sky-3 glw-sky-4 glw-ice-1 glw-ice-2 glw-ice-3 glw-ice-4\n"
+    "            glw-birch-1 glw-birch-2 glw-birch-3 glw-melt glw-copper fur-1 fur-2 ink)\n"
+    "  tiles: glasswood\n  roster: ()\n  moments: ()\n  wander: ()\n  gives: ())\n"))
 (define X0-BEFORE (worldmap-x0 (content-map (shell-content))))
-(define PS2 (shell-replace-files! (list (cons "world/rooms/glasswood/x-2y3.room" WEST-ROOM)
-                                        (cons "world/regions/glasswood.map" WEST-MAP))))
+(define PS2 (shell-replace-files! (list (cons "world/world.sgl" WEST-WORLD)
+                                        (cons "world/rooms/probe/x-8y3.room" WEST-ROOM)
+                                        (cons "world/regions/probe.map" WEST-MAP))))
 (define X0-AFTER (worldmap-x0 (content-map (shell-content))))
 (define STONE-AFTER (cons (+ 21 (* 25 (- 10 X0-AFTER))) (+ 8 (* 11 (- 3 (worldmap-y0 (content-map (shell-content))))))))
 
 (test-group "reload: the map's origin moves west"
-  (test "the reload is clean and moves the origin from x -1 to x -2"
+  (test "the reload is clean and moves the origin from x -6 to x -8"
     (assert-equal '() PS2)
-    (assert-equal -1 X0-BEFORE)
-    (assert-equal -2 X0-AFTER))
+    (assert-equal -6 X0-BEFORE)
+    (assert-equal -8 X0-AFTER))
   (test "the body stays in the Old Stone, where it stood"
     (assert-equal "reedfen:10,3" (shell-room-label))
-    (assert-true (< (abs (- (body-x (world-body (shell-world))) (+ (body-x AFTER) 400.0))) 0.01)))
+    (assert-true (< (abs (- (body-x (world-body (shell-world))) (+ (body-x AFTER) (* 400.0 (- X0-BEFORE X0-AFTER))))) 0.01)))
   (test "and the opened stone stays open"
     (assert-equal 'open (stone-state (find (lambda (s) (equal? (stone-cell s) STONE-AFTER)) (world-stones (shell-world)))))))

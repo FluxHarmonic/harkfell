@@ -42,7 +42,7 @@
 //              Chrome delivers CDP touches ~90 ms late, so the latency legs
 //              prove the readout works, not what a phone measures)
 //   world      (A1) the page hands over the baked world and it loads clean:
-//              "harkfell: world 43 files, 0 problems" (39 rooms, three maps
+//              "harkfell: world 50 files, 0 problems" (46 rooms, three maps
 //              and world.sgl: WORLD_FILES), and a plain boot enters the world's start
 //              (hollow:4,3)
 //   door       (A1) ?room=reedfen:10,4 boots into that room ("harkfell: room
@@ -98,10 +98,11 @@ const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
 // The written world's span in rooms: the legs below place rooms by it. A4's
 // world started at x 1; Glasswood (0.2, x -6..0) moves it west, and its
-// first rooms (the negative-coordinates probe) start at x -1.
-const X0 = -1, X1 = 17, Y0 = 2, Y1 = 5;
+// rooms reach x -6 (Snow Hollow, at y 5)
+// and y 6 (the Ice Well).
+const X0 = -6, X1 = 17, Y0 = 2, Y1 = 6;
 const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
-const WORLD_FILES = 39 + 3 + 1;   // rooms, maps, world.sgl (39: Glasswood's probes and the look probe, Root Ice)
+const WORLD_FILES = 46 + 3 + 1;   // rooms, maps, world.sgl (46: the Hollow, Reedfen and Glasswood written so far)
 const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`;   // rooms at 1/4, a 2 px gap
 const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");

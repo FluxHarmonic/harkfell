@@ -1,0 +1,27 @@
+;; world/rooms/glasswood/x-3y5.room
+(room
+  region: glasswood
+  at: (-3 5)
+  title: "Blue Hall"
+  intent: "a hall of blue ice under the wood, where the moths come to you and light the walls: the first cave they fill"
+  bed: (wind 0.05 water 0.6 hum 0.4 drone 0.7)
+  light: 0.33
+  grid:
+  ("#########################"
+   "######             ######"
+   "####                 ####"
+   "###                   ###"
+   "##                     ##"
+   "##                     ##"
+   "##         ###           "
+   "           ###           "
+   "           ###           "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (12 3) count: 8 drawn: 3))
+  decor: auto)
+;; The first cave the moths fill: a tall hall with one pillar of blue ice
+;; in the middle. In from the Glass Chute (rows 7-8), on east to the
+;; Meltwater (rows 6-8). Its moment, blue-hall (first visit), is named
+;; when SOUND writes the tune: a named moment with no file is red in
+;; test-tunes, and a placeholder tune would be spent in a save.

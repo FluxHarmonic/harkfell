@@ -129,12 +129,15 @@
 ;; The mute stone's hum survives leaving its range and coming straight back
 ;; (the review's finding 2: the first fade's pending remove deleted the
 ;; reopened hum's source, and it stayed silent for good).
+;; The stone is the Old Stone's, the one nearest the body in (10 3): the
+;; world's first stone is not it since Glasswood added stones west of it.
 (define (hum-after steps)
   (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
   (sound-reset!)
   (let* ((w (world-in 10 3))
          (base (world-place w CT))
-         (st (car (place-stones base)))
+         (d2 (lambda (s) (let ((dx (- (caddr s) (place-px base))) (dy (- (cadddr s) (place-py base)))) (+ (* dx dx) (* dy dy)))))
+         (st (car (list-sort (lambda (a b) (< (d2 a) (d2 b))) (place-stones base))))
          (near (place base px: (- (caddr st) 50.0) py: (cadddr st)))
          (far (place base px: (- (caddr st) 150.0) py: (cadddr st))))
     (let loop ((ps steps) (f 0))

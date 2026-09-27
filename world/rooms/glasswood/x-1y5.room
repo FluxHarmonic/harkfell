@@ -10,18 +10,20 @@
   ("#########################"
    "#########################"
    "####   ######     #######"
-   "##          ##       ####"
-   "#                     ###"
-   "#                      ##"
-   "#                    %%##"
-   "#                  %%%%##"
-   "#####~~~~~~~~~#####%%%%##"
+   "##          #            "
+   "#                        "
+   "                    %####"
+   "                   %%####"
+   "                 %%%%####"
+   "#####~~~~~~~~~###%%%%####"
    "######~~~~~~~############"
    "#########################")
   things: ((lantern-moth at: (9 5) count: 4 drawn: 3))
   start: (2 7)
   decor: auto)
-;; LOOK PROBE (the look track, 2026-09-26): the dark palette and the moths'
-;; lit circle (D42), in the slot the map gives Root Ice. Closed on every
-;; side until the ROOMS slice writes the caves; the ROOMS slice redraws it.
+;; The look track's dark probe (2026-09-26), folded into the map's Root
+;; Ice by the ROOMS slice: the same low cave, pool and moths at light
+;; 0.25, opened west to the Meltwater (rows 5-7) and east to the Cave
+;; Mouth (rows 3-4) over a rough step up. start: stays at (2,7), far from
+;; (15,7), which scripts/gate-look uses for the moth light's box.
 ;; Carry H3 (?carry=2,3) and the moths come to you and light the cave.

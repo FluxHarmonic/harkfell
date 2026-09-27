@@ -63,14 +63,15 @@
 (test-group "gates: the world has one stone and one harmonic"
   (test "the world loads clean"
     (assert-equal '() (content-problems CT)))
-  (test "four ring-stones: the Old Stone's, the bowl's and Scree End's door (D41) keyed to 2, the one under the bowl to 3"
-    (assert-equal 4 (length (content-stones CT)))
-    (assert-equal '(2 2 2 3) (list-sort < (map stone-overtone (content-stones CT))))
+  (test "six ring-stones: the Old Stone's, the bowl's and Scree End's door (D41) keyed to 2; the one under the bowl and the Old Birch's (Glasswood) to 3; the Ice Well's to 4"
+    (assert-equal 6 (length (content-stones CT)))
+    (assert-equal '(2 2 2 3 3 4) (list-sort < (map stone-overtone (content-stones CT))))
     (assert-true (the-stone (world-standing 10 3 18 8 '())))
     (assert-equal 2 (stone-overtone (the-stone (world-standing 10 3 18 8 '())))))
-  (test "one pickup, on the Far Mound (A4 moved it there from the Drowned Channel)"
-    (assert-equal 1 (length (content-pickups CT)))
-    (assert-equal (local->global CT (content-room CT 17 3) 22 3) (pickup-cell (car (content-pickups CT))))))
+  (test "two pickups: H2 on the Far Mound (A4 moved it there from the Drowned Channel), H3 at the Old Birch (Glasswood)"
+    (assert-equal 2 (length (content-pickups CT)))
+    (assert-equal (local->global CT (content-room CT 17 3) 22 3) (pickup-cell (find (lambda (p) (= 2 (pickup-overtone p))) (content-pickups CT))))
+    (assert-equal (local->global CT (content-room CT -5 5) 17 7) (pickup-cell (find (lambda (p) (= 3 (pickup-overtone p))) (content-pickups CT))))))
 
 ;; Standing three tiles west of the stone, then pushing east into it.
 (define SHUT (ticks (world-standing 10 3 18 8 '()) RIGHT 240 '()))
@@ -100,7 +101,8 @@
     ;; the gate news alone: the Far Mound's moths chime (call) the moment H2 is carried
     (assert-equal '(pickup) (filter (lambda (k) (not (eq? k 'call))) (kinds (cdr TAKEN))))
     (assert-equal 1 (length GIVEN))
-    (assert-equal '() (world-pickups (car TAKEN))))
+    ;; the Far Mound's is gone; H3's (the Old Birch) is still there
+    (assert-equal '(3) (map pickup-overtone (world-pickups (car TAKEN)))))
   (test "at the stone with it: it rings, sinks, then opens, within 150 ticks"
     (assert-equal '(ring sink open) (kinds (cdr AT-STONE)))
     (assert-equal 'open (stone-state (the-stone (car AT-STONE)))))

@@ -1,0 +1,25 @@
+;; world/rooms/glasswood/x-2y5.room
+(room
+  region: glasswood
+  at: (-2 5)
+  title: "Meltwater"
+  intent: "a pool of meltwater under the ice, swum by the moths' light"
+  bed: (wind 0.05 water 0.8 hum 0.3 drone 0.6)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "#######           #######"
+   "#####               #####"
+   "###                   ###"
+   "##                       "
+   "                         "
+   "                         "
+   "     ~~~~~~~~##~~~#######"
+   "#####~~~~~~~~##~~~#######"
+   "########~~~##############")
+  things: ((lantern-moth at: (12 5) count: 4 drawn: 3))
+  decor: auto)
+;; A short swim: eight tiles of meltwater to an ice hummock (13-14), then
+;; three more to the east bank. The water goes on down at columns 8-10
+;; into the Ice Well (x-2y6).

@@ -1,0 +1,34 @@
+;; world/rooms/glasswood/x-5y5.room
+(room
+  region: glasswood
+  at: (-5 5)
+  title: "The Old Birch"
+  intent: "at the foot of the fall, the oldest birch in the wood, hollow, where the moths winter, and the note you followed among them"
+  bed: (wind 0.1 water 0.4 hum 0.4 drone 0.8)
+  grid:
+  ("#########################"
+   "####  %#######      #####"
+   "####  %####     ||| #####"
+   "####  %#        ||| #####"
+   "####  %         ||| #####"
+   "                ||| o    "
+   "                |||######"
+   "                |||######"
+   "#########~~~#############"
+   "#########~~~#############"
+   "#########################")
+  things: ((harmonic at: (17 7) overtone: 3)
+           (ring-stone at: (20 5) overtone: 3)
+           (lantern-moth at: (17 3) count: 8 drawn: 3))
+  decor: auto)
+;; The foot of the frozen fall. The chimney comes down at columns 4-5
+;; between the fall's glass (column 3) and the rough rock (column 6,
+;; climbable back up from the floor); its top stays closed until The
+;; Frozen Fall (x-5y4) is written above.
+;; The Old Birch is the three-wide trunk (columns 16-18, rows 2-7), its
+;; hollow in the fifth row; H3 lies at its foot among the moths' cloud.
+;; The green stone (20,5) is the door to the Glass Chute: taking H3 at
+;; (17,7) puts you 3.6 tiles from it, so it rings as you take the fifth.
+;; Carrying only H2 it shivers off-key and stays shut, so the caves
+;; cannot be entered without H3 (the one-way chute is not a trap).
+;; West under the low rock is Snow Hollow (rows 5-7).

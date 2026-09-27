@@ -1,0 +1,26 @@
+;; world/rooms/glasswood/x0y5.room
+(room
+  region: glasswood
+  at: (0 5)
+  title: "Cave Mouth"
+  intent: "the caves' east end, a climb up to the back of the green stone, which rings and opens as you come carrying H3"
+  bed: (wind 0.1 water 0.5 hum 0.4 drone 0.7)
+  light: 0.5
+  grid:
+  ("#########################"
+   "#################%  %####"
+   "#        ########%  %####"
+   "         ########%  %####"
+   "                 %  %####"
+   "#######          %  %####"
+   "#########        %  %####"
+   "###########             #"
+   "#############           #"
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (15 6) count: 4 drawn: 3))
+  decor: auto)
+;; In from Root Ice along the high passage (rows 3-4), down three steps
+;; into the chamber, and up the rough shaft (columns 18-19) to the back
+;; of the Scree Foot's green stone. The shaft's top stays closed until
+;; the Scree Foot (x0y4) is written above.

@@ -1,0 +1,25 @@
+;; world/rooms/glasswood/x-6y5.room
+(room
+  region: glasswood
+  at: (-6 5)
+  title: "Snow Hollow"
+  intent: "a hollow of deep snow beside the old birch, where voles come up to look at you if you stand still: a breath"
+  bed: (wind 0.1 hum 0.2 drone 0.5)
+  grid:
+  ("#########################"
+   "#########################"
+   "#########        ########"
+   "######              #####"
+   "####                 ####"
+   "###                      "
+   "##                       "
+   "##    ###        ##      "
+   "###########   ###########"
+   "#########################"
+   "#########################")
+  things: ((snow-vole at: (12 8))
+           (snow-vole at: (21 7)))
+  decor: auto)
+;; A pocket off the Old Birch (its west edge, rows 5-7), closed on every
+;; other side. Two drifts to stand on and a dip where a vole lives. A
+;; breath: nothing to do but stand still and let the voles look.

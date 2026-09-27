@@ -3,8 +3,10 @@
 ;;; (glasswood:0,3) and First Sight (glasswood:-1,3) joined to the Hollow's
 ;;; Scree End through the old amber door (D41):
 ;;;
-;;;   the map     the world loads clean, its origin is x -1, and a body in
-;;;               the first column of rooms is in glasswood:-1,3
+;;;   the map     the world loads clean, its origin is x -6 (Glasswood's west
+;;;               edge), a body in the first column of rooms is in
+;;;               glasswood:-6,5, and bodies either side of x 0 are in
+;;;               glasswood:-1,3 and glasswood:0,3
 ;;;   the seam    a body walking west along The Scree's shoulder crosses into
 ;;;               First Sight (x 0 to x -1)
 ;;;   a door      "glasswood:-1,3" parses, and shell-goto! (the path the web's
@@ -67,12 +69,13 @@
     (assert-equal '() (content-problems CT))
     (assert-true (content-room CT 0 3))
     (assert-true (content-room CT -1 3)))
-  (test "the world map's origin is x -1 (Glasswood moved it west from x 1)"
-    (assert-equal -1 (worldmap-x0 (content-map CT))))
-  (test "a pixel in the first column of rooms is in glasswood:-1,3, the next in glasswood:0,3"
+  (test "the world map's origin is x -6 (Glasswood's west edge; it was x 1 before Glasswood)"
+    (assert-equal -6 (worldmap-x0 (content-map CT))))
+  (test "a pixel in the first column of rooms is in glasswood:-6,5; either side of x 0, glasswood:-1,3 and glasswood:0,3"
     (let ((wm (content-map CT)))
-      (assert-equal '(-1 3) (let ((p (worldmap-room-at-px wm 10.0 (+ 10.0 (* 176 (- 3 (worldmap-y0 wm))))))) (list (placed-x p) (placed-y p))))
-      (assert-equal '(0 3) (let ((p (worldmap-room-at-px wm 410.0 (+ 10.0 (* 176 (- 3 (worldmap-y0 wm))))))) (list (placed-x p) (placed-y p))))))
+      (assert-equal '(-6 5) (let ((p (worldmap-room-at-px wm 10.0 (+ 10.0 (* 176 (- 5 (worldmap-y0 wm))))))) (list (placed-x p) (placed-y p))))
+      (assert-equal '(-1 3) (let ((p (worldmap-room-at-px wm (+ 10.0 (* 400 (- -1 (worldmap-x0 wm)))) (+ 10.0 (* 176 (- 3 (worldmap-y0 wm))))))) (list (placed-x p) (placed-y p))))
+      (assert-equal '(0 3) (let ((p (worldmap-room-at-px wm (+ 10.0 (* 400 (- 0 (worldmap-x0 wm)))) (+ 10.0 (* 176 (- 3 (worldmap-y0 wm))))))) (list (placed-x p) (placed-y p))))))
   (test "room labels carry the sign"
     (assert-equal "glasswood:-1,3" (room-label (content-room CT -1 3)))))
 

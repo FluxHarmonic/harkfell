@@ -1,0 +1,27 @@
+;; world/rooms/glasswood/x-4y5.room
+(room
+  region: glasswood
+  at: (-4 5)
+  title: "Glass Chute"
+  intent: "behind a green stone, the fall's pool drains under the wood down a chute of clear ice, into the dark"
+  bed: (wind 0.05 water 0.6 hum 0.3 drone 0.6)
+  light: 0.5
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########       #########"
+   "#####              ######"
+   "                    #####"
+   "#####                 ###"
+   "#####                    "
+   "#####                    "
+   "#####      ##############"
+   "#########################")
+  things: ((lantern-moth at: (14 6) count: 3 drawn: 3))
+  decor: auto)
+;; The passage behind the Old Birch's green stone comes in at row 5 and
+;; ends at a sheer drop of glass ice: four tiles down to the floor, too
+;; high to jump back up and a single smooth wall with nothing to kick
+;; from. One way down, into the dark. Only a player carrying H3 gets
+;; here, and the way home is east, through the caves to the Cave Mouth.

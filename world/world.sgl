@@ -119,7 +119,7 @@
   roster: (lantern-moth snow-owl snow-vole)
   moments: ()
   wander: ()
-  gives: ())
+  gives: ((overtone 3)))
 
 (region reedfen
   name: "Reedfen"

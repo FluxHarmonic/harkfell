@@ -1,0 +1,29 @@
+;; world/rooms/glasswood/x-2y6.room
+(room
+  region: glasswood
+  at: (-2 6)
+  title: "The Ice Well"
+  intent: "a well of clear ice going down from the meltwater to a cold blue stone: somewhere deeper, not yet"
+  bed: (wind 0.0 water 0.9 hum 0.4 drone 0.6)
+  light: 0.25
+  grid:
+  ("########~~~##############"
+   "########~~~##############"
+   "########~~~##############"
+   "####    ~~~##############"
+   "####    ~~~##############"
+   "########~~~##############"
+   "########~~~##############"
+   "########~~~##############"
+   "########~~~##############"
+   "########~~~o#############"
+   "#########################")
+  things: ((ring-stone at: (11 9) overtone: 4)
+           (lantern-moth at: (6 3) count: 3 drawn: 3))
+  decor: auto)
+;; Down from the Meltwater's pool. Halfway, air is trapped under the ice
+;; in a pocket to the west (rows 3-4): a place to rest and look down. At
+;; the bottom a cold blue stone (H4) is set in the east wall: it hums D4,
+;; shivers off-key at what you carry, and stays shut. Nothing in this
+;; release gives H4. Proposed (question 5's reply on the map): the door
+;; to Wrongwater.

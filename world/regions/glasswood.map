@@ -2,11 +2,8 @@
 ;;; intent each: topics/harkfell-glasswood-map, ruled by David 2026-09-26
 ;;; (D41-D46). West of the Hollow and lower, at negative x.
 ;;;
-;;; PHASE 1: only the negative-coordinates probe's two rooms, The Scree (A)
-;;; and First Sight (B), joined to the Hollow's Scree End through the old
-;;; amber door; and the look track's dark look probe, Root Ice (U), closed on
-;;; every side until the caves are written. The other nineteen come in
-;;; phase 2, with the full layout:
+;;; The full layout (the ROOMS slice writes it in three batches: the caves
+;;; and the fall's foot; the crowns and pockets; the floor):
 ;;;
 ;;;   x-6  x-5  x-4  x-3  x-2  x-1  x0
 ;;;   J -  I -  H -  G -  F    B -  A      y3  the crowns (sky above)
@@ -16,17 +13,36 @@
 ;;;   P -  O #  Q -  R -  S -  U -  V      y5  the fall's foot, the glass caves
 ;;;                  |
 ;;;                  T                     y6  the Ice Well
+;;;
+;;; O and Q, and C and V, are joined through green stones (H3): the map
+;;; draws them as open joins, since each stone is set one cell in from the
+;;; shared edge and the edge itself is open. The caves are entered only
+;;; carrying H3.
+;;;
+;;; WRITTEN SO FAR: the probe rooms (A, B) and batch 1, the caves and the
+;;; fall's foot (O, P, Q, R, S, T, U, V). O's top (the chimney down from
+;;; M) and V's top (the shaft up to C's stone) stay closed until M and C
+;;; are written.
 (map
   region: glasswood
-  origin: (-1 3)
+  origin: (-6 3)
   layout:
-  ("B-A"
-   "   "
-   "   "
-   "   "
-   "U  ")
+  ("          B-A"
+   "             "
+   "             "
+   "             "
+   "P-O-Q-R-S-U-V"
+   "        |    "
+   "        T    ")
   rooms:
   ((A "The Scree" "through the old stone door, scree falls away west into mist, and the birches glitter far below")
    (B "First Sight" "the scree's last shoulder over the mist, where the whole glazed wood glitters below: a breath")
-   (U "Root Ice" "a low cave where the birches' roots hang down through the ice: a breath in the dark"))
+   (O "The Old Birch" "at the foot of the fall, the oldest birch in the wood, hollow, where the moths winter, and the note you followed among them")
+   (P "Snow Hollow" "a hollow of deep snow beside the old birch, where voles come up to look at you if you stand still: a breath")
+   (Q "Glass Chute" "behind a green stone, the fall's pool drains under the wood down a chute of clear ice, into the dark")
+   (R "Blue Hall" "a hall of blue ice under the wood, where the moths come to you and light the walls: the first cave they fill")
+   (S "Meltwater" "a pool of meltwater under the ice, swum by the moths' light")
+   (T "The Ice Well" "a well of clear ice going down from the meltwater to a cold blue stone: somewhere deeper, not yet")
+   (U "Root Ice" "a low cave where the birches' roots hang down through the ice: a breath in the dark")
+   (V "Cave Mouth" "the caves' east end, a climb up to the back of the green stone, which rings and opens as you come carrying H3"))
   borders: ((A east)))
