@@ -6,20 +6,23 @@
   intent: "the tops of the wood under the whole sky, every twig in glass and clinking in the wind: a breath"
   bed: (wind 0.9 water 0.0 hum 0.1 drone 0.3)
   grid:
-  ("   |        |       |    "
-   "   |        |       |    "
-   "   |        |       |    "
-   "   |        |       |    "
-   "   |        |       |    "
-   "   |      =====     |    "
-   "########    |    ########"
-   "########    |    ########"
-   "#########################"
+  ("       |     |     |     "
+   "       |     |     |     "
+   "       |     |     |     "
+   "       |     |     |     "
+   "       |     |     |     "
+   "       |    ====   |     "
+   "###  =====   |   ==== ###"
+   "###    |     |     |  ###"
+   "###    |     |     |  ###"
    "#########################"
    "#########################")
-  things: ((snow-owl at: (12 4)))
+  things: ((snow-owl at: (13 4)))
   decor: auto)
-;; A ridge of glazed rock over the Icicle Gallery's overhang (nothing
-;; joins it below), level with the crowns of the wood. A dip in the
-;; middle under one birch; the owl sits on its branch (12,5), a held jump
-;; up from the dip. A breath under the whole sky.
+;; The tops of three birches (columns 7, 13, 19), their crowns of glazed
+;; branches at different heights between two pillars of rock (columns 0-2
+;; and 22-24) level with the Branch Stair and the Crown Gap. Hops of one and
+;; two tiles from crown to crown; the owl sits on the highest (13,4). A miss
+;; lands on the rock bed under the wood (row 8), a held jump from the
+;; crowns and the pillars. A breath under the whole sky. Nothing joins it
+;; below (the Icicle Gallery's overhang).

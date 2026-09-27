@@ -12,15 +12,16 @@
    "     |             |     "
    "     |             |     "
    "     |             |     "
-   "===========   ==========#"
+   "==== |=====   =====| ===#"
    "     |             |    #"
    "     |             |    #"
    "     |             |    #"
    "     |             |    #")
   decor: auto)
 ;; Two crowns of glazed branches (row 6) with a gap of three (columns
-;; 11-13) between them: the envelope's edge, taken at a run from either
-;; side. Under both is the Frozen Tarn (x-4y4): a miss, or a drop through
-;; the branches, lands you on the ice. The far side is also reached up the
-;; frozen fall, so the gap is proved on its own in a probe world cut from
-;; the Crowns and this room (the Session Log).
+;; 11-13) between them: the envelope's edge, taken at a run. Each crown has
+;; a twig gap of two in it (columns 4-5 and 19-20) to hop on the way. Under
+;; both is the Frozen Tarn (x-4y4): a miss, or a drop through the branches,
+;; lands you on the ice. The far side is also reached up the frozen fall, so
+;; the gap is proved on its own in a probe world cut from the Crowns and
+;; this room (the Session Log).

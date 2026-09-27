@@ -6,28 +6,29 @@
   intent: "at the foot of the fall, the oldest birch in the wood, hollow, where the moths winter, and the note you followed among them"
   bed: (wind 0.1 water 0.4 hum 0.4 drone 0.8)
   grid:
-  ("####  %##################"
-   "####  %#######      #####"
-   "####  %####     ||| #####"
-   "####  %#        ||| #####"
+  ("####  %=============#####"
    "####  %         ||| #####"
-   "                ||| o    "
+   "####  %         ||| #####"
+   "####  %         ||| #####"
+   "####  %         ||| #####"
+   "                |||      "
    "                |||######"
    "                |||######"
    "#########~~~#############"
    "#########~~~#############"
    "#########################")
   things: ((harmonic at: (17 7) overtone: 3)
-           (ring-stone at: (20 5) overtone: 3)
            (lantern-moth at: (17 3) count: 8 drawn: 3))
   decor: auto)
-;; The foot of the frozen fall. The chimney comes down at columns 4-5
+;; The foot of the frozen fall, open to the sky: the top row east of the
+;; chimney is the Old Birch's crown (branches, which close the edge under the
+;; Frozen Fall's floor but let the room draw under the sky). The chimney
+;; comes down at columns 4-5
 ;; between the fall's glass (column 3) and the rough rock (column 6,
 ;; climbable back up from the floor), from the Frozen Fall above.
-;; The Old Birch is the three-wide trunk (columns 16-18, rows 2-7), its
-;; hollow in the fifth row; H3 lies at its foot among the moths' cloud.
-;; The green stone (20,5) is the door to the Glass Chute: taking H3 at
-;; (17,7) puts you 3.6 tiles from it, so it rings as you take the fifth.
-;; Carrying only H2 it shivers off-key and stays shut, so the caves
-;; cannot be entered without H3 (the one-way chute is not a trap).
+;; The Old Birch is the three-wide trunk (columns 16-18, rows 1-7), its
+;; hollow at row 6, just above its base; H3 lies at its foot among the moths' cloud.
+;; The passage east (row 5, over the rock step at column 19) leads to the
+;; Glass Chute's dark chamber and its green stone (the dark room before
+;; H3, David 2026-09-27). Carrying only H2 the caves beyond it stay shut.
 ;; West under the low rock is Snow Hollow (rows 5-7).

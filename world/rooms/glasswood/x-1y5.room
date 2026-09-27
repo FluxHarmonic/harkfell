@@ -15,10 +15,12 @@
    "                    %####"
    "                   %%####"
    "                 %%%%####"
-   "#####~~~~~~~~~###%%%%####"
-   "######~~~~~~~############"
+   "#################%%%%####"
+   "######~~~#~~~############"
    "#########################")
-  things: ((lantern-moth at: (9 5) count: 4 drawn: 3))
+  things: ((lantern-moth at: (9 5) count: 4 drawn: 3)
+           (thin-ice at: (6 8)) (thin-ice at: (7 8)) (thin-ice at: (8 8))
+           (thin-ice at: (10 8)) (thin-ice at: (11 8)) (thin-ice at: (12 8)))
   start: (2 7)
   decor: auto)
 ;; The look track's dark probe (2026-09-26), folded into the map's Root
@@ -27,3 +29,7 @@
 ;; Mouth (rows 3-4) over a rough step up. start: stays at (2,7), far from
 ;; (15,7), which scripts/gate-look uses for the moth light's box.
 ;; Carry H3 (?carry=2,3) and the moths come to you and light the cave.
+;; The pool is thin ice over meltwater (the challenge-and-danger pass,
+;; 2026-09-27): two spans of three cells (6-8, 10-12) with a rock step
+;; between (9). Walk each span in one go; stand on it for a second and it
+;; gives, and the cold water sends you back to the room's edge.

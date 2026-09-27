@@ -10,14 +10,14 @@
 ;;;        |    |         |    |    |
 ;;;   N -  M -  L -  K -  E -  D -  C      y4  the wood floor
 ;;;        |                        #
-;;;   P -  O #  Q -  R -  S -  U -  V      y5  the fall's foot, the glass caves
+;;;   P -  O -  Q -  R -  S -  U -  V      y5  the fall's foot, the glass caves
 ;;;                  |
 ;;;                  T                     y6  the Ice Well
 ;;;
-;;; O and Q, and C and V, are joined through green stones (H3): the map
-;;; draws them as open joins, since each stone is set one cell in from the
-;;; shared edge and the edge itself is open. The caves are entered only
-;;; carrying H3.
+;;; C and V are joined through a green stone (H3), set in the Scree Foot one
+;;; cell in from the shared edge (the map draws it as an open join). The Glass
+;;; Chute's dark chamber is reached from the Old Birch without H3 (the dark
+;;; room before H3, 2026-09-27); its own green stone is the door to the caves.
 ;;;
 ;;; ALL 22 ROOMS ARE WRITTEN (the ROOMS slice, 2026-09-27). Behind the Fall
 ;;; waits for SYSTEMS' upward icicle (D43).

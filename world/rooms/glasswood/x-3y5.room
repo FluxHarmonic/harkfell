@@ -8,20 +8,24 @@
   light: 0.33
   grid:
   ("#########################"
-   "######             ######"
-   "####                 ####"
-   "###                   ###"
-   "##                     ##"
-   "##                     ##"
+   "######          ## ######"
+   "####            ##   ####"
+   "###             ##    ###"
+   "##              ##     ##"
+   "##              ##     ##"
    "##         ###           "
    "           ###           "
    "           ###           "
    "#########################"
    "#########################")
-  things: ((lantern-moth at: (12 3) count: 8 drawn: 3))
+  things: ((lantern-moth at: (12 3) count: 8 drawn: 3)
+           (icicle at: (16 6)))
   decor: auto)
 ;; The first cave the moths fill: a tall hall with one pillar of blue ice
 ;; in the middle. In from the Glass Chute (rows 7-8), on east to the
 ;; Meltwater (rows 6-8). Its moment, blue-hall (first visit), is named
 ;; when SOUND writes the tune: a named moment with no file is red in
 ;; test-tunes, and a placeholder tune would be spent in a save.
+;; A spur of blue ice hangs from the roof (columns 16-17, rows 1-5) with an
+;; icicle under it (16,6), over the way on east: in the dark it shows only
+;; when the moth light reaches it, so listen for its ring.

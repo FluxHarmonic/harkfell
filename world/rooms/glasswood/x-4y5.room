@@ -5,23 +5,28 @@
   title: "Glass Chute"
   intent: "behind a green stone, the fall's pool drains under the wood down a chute of clear ice, into the dark"
   bed: (wind 0.05 water 0.6 hum 0.3 drone 0.6)
-  light: 0.5
+  light: 0.33
   grid:
   ("#########################"
    "#########################"
    "#########################"
-   "#########       #########"
-   "#####              ######"
-   "                    #####"
-   "#####                 ###"
-   "#####                    "
-   "#####                    "
-   "#####      ##############"
+   "#        ################"
+   "#        ##        ######"
+   "         o           ####"
+   "###########           ###"
+   "###########              "
+   "###########              "
+   "###########    ##########"
    "#########################")
-  things: ((lantern-moth at: (14 6) count: 3 drawn: 3))
+  things: ((ring-stone at: (9 5) overtone: 3)
+           (icicle at: (13 4))
+           (lantern-moth at: (17 6) count: 3 drawn: 3))
   decor: auto)
-;; The passage behind the Old Birch's green stone comes in at row 5 and
-;; ends at a sheer drop of glass ice: four tiles down to the floor, too
-;; high to jump back up and a single smooth wall with nothing to kick
-;; from. One way down, into the dark. Only a player carrying H3 gets
-;; here, and the way home is east, through the caves to the Cave Mouth.
+;; The dark room before H3 (David, 2026-09-27): the passage from the Old
+;; Birch comes in at row 5 into a small chamber in the real dark. Its green
+;; stone (9,5) is the door to the chute: carrying only H2 you stand in the
+;; black by a stone that hums A3 and shivers off-key, and go back the way you
+;; came. Carrying H3 it rings as you come near, and beyond it the chute is a
+;; sheer drop of glass ice, four tiles to the floor, too high to jump back up,
+;; with nothing to kick from: one way down. An icicle hangs over where you
+;; land (13,4). The way home is east, through the caves to the Cave Mouth.

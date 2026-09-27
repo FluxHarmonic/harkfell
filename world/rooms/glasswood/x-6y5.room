@@ -6,20 +6,22 @@
   intent: "a hollow of deep snow beside the old birch, where voles come up to look at you if you stand still: a breath"
   bed: (wind 0.1 hum 0.2 drone 0.5)
   grid:
-  ("#########################"
-   "#########################"
-   "#########        ########"
-   "######              #####"
-   "####                 ####"
-   "###                      "
-   "##                       "
-   "##    ###        ##      "
-   "###########   ###########"
+  ("###===================###"
+   "###  |     |        | ###"
+   "###  |     |        | ###"
+   "##   |     |        |  ##"
+   "##   |     |        |  ##"
+   "###  |     |        |    "
+   "##   |     |        |    "
+   "##   |###  |     ## |    "
+   "###########|  ###########"
    "#########################"
    "#########################")
   things: ((snow-vole at: (12 8))
            (snow-vole at: (21 7)))
   decor: auto)
-;; A pocket off the Old Birch (its west edge, rows 5-7), closed on every
-;; other side. Two drifts to stand on and a dip where a vole lives. A
-;; breath: nothing to do but stand still and let the voles look.
+;; A hollow of deep snow off the Old Birch (its west edge, rows 5-7), under
+;; the wood: its top row is branches (a canopy, not rock: the room draws
+;; under the sky, with the far wood behind it), with three birches standing
+;; in it. Two drifts to stand on and a dip where a vole lives. A breath:
+;; nothing to do but stand still and let the voles look.

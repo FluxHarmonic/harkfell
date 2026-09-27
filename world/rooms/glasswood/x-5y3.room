@@ -11,8 +11,8 @@
    "          |          |   "
    "          |          |   "
    "          |          |   "
-   "          |          |   "
-   "####  %=================="
+   "          |   =====  |   "
+   "####  %=====         ===="
    "####  %   |          |   "
    "####  %   |          |   "
    "####  %   |          |   "
@@ -20,7 +20,9 @@
   decor: auto)
 ;; The stream froze on the shelf (columns 0-3) and its fall is the glass
 ;; wall (column 3) going down through the Frozen Fall to the Old Birch.
-;; Between the glass and the rough rock (column 6) is the chimney
-;; (columns 4-5), two wide: a hop across its mouth, or the way down. East
-;; the crowns run on to the Crown Gap over the Frozen Fall's floor. H3's
-;; tone comes up from below.
+;; Between the glass and the rough rock (column 6) is the chimney (columns
+;; 4-5), two wide: a hop across its mouth, or the way down. East the crowns
+;; run on to the Crown Gap in three pieces at different heights (columns
+;; 7-11, 14-18 a row higher, 21-24) with twig gaps of two between, over the
+;; Frozen Fall's floor: a miss is a fall to it. H3's tone comes up from
+;; below.
