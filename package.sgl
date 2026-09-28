@@ -107,7 +107,7 @@
 
 (package
   name: "harkfell"
-  version: "0.1.1"
+  version: "0.2.0"
   sigil: "0.22.10"   ; fba8cb3b (Glasswood phase 2 relock, the leader's call: code compiled by 0.22.10 does not link against an older sigil-lib); 0.22.9 (300d5ddd): the C-path size fix (the web wasm about 70% smaller); 0.22.8 (26cf03de) brought the native helper-recogniser miscompile fixes, the NaN fix, R7RS in core, the wasm export limit, and %hygiene-cell
   description: "A quiet exploration platformer about carrying lost harmonics home"
   license: "GPL-3.0-or-later"
