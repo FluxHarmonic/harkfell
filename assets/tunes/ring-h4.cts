@@ -9,4 +9,4 @@
       (row 3 (2 "D-5" 2 34 "000"))
       (row 6 (3 "A-5" 2 26 "000"))))
   (order 0)
-  (history ("claude" "2026-09-24" "A3 cue: a ring-stone keyed to H2 rings in sympathy: D3 swelling, its octave and twelfth after") ("claude" "2026-09-27" "Glasswood ROOMS: PLACEHOLDER for SOUND, the H2 cue an octave up (H4 is twice H2), for the blue stones (the Ice Well; the bowl's pocket)")))
+  (history ("claude" "2026-09-24" "A3 cue: a ring-stone keyed to H2 rings in sympathy: D3 swelling, its octave and twelfth after") ("claude" "2026-09-27" "Glasswood ROOMS: PLACEHOLDER for SOUND, the H2 cue an octave up (H4 is twice H2), for the blue stones (the Ice Well; the bowl's pocket)") ("claude" "2026-09-28" "Glasswood SOUND: kept as the real cue: H4's partials (D4, D5, A5), the rule ring-h2 set. Not heard in 0.2 (no H4 to carry), registered in SPOTS for when it is.")))

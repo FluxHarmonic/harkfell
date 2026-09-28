@@ -12,4 +12,4 @@
       (row 8 (5 "C#6" 1 26 "000"))
       (row 10 (6 "E-6" 1 22 "000"))))
   (order 0)
-  (history ("claude" "2026-09-24" "A3 cue: H2 taken; its own partials rise from D3 (2, 4, 6, 8, 10, 12 times the fundamental)") ("claude" "2026-09-27" "Glasswood ROOMS: PLACEHOLDER for SOUND, the H2 cue a just fifth up (A4's method for the H3 stone), so the Old Birch's H3 pickup has a cue")))
+  (history ("claude" "2026-09-24" "A3 cue: H2 taken; its own partials rise from D3 (2, 4, 6, 8, 10, 12 times the fundamental)") ("claude" "2026-09-27" "Glasswood ROOMS: PLACEHOLDER for SOUND, the H2 cue a just fifth up (A4's method for the H3 stone), so the Old Birch's H3 pickup has a cue") ("claude" "2026-09-28" "Glasswood SOUND: kept as the real cue. The notes are H3's own partials (3, 6, 9, 12, 15, 18 times D2: A3 A4 E5 A5 C#6 E6), the rule pickup-h2 set with H2's; what was wrong was that the director never rendered it (not in SPOTS), so taking H3 was silent.")))

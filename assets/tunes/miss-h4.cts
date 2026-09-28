@@ -7,4 +7,4 @@
       (row 0 (1 "D-4" 1 34 "000"))
       (row 1 (2 "D#4" 1 30 "000"))))
   (order 0)
-  (history ("claude" "2026-09-24" "A3 cue: the near miss: the stone's D3 against a semitone above it, beating, a moment, then silent") ("claude" "2026-09-27" "Glasswood ROOMS: PLACEHOLDER for SOUND, the H2 cue an octave up (H4 is twice H2), for the blue stones (the Ice Well; the bowl's pocket)")))
+  (history ("claude" "2026-09-24" "A3 cue: the near miss: the stone's D3 against a semitone above it, beating, a moment, then silent") ("claude" "2026-09-27" "Glasswood ROOMS: PLACEHOLDER for SOUND, the H2 cue an octave up (H4 is twice H2), for the blue stones (the Ice Well; the bowl's pocket)") ("claude" "2026-09-28" "Glasswood SOUND: kept as the real cue: the blue stone's D4 against the semitone above it, the rule miss-h2 set; registered in SPOTS so the blue stones' near miss sounds (it was silent).")))

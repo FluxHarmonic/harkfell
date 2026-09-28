@@ -76,7 +76,7 @@
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
           sound-work! sound-set-work-in-frame! sound-bank-busy? sound-cue MOVING-CUES
-          place-moves place-mode place-vx place-bx place-foot sound-moved spot-gain
+          place-moves place-mode place-vx place-bx place-foot place-light sound-moved spot-gain sound-surface
           THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S BORDER-DEFAULT
           bed-channels-of group-channels
           DUCK-GAIN DUCK-IN-S DUCK-OUT-S ROOM-RAMP-S BORDER-S FADE-S STILL-S
@@ -102,7 +102,7 @@
     (define DRONE-CHANNELS '(4 5 6 7 8))
     (define HARMONIC-CHANNEL '((2 . 4) (3 . 5) (4 . 6) (5 . 7) (7 . 8)))
     ;; hum (A4): the Hollow's channel 3, the fundamental under the floor
-    (define DEFAULT-LEVELS '((wind . 0.5) (water . 0.4) (reeds . 0.4) (texture . 0.4) (hum . 0.3) (drone . 0.6)))
+    (define DEFAULT-LEVELS '((wind . 0.5) (water . 0.4) (reeds . 0.4) (texture . 0.4) (hum . 0.3) (chimes . 0.4) (drone . 0.6)))
     (define BED-ID "bed")
     (define MOMENT-ID "moment")
     (define TONE-ID "tone-h2")
@@ -133,6 +133,8 @@
     ;;   moment-still      it plays only once you have stood still this many
     ;;                     seconds in the room (moment: (... still: 6)), or #f
     ;; Glasswood:
+    ;;   light             the room's light: (1.0 daylight): Glasswood's steps are
+    ;;                     ice, not snow, in a room darker than daylight
     ;;   moment-key        the key the hush spends this moment under (one of
     ;;                     the room's moments), or #f: the room's key
     (define-struct place
@@ -143,7 +145,7 @@
       (carry default: #f) (tones default: #f) (stones default: '()) (news default: '())
       (wander default: '()) (moment-carrying default: #f) (moment-still default: #f) (moment-key default: #f)
       (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f)
-      (hums default: '()))
+      (hums default: '()) (light default: 1.0))
 
     ;; --- state ---------------------------------------------------------------------
     (define *say* (lambda parts #f))
@@ -631,7 +633,8 @@
     ;; One is drawn on entering the room and starts WANDER-DELAY-LO to -HI
     ;; seconds later if you are still there and the hush still allows.
     ;; David, 2026-09-24: the slice's two wandering moments
-    (define WANDER-TAGS '(("stones-remember" . open-sky) ("seed-wind" . water)))
+    (define WANDER-TAGS '(("stones-remember" . open-sky) ("seed-wind" . water)
+                          ("glaze-wind" . open-sky) ("under-ice" . water)))
     (define WANDER-DELAY-LO 3.0)
     (define WANDER-DELAY-HI 8.0)
     (define *wander-due* #f)      ; (name key t)
@@ -1100,6 +1103,14 @@
             (list 'step-stone-b "step-stone-b" 0.0 0.0 0.095)
             (list 'step-wood-a "step-wood-a" 0.0 0.0 0.33)
             (list 'step-wood-b "step-wood-b" 0.0 0.0 0.33)
+            ;; Glasswood (D36): squeaking snow, a harder tap on the caves' ice,
+            ;; and thin ice's own hollow knock
+            (list 'step-snow-a "step-snow-a" 0.0 0.0 0.36)
+            (list 'step-snow-b "step-snow-b" 0.0 0.0 0.45)
+            (list 'step-ice-a "step-ice-a" 0.0 0.0 0.065)
+            (list 'step-ice-b "step-ice-b" 0.0 0.0 0.076)
+            (list 'step-thin-a "step-thin-a" 0.0 0.0 0.107)
+            (list 'step-thin-b "step-thin-b" 0.0 0.0 0.13)
             (list 'jump "jump" 0.0 0.0 0.32)
             (list 'wall-jump "wall-jump" 0.0 0.0 0.2)
             (list 'land-soft "land-soft" 0.0 0.0 0.81)
@@ -1121,9 +1132,20 @@
             (list 'miss-h3 "miss-h3" 0.0 0.0 0.32)
             (list 'ring-h3 "ring-h3" 0.0 0.0 0.57)
             (list 'stone-slide "stone-slide" 0.0 0.0 0.72)
-            ;; Glasswood's falling ice: the tell (a PLACEHOLDER tune for SOUND; the tell
-            ;; was silent, and in a moth-lit cave the icicle unseen)
-            (list (quote ice-tell) "ice-tell" 0.0 0.0 0.5)
+            ;; Glasswood's falling ice: the tell first (the only warning in the
+            ;; dark), then the fall and the shatter; thin ice's creak and crack
+            (list 'ice-tell "ice-tell" 0.0 0.0 0.29)
+            (list 'ice-creak "ice-creak" 0.0 0.0 0.84)
+            (list 'ice-crack "ice-crack" 0.0 0.0 0.32)
+            (list 'ice-fall "ice-fall" 0.0 0.0 0.45)
+            (list 'ice-shatter "ice-shatter" 0.0 0.0 0.2)
+            ;; H3 (the Old Birch) and its creatures; H4, the blue stones
+            (list 'pickup-h3 "pickup-h3" 0.0 0.0 0.55)
+            (list 'moth-h3 "moth-h3" 0.0 0.0 0.12)
+            (list 'owl-h3 "owl-h3" 0.0 0.0 0.44)
+            (list 'vole "vole" 0.0 0.0 0.34)
+            (list 'miss-h4 "miss-h4" 0.0 0.0 0.29)
+            (list 'ring-h4 "ring-h4" 0.0 0.0 0.54)
             ;; what H2 changes
             (list 'croak-h2 "croak-h2" 0.0 0.0 0.55)
             (list 'song-h2 "song-h2" 0.0 0.0 0.5)
@@ -1191,13 +1213,13 @@
             ((near-miss) (let ((c (harmonic-cue "miss-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
             ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
             ((call) (unless *moment* (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
-            ;; Glasswood's falling ice ((harkfell ice)): its tell is a warning, so it
-            ;; sounds even under a moment; the fall and the shatter are spot sounds.
-            ;; The cues are the sound track's (ice-tell ice-fall ice-shatter); one not
-            ;; written yet plays nothing.
+            ;; Glasswood's ice ((harkfell ice), and thin ice in (harkfell world)):
+            ;; the icicle's tell and thin ice's creak are warnings, so they sound
+            ;; even under a moment; the fall, the shatter and the crack are spot
+            ;; sounds. Cues ice-tell ice-fall ice-shatter ice-creak ice-crack.
             ((ice) (let ((c (string->symbol (string-append "ice-" (symbol->string (cadr item))))))
                      (*say* "sound" "ice" (symbol->string (cadr item)))
-                     (when (or (eq? (cadr item) 'tell) (not *moment*))
+                     (when (or (memq (cadr item) '(tell creak)) (not *moment*))
                        (cue-at! c (spot-gain c) (caddr item) pl))))
             (else #f)))
         (place-news pl)))
@@ -1222,7 +1244,8 @@
     (define SILENT-PEAK 1e-4)     ; -80 dBFS
     (define MOVING-CUES
       (list 'jump 'land-soft 'land-hard 'step-fen-a 'step-fen-b 'step-grass-a 'step-grass-b
-            'splash 'wall-jump 'step-stone-a 'step-stone-b 'step-wood-a 'step-wood-b))
+            'splash 'wall-jump 'step-stone-a 'step-stone-b 'step-wood-a 'step-wood-b
+            'step-snow-a 'step-snow-b 'step-ice-a 'step-ice-b 'step-thin-a 'step-thin-b))
     (define (bank-order)
       (append (filter spot-ref MOVING-CUES)
               (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))))
@@ -1365,14 +1388,26 @@
     (define *moved* '())          ; ((name . gain) ...) this frame, newest first (the gates)
     (define (sound-moved) *moved*)
 
+    ;; Glasswood (D36): smooth ground is snow under the sky and blue ice in
+    ;; the dark (a room with light: under 1, the caves and the hollow behind
+    ;; the fall); a birch branch is glazed, so ice; thin ice (brittle) has its
+    ;; own hollow step.
     (define (surface pl)
       (let ((k (place-foot pl)) (r (place-region pl)))
-        (case k
-          ((ledge) (if (eq? r 'reedfen) 'wood 'stone))
-          ((climbable) 'stone)
-          ;; thin ice (brittle) steps as the region's rock does (the review: it was silent)
-          ((solid brittle) (case r ((reedfen) 'fen) ((hollow) 'grass) (else 'stone)))
-          (else #f))))
+        (if (eq? r 'glasswood)
+            (case k
+              ((ledge) 'ice)
+              ((climbable) 'stone)
+              ((brittle) 'thin)
+              ((solid) (if (< (place-light pl) 1.0) 'ice 'snow))
+              (else #f))
+            (case k
+              ((ledge) (if (eq? r 'reedfen) 'wood 'stone))
+              ((climbable) 'stone)
+              ((solid brittle) (case r ((reedfen) 'fen) ((hollow) 'grass) (else 'stone)))
+              (else #f)))))
+
+    (define (sound-surface pl) (surface pl))
 
     (define (move-cue! name gain pan)
       (let ((c (assq name *cues*)) (g (* gain (spot-gain name) (if *moment* MOVE-IN-MOMENT 1.0))))
