@@ -93,7 +93,7 @@
             hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
   tiles: hollow
   roster: (reedling lantern-moth)
-  moments: (high-fell hollow-answers)
+  moments: (high-fell hollow-answers hollow-fifth)
   wander: (stones-remember)
   gives: ())
 
@@ -103,22 +103,22 @@
 ;; End (H2); H3 lies in the Old Birch at its far west corner. PHASE 1 holds
 ;; only the negative-coordinates probe (The Scree, First Sight), and LOOK's
 ;; dark look probe (Root Ice). The palette and tiles are the look track's
-;; (glw-*, assets/art/glasswood.txt). PLACEHOLDER until the sound track
-;; lands: the Hollow's bed (SOUND's glasswood-bed, channels wind water
-;; chimes drone); gives: H3 once the Old Birch is written.
+;; (glw-*, assets/art/glasswood.txt). The sound is the sound track's
+;; (2026-09-28): glasswood-bed, channel 3 the glazed twigs clinking; the
+;; three moments here, hollow-fifth in the Hollow, and two wandering ones.
 (region glasswood
   name: "Glasswood"
   bounds: ((-6 3) (0 6))
   overtone: 3
-  bed: "hollow-bed"
-  bed-channels: (wind water hum drone)
+  bed: "glasswood-bed"
+  bed-channels: (wind water chimes drone)
   mode: lydian
   palette: (glw-sky-1 glw-sky-2 glw-sky-3 glw-sky-4 glw-ice-1 glw-ice-2 glw-ice-3 glw-ice-4
             glw-birch-1 glw-birch-2 glw-birch-3 glw-melt glw-copper fur-1 fur-2 ink)
   tiles: glasswood
   roster: (lantern-moth snow-owl snow-vole)
-  moments: ()
-  wander: ()
+  moments: (the-ice-rings singing-ice blue-hall)
+  wander: (glaze-wind under-ice)
   gives: ((overtone 3)))
 
 (region reedfen

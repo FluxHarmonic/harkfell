@@ -4,7 +4,7 @@
   at: (-5 3)
   title: "Fall's Head"
   intent: "where the stream froze as it went over the edge, and the note you are following comes up from below"
-  bed: (wind 0.7 water 0.3 hum 0.2 drone 0.4)
+  bed: (wind 0.7 water 0.3 chimes 0.6 drone 0.4)
   grid:
   ("          |          |   "
    "          |          |   "

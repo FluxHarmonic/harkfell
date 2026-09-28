@@ -4,7 +4,7 @@
   at: (-3 3)
   title: "The Crowns"
   intent: "the tops of the wood under the whole sky, every twig in glass and clinking in the wind: a breath"
-  bed: (wind 0.9 water 0.0 hum 0.1 drone 0.3)
+  bed: (wind 0.9 water 0.0 chimes 0.6 drone 0.3)
   grid:
   ("       |     |     |     "
    "       |     |     |     "

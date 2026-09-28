@@ -4,7 +4,7 @@
   at: (-3 4)
   title: "Icicle Gallery"
   intent: "a long overhang hung with icicles: listen for each one, wait, and go"
-  bed: (wind 0.3 water 0.1 hum 0.2 drone 0.5)
+  bed: (wind 0.3 water 0.1 chimes 0.45 drone 0.5)
   grid:
   ("#########################"
    "#########################"

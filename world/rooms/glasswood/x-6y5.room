@@ -4,7 +4,7 @@
   at: (-6 5)
   title: "Snow Hollow"
   intent: "a hollow of deep snow beside the old birch, where voles come up to look at you if you stand still: a breath"
-  bed: (wind 0.1 hum 0.2 drone 0.5)
+  bed: (wind 0.1 chimes 0.4 drone 0.5)
   grid:
   ("###===================###"
    "###  |     |        | ###"

@@ -4,7 +4,7 @@
   at: (-5 4)
   title: "The Frozen Fall"
   intent: "a waterfall frozen mid-fall: glass on one side, rough rock on the other, and a chimney between them"
-  bed: (wind 0.4 water 0.4 hum 0.2 drone 0.5)
+  bed: (wind 0.4 water 0.4 chimes 0.45 drone 0.5)
   grid:
   ("####  %   |          |   "
    "####  %   |          |   "

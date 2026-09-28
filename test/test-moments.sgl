@@ -12,8 +12,9 @@
 ;;;                  that room's first moment, so the moment it heard stays
 ;;;                  heard and the second is still to come
 ;;;
-;;; The start room lists hollow-answers then high-fell (a real tune) here in
-;;; place of hollow-fifth, whose tune the sound track has not written yet.
+;;; The start room lists hollow-answers then hollow-fifth (the sound track,
+;;; 2026-09-28); the tests swap in high-fell as a second moment whose tune
+;;; the director opens without the save having heard it.
 
 (import (sigil test)
         (sigil list)
@@ -38,7 +39,8 @@
              (string-append (substring s 0 k) b (substring s (+ k m) n)))
             (else (loop (+ k 1)))))))
 
-(define ONE "moment: (tune: hollow-answers when: first-visit carrying: 2)")
+;; the start room's moment: lines as the room file has them
+(define ONE "moment: ((tune: hollow-answers when: first-visit carrying: 2)\n           (tune: hollow-fifth when: first-visit carrying: 3))")
 (define (with-start-moment text)
   (map (lambda (e) (if (string-contains? (car e) "hollow/x4y3.room") (cons (car e) (swap (cdr e) ONE text)) e)) SRC))
 (define (problems src) (map problem-message (content-problems (load-content src))))
@@ -53,8 +55,11 @@
   (test "two moments listed in the start room load clean"
     (assert-equal '() (content-problems CT2))
     (assert-equal '("hollow-answers" "high-fell") (room-moment-names START)))
+  (test "the real start room lists hollow-answers, then hollow-fifth"
+    (assert-equal (quote ("hollow-answers" "hollow-fifth")) (room-moment-names (content-room CT 4 3))))
   (test "one moment, as before, is still a list of one"
-    (assert-equal '("hollow-answers") (room-moment-names (content-room CT 4 3))))
+    (assert-equal (quote ("hollow-answers"))
+                  (room-moment-names (content-room (load-content (with-start-moment "moment: (tune: hollow-answers when: first-visit carrying: 2)")) 4 3))))
   (test "a tune listed twice is red"
     (assert-true (has? (problems (with-start-moment "moment: ((tune: hollow-answers when: first-visit) (tune: hollow-answers when: first-visit carrying: 3))"))
                        "is listed twice in this room")))

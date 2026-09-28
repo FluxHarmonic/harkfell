@@ -4,7 +4,7 @@
   at: (-2 5)
   title: "Meltwater"
   intent: "a pool of meltwater under the ice, swum by the moths' light"
-  bed: (wind 0.05 water 0.8 hum 0.3 drone 0.6)
+  bed: (wind 0.05 water 0.8 chimes 0.1 drone 0.6)
   light: 0.33
   grid:
   ("#########################"

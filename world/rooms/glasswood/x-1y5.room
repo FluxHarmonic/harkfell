@@ -4,7 +4,7 @@
   at: (-1 5)
   title: "Root Ice"
   intent: "a low cave where the birches' roots hang down through the ice: a breath in the dark"
-  bed: (wind 0.05 water 0.7 hum 0.3)
+  bed: (wind 0.05 water 0.7 chimes 0.1)
   light: 0.25
   grid:
   ("#########################"

@@ -4,7 +4,7 @@
   at: (0 4)
   title: "Scree Foot"
   intent: "the foot of the scree, where the ground opens into the dark: the first dark, before you have a light"
-  bed: (wind 0.4 water 0.2 hum 0.3 drone 0.5)
+  bed: (wind 0.4 water 0.2 chimes 0.3 drone 0.5)
   grid:
   ("%%%%%%%%%%          #####"
    "%%%%%%%%%%    |     #####"

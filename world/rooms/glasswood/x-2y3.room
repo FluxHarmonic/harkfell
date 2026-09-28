@@ -4,7 +4,7 @@
   at: (-2 3)
   title: "Branch Stair"
   intent: "birch branches like the rungs of a ladder, up out of the snow into the light, and down again through them"
-  bed: (wind 0.6 water 0.1 hum 0.1 drone 0.3)
+  bed: (wind 0.6 water 0.1 chimes 0.6 drone 0.3)
   grid:
   ("    |     |            ##"
    "    |     |            ##"

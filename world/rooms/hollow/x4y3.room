@@ -22,7 +22,8 @@
            (ring-stone at: (23 8) overtone: 4)
            (lantern-moth at: (19 6) count: 3 drawn: 3)
            (lantern-moth at: (11 5) count: 4 drawn: 2))
-  moment: (tune: hollow-answers when: first-visit carrying: 2)
+  moment: ((tune: hollow-answers when: first-visit carrying: 2)
+           (tune: hollow-fifth when: first-visit carrying: 3))
   decor: auto)
 ;; Where the game starts: at the bottom of the bowl, beside the H2 stone
 ;; (16,8), a door into the fell. Coming home carrying H2 it rings and sinks;
@@ -33,4 +34,4 @@
 ;; it, in a one-cell pocket (22,8), a cold blue stone (23,8), keyed to H4,
 ;; stays shut: amber, green, blue. A few moths drawn to H3 gather at the
 ;; green stone. Its second moment, hollow-fifth (first visit, carrying: 3),
-;; is listed after hollow-answers when SOUND writes the tune.
+;; is listed after hollow-answers: the same stones, ringing up A's series.

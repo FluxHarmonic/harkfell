@@ -4,7 +4,7 @@
   at: (-4 4)
   title: "The Frozen Tarn"
   intent: "a tarn frozen clear as glass, with stones the old people sank lying under the ice: stand still and it sings"
-  bed: (wind 0.3 water 0.3 hum 0.3 drone 0.5)
+  bed: (wind 0.3 water 0.3 chimes 0.45 drone 0.5)
   grid:
   ("     |             |    #"
    "     |             |    #"
@@ -17,7 +17,8 @@
    "#########################"
    "#######~~~~~~~~~~~#######"
    "###%%%###################")
+  moment: (tune: singing-ice when: first-visit still: 8)
   decor: auto)
 ;; The tarn, glass over dark water, between two birches on its shores;
 ;; open above to the Crown Gap (a miss lands here). Its moment,
-;; singing-ice (still: 8), is named when SOUND writes the tune.
+;; singing-ice (still: 8): stand on the ice and it sings.

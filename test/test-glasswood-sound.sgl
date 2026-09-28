@@ -1,0 +1,171 @@
+;;; Glasswood's sound track (topics/harkfell-glasswood-sound), through the
+;;; real director and the real world:
+;;;
+;;;   rendered  every cue the world can name is one the director renders
+;;;             (in SPOTS). test-tunes checks each FILE exists; a file the
+;;;             director never renders plays nothing, and that is how taking
+;;;             H3 at the Old Birch was silent (pickup-h3 had a file, no SPOTS
+;;;             entry). The world side is derived from the content: each placed
+;;;             harmonic's pickup, each stone's ring and near miss, each drawn
+;;;             moth's call; plus the creature and ice cues the code emits.
+;;;             Behaviourally too: news of an H3 pickup must not be cue-missing,
+;;;             and news of an H5 pickup (no tune yet) must be (the control).
+;;;   steps     Glasswood's surfaces: snow under the sky, blue ice in the dark
+;;;             and on the glazed branches, thin ice its own; the other
+;;;             regions unchanged; every surface has both step cues.
+;;;   wander    every region's wandering moment has a WANDER-TAGS entry (a name
+;;;             with none fits any room), and Glasswood's fit their rooms.
+;;;   warnings  under a moment, thin ice's creak sounds (a warning, like the
+;;;             icicle's tell) and the icicle's fall does not (a spot sound).
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine mixer)
+        (engine worldmap)
+        (harkfell content)
+        (harkfell source)
+        (harkfell sound)
+        (harkfell gates)
+        (harkfell audio))
+
+(define WORLD (read-world-source "world"))
+(define CT (load-content WORLD))
+
+(define (kw-ref l name)
+  (let find ((l l))
+    (cond ((or (not (pair? l)) (null? (cdr l))) #f)
+          ((and (keyword? (car l)) (string=? (keyword->string (car l)) name)) (cadr l))
+          (else (find (cdr l))))))
+
+(define (h base n) (string-append base (number->string n)))
+
+;; a region's wandering moments as tune names ((harkfell audio)'s, not exported)
+(define (region-wander reg)
+  (let ((w (region-field reg (quote wander))))
+    (if (list? w) (map (lambda (x) (if (symbol? x) (symbol->string x) x)) w) (quote ()))))
+
+;; The moths drawn to a harmonic, over every room: moth-hN for each N.
+(define (drawn-moth-cues ct)
+  (apply append
+         (map (lambda (p)
+                (let ((ts (room-things (placed-data p))))
+                  (filter-map* (lambda (t)
+                                 (and (pair? t) (eq? (car t) 'lantern-moth)
+                                      (let ((n (kw-ref (cdr t) "drawn"))) (and (number? n) (h "moth-h" n)))))
+                               (if (list? ts) ts '()))))
+              (content-rooms ct))))
+
+(define (filter-map* f l)
+  (let loop ((l l) (acc '()))
+    (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+;; What the code emits by name ((harkfell creatures)' calls, (harkfell ice)
+;; and thin ice's news in (harkfell world)).
+(define CODE-CUES
+  '("chirp-a" "chirp-b" "flurry" "song-h2" "croak-a" "croak-b" "croak-h2" "moth-a" "moth-b"
+    "owl-h3" "vole" "ice-tell" "ice-fall" "ice-shatter" "ice-creak" "ice-crack"))
+
+(define (world-cues ct)
+  (append (map (lambda (n) (h "pickup-h" n)) (map pickup-overtone (content-pickups ct)))
+          (apply append (map (lambda (n) (list (h "ring-h" n) (h "miss-h" n)))
+                             (map stone-overtone (content-stones ct))))
+          (drawn-moth-cues ct)
+          CODE-CUES))
+
+(define MISSING (filter (lambda (c) (not (member c (sound-cue-tunes)))) (world-cues CT)))
+
+;; The news path: what the director says for a pickup's news.
+(define SAID '())
+(sound-boot! '() (lambda parts (set! SAID (cons parts SAID))))
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(sound-reset!)
+(define (body-place . news)
+  (place key: "t" region: 'glasswood bed-tune: #f groups: '() levels: '()
+         carry: '(2) tones: '() stones: '() news: news px: 100.0 py: 100.0 rx: 0 ry: 0))
+(sound-frame! 0.0 0.0 (body-place (list 'pickup 3 120.0 100.0) (list 'pickup 5 120.0 100.0)))
+(define (said? kind name) (member (list "sound" kind name) SAID))
+
+(test-group "glasswood sound: every cue the world can name is rendered"
+  (test "the world places H3 and an H4 stone and draws moths to H3 (the check has its subject)"
+    (let ((ws (world-cues CT)))
+      (assert-true (member "pickup-h3" ws))
+      (assert-true (member "miss-h4" ws))
+      (assert-true (member "moth-h3" ws))))
+  (test "every one is in the director's SPOTS"
+    (unless (null? MISSING) (display "  not rendered: ") (display MISSING) (newline))
+    (assert-equal '() MISSING))
+  (test "news of the H3 pickup finds its cue (waiting or ready, not missing)"
+    (assert-true (or (said? "cue" "pickup-h3") (said? "cue-waiting" "pickup-h3")))
+    (assert-false (said? "cue-missing" "pickup-h3")))
+  (test "control: an H5 pickup, which has no cue yet, is reported missing"
+    (assert-true (said? "cue-missing" "pickup-h5"))))
+
+(define (foot region kind light)
+  (sound-surface (place key: "t" region: region foot: kind light: light)))
+
+(test-group "glasswood sound: footsteps (D36)"
+  (test "snow on smooth ground under the sky, blue ice in the dark"
+    (assert-equal 'snow (foot 'glasswood 'solid 1.0))
+    (assert-equal 'ice (foot 'glasswood 'solid 0.33)))
+  (test "thin ice its own step; a glazed branch is ice; rough rock is stone"
+    (assert-equal 'thin (foot 'glasswood 'brittle 1.0))
+    (assert-equal 'thin (foot 'glasswood 'brittle 0.25))
+    (assert-equal 'ice (foot 'glasswood 'ledge 1.0))
+    (assert-equal 'stone (foot 'glasswood 'climbable 1.0)))
+  (test "control: the other regions step as before"
+    (assert-equal 'grass (foot 'hollow 'solid 1.0))
+    (assert-equal 'fen (foot 'reedfen 'solid 1.0))
+    (assert-equal 'wood (foot 'reedfen 'ledge 1.0))
+    (assert-equal 'stone (foot 'hollow 'ledge 1.0)))
+  (test "every surface has both of its step cues"
+    (for-each (lambda (s)
+                (for-each (lambda (ab)
+                            (assert-true (member (string-append "step-" s ab) (sound-cue-tunes))))
+                          '("-a" "-b")))
+              '("fen" "grass" "stone" "wood" "snow" "ice" "thin"))))
+
+(test-group "glasswood sound: wandering moments"
+  (test "every region's wandering moment has a tag (Glasswood names two)"
+    (let ((ws (apply append (map region-wander (content-regions CT)))))
+      (assert-true (member "glaze-wind" ws))
+      (assert-true (member "under-ice" ws))
+      (for-each (lambda (w) (assert-true (assoc w WANDER-TAGS))) ws)))
+  (test "glaze-wind fits the crowns, not a cave"
+    (assert-true (wander-fits? "glaze-wind" '((wind . 0.8) (water . 0.1))))
+    (assert-false (wander-fits? "glaze-wind" '((wind . 0.05) (water . 0.8)))))
+  (test "under-ice fits a cave, not the crowns"
+    (assert-true (wander-fits? "under-ice" '((wind . 0.05) (water . 0.8))))
+    (assert-false (wander-fits? "under-ice" '((wind . 0.8) (water . 0.1))))))
+
+;; Under a moment: Blue Hall's moment starts on the first visit, then news of
+;; thin ice creaking and an icicle falling. cue! counts every play it is asked
+;; for (sound-spots-played), rendered or not, so the count is the routing.
+(define BLUE-HALL
+  (place key: "glasswood:-3,5" region: 'glasswood bed-tune: "glasswood-bed" groups: '(wind water chimes drone)
+         levels: '((wind . 0.05) (water . 0.6) (chimes . 0.15) (drone . 0.7)) moment: "blue-hall"
+         px: -1000.0 py: 900.0 rx: -3 ry: 5 light: 0.33))
+(define (run-until t0 t1 p)
+  (let loop ((f (exact (round (* 30 t0)))))
+    (let ((now (/ f 30.0)))
+      (when (<= now t1)
+        (sound-frame! now (/ 1 30.0) p)
+        (mixer-pump! now)
+        (loop (+ f 1))))))
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(sound-reset!)
+(run-until 0.0 3.0 BLUE-HALL)
+(define MOMENT (sound-moment-playing))
+(define N0 (sound-spots-played))
+(sound-frame! 3.1 (/ 1 30.0) (place BLUE-HALL news: (list (list 'ice 'creak -1000.0 900.0))))
+(define N1 (sound-spots-played))
+(sound-frame! 3.2 (/ 1 30.0) (place BLUE-HALL news: (list (list 'ice 'fall -1000.0 850.0))))
+(define N2 (sound-spots-played))
+
+(test-group "glasswood sound: warnings under a moment"
+  (test "Blue Hall's moment is playing (the check has its subject)"
+    (assert-equal "blue-hall" MOMENT))
+  (test "thin ice's creak sounds under it"
+    (assert-equal 1 (- N1 N0)))
+  (test "the icicle's fall does not (a spot sound waits for the moment)"
+    (assert-equal 0 (- N2 N1))))

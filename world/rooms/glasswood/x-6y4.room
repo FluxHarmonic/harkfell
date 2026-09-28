@@ -4,7 +4,7 @@
   at: (-6 4)
   title: "Behind the Fall"
   intent: "a hollow behind the frozen curtain that a careful eye finds, where one icicle grows upward and hums a note no stone has"
-  bed: (wind 0.0 water 0.2 hum 0.5 drone 0.8)
+  bed: (wind 0.0 water 0.2 chimes 0.2 drone 0.8)
   light: 0.7
   grid:
   ("#########################"

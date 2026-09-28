@@ -4,7 +4,7 @@
   at: (-4 5)
   title: "Glass Chute"
   intent: "behind a green stone, the fall's pool drains under the wood down a chute of clear ice, into the dark"
-  bed: (wind 0.05 water 0.6 hum 0.3 drone 0.6)
+  bed: (wind 0.05 water 0.6 chimes 0.1 drone 0.6)
   light: 0.33
   grid:
   ("#########################"

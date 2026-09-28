@@ -4,7 +4,7 @@
   at: (0 3)
   title: "The Scree"
   intent: "through the old stone door, scree falls away west into mist, and the birches glitter far below"
-  bed: (wind 0.8 water 0.1 hum 0.1)
+  bed: (wind 0.8 water 0.1 chimes 0.6)
   grid:
   ("                        #"
    "                        #"

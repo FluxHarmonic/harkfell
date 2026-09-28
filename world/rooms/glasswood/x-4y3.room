@@ -4,7 +4,7 @@
   at: (-4 3)
   title: "Crown Gap"
   intent: "a gap between two crowns taken at a run; miss, and you drop onto the frozen tarn"
-  bed: (wind 0.8 water 0.1 hum 0.1 drone 0.3)
+  bed: (wind 0.8 water 0.1 chimes 0.6 drone 0.3)
   grid:
   ("     |             |     "
    "     |             |     "

@@ -125,7 +125,7 @@ tunes() {
 # --- under the world: the movement cues' levels in play ----------------------------------
 under_world() {
   n=0; bad=0
-  for c in step-fen-a step-fen-b step-grass-a step-grass-b step-stone-a step-stone-b step-wood-a step-wood-b jump wall-jump land-soft land-hard splash; do
+  for c in step-fen-a step-fen-b step-grass-a step-grass-b step-stone-a step-stone-b step-wood-a step-wood-b step-snow-a step-snow-b step-ice-a step-ice-b step-thin-a step-thin-b jump wall-jump land-soft land-hard splash; do
     g=$(grep -o "(list '$c \"$c\" 0.0 0.0 [0-9.]*)" src/harkfell/sound.sgl | awk '{print $NF}' | tr -d ')')
     [ -n "$g" ] || { echo "UNDER-WORLD FAIL $c: no gain in SPOTS"; bad=$((bad + 1)); continue; }
     "$TOOL" render-tune "assets/tunes/$c.cts" "$TMP/uw-$c.wav" > /dev/null 2>&1 || { echo "UNDER-WORLD FAIL $c: does not render"; bad=$((bad + 1)); continue; }
@@ -136,8 +136,8 @@ under_world() {
     if [ -n "$m" ] && awk -v v="$v" -v l="$lim" 'BEGIN{exit !(v <= l)}'; then echo "under-world $c: $v LUFS in play (limit $lim)"
     else echo "UNDER-WORLD FAIL $c: ${v:-?} LUFS in play, limit $lim"; bad=$((bad + 1)); fi
   done
-  echo "under-world: $n of 13 measured, $bad over"
-  [ "$n" -eq 13 ] && [ "$bad" -eq 0 ] || FAIL=1
+  echo "under-world: $n of 19 measured, $bad over"
+  [ "$n" -eq 19 ] && [ "$bad" -eq 0 ] || FAIL=1
 }
 
 # --- the director ------------------------------------------------------------------------
@@ -205,6 +205,7 @@ green_all() {
   green test/test-a4-web-opening.sgl 3
   under_world
   green test/test-tunes.sgl 5
+  green test/test-glasswood-sound.sgl 14
 }
 
 if [ "${1:-}" != "--sabotage" ]; then
@@ -343,5 +344,33 @@ plant release-burst src/engine/mixer.sgl \
   "                    #f" \
   "$A4T" "released: no burst"
 
-if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all twenty-one RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+
+# Glasswood's sound track (test/test-glasswood-sound.sgl):
+#   cue-unrendered  the H3 pickup's cue left out of SPOTS (how taking H3 was silent)
+#   thin-as-rock    thin ice steps as the region's rock again
+#   creak-waits     thin ice's creak held back under a moment like a spot sound
+#   glass-tagless   Glasswood's wandering moments without their tags
+GT=test/test-glasswood-sound.sgl
+passes "$GT" "every one is in the director's SPOTS"
+passes "$GT" "thin ice its own step; a glazed branch is ice; rough rock is stone"
+passes "$GT" "thin ice's creak sounds under it"
+passes "$GT" "every region's wandering moment has a tag (Glasswood names two)"
+plant cue-unrendered "$S" \
+  "            (list 'pickup-h3 \"pickup-h3\" 0.0 0.0 0.55)" \
+  "            ;; SABOTAGE: pickup-h3 not rendered" \
+  "$GT" "every one is in the director's SPOTS"
+plant thin-as-rock "$S" \
+  "              ((brittle) 'thin)" \
+  "              ((brittle) 'stone)" \
+  "$GT" "thin ice its own step; a glazed branch is ice; rough rock is stone"
+plant creak-waits "$S" \
+  "(memq (cadr item) '(tell creak))" \
+  "(memq (cadr item) '(tell))" \
+  "$GT" "thin ice's creak sounds under it"
+plant glass-tagless "$S" \
+  "                          (\"glaze-wind\" . open-sky) (\"under-ice\" . water)))" \
+  "                          ))" \
+  "$GT" "every region's wandering moment has a tag (Glasswood names two)"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all twenty-five RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
 exit $FAIL

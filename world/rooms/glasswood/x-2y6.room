@@ -4,7 +4,7 @@
   at: (-2 6)
   title: "The Ice Well"
   intent: "a well of clear ice going down from the meltwater to a cold blue stone: somewhere deeper, not yet"
-  bed: (wind 0.0 water 0.9 hum 0.4 drone 0.6)
+  bed: (wind 0.0 water 0.9 chimes 0.1 drone 0.6)
   light: 0.25
   grid:
   ("########~~~##############"

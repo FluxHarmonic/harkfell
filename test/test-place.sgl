@@ -72,8 +72,9 @@
   (test "the bowl's moment is spent under hollow:4,3/hollow-answers"
     (assert-equal "hollow-answers" (place-moment BOWL-FRESH))
     (assert-equal "hollow:4,3/hollow-answers" (place-moment-key BOWL-FRESH)))
-  (test "continued from a 0.1 save that heard it, the bowl has no moment left to play"
-    (assert-false (place-moment BOWL-CONTINUED))))
+  (test "continued from a 0.1 save that heard it, the bowl's next moment is hollow-fifth, armed for H3 (hollow-answers is not heard again)"
+    (assert-equal "hollow-fifth" (place-moment BOWL-CONTINUED))
+    (assert-equal 3 (place-moment-carrying BOWL-CONTINUED))))
 
 ;; Listening, end to end on the real world: the director given the adapter's
 ;; place, standing still for 3 s. H2's tone is where the world's pickup lies:

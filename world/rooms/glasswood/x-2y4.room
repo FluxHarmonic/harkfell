@@ -4,7 +4,7 @@
   at: (-2 4)
   title: "Owl's Watch"
   intent: "a snow owl on a high branch turns its head to follow you: a breath at the foot of the branches"
-  bed: (wind 0.4 water 0.1 hum 0.2 drone 0.4)
+  bed: (wind 0.4 water 0.1 chimes 0.45 drone 0.4)
   grid:
   ("### |     |      |     ##"
    "### |=====|      |     ##"

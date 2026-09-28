@@ -4,7 +4,7 @@
   at: (-5 5)
   title: "The Old Birch"
   intent: "at the foot of the fall, the oldest birch in the wood, hollow, where the moths winter, and the note you followed among them"
-  bed: (wind 0.1 water 0.4 hum 0.4 drone 0.8)
+  bed: (wind 0.1 water 0.4 chimes 0.4 drone 0.8)
   grid:
   ("####  %=============#####"
    "####  %         ||| #####"

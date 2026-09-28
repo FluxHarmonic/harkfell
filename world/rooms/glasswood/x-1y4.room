@@ -4,7 +4,7 @@
   at: (-1 4)
   title: "Icicle Walk"
   intent: "the first falling ice: icicles over the path, and one that rings, shivers and falls where a hit costs a few steps"
-  bed: (wind 0.4 water 0.1 hum 0.2 drone 0.4)
+  bed: (wind 0.4 water 0.1 chimes 0.45 drone 0.4)
   grid:
   ("##   |   |   ############"
    "##   |   |   ############"

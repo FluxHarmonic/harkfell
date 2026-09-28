@@ -4,7 +4,7 @@
   at: (-3 5)
   title: "Blue Hall"
   intent: "a hall of blue ice under the wood, where the moths come to you and light the walls: the first cave they fill"
-  bed: (wind 0.05 water 0.6 hum 0.4 drone 0.7)
+  bed: (wind 0.05 water 0.6 chimes 0.15 drone 0.7)
   light: 0.33
   grid:
   ("#########################"
@@ -20,12 +20,12 @@
    "#########################")
   things: ((lantern-moth at: (12 3) count: 8 drawn: 3)
            (icicle at: (16 6)))
+  moment: (tune: blue-hall when: first-visit)
   decor: auto)
 ;; The first cave the moths fill: a tall hall with one pillar of blue ice
 ;; in the middle. In from the Glass Chute (rows 7-8), on east to the
-;; Meltwater (rows 6-8). Its moment, blue-hall (first visit), is named
-;; when SOUND writes the tune: a named moment with no file is red in
-;; test-tunes, and a placeholder tune would be spent in a save.
+;; Meltwater (rows 6-8). Its moment, blue-hall (first visit), is the moths
+;; and the ice: the moths gather in H3's partials as the light spreads.
 ;; A spur of blue ice hangs from the roof (columns 16-17, rows 1-5) with an
 ;; icicle under it (16,6), over the way on east: in the dark it shows only
 ;; when the moth light reaches it, so listen for its ring.
