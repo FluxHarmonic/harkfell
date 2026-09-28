@@ -75,7 +75,7 @@
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
-          sound-work! sound-set-work-in-frame! sound-bank-busy? sound-cue MOVING-CUES sound-cue-names FADE-OUT-S
+          sound-work! sound-set-work-in-frame! sound-bank-busy? sound-cue MOVING-CUES sound-cue-names FADE-OUT-S CUE-LIMIT-S
           place-moves place-mode place-vx place-bx place-foot place-light sound-moved spot-gain sound-surface
           THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S BORDER-DEFAULT
           bed-channels-of group-channels
@@ -235,7 +235,8 @@
       (set! *opening* #f) (set! *opening-skip* #f) (set! *opening-t0* #f) (set! *held* #f)
       (set! *wander-due* #f) (set! *still-wait* #f) (set! *opening-want* #f) (set! *opening-handoff* #f)
       (set! *bed-carried* '()) (set! *bed-start-at* 0.0) (set! *cue-wait* #f) (set! *open-wait* #f)
-      (set! *step-idx* #f) (set! *step-alt* #f) (set! *moved* '()) (set! *last-splash* -1000.0))
+      (set! *step-idx* #f) (set! *step-alt* #f) (set! *moved* '()) (set! *last-splash* -1000.0)
+      (set! *moment-quiet* #f) (set! *opening-quiet* #f))
 
     ;; --- A4: the border, and what a save keeps ---------------------------------------
     ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
@@ -420,6 +421,47 @@
 
     (define (pull-of p) (lambda (out off n) (player-pull! p out off n)))
 
+    ;; A moment is OVER once its walk has ended and its output
+    ;; has fallen under QUIET-OVER (-50 dBFS): the bed un-ducks and the hush
+    ;; starts then. Since motif 0.8.1 a player rings on until it is under -70
+    ;; dBFS (or its 10 s cap), 5 to 7 s past a moment's last row; that tail keeps
+    ;; playing under a TAIL-ID of its own, but the world does not wait for it
+    ;; (the leader's ruling, 2026-09-28). Only after the walk has ended, so a
+    ;; quiet rest inside a moment never ends it.
+    (define QUIET-OVER 0.0031622776601683794)
+    (define MOMENT-TAIL-ID "moment-tail")
+    (define OPENING-TAIL-ID "opening-tail")
+    ;; flag: a vector whose slot 0 becomes #t, once. walk-only?: over when the
+    ;; walk ends, whatever the level (the opening: measured 2026-09-28, its walk
+    ;; ends at 20 s still at -17 dBFS and falls under -40 only at 29 s, so it
+    ;; would never reach -50 before motif's cap; in play the handoff to the
+    ;; first bed fades it long before, so its state follows the tune's rows)
+    (define (watch-pull p flag . walk-only?)
+      (lambda (out off n)
+        (let ((more (player-pull! p out off n)))
+          (when (and more (not (vector-ref flag 0)) (player-ended? p)
+                     (or (and (pair? walk-only?) (car walk-only?)) (quiet-chunk? out off n)))
+            (vector-set! flag 0 #t))
+          more)))
+    (define (quiet-chunk? out off n)
+      (let loop ((i 0))
+        (or (>= i (* 2 n))
+            (and (< (abs (bytevector-ieee-single-ref out (+ off (* 4 i)) 'little)) QUIET-OVER)
+                 (loop (+ i 1))))))
+    (define *moment-quiet* #f)
+    (define *opening-quiet* #f)
+    ;; every frame: a moment or opening gone quiet is over
+    (define (quiet-frame! now)
+      (when (and *moment* *moment-quiet* (vector-ref *moment-quiet* 0))
+        (let ((name (car *moment*)))
+          (mixer-rename! MOMENT-ID MOMENT-TAIL-ID)
+          (moment-over! now)
+          (*say* "sound" "moment" name "end")))
+      (when (and *opening* (not *opening-handoff*) *opening-quiet* (vector-ref *opening-quiet* 0))
+        (mixer-rename! OPENING-ID OPENING-TAIL-ID)
+        (set! *opening* #f)
+        (*say* "sound" "opening" "end")))
+
     ;; A room's fixed moment, opened ahead (the first open of a tune is a
     ;; frame-thread stall; do it while nothing is at stake).
     (define (sound-preopen! name)
@@ -529,7 +571,8 @@
           (set! *moment-key* key)
           (set! *hush* (hush-started *hush* name key))
           (*say* "sound" "moment" name "start")
-          (let ((s (mixer-add! MOMENT-ID (pull-of p) #t)))
+          (set! *moment-quiet* (vector #f))
+          (let ((s (mixer-add! MOMENT-ID (watch-pull p *moment-quiet*) #t)))
             (duck-bed! now)
             (source-on-end! s (lambda (t)
                                 (when (and *moment* (eq? (cdr *moment*) p))
@@ -733,7 +776,8 @@
         (let ((p (open OPENING-TUNE #f)))
           (if (not p)
               (*say* "sound" "error" "no-opening")
-              (let ((s (mixer-add! OPENING-ID (pull-of p) #t)))
+              (let ((s (begin (set! *opening-quiet* (vector #f))
+                              (mixer-add! OPENING-ID (watch-pull p *opening-quiet* #t) #t))))
                 (set! *opening* p)
                 (set! *opening-t0* *now*)
                 (set! *opening-handoff* #f)
@@ -1275,7 +1319,7 @@
           (set! *cue-queue* (cdr *cue-queue*))
           (when p (set! *cue-job* (vector name p '() 0 0 #f)))))
       (when *cue-job*
-        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (* 6 (mixer-rate)))
+        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (exact (round (* CUE-LIMIT-S (mixer-rate)))))
                (more (and (< (vector-ref j 3) limit) (player-pull! p *cue-buf* 0 CUE-BLOCK))))
           (if more
               (let* ((mp (mono-of *cue-buf* CUE-BLOCK))
@@ -1293,13 +1337,16 @@
               (finish-cue! j (and (>= (vector-ref j 3) limit) (= (vector-ref j 4) 0)))))))
 
     ;; The rendered cue, less its trailing silent blocks. A cue cut at the
-    ;; bank's 6 s limit while still sounding (fade? #t) fades out over its last
+    ;; bank's CUE-LIMIT-S while still sounding (fade? #t) fades out over its last
     ;; FADE-OUT-S. Since motif 0.8.1 a player rings out before it ends (David,
     ;; 2026-09-28: cues were cut "like broken samples"; ring-h2 was within 4 dB
     ;; of its peak when 0.8.0 ended it), so this is the backstop for the long
-    ;; rings motif would carry past 6 s. test/test-cue-tails.sgl holds every
+    ;; rings motif would carry past the limit. test/test-cue-tails.sgl holds every
     ;; cue's last 20 ms 40 dB under its peak.
     (define FADE-OUT-S 1.0)
+    ;; the longest a cue renders: 4 s keeps the rings as David approved them
+    ;; (3.3 s with the fade) at +29% of 0.8.0's boot render; 6 s was +62%
+    (define CUE-LIMIT-S 4.0)
     (define (finish-cue! j . fade?)
       (let* ((chunks (list-tail* (vector-ref j 2) (vector-ref j 4)))
              (frames (* CUE-BLOCK (length chunks)))
@@ -1579,6 +1626,7 @@
     (define (sound-frame! now dt pl0)
       (set! *now* now)
       (opening-frame!)
+      (quiet-frame! *now*)
       ;; the cue bank and the moments opened ahead: while the world is held too
       ;; (the start screen, the card), since they need no place
       (when *work-in-frame* (sound-work! (in-frame-more?)))

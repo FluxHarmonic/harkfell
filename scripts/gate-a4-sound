@@ -379,5 +379,22 @@ plant tails-cut "$S" \
   "              (finish-cue! j #f)))))" \
   test/test-cue-tails.sgl "every cue's last 20 ms are at least 40 dB under its peak"
 
-if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all twenty-six RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
+
+# motif 0.8.1 rings a player out; the director does not wait for the tail:
+#   moment-waits   a moment is never quiet (QUIET-OVER 0), so it is over only at
+#                  motif's end: the hush and the duck wait up to 10 s
+#   opening-waits  the opening is over on the level, not its walk (it stays in
+#                  'world ~10 s longer)
+passes "$A4T" "it ends (the hush counts from its end)"
+passes "$A4T" "and the tune ends after a skip"
+plant moment-waits "$S" \
+  "    (define QUIET-OVER 0.0031622776601683794)" \
+  "    (define QUIET-OVER 0.0)" \
+  "$A4T" "it ends (the hush counts from its end)"
+plant opening-waits "$S" \
+  "(mixer-add! OPENING-ID (watch-pull p *opening-quiet* #t) #t)" \
+  "(mixer-add! OPENING-ID (watch-pull p *opening-quiet*) #t)" \
+  "$A4T" "and the tune ends after a skip"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-A4-SOUND SABOTAGE: all twenty-eight RED"; else echo "GATE-A4-SOUND SABOTAGE: a leg was not caught"; fi
 exit $FAIL

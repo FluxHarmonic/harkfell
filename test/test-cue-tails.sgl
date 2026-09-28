@@ -7,8 +7,8 @@
 ;;;   tail   the peak of a cue's last TAIL-S seconds is at least TAIL-DB under
 ;;;          its own peak: the reverb and the releases decay into silence
 ;;;          before the cue ends, rather than stopping at full level
-;;;   cap    and no cue ends at the render's cap (6 s), where it would be cut
-;;;          whatever its level
+;;;   limit  the cues cut at the bank's render limit (CUE-LIMIT-S; since motif
+;;;          0.8.1 the long rings reach it) exist, and each ends faded (the backstop)
 ;;;
 ;;; The control: a cue cut in half (its first half as a cue of its own) fails
 ;;; the tail rule, so the rule can go red.
@@ -22,7 +22,7 @@
 (define RATE 32000)
 (define TAIL-S 0.02)
 (define TAIL-DB -40.0)
-(define CAP-FRAMES (* 6 RATE))
+(define LIMIT-FRAMES (exact (round (* CUE-LIMIT-S RATE))))
 
 (mixer-open-headless! RATE (lambda (id buf n gain) #f))
 (sound-reset!)
@@ -52,7 +52,8 @@
                    (and c (list n (cue-frames c) (tail-db c)))))
                NAMES))
 (define CUT (filter (lambda (r) (> (caddr r) TAIL-DB)) REPORT))
-(define CAPPED (filter (lambda (r) (>= (cadr r) CAP-FRAMES)) REPORT))
+;; a cue ends at the limit to within one render block
+(define AT-LIMIT (filter (lambda (r) (>= (cadr r) (- LIMIT-FRAMES 1024))) REPORT))
 
 ;; the control: ring-h2's first half, a cue of its own
 (define HALF
@@ -72,5 +73,7 @@
               REPORT)
     (unless (null? CUT) (display "  CUT: ") (display (map car CUT)) (newline))
     (assert-equal '() (map car CUT)))
-  (test "no cue runs into the render's 6 s cap"
-    (assert-equal '() (map car CAPPED))))
+  (test "the cues cut at the bank's limit exist (the backstop is exercised), and each ends 40 dB down"
+    (display "  at the limit: ") (display (map car AT-LIMIT)) (newline)
+    (assert-true (pair? AT-LIMIT))
+    (assert-true (every (lambda (r) (<= (caddr r) TAIL-DB)) AT-LIMIT))))
