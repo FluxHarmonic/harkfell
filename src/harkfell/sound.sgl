@@ -1287,16 +1287,17 @@
                 (vector-set! j 4 silent)
                 (vector-set! j 5 heard)
                 (when (>= silent SILENT-BLOCKS) (finish-cue! j)))
-              ;; the player ended (motif stops a fixed 2 s after the last row) or the
-              ;; cap: the cue is still sounding (no silent block at its end yet), so it
-              ;; fades out
-              (finish-cue! j (= (vector-ref j 4) 0))))))
+              ;; the player ended (motif 0.8.1 ends a player only once it is quiet,
+              ;; or after its own capped fade) or the bank's own LIMIT: only a cue
+              ;; cut at LIMIT while still sounding needs the bank's fade (the backstop)
+              (finish-cue! j (and (>= (vector-ref j 3) limit) (= (vector-ref j 4) 0)))))))
 
-    ;; The rendered cue, less its trailing silent blocks. A cue that did not
-    ;; decay into silence (fade? #t) fades out over its last FADE-OUT-S (David,
-    ;; 2026-09-28: the moth chimes, the icicle breaking "and others" were cut
-    ;; at full level, "like broken samples": ring-h2 was still within 4 dB of
-    ;; its peak when motif ended it). test/test-cue-tails.sgl holds every
+    ;; The rendered cue, less its trailing silent blocks. A cue cut at the
+    ;; bank's 6 s limit while still sounding (fade? #t) fades out over its last
+    ;; FADE-OUT-S. Since motif 0.8.1 a player rings out before it ends (David,
+    ;; 2026-09-28: cues were cut "like broken samples"; ring-h2 was within 4 dB
+    ;; of its peak when 0.8.0 ended it), so this is the backstop for the long
+    ;; rings motif would carry past 6 s. test/test-cue-tails.sgl holds every
     ;; cue's last 20 ms 40 dB under its peak.
     (define FADE-OUT-S 1.0)
     (define (finish-cue! j . fade?)

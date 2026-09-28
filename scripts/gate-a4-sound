@@ -372,10 +372,10 @@ plant glass-tagless "$S" \
   "                          (\"glaze-wind\" . open-sky) (\"under-ice\" . water)))" \
   "                          ))" \
   "$GT" "every region's wandering moment has a tag (Glasswood names two)"
-# tails-cut: a cue motif stopped while still ringing is kept as it is, cut at level
+# tails-cut: a cue cut at the bank's 6 s limit while still ringing is kept as it is
 passes test/test-cue-tails.sgl "every cue's last 20 ms are at least 40 dB under its peak"
 plant tails-cut "$S" \
-  "              (finish-cue! j (= (vector-ref j 4) 0))))))" \
+  "              (finish-cue! j (and (>= (vector-ref j 3) limit) (= (vector-ref j 4) 0)))))))" \
   "              (finish-cue! j #f)))))" \
   test/test-cue-tails.sgl "every cue's last 20 ms are at least 40 dB under its peak"
 

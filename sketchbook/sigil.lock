@@ -8,9 +8,9 @@
            version: "0.22.5")
   (package name: "motif"
            url: "codeberg:sigil/motif"
-           ref: "^0.8.0"
-           sha: "a197380f3afcbb80142b41817c053957043ae8d6"
-           version: "0.8.0")
+           ref: "^0.8.1"
+           sha: "152e703c81d84f53d040c4ae18fe740810efe0ea"
+           version: "0.8.1")
   (package name: "sigil-audio"
            url: "codeberg:sigil/sigil-audio"
            ref: "^0.13.0"
