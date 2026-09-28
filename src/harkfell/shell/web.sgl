@@ -25,6 +25,8 @@
 ;;;   ("reset", "")          back to the entry
 ;;;   ("where", "")          print "harkfell: at X Y MODE" (the arm's probe)
 ;;;   ("latency", "")        print the latency lines of the ?ms readout
+;;;   ("cues", "")           print "harkfell: cues PATH MODE plays N ring-ms X lag-ms Y"
+;;;                          (0.1.1: the cues' path and latency, device output left out)
 ;;;   ("world-file", "PATH\nTEXT")  one file of the world, baked into the page
 ;;;                          at build time (A1)
 ;;;   ("world-done", "")     every file handed over: load the world and enter
@@ -266,6 +268,10 @@
              0)
             ((string=? type "latency")
              (apply say "latency" (shell-latency-lines))
+             0)
+            ;;   harkfell: cues PATH MODE plays N ring-ms X lag-ms Y (0.1.1)
+            ((string=? type "cues")
+             (apply say "cues" (audio-cue-words))
              0)
             ((string=? type "reset") (shell-reset-world!) 0)
             ((string=? type "world-file")

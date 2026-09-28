@@ -73,6 +73,16 @@
 //              fades after 2.5 s and a mouse move brings it back; with the
 //              Fullscreen API removed (iPhone Safari) it is hidden and F asks
 //              for nothing
+//   pause      (D40) a blur pauses (a held key moves nothing) and a focus resumes;
+//              the game says audio hold / release, and every AudioContext on
+//              the page is running before the blur, suspended while held and
+//              running after (0.1.1)
+//   cues       (0.1.1) walking plays step cues: by default through the audio
+//              bridge's worklet (mode worklet, a lag readout), and with
+//              ?sound=cues:ring through the old cue sink (a ring-depth readout);
+//              the worklet's wait is under the ring's, at most 20 ms, and the ring's
+//              queue at least 50 ms (it keeps 120). Both figures leave out the
+//              device's output latency
 //   errors     no console error and no exception in any leg
 //
 // Every leg but frame, save and fullscreen boots with &frame=off (open()
@@ -89,7 +99,7 @@ import { spawn, spawnSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
-const VALUED = ["--port", "--cdp", "--legs", "--record-replay", "--replay-fixture", "--shot"];
+const VALUED = ["--port", "--cdp", "--legs", "--record-replay", "--replay-fixture", "--shot", "--cpu-throttle"];
 const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && VALUED.includes(args[i - 1])));
 const ROOT = path.resolve(positional[0] || "build/web");
 const PORT = parseInt(opt("--port", "8199"), 10);
@@ -104,7 +114,7 @@ const X0 = -6, X1 = 17, Y0 = 2, Y1 = 6;
 const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
 const WORLD_FILES = 58 + 3 + 1;   // rooms, maps, world.sgl (58: the Hollow 14, Reedfen 22, Glasswood 22)
 const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`;   // rooms at 1/4, a 2 px gap
-const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "errors"];
+const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "cues", "startup", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
@@ -604,12 +614,21 @@ if (LEGS.includes("save")) {
 if (LEGS.includes("pause")) {
   ran.add("pause");
   await open("trace&test-room");
+  // 0.1.1: the page's AudioContexts themselves (SOUND's open item): a key is
+  // the gesture that starts them (the control: running before the blur),
+  // the hold suspends every one, the release resumes them
+  const states = () => evaluate(`(window.HARKFELL_CONTEXTS || []).map((c) => c.state).join(",")`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+  await sleep(500);
+  const ctxBefore = await states();
   await evaluate(`window.dispatchEvent(new Event("blur"))`);
   const a = await where();
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await sleep(600);
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   const b = await where();
+  const ctxHeld = await states();
   await evaluate(`window.dispatchEvent(new Event("focus"))`);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await sleep(500);
@@ -617,8 +636,12 @@ if (LEGS.includes("pause")) {
   const c = await where();
   // SOUND's hold and release (the page suspends and resumes its audio on them)
   const held = lines.includes("harkfell: audio hold"), released = lines.includes("harkfell: audio release");
-  (b.x === a.x && b.y === a.y && c.x > b.x + 8 && held && released ? pass : fail)("pause",
-    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}; audio hold ${held}, release ${released}`);
+  const ctxAfter = await states();
+  const all = (s, want) => s.length > 0 && s.split(",").every((x) => x === want);
+  (b.x === a.x && b.y === a.y && c.x > b.x + 8 && held && released &&
+   all(ctxBefore, "running") && all(ctxHeld, "suspended") && all(ctxAfter, "running") ? pass : fail)("pause",
+    `blurred, a held key: x ${a.x} -> ${b.x}; focused again: -> ${c.x}; audio hold ${held}, release ${released}; ` +
+    `contexts before [${ctxBefore}], held [${ctxHeld}], after [${ctxAfter}]`);
 }
 
 // D40: with a save, the start screen's R held 1.5 s wipes it and begins a
@@ -711,6 +734,87 @@ if (LEGS.includes("fullscreen")) {
     `start screen: shown ${!start.hidden}, not faded after 3 s ${!start.faded}; click: asked ${asked}, ${onLine}, fullscreen element #${full.el}; ` +
     `start screen kept ${stayed}; F: ${offLine}, fullscreen ${left.full}; kept ${stayed2}; play: faded after 3.3 s ${idle.faded}, back on a mouse move ${!woken.faded}; ` +
     `no API: hidden ${none.hidden}, F asks nothing ${noAsk}`);
+}
+
+// 0.1.1: the cues' latency, one build, both paths. Walking in the Climb Back
+// plays step cues. By default they are the bridge's (mixed in the
+// AudioWorklet): the readout gives the last play's wait for its first render
+// quantum. With ?sound=cues:ring they go the old way, into the cue sink: the
+// readout gives the queue ahead of the last cue. Both leave out the device's
+// output latency, so the two are comparable; this box is not a phone.
+async function cueLine() {
+  const before = lines.length;
+  await evaluate(`SigilWebApp.dispatch("cues", "")`);
+  const l = await waitFor(() => lines.slice(before).find((x) => x.startsWith("harkfell: cues ")), 5000, "cues");
+  const w = l.split(" ");
+  const num = (k) => { const i = w.indexOf(k); return i >= 0 && w[i + 1] !== "-" ? Number(w[i + 1]) : null; };
+  return { line: l, path: w[2], mode: w[3], plays: num("plays"), ring: num("ring-ms"), lag: num("lag-ms") };
+}
+async function walkUntil(pred, ms) {
+  const t0 = Date.now();
+  let k = 0;
+  while (Date.now() - t0 < ms) {
+    const key = k++ % 2 ? ["ArrowLeft", 37] : ["ArrowRight", 39];
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: key[0], code: key[0], windowsVirtualKeyCode: key[1] });
+    await sleep(700);
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: key[0], code: key[0], windowsVirtualKeyCode: key[1] });
+    const c = await cueLine();
+    if (pred(c)) return c;
+  }
+  return await cueLine();
+}
+if (LEGS.includes("cues")) {
+  ran.add("cues");
+  await open("trace&room=reedfen:10,4");
+  const br = await walkUntil((c) => c.plays >= 3 && c.lag !== null, 60000);
+  await open("trace&room=reedfen:10,4&sound=cues:ring");
+  const rg = await walkUntil((c) => c.ring !== null, 60000);
+  (br.path === "bridge" && br.mode === "worklet" && br.plays >= 3 && br.lag !== null &&
+   rg.path === "ring" && rg.ring !== null && br.lag < rg.ring &&
+   br.lag <= 20 && rg.ring >= 50 ? pass : fail)("cues",
+    `bridge: ${br.line.slice(15)}; ring: ${rg.line.slice(15)}`);
+}
+
+// 0.1.1: the startup (David's test of the cue build: crackle at startup, and
+// the jump silent for 3-4 s after control). A fresh game with the frame, the
+// CPU throttled (--cpu-throttle, default 4: a phone is several times slower
+// than this box), the start screen given 3 s, then the gesture, the card, the
+// dawn, and 8 s of walking and jumping. Measured by the page, not the game:
+// every sink's sounding underruns (SigilWasmAudio.sinkUnderrunsSounding: starved
+// frames that cut off sound), polled every 100 ms from before the gesture.
+// Pass: 0 of them, and the movement cues ready ("sound cues-moving") before
+// "frame play".
+const THROTTLE = Number(opt("--cpu-throttle", "4"));
+if (LEGS.includes("startup")) {
+  ran.add("startup");
+  await send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
+  await open("trace&frame=on&new");
+  await evaluate(`(() => { window.__under = {}; const A = window.SigilWasmAudio;
+    window.__poll = setInterval(() => { if (!A) return;
+      for (let id = 0; id < 256; id++) { const n = A.sinkUnderrunsSounding(id);
+        if (n > (window.__under[id] || 0)) window.__under[id] = n; } }, 100); return true; })()`);
+  await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 30000, "startup: frame start");
+  await sleep(3000);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", code: "KeyX" });
+  await waitFor(() => lines.find((l) => l === "harkfell: frame play"), 90000, "startup: frame play");
+  const playAt = lines.indexOf("harkfell: frame play");
+  const readyAt = lines.findIndex((l) => l.startsWith("harkfell: sound cues-moving"));
+  for (const [key, code, vk, ms] of [["ArrowRight", "ArrowRight", 39, 2500], [" ", "Space", 32, 150], ["ArrowLeft", "ArrowLeft", 37, 2500], [" ", "Space", 32, 150]]) {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk });
+    await sleep(ms);
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk });
+    await sleep(500);
+  }
+  await sleep(2000);
+  const under = await evaluate(`(() => { clearInterval(window.__poll); return JSON.stringify(window.__under); })()`);
+  await send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  const per = JSON.parse(under || "{}");
+  const total = Object.values(per).reduce((a, b) => a + b, 0);
+  const ready = readyAt >= 0 && readyAt < playAt;
+  (ready && total === 0 ? pass : fail)("startup",
+    `cpu x${THROTTLE}; movement cues ready before control: ${ready} (${readyAt >= 0 ? lines[readyAt] : "no cues-moving line"}); ` +
+    `sounding underruns ${total} frames, per sink ${under}`);
 }
 
 if (LEGS.includes("errors")) {

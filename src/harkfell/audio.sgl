@@ -31,15 +31,25 @@
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
-          audio-pause! audio-resume! audio-paused?
           audio-carry! audio-tone-room! audio-lines world-place room-moment-name room-moment-names room-moment-now
+          audio-pause! audio-resume! audio-paused? audio-set-wall-clock! audio-cue-words
           audio-sound-door! frame-event! save-extras restore-extras!)
 
   (begin
     (define *say* (lambda parts #f))
     (define *last* #f)
 
-    (define (wall-now) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+    ;; The wall clock the sound runs on; a test drives it by hand
+    ;; (audio-set-wall-clock! f; #f is the real clock again). A new clock starts
+    ;; the sound's clock afresh, unpaused: a test's hand clock and its pauses
+    ;; must not reach the next test file (the suite is one process).
+    (define (real-clock) (/ (current-jiffy) (* 1.0 (jiffies-per-second))))
+    (define *wall-clock* real-clock)
+    (define (wall-now) (*wall-clock*))
+    (define (audio-set-wall-clock! f)
+      (set! *wall-clock* (or f real-clock))
+      (set! *paused-at* #f)
+      (set! *paused-total* 0.0))
 
     ;; D40: the game pauses when it loses focus, and the sound with it. The
     ;; sound's clock (audio-now) leaves out the time paused, from the end of
@@ -74,6 +84,8 @@
     (define (audio-boot! say)
       (set! *say* say)
       (mixer-open!)
+      ;; the sound's deferred work runs after the pump (audio-frame!), not in the frame
+      (sound-set-work-in-frame! #f)
       (shell-set-extra-lines! audio-lines)
       ;; A4: a save keeps the moments heard and the time played, and a
       ;; continue gives them back ((harkfell save))
@@ -110,6 +122,8 @@
                   (cond ((string=? item "border:cross") (sound-set-border-mode! 'cross))
                         ((string=? item "border:through") (sound-set-border-mode! 'through))
                         ((string=? item "bench:a4") (bench-set-phases! 'a4))
+                        ;; 0.1.1: the web's cues through the old ring, to hear and measure it
+                        ((string=? item "cues:ring") (mixer-set-cue-path! 'ring))
                         ((and (> (string-length item) 7) (string=? (substring item 0 7) "moment:"))
                          (let ((name (substring item 7 (string-length item))))
                            ;; ask for the text now: on the web the page fetches it
@@ -320,6 +334,20 @@
               (ws (apply append (map region-wander (content-regions ct)))))
           (sound-boot! (append ms ws) *say*))))
 
+    ;; The frame's deferred sound work (the cue bank, the moments opened ahead)
+    ;; runs AFTER the pump, so the sinks are topped up first, for at most
+    ;; WORK-MS-SOUNDING of wall time while anything sounds, WORK-MS-QUIET
+    ;; while nothing does (the start screen before the gesture: free time), and
+    ;; at least one step (0.1.1: David's test, crackle at startup and the jump
+    ;; late; measured by verify.mjs's startup leg).
+    (define WORK-MS-SOUNDING 3.0)
+    (define WORK-MS-QUIET 12.0)
+    (define (wall-ms) (/ (* 1000.0 (current-jiffy)) (jiffies-per-second)))
+    (define (work-more? budget-ms)
+      (let ((until (+ (wall-ms) budget-ms)))
+        (lambda () (< (wall-ms) until))))
+    (define (sounding?) (any source-live? (mixer-sources)))
+
     (define (audio-frame! frame-ms work-ms)
       (let ((now (audio-now)))
         (cond
@@ -334,13 +362,28 @@
                     (pl (world-place (shell-world) (shell-content) (shell-take-news!))))
                 (sound-frame! now dt (and pl (place pl moves: moves)))))))
         (set! *last* now)
-        (mixer-pump! now)))
+        (mixer-pump! now)
+        (unless (or *paused-at* (bench-running?) (bench-done?))
+          (sound-work! (work-more? (if (sounding?) WORK-MS-SOUNDING WORK-MS-QUIET))))))
 
     (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
+
+    ;; The cues' path and latency, as words (the web's "cues" probe and the
+    ;; readout): PATH MODE plays N ring-ms X lag-ms Y ("-" when not measured).
+    ;; Both figures leave out the device's own output latency.
+    (define (audio-cue-words)
+      (let* ((st (mixer-stats))
+             (num (lambda (v) (if (number? v) (r1 v) "-"))))
+        (list (symbol->string (stats-ref st 'cue-path))
+              (let ((m (stats-ref st 'cue-mode))) (if m (symbol->string m) "-"))
+              "plays" (number->string (stats-ref st 'cue-plays))
+              "ring-ms" (num (stats-ref st 'cue-ring-ms))
+              "lag-ms" (num (stats-ref st 'cue-lag-ms)))))
 
     (define (audio-lines)
       (let ((st (mixer-stats)))
         (append (sound-lines)
                 (list (string-append "music " (r1 (stats-ref st 'frame-ms)) " ms/frame pump "
                                      (r1 (car (stats-ref st 'pump))) " dry " (number->string (stats-ref st 'dry-sounding))
-                                     " rate " (number->string (mixer-rate)))))))))
+                                     " rate " (number->string (mixer-rate)))
+                      (string-append "cues " (string-join (audio-cue-words) " "))))))))

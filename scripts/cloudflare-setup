@@ -39,16 +39,20 @@
 #     Zone     DNS                         Edit    harkfell.com only (--domain)
 #     Zone     Zone                        Read    harkfell.com only (the zone id)
 #
-#   PUBLISH token (for scripts/publish-web; keep it in its own env file)
+#   PUBLISH token (for scripts/publish-web; pass cloudflare/harkfell-site, minted
+#   by ~/Ops/scripts/cloudflare-token-site.sh harkfell harkfell.com harkfell-wasm)
 #     Account  Cloudflare Pages            Edit    `wrangler pages deploy`
-#     Account  Workers R2 Storage Bucket Item Write, on harkfell-wasm only
-#              (permission group 2efd5506f9c8494dacb1fa10a3e7d5b6, resource
-#              com.cloudflare.edge.r2.bucket.<acct>_default_harkfell-wasm)
+#     R2 bucket harkfell-wasm ONLY: Workers R2 Storage Bucket Item Read and Write
+#              (resource com.cloudflare.edge.r2.bucket.<acct>_default_harkfell-wasm)
 #                                                  the wasm upload and read-back
-#     Probe it before trusting it: a read-only list of any OTHER bucket must be 403.
-#     (Whether `wrangler r2 object put/get --remote` accepts a bucket-item token
-#     is not yet tested here; if it refuses, that is the finding to report, not a
-#     reason to widen the token.)
+#     Zone     DNS Edit, Zone Read     harkfell.com only (--domain)
+#     The wasm goes through R2's S3 API (scripts/r2-s3), which honours the
+#     bucket scope. `wrangler r2 object --remote` does NOT: its REST endpoint
+#     answers 403 to a bucket-item token (measured 2026-09-25), which is why
+#     nothing here uses it. Probe a new token before trusting it:
+#     scripts/r2-s3 head <another-bucket> x must fail with HTTP 403.
+#     This token cannot list or create buckets, so --create and the report
+#     below say "unknown to this token" for the bucket rather than guessing.
 #
 # The bucket stays private: the only way to its objects is the Pages Function
 # (functions/play/w/[[path]].js) through the WASM binding in wrangler.jsonc,
@@ -108,10 +112,17 @@ else
   HAVE_PROJECT=0
   say "Pages project $PROJECT does not exist ($(printf '%s' "$PROJ_JSON" | jq -c '.errors[0].message'))"
 fi
-if wrangler r2 bucket list 2>/dev/null | grep -q "^name: *$BUCKET$"; then
+# three answers, not two: a bucket-scoped publish token cannot see buckets at
+# all, and "the token can't tell" must not read as "missing, create it"
+# the token reaches curl on stdin (-K -), not on its command line
+BUCKET_JSON="$(printf 'header = "Authorization: Bearer %s"\n' "$CLOUDFLARE_API_TOKEN" | curl -sS -K - "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET")" || BUCKET_JSON='{}'
+if [ "$(printf '%s' "$BUCKET_JSON" | jq -r '.success' 2>/dev/null)" = true ]; then
   HAVE_BUCKET=1; say "R2 bucket $BUCKET exists"
-else
+elif printf '%s' "$BUCKET_JSON" | jq -e '[.errors[]?.code] | index(10006)' > /dev/null 2>&1; then
   HAVE_BUCKET=0; say "R2 bucket $BUCKET does not exist"
+else
+  HAVE_BUCKET=unknown
+  say "R2 bucket $BUCKET: unknown to this token ($(printf '%s' "$BUCKET_JSON" | jq -c '.errors[0]' 2>/dev/null || echo 'no JSON reply')); a bucket-scoped publish token cannot see buckets"
 fi
 
 if [ "$MODE" = create ]; then
@@ -122,6 +133,8 @@ if [ "$MODE" = create ]; then
   if [ "$HAVE_BUCKET" = 0 ]; then
     wrangler r2 bucket create "$BUCKET"
     say "created R2 bucket $BUCKET (private)"
+  elif [ "$HAVE_BUCKET" = unknown ]; then
+    say "NOT creating R2 bucket $BUCKET: this token cannot tell whether it exists. Creating a bucket needs the SETUP token (account-wide R2 Storage Edit), not the publish token"
   fi
   say "next: a preview publish (scripts/publish-web DIR \"<line>\" --preview), checked on its pages.dev URL"
   exit 0
