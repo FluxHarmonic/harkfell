@@ -43,7 +43,7 @@
 (package
   name: "harkfell-sketchbook"
   version: "0.0.1"
-  sigil: "0.22.5"
+  sigil: "0.22.10"
   description: "Harkfell's sound sketchbook: beds, the drone and moments, live on motif"
   license: "GPL-3.0-or-later"
   authors: (list "David Wilson <david@daviwil.com>")
@@ -84,8 +84,8 @@
     (from-git url: "codeberg:sigil/motif" version: "^0.8.1")
     ;; The sink: sokol natively (unused by the tool), the WebAudio bridge on the web.
     (from-git url: "codeberg:sigil/sigil-audio" version: "^0.13.0")
-    (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.5" configs: '(web))
-    (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.5" configs: '(web)))
+    (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.10" configs: '(web))
+    (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.10" configs: '(web)))
 
   tasks: (list
     (task
