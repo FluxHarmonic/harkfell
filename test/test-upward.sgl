@@ -5,8 +5,8 @@
 ;;;   the place   the adapter hands the director its place, (7 x y) in
 ;;;               absolute world pixels
 ;;;   the hum     near it a voice of its own sounds its harmonic's tune,
-;;;               louder nearer, silent past UPWARD-R (driven with an H2 hum:
-;;;               tone-h7 is the sound track's to write)
+;;;               louder nearer, silent past UPWARD-R (driven with an H2 hum,
+;;;               and with H7's own tone-h7)
 ;;;   the ears    never point at it: H7 cannot be found, so it is no
 ;;;               finding tone (a tone at the same place turns them)
 
@@ -85,6 +85,9 @@
 (define NEAR (listen (pl (list (list 2 148.0 100.0)) '() 100.0) UPWARD-ID))
 (define MID (listen (pl (list (list 2 180.0 100.0)) '() 100.0) UPWARD-ID))
 (define FAR (listen (pl (list (list 2 244.0 100.0)) '() 100.0) UPWARD-ID))
+;; and with its own note: H7, tone-h7 (the sound track's, the voice its finding
+;; tone will use), 3 tiles east
+(define H7 (listen (pl (list (list 7 148.0 100.0)) '() 100.0) UPWARD-ID))
 ;; For the ears: a hum and, as the control, a finding tone, each 100 px straight
 ;; below (inside UPWARD-R; 0.57 rooms off, past the 0.3 inside which the ears
 ;; point up whatever is there): the tone turns them down, the hum must not.
@@ -95,6 +98,8 @@
   (test "near it, its voice sounds, louder nearer"
     (display "  hum near ") (display (car NEAR)) (display ", mid ") (display (car MID)) (newline)
     (assert-true (and (car NEAR) (car MID) (> (car NEAR) (car MID) 0.0))))
+  (test "with H7's own tune (tone-h7) it sounds too"
+    (assert-true (and (car H7) (> (car H7) 0.0))))
   (test "past UPWARD-R, silent"
     (assert-false (car FAR)))
   (test "standing still by it, the ears do not point at it"

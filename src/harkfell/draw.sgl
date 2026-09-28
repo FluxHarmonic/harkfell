@@ -54,7 +54,7 @@
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
           slot player-frame set-look-sound! region-colours set-look-waking! waking-frame
-          floating-reeds)
+          floating-reeds room-hue)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -1177,8 +1177,19 @@
     ;; room's light belongs to (its pickup, its stone, the moths' draw).
     ;; A room with neither takes its moths' harmonic (Root Ice's moths glow
     ;; H3's green, not H2's amber).
+    ;; Is a global cell in the room the body is in? (The world's stones and
+    ;; pickups are the whole world's: room-hue must look only at the room's.
+    ;; The 0.2 RC review found it taking the world's first, H3's green in every
+    ;; room from a new game, H4's blue once H2 and H3 were carried.)
+    (define (cell-in-room? w cell)
+      (let* ((s (tilemap-size (world-tiles w)))
+             (p (world-room w))
+             (q (worldmap-room-at-px (world-map w) (+ (* s (car cell)) (/ s 2.0)) (+ (* s (cdr cell)) (/ s 2.0)))))
+        (and p q (= (placed-x p) (placed-x q)) (= (placed-y p) (placed-y q)))))
+
     (define (room-hue w)
-      (let* ((stones (world-stones w)) (pickups (world-pickups w))
+      (let* ((stones (filter (lambda (st) (cell-in-room? w (stone-cell st))) (world-stones w)))
+             (pickups (filter (lambda (pk) (cell-in-room? w (pickup-cell pk))) (world-pickups w)))
              (cs (let ((c (world-critters w))) (if c (critters-list c) '())))
              (moth (find (lambda (c) (and (eq? (critter-kind c) 'moth) (critter-drawn c))) cs)))
         (slot-of (harmonic-role

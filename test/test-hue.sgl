@@ -1,0 +1,43 @@
+;;; The colour of a room's light ((harkfell draw) room-hue): the harmonic of
+;;; THIS room's pickup, else its first stone, else its moths' draw, else (D43)
+;;; its upward icicle's violet, else H2's amber. The 0.2 RC review found it
+;;; reading the whole world's pickups and stones, so every room took the
+;;; world's first (H3's green from a new game, H4's blue once H2 and H3 were
+;;; carried). Each room below would read a different colour under that bug.
+
+(import (sigil test)
+        (sigil list)
+        (engine worldmap)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell palette)
+        (harkfell draw))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+
+(define (world-in region x y carry)
+  (let* ((rm (content-room CT x y))
+         (cell (room-start-cell CT rm)))
+    (world-populate (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car cell) (cdr cell)))
+                    (content-stones CT) (content-pickups CT) carry)))
+
+(define (hue region x y carry) (room-hue (world-in region x y carry)))
+
+(test-group "hue: each room's own harmonic"
+  (test "the bowl (its stones: H2's amber first), from a new game"
+    (assert-equal (slot-of 'h2) (hue 'hollow 4 3 '())))
+  (test "the bowl still amber carrying H2 and H3 (not the world's H4)"
+    (assert-equal (slot-of 'h2) (hue 'hollow 4 3 '(2 3))))
+  (test "the Far Mound: its pickup, H2"
+    (assert-equal (slot-of 'h2) (hue 'reedfen 17 3 '())))
+  (test "the Old Birch: its pickup, H3's green"
+    (assert-equal (slot-of 'h3) (hue 'glasswood -5 5 '(2))))
+  (test "Root Ice: no stone or pickup, its moths' H3"
+    (assert-equal (slot-of 'h3) (hue 'glasswood -1 5 '(2 3))))
+  (test "Behind the Fall: the upward icicle's H7 violet"
+    (assert-equal (slot-of 'h7) (hue 'glasswood -6 4 '(2 3)))))
