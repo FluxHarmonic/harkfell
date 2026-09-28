@@ -9,8 +9,9 @@
 # at 1x (400x176, one PNG pixel per view pixel; the page scales it up crisp).
 # The table below is the whole policy: the file name the page uses, the door
 # (?room=REGION:X,Y&still, the room held still), optionally a world
-# directory to draw instead of the baked one, and optionally a scale (1
-# when empty).
+# directory to draw instead of the baked one, optionally a scale (1
+# when empty), and optionally how long the room runs before the shot, in ms
+# (shot.mjs's 1200 when empty).
 #
 # og-hollow-stones.png is the link preview (og:image and twitter:image on the
 # landing): the Standing Stones room at 3x, 1200x528, whole texels, because a
@@ -20,6 +21,11 @@
 # build of the site rebased on master 0cbb306 ("Version 0.1.0"). The Hollow
 # rows are CONTENT's rooms: 5,3 (the ring of standing stones) and 4,3 (the
 # bowl and its two ring-stones).
+#
+# 0.2 (2026-09-28) adds glasswood-moths.png: Meltwater (glasswood:-2,5)
+# carrying H2 and H3, run 8 s (not held still), so the moths have come to
+# the creature and light their circle. The moths move on the wall clock, so
+# a retake is a similar frame, not the same one; review it.
 #
 # A room that fails to load (shot.mjs exits non-zero) stops the run; nothing
 # in site/shots/ changes unless every picture was taken. Review the result
@@ -32,6 +38,7 @@ BUILD="${1:-}"; DRY=0; [ "${2:-}" = --dry-run ] && DRY=1
 
 SHOTS='
 hollow-stones.png|room=hollow:5,3&still|
+glasswood-moths.png|room=glasswood:-2,5&carry=2,3|||8000
 reedfen-bridge.png|room=reedfen:9,3&still|
 reedfen-reeds.png|room=reedfen:12,3&still|
 hollow-bowl.png|room=hollow:4,3&still|
@@ -40,13 +47,13 @@ og-hollow-stones.png|room=hollow:5,3&still||3
 '
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/harkfell-site-shots-XXXXXX")"
 trap 'rm -rf "$OUT"' EXIT
-echo "$SHOTS" | while IFS='|' read -r name query world scale; do
+echo "$SHOTS" | while IFS='|' read -r name query world scale wait; do
   [ -n "$name" ] || continue
   if [ -n "$world" ]; then
     [ -d "$world" ] || { echo "site-shots: $name wants the world $world, which this checkout lacks"; exit 1; }
-    node scripts/shot.mjs "$BUILD" "$OUT/$name" --scale "${scale:-1}" --query "$query" --world "$world"
+    node scripts/shot.mjs "$BUILD" "$OUT/$name" --scale "${scale:-1}" --wait "${wait:-1200}" --query "$query" --world "$world"
   else
-    node scripts/shot.mjs "$BUILD" "$OUT/$name" --scale "${scale:-1}" --query "$query" --baked
+    node scripts/shot.mjs "$BUILD" "$OUT/$name" --scale "${scale:-1}" --wait "${wait:-1200}" --query "$query" --baked
   fi
   [ -s "$OUT/$name" ] || { echo "site-shots: $name was not written"; exit 1; }
 done
