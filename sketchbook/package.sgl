@@ -78,11 +78,12 @@
       features: '(web wasm)))
 
   dependencies: (list
-    ;; The tune model, the player and the render, both targets. 0.7.0 is the
+    ;; The tune model, the player and the render, both targets, at the game's
+    ;; motif (gate-a4-sound renders with it). 0.7.0 was the
     ;; release with the bed nodes and kinds these sketches use.
-    (from-git url: "codeberg:sigil/motif" version: "^0.7.0")
+    (from-git url: "codeberg:sigil/motif" version: "^0.8.0")
     ;; The sink: sokol natively (unused by the tool), the WebAudio bridge on the web.
-    (from-git url: "codeberg:sigil/sigil-audio" version: "^0.12.2")
+    (from-git url: "codeberg:sigil/sigil-audio" version: "^0.13.0")
     (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.5" configs: '(web))
     (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.5" configs: '(web)))
 
