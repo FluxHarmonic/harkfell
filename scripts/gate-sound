@@ -118,7 +118,7 @@ if [ "${1:-}" = "--sabotage" ]; then
   passes test/test-hush.sgl "4 minutes played but only 5 rooms entered: blocked"
   passes test/test-hush.sgl "and plays on the following visit once the hush allows"
   passes test/test-sound.sgl "and the duck held"
-  passes test/test-place.sgl "in the Climb Back, still: the ears lean west and the tone sounds"
+  passes test/test-place.sgl "in the Heron's Water, still: the ears lean east and the tone sounds"
   passes test/test-sound.sgl "and no spot sound had played"
   plant first-visit src/harkfell/hush.sgl \
     "      (cond ((member key (hush-spent h)) 'spent)
@@ -145,7 +145,7 @@ if [ "${1:-}" = "--sabotage" ]; then
     "                           px: (+ (body-x b) 4.0 (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)))
                            py: (+ (body-y b) 6.0 (* (worldmap-rows wm) (worldmap-size wm) (worldmap-y0 wm)))" \
     "                           px: (+ (body-x b) 4.0) py: (+ (body-y b) 6.0)" \
-    test/test-place.sgl "in the Climb Back, still: the ears lean west and the tone sounds"
+    test/test-place.sgl "in the Heron's Water, still: the ears lean east and the tone sounds"
   plant spots-in-moment src/harkfell/sound.sgl \
     "      (if *moment*
           (set! *next* '())

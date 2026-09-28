@@ -375,7 +375,7 @@ plant glass-tagless "$S" \
 # tails-cut: a cue motif stopped while still ringing is kept as it is, cut at level
 passes test/test-cue-tails.sgl "every cue's last 20 ms are at least 40 dB under its peak"
 plant tails-cut "$S" \
-  "              (finish-cue! j #t)))))" \
+  "              (finish-cue! j (= (vector-ref j 4) 0))))))" \
   "              (finish-cue! j #f)))))" \
   test/test-cue-tails.sgl "every cue's last 20 ms are at least 40 dB under its peak"
 

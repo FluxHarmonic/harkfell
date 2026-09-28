@@ -51,10 +51,6 @@
                  (let ((c (sound-cue n)))
                    (and c (list n (cue-frames c) (tail-db c)))))
                NAMES))
-(define (filter-map* f l)
-  (let loop ((l l) (acc '()))
-    (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
-
 (define CUT (filter (lambda (r) (> (caddr r) TAIL-DB)) REPORT))
 (define CAPPED (filter (lambda (r) (>= (cadr r) CAP-FRAMES)) REPORT))
 

@@ -1248,11 +1248,13 @@
       (list 'jump 'land-soft 'land-hard 'step-fen-a 'step-fen-b 'step-grass-a 'step-grass-b
             'splash 'wall-jump 'step-stone-a 'step-stone-b 'step-wood-a 'step-wood-b
             'step-snow-a 'step-snow-b 'step-ice-a 'step-ice-b 'step-thin-a 'step-thin-b))
-    ;; Glasswood's cues other than its steps are heard only minutes in, so they
-    ;; render after the moments are opened ahead (rendered before them, 16 more
-    ;; cues held test-a4-sound 6's moments past its 60 s at 15 frames a second).
+    ;; Glasswood's cues other than its steps and its two warnings (the tell and
+    ;; thin ice's creak, which must sound even under a moment opened on demand)
+    ;; are heard only minutes in, so they render after the moments are opened
+    ;; ahead (rendered before them, the new cues held test-a4-sound 6's moments
+    ;; past its 60 s at 15 frames a second).
     (define LATE-CUES
-      (list 'ice-tell 'ice-creak 'ice-crack 'ice-fall 'ice-shatter
+      (list 'ice-crack 'ice-fall 'ice-shatter
             'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4))
     (define *late-cues* '())
     (define (bank-order)
@@ -1286,8 +1288,9 @@
                 (vector-set! j 5 heard)
                 (when (>= silent SILENT-BLOCKS) (finish-cue! j)))
               ;; the player ended (motif stops a fixed 2 s after the last row) or the
-              ;; cap: the cue is still sounding, so it fades out
-              (finish-cue! j #t)))))
+              ;; cap: the cue is still sounding (no silent block at its end yet), so it
+              ;; fades out
+              (finish-cue! j (= (vector-ref j 4) 0))))))
 
     ;; The rendered cue, less its trailing silent blocks. A cue that did not
     ;; decay into silence (fade? #t) fades out over its last FADE-OUT-S (David,
@@ -1421,8 +1424,9 @@
     (define (sound-moved) *moved*)
 
     ;; Glasswood (D36): smooth ground is snow under the sky and blue ice in
-    ;; the dark (a room with light: under 1, the caves and the hollow behind
-    ;; the fall); a birch branch is glazed, so ice; thin ice (brittle) has its
+    ;; the dark (a dark room as (harkfell content) has it, light: under 11/12:
+    ;; the caves and the hollow behind the fall); a birch branch is glazed, so
+    ;; ice; thin ice (brittle) has its
     ;; own hollow step.
     (define (surface pl)
       (let ((k (place-foot pl)) (r (place-region pl)))
@@ -1431,7 +1435,7 @@
               ((ledge) 'ice)
               ((climbable) 'stone)
               ((brittle) 'thin)
-              ((solid) (if (< (place-light pl) 1.0) 'ice 'snow))
+              ((solid) (if (< (place-light pl) (/ 11.0 12.0)) 'ice 'snow))
               (else #f))
             (case k
               ((ledge) (if (eq? r 'reedfen) 'wood 'stone))

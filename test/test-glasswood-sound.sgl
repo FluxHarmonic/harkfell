@@ -73,7 +73,9 @@
           (drawn-moth-cues ct)
           CODE-CUES))
 
-(define MISSING (filter (lambda (c) (not (member c (sound-cue-tunes)))) (world-cues CT)))
+;; by the names the director plays cues under (spot-ref), not their tune files
+(define PLAYED (map symbol->string (sound-cue-names)))
+(define MISSING (filter (lambda (c) (not (member c PLAYED))) (world-cues CT)))
 
 ;; The news path: what the director says for a pickup's news.
 (define SAID '())
@@ -121,7 +123,7 @@
   (test "every surface has both of its step cues"
     (for-each (lambda (s)
                 (for-each (lambda (ab)
-                            (assert-true (member (string-append "step-" s ab) (sound-cue-tunes))))
+                            (assert-true (member (string-append "step-" s ab) PLAYED)))
                           '("-a" "-b")))
               '("fen" "grass" "stone" "wood" "snow" "ice" "thin"))))
 
