@@ -285,7 +285,16 @@
                                          (and (pair? t) (eq? (car t) 'bellfrog)
                                               (let ((at (kw-ref (cdr t) "at")))
                                                 (and (pair? at) (+ (* TILE (car at)) (/ TILE 2.0))))))
-                                       (let ((ts (room-things rm))) (if (list? ts) ts '())))))
+                                       (let ((ts (room-things rm))) (if (list? ts) ts '()))))
+                    ;; D43: the upward icicles of the room, (7 x y) in ABSOLUTE world pixels
+                    ;; (the middle of its cell), for their hum (the director's upward-frame!)
+                    (hums (filter-map (lambda (t)
+                                        (and (pair? t) (eq? (car t) 'upward-icicle)
+                                             (let ((at (kw-ref (cdr t) "at")))
+                                               (and (pair? at)
+                                                    (list 7 (+ (* 400.0 (room-x rm)) (* TILE (car at)) (/ TILE 2.0))
+                                                          (+ (* 176.0 (room-y rm)) (* TILE (cadr at)) (/ TILE 2.0)))))))
+                                      (let ((ts (room-things rm))) (if (list? ts) ts '())))))
                (place key: (room-label rm)
                            region: (room-region rm)
                            bed-tune: (cond ((string? bed) bed) ((symbol? bed) (symbol->string bed)) (else #f))
@@ -297,6 +306,7 @@
                            moment-key: (and mm (moment-key rm (symbol->string (moment-kw mm "tune"))))
                            wander: (region-wander reg)
                            frogs: frogs
+                           hums: hums
                            ;; ABSOLUTE world pixels: the map's pixels start at its
                            ;; westmost and northmost room (x0 y0), not at room (0 0)
                            px: (+ (body-x b) 4.0 (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)))

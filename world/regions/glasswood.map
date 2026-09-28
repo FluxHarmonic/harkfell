@@ -20,7 +20,7 @@
 ;;; Glass Chute's is the door down its chute. Both open only carrying H3.
 ;;;
 ;;; ALL 22 ROOMS ARE WRITTEN (the ROOMS slice, 2026-09-27). Behind the Fall
-;;; waits for SYSTEMS' upward icicle (D43).
+;;; holds the upward icicle (D43, phase 2).
 (map
   region: glasswood
   origin: (-6 3)

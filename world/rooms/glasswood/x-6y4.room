@@ -18,10 +18,12 @@
    "#########################"
    "#########################"
    "#########################")
+  things: ((upward-icicle at: (13 7)))
   decor: auto)
 ;; Through the false wall in the Frozen Fall's curtain (its columns 0-3,
-;; rows 5-7): a hollow in the rock at the blue hour. THE SECRET (D43) IS
-;; NOT HERE YET: the upward icicle humming H7, faintly violet, needs
-;; SYSTEMS' (upward-icicle at: (C R)) thing, which is not built. Its place
-;; is (13,7), on the floor in the middle of the hollow; LOOK's frame is
-;; glasswood/upward-icicle@h7.
+;; rows 5-7): a hollow in the rock at the blue hour. THE SECRET (D43): one
+;; icicle growing upward from the floor at (13,7), in the middle of the
+;; hollow, humming H7's note faintly (the director's upward-hum, the tune
+;; tone-h7 when the sound track writes it) and glowing the violet no region
+;; uses (the look track's glasswood/upward-icicle@h7). Nothing to take, and
+;; the ears never point at it: H7 cannot be found yet.

@@ -540,6 +540,14 @@
                                  (add! (string-append "things: harmonic overtone: " (number->string o) " is not one "
                                                       (symbol->string region-sym) " gives: (gives: in world/world.sgl)")
                                        "things"))))
+                            ((eq? (car t) 'upward-icicle)     ; Glasswood's secret (D43): on no roster, grows from a floor
+                             (let ((a (thing-kw t "at")))
+                               (cond ((not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
+                                      (add! (string-append "things: upward-icicle at: " (datum->string a) " is not a cell of the grid") "things"))
+                                     ((not (grid-standable? (roomfile-grid rf) (car a) (cadr a)))
+                                      (add! (string-append "things: upward-icicle at: " (datum->string a)
+                                                           " does not grow from a floor (open, with rock or a ledge under it)")
+                                            "things")))))
                             ((eq? (car t) 'icicle)            ; Glasswood: falling ice, on no roster
                              (let ((a (thing-kw t "at")))
                                (if (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))

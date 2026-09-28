@@ -1,0 +1,104 @@
+;;; D43, Glasswood's secret: the upward icicle in Behind the Fall
+;;; ((upward-icicle at: (C R)), content, audio, sound, draw).
+;;;
+;;;   the room    it is on no roster, and it must grow from a floor
+;;;   the place   the adapter hands the director its place, (7 x y) in
+;;;               absolute world pixels
+;;;   the hum     near it a voice of its own sounds its harmonic's tune,
+;;;               louder nearer, silent past UPWARD-R (driven with an H2 hum:
+;;;               tone-h7 is the sound track's to write)
+;;;   the ears    never point at it: H7 cannot be found, so it is no
+;;;               finding tone (a tone at the same place turns them)
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine roomfile)
+        (engine worldmap)
+        (engine mixer)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell sound)
+        (harkfell audio))
+
+(define SRC (read-world-source "world"))
+(define CT (load-content SRC))
+
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a)
+             (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+(define (problems src) (map problem-message (content-problems (load-content src))))
+(define (has? ps s) (and (find (lambda (p) (string-contains? p s)) ps) #t))
+(define IN-AIR
+  (map (lambda (e) (if (string-contains? (car e) "glasswood/x-6y4.room")
+                       (cons (car e) (swap (cdr e) "(upward-icicle at: (13 7))" "(upward-icicle at: (13 6))"))
+                       e))
+       SRC))
+
+(test-group "upward: the room"
+  (test "the world loads clean with it in Behind the Fall (on no roster)"
+    (assert-equal '() (content-problems CT))
+    (assert-true (find (lambda (t) (and (pair? t) (eq? (car t) 'upward-icicle))) (room-things (content-room CT -6 4)))))
+  (test "one not on a floor is red"
+    (assert-true (has? (problems IN-AIR) "upward-icicle at: (13 6) does not grow from a floor"))))
+
+;; --- the place ---------------------------------------------------------------------------
+(define (world-in x y)
+  (let* ((rm (content-room CT x y))
+         (cell (room-start-cell CT rm)))
+    (world-populate
+      (world-at (content-map CT) (cell-body (worldmap-tiles (content-map CT)) HARKFELL-FEEL (car cell) (cdr cell)))
+      (content-stones CT) (content-pickups CT) '())))
+(define BEHIND (world-place (world-in -6 4) CT))
+
+(test-group "upward: the place"
+  (test "the director is told where it grows, in absolute world pixels"
+    ;; x -6: -2400 + 13 * 16 + 8; y 4: 704 + 7 * 16 + 8
+    (assert-equal (list (list 7 -2184.0 824.0)) (place-hums BEHIND))))
+
+;; --- the hum and the ears ------------------------------------------------------------------
+(define (pl hums tones px)
+  (place key: "t" region: 'glasswood bed-tune: #f groups: '() levels: '()
+         carry: '() tones: tones stones: '() hums: hums news: '()
+         px: px py: 100.0 rx: 0 ry: 0 still: #t))
+(define (listen p id)
+  (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+  (sound-reset!)
+  (let loop ((f 0))
+    (let ((now (/ f 30.0)))
+      (when (<= now 3.0)
+        (sound-frame! now (if (= f 0) 0.0 (/ 1 30.0)) p)
+        (mixer-pump! now)
+        (loop (+ f 1)))))
+  (let ((s (sound-voice-source id)))
+    (list (and s (source-gain s 3.0)) (sound-ears))))
+
+;; a hum 3 tiles east, 5 tiles east, and 9 tiles east (past UPWARD-R, 7 tiles)
+(define NEAR (listen (pl (list (list 2 148.0 100.0)) '() 100.0) UPWARD-ID))
+(define MID (listen (pl (list (list 2 180.0 100.0)) '() 100.0) UPWARD-ID))
+(define FAR (listen (pl (list (list 2 244.0 100.0)) '() 100.0) UPWARD-ID))
+;; For the ears: a hum and, as the control, a finding tone, each 100 px straight
+;; below (inside UPWARD-R; 0.57 rooms off, past the 0.3 inside which the ears
+;; point up whatever is there): the tone turns them down, the hum must not.
+(define BELOW-HUM (listen (pl (list (list 2 100.0 200.0)) '() 100.0) UPWARD-ID))
+(define TONE (listen (pl '() (list (list 2 100.0 200.0)) 100.0) "tone-h2"))
+
+(test-group "upward: the hum"
+  (test "near it, its voice sounds, louder nearer"
+    (display "  hum near ") (display (car NEAR)) (display ", mid ") (display (car MID)) (newline)
+    (assert-true (and (car NEAR) (car MID) (> (car NEAR) (car MID) 0.0))))
+  (test "past UPWARD-R, silent"
+    (assert-false (car FAR)))
+  (test "standing still by it, the ears do not point at it"
+    (assert-true (and (car BELOW-HUM) (> (car BELOW-HUM) 0.0)))
+    (assert-equal 'up (cadr BELOW-HUM)))
+  (test "control: a finding tone in the same place turns the ears down"
+    (assert-equal 'below (cadr TONE))))

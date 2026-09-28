@@ -71,7 +71,7 @@
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
-          place-wander place-moment-carrying place-moment-still place-moment-key
+          place-wander place-moment-carrying place-moment-still place-moment-key place-hums UPWARD-ID
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
@@ -142,7 +142,8 @@
       (still default: #f) (returns default: 0)
       (carry default: #f) (tones default: #f) (stones default: '()) (news default: '())
       (wander default: '()) (moment-carrying default: #f) (moment-still default: #f) (moment-key default: #f)
-      (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f))
+      (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f)
+      (hums default: '()))
 
     ;; --- state ---------------------------------------------------------------------
     (define *say* (lambda parts #f))
@@ -1017,6 +1018,34 @@
             (voice-set! HUM-ID (* HUM-GAIN (- 1.0 (/ d HUM-R))) (clamp (- MAX-PAN) MAX-PAN dx) #f now)))
         (set! *hum-n* n)))
 
+    ;; D43, Glasswood's secret: an upward icicle hums H7's note, faintly, from
+    ;; where it grows (the place's hums: ((overtone x y) ...)). Its own voice,
+    ;; "upward-hum", playing H7's finding-tone tune (tone-hN, the voice H7 will
+    ;; use when it can be found), louder as you come near and silent past
+    ;; UPWARD-R. It is NOT a finding tone: H7 is in no pickup, so nothing here
+    ;; enters tone-spots, and the ears never point at it. With no tone-h7 tune
+    ;; written yet, the voice does not open (voice-open! needs the tune).
+    (define UPWARD-ID "upward-hum")
+    (define UPWARD-R 112.0)        ; px: 7 tiles, the hollow behind the fall
+    (define UPWARD-GAIN 0.2)
+    (define *upward-n* #f)
+    (define (upward-frame! pl now)
+      (let* ((near (let loop ((hs (place-hums pl)) (best #f) (bd UPWARD-R))
+                     (if (null? hs)
+                         best
+                         (let* ((h (car hs))
+                                (d (sqrt (+ (expt (- (cadr h) (place-px pl)) 2) (expt (- (caddr h) (place-py pl)) 2)))))
+                           (if (< d bd) (loop (cdr hs) (cons h d) d) (loop (cdr hs) best bd))))))
+             (n (and near (car (car near)))))
+        (when (and (assoc UPWARD-ID *voices*) (not (eqv? n *upward-n*)))
+          (voice-fade! UPWARD-ID now))
+        (when near
+          (unless (assoc UPWARD-ID *voices*) (voice-open! UPWARD-ID (tone-id n) now))
+          (let* ((h (car near)) (d (cdr near))
+                 (dx (/ (- (cadr h) (place-px pl)) 200.0)))
+            (voice-set! UPWARD-ID (* UPWARD-GAIN (- 1.0 (/ d UPWARD-R))) (clamp (- MAX-PAN) MAX-PAN dx) #f now)))
+        (set! *upward-n* n)))
+
     (define (still-frame! pl dt now)
       (set! *still-for* (if (place-still pl) (+ *still-for* dt) 0.0))
       (let ((now-still (>= *still-for* STILL-S)))
@@ -1510,6 +1539,7 @@
         (tone-frame! pl now)
         (call-frame! pl now)
         (hum-frame! pl now)
+        (upward-frame! pl now)
         (news-frame! pl)
         (movement-frame! pl)
         (pending-cues-frame!)

@@ -1106,6 +1106,34 @@
                             (draw-filled-rect x y TILE TILE))))
                       (room-thin-ice rm))))))
 
+    ;; D43: the room's upward icicles, ((c . r) ...) in room cells.
+    (define (room-upward rm)
+      (filter-map* (lambda (t)
+                     (and (pair? t) (eq? (car t) 'upward-icicle)
+                          (let ((a (thing-at t))) (and a (cons (car a) (cdr a))))))
+                   (room-things rm)))
+
+    (define (filter-map* f l)
+      (let loop ((l l) (acc '()))
+        (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+    ;; Its frame (the look track's glasswood/upward-icicle@h7, 6 x 14), standing
+    ;; on the floor of its cell.
+    (define (draw-upward! rm)
+      (let ((i (ice-cell "upward-icicle@h7")))
+        (when i
+          (set-color 1.0 1.0 1.0 1.0)
+          (for-each (lambda (cr) (atlas-draw! i (+ (* TILE (car cr)) 5) (- (* TILE (+ (cdr cr) 1)) 14) 1))
+                    (room-upward rm)))))
+
+    ;; Its faint violet light (B, in the additive pass; the room's hue is H7's
+    ;; there, room-hue), breathing slowly.
+    (define (draw-upward-light! rm t)
+      (for-each (lambda (cr)
+                  (light-disc! (+ (* TILE (car cr)) 8.0) (- (* TILE (+ (cdr cr) 1)) 7.0) 7.0
+                               (/ (+ 0.9 (* 0.3 (sin (* t 0.02)))) DARK-GAIN)))
+                (room-upward rm)))
+
     (define (draw-ice! w ox oy t)
       (let ((is (world-ice w))
             (seen? (seen-fn w)))
@@ -1157,6 +1185,8 @@
                   (cond ((pair? pickups) (pickup-overtone (car pickups)))
                         ((pair? stones) (stone-overtone (car stones)))
                         (moth (critter-drawn moth))
+                        ;; D43: behind the fall, the upward icicle's violet
+                        ((and (world-room w) (placed-data (world-room w)) (pair? (room-upward (placed-data (world-room w))))) 7)
                         (else 2))))))
 
     ;; A disc of light (B, additive: the caller's blend) of amount a, radius
@@ -1300,6 +1330,8 @@
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
               ;; falling ice ((harkfell ice)), in front of the rock it hangs from
               (draw-ice! w ox oy t)
+              ;; D43: the upward icicle, where the room has one
+              (draw-upward! rm)
               ;; a reedling perched on a reed tip rides the tip's sway
               (for-each (lambda (c)
                           (unless (eyes? c)
@@ -1338,6 +1370,7 @@
                   (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) moths)
                   (draw-moth-light! moths b rm ox oy t)
                   (draw-icicle-glints! w rm ox oy t)
+                  (draw-upward-light! rm t)
                   (draw-glints! t)
                   (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
