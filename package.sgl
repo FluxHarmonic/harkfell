@@ -108,7 +108,7 @@
 (package
   name: "harkfell"
   version: "0.1.1"
-  sigil: "0.22.9"   ; 300d5ddd: the C-path size fix (the web wasm about 70% smaller); 0.22.8 (26cf03de) brought the native helper-recogniser miscompile fixes, the NaN fix, R7RS in core, the wasm export limit, and %hygiene-cell
+  sigil: "0.22.10"   ; fba8cb3b (Glasswood phase 2 relock, the leader's call: code compiled by 0.22.10 does not link against an older sigil-lib); 0.22.9 (300d5ddd): the C-path size fix (the web wasm about 70% smaller); 0.22.8 (26cf03de) brought the native helper-recogniser miscompile fixes, the NaN fix, R7RS in core, the wasm export limit, and %hygiene-cell
   description: "A quiet exploration platformer about carrying lost harmonics home"
   license: "GPL-3.0-or-later"
   authors: (list "David Wilson <david@daviwil.com>")
@@ -158,20 +158,20 @@
     (from-git url: graphics-repo version: "^0.13.0")
     ;; Web only: the wasm runtime and loader, the WebGL2 bridge and app
     ;; shell, and localStorage for (engine store).
-    (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.9" configs: '(web))
-    (from-git url: sigil-repo package: "sigil-wasm-gles3" version: ">=0.22.9" configs: '(web))
-    (from-git url: sigil-repo package: "sigil-browser" version: ">=0.22.9" configs: '(web))
+    (from-git url: sigil-repo package: "sigil-wasm-runtime" version: ">=0.22.10" configs: '(web))
+    (from-git url: sigil-repo package: "sigil-wasm-gles3" version: ">=0.22.10" configs: '(web))
+    (from-git url: sigil-repo package: "sigil-browser" version: ">=0.22.10" configs: '(web))
     ;; A2, the sound: the tune model and the live player (0.7.0 has the bed
     ;; nodes and kinds), and the sink (miniaudio natively, the WebAudio bridge on
     ;; the web). motif 0.8.0 widens its sigil-audio range to <0.14, so
     ;; sigil-audio 0.13.0 gives native builds the cues ((engine mixer)).
     (from-git url: "codeberg:sigil/motif" version: "^0.8.0")
     (from-git url: "codeberg:sigil/sigil-audio" version: "^0.13.0")
-    (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.9" configs: '(web)))
+    (from-git url: sigil-repo package: "sigil-wasm-audio" version: ">=0.22.10" configs: '(web)))
 
   dev-dependencies: (list
-    (from-git url: sigil-repo package: "sigil-test" version: ">=0.22.9")
-    (from-git url: sigil-repo package: "sigil-test-runner" version: ">=0.22.9"))
+    (from-git url: sigil-repo package: "sigil-test" version: ">=0.22.10")
+    (from-git url: sigil-repo package: "sigil-test-runner" version: ">=0.22.10"))
 
   tasks: (list
     (task
