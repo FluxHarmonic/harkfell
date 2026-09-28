@@ -75,7 +75,7 @@
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
-          sound-work! sound-set-work-in-frame! sound-bank-busy? sound-cue MOVING-CUES
+          sound-work! sound-set-work-in-frame! sound-bank-busy? sound-cue MOVING-CUES sound-cue-names FADE-OUT-S
           place-moves place-mode place-vx place-bx place-foot place-light sound-moved spot-gain sound-surface
           THROUGH-OUT-S THROUGH-IN-S THROUGH-OVERLAP-S THROUGH-MID OPENING-ID OPENING-HANDOFF-S BORDER-DEFAULT
           bed-channels-of group-channels
@@ -1228,6 +1228,8 @@
 
     ;; Every tune the director renders as a cue (the gates check each exists).
     (define (sound-cue-tunes) (map cadr SPOTS))
+    ;; ... and by the names the director plays them under
+    (define (sound-cue-names) (map car SPOTS))
 
     ;; Render the queued cues a block at a time (review M7: a whole cue at
     ;; once, its notes and motif's 2 s release tail, was one long frame each).
@@ -1246,6 +1248,13 @@
       (list 'jump 'land-soft 'land-hard 'step-fen-a 'step-fen-b 'step-grass-a 'step-grass-b
             'splash 'wall-jump 'step-stone-a 'step-stone-b 'step-wood-a 'step-wood-b
             'step-snow-a 'step-snow-b 'step-ice-a 'step-ice-b 'step-thin-a 'step-thin-b))
+    ;; Glasswood's cues other than its steps are heard only minutes in, so they
+    ;; render after the moments are opened ahead (rendered before them, 16 more
+    ;; cues held test-a4-sound 6's moments past its 60 s at 15 frames a second).
+    (define LATE-CUES
+      (list 'ice-tell 'ice-creak 'ice-crack 'ice-fall 'ice-shatter
+            'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4))
+    (define *late-cues* '())
     (define (bank-order)
       (append (filter spot-ref MOVING-CUES)
               (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))))
@@ -1276,10 +1285,18 @@
                 (vector-set! j 4 silent)
                 (vector-set! j 5 heard)
                 (when (>= silent SILENT-BLOCKS) (finish-cue! j)))
-              (finish-cue! j)))))
+              ;; the player ended (motif stops a fixed 2 s after the last row) or the
+              ;; cap: the cue is still sounding, so it fades out
+              (finish-cue! j #t)))))
 
-    ;; The rendered cue, less its trailing silent blocks.
-    (define (finish-cue! j)
+    ;; The rendered cue, less its trailing silent blocks. A cue that did not
+    ;; decay into silence (fade? #t) fades out over its last FADE-OUT-S (David,
+    ;; 2026-09-28: the moth chimes, the icicle breaking "and others" were cut
+    ;; at full level, "like broken samples": ring-h2 was still within 4 dB of
+    ;; its peak when motif ended it). test/test-cue-tails.sgl holds every
+    ;; cue's last 20 ms 40 dB under its peak.
+    (define FADE-OUT-S 1.0)
+    (define (finish-cue! j . fade?)
       (let* ((chunks (list-tail* (vector-ref j 2) (vector-ref j 4)))
              (frames (* CUE-BLOCK (length chunks)))
              (out (make-bytevector (* 4 frames) 0)))
@@ -1288,11 +1305,26 @@
           (when (pair? cs)
             (bytevector-copy! out (* 4 at) (car cs) 0 (bytevector-length (car cs)))
             (fill (cdr cs) (+ at CUE-BLOCK))))
+        (when (and (pair? fade?) (car fade?)) (fade-out! out frames))
         (set! *cues* (cons (cons (vector-ref j 0) (make-cue out frames)) *cues*))
         (set! *cue-job* #f)
         (bank-news!)))
 
     (define (list-tail* l k) (if (or (<= k 0) (null? l)) l (list-tail* (cdr l) (- k 1))))
+
+    ;; The last FADE-OUT-S (at most half the cue) times (1 - x) 10^(-3x), x
+    ;; going 0 to 1: an exponential fall, like a reverb dying away, that
+    ;; reaches -60 dB and then nothing at the last sample.
+    (define (fade-out! out frames)
+      (let* ((n (min (quotient frames 2) (exact (round (* FADE-OUT-S (mixer-rate))))))
+             (at (- frames n)))
+        (let loop ((i 0))
+          (when (< i n)
+            (let* ((x (/ (+ i 1.0) n))
+                   (g (* (- 1.0 x) (expt 10.0 (* -3.0 x))))
+                   (k (* 4 (+ at i))))
+              (bytevector-ieee-single-set! out k (* g (bytevector-ieee-single-ref out k (quote little))) (quote little))
+              (loop (+ i 1)))))))
 
     ;; "sound cues-moving T" once every movement cue is rendered, "sound
     ;; cues-all T" once the bank is (T the sound's clock): what the web's
@@ -1301,7 +1333,7 @@
       (when (and (not *moving-said*) (every (lambda (n) (or (not (spot-ref n)) (assq n *cues*))) MOVING-CUES))
         (set! *moving-said* #t)
         (*say* "sound" "cues-moving" (number->string (/ (round (* 100.0 *now*)) 100.0))))
-      (when (and (not *all-said*) (not *cue-job*) (null? *cue-queue*))
+      (when (and (not *all-said*) (not *cue-job*) (null? *cue-queue*) (null? *late-cues*))
         (set! *all-said* #t)
         (*say* "sound" "cues-all" (number->string (/ (round (* 100.0 *now*)) 100.0)))))
 
@@ -1458,7 +1490,8 @@
       ;; from nothing: the late-cue gate relies on it)
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
       (set! *cue-job* #f) (set! *cues* (quote ())) (set! *pending-cues* (quote ()))
-      (set! *cue-queue* (bank-order))
+      (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
+      (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
       (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) (map cadr SPOTS))))
 
@@ -1485,6 +1518,12 @@
     ;; #f (nothing to do, or waiting for a text).
     (define (boot-step!)
       (cond (*cue-job* (render-next-cue!) 'block)
+            ;; the moments are open (or dropped): now the late cues, less any a
+            ;; gate cue pulled forward and rendered already
+            ((and (null? *cue-queue*) (null? *to-open*) (pair? *late-cues*))
+             (set! *cue-queue* (filter (lambda (n) (not (assq n *cues*))) *late-cues*))
+             (set! *late-cues* '())
+             'block)
             ((and (pair? *cue-queue*) (tune-text (cadr (spot-ref (car *cue-queue*)))))
              (set! *cue-wait* #f)
              (render-next-cue!)
@@ -1524,7 +1563,7 @@
     (define (sound-work! more?)
       (unless (moment-busy?) (boot-work! more?)))
     ;; Is the bank still rendering (the game gives it more time while it is)?
-    (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*)))
+    (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*) (pair? *late-cues*)))
     ;; A rendered cue by name ((engine mixer) make-cue), or #f: for the tests.
     (define (sound-cue name) (let ((e (assq name *cues*))) (and e (cdr e))))
 

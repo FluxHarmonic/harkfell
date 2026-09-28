@@ -1,0 +1,80 @@
+;;; Every cue rings out (David, 2026-09-28, on the Glasswood listening page:
+;;; "several effects are cut off too fast ... they sound like broken
+;;; samples"). Through the real cue bank ((harkfell sound)'s boot work, at
+;;; the game's render rate, headless): every cue in SPOTS rendered as the game
+;;; renders it, then its END read from the rendered samples.
+;;;
+;;;   tail   the peak of a cue's last TAIL-S seconds is at least TAIL-DB under
+;;;          its own peak: the reverb and the releases decay into silence
+;;;          before the cue ends, rather than stopping at full level
+;;;   cap    and no cue ends at the render's cap (6 s), where it would be cut
+;;;          whatever its level
+;;;
+;;; The control: a cue cut in half (its first half as a cue of its own) fails
+;;; the tail rule, so the rule can go red.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (engine mixer)
+        (harkfell sound))
+
+(define RATE 32000)
+(define TAIL-S 0.02)
+(define TAIL-DB -40.0)
+(define CAP-FRAMES (* 6 RATE))
+
+(mixer-open-headless! RATE (lambda (id buf n gain) #f))
+(sound-reset!)
+(sound-boot! '() (lambda parts #f))
+(let loop ((f 0))
+  (when (and (< f 20000) (sound-bank-busy?))
+    (sound-frame! (/ f 60.0) (/ 1.0 60.0) #f)
+    (loop (+ f 1))))
+
+(define (filter-map* f l)
+  (let loop ((l l) (acc (quote ())))
+    (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+(define NAMES (sound-cue-names))
+(define (peak c from to)
+  (let loop ((i (max 0 from)) (m 0.0))
+    (if (>= i to) m (loop (+ i 1) (max m (abs (cue-ref c i)))))))
+(define (db x) (if (<= x 0.0) -200.0 (* 20.0 (/ (log x) (log 10.0)))))
+(define (tail-db c)
+  (let* ((n (cue-frames c)) (k (exact (round (* TAIL-S RATE)))))
+    (- (db (peak c (- n k) n)) (db (peak c 0 n)))))
+
+;; ((name frames tail-db) ...) for every rendered cue
+(define REPORT
+  (filter-map* (lambda (n)
+                 (let ((c (sound-cue n)))
+                   (and c (list n (cue-frames c) (tail-db c)))))
+               NAMES))
+(define (filter-map* f l)
+  (let loop ((l l) (acc '()))
+    (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+(define CUT (filter (lambda (r) (> (caddr r) TAIL-DB)) REPORT))
+(define CAPPED (filter (lambda (r) (>= (cadr r) CAP-FRAMES)) REPORT))
+
+;; the control: ring-h2's first half, a cue of its own
+(define HALF
+  (let* ((c (sound-cue 'ring-h2)) (n (quotient (cue-frames c) 2)) (b (make-bytevector (* 4 n) 0)))
+    (let loop ((i 0)) (when (< i n) (bytevector-ieee-single-set! b (* 4 i) (cue-ref c i) 'little) (loop (+ i 1))))
+    (make-cue b n)))
+
+(test-group "cue tails: every cue rings out"
+  (test "the bank rendered every cue (the check has its subject)"
+    (assert-equal (length NAMES) (length REPORT)))
+  (test "control: a cue cut in half ends at level, and the rule sees it"
+    (assert-true (> (tail-db HALF) TAIL-DB)))
+  (test "every cue's last 20 ms are at least 40 dB under its peak"
+    (for-each (lambda (r)
+                (display "  ") (display (car r)) (display " ") (display (/ (round (* 100.0 (/ (cadr r) RATE))) 100.0))
+                (display " s, tail ") (display (/ (round (* 10.0 (caddr r))) 10.0)) (display " dB") (newline))
+              REPORT)
+    (unless (null? CUT) (display "  CUT: ") (display (map car CUT)) (newline))
+    (assert-equal '() (map car CUT)))
+  (test "no cue runs into the render's 6 s cap"
+    (assert-equal '() (map car CAPPED))))
