@@ -18,6 +18,14 @@
 //   isolation     /play/ carries COOP same-origin + COEP require-corp; / does not
 //   missing       a missing page, an unpublished wasm hash and /_headers are 404
 //
+// Right after a deploy the wasm route can answer 404 for a few seconds, before
+// the object is visible to the Function (t-975606; production hit it on
+// 2026-09-29, and a verify 10 s later passed). Every fetch of the published
+// wasm (files, wasm-headers, wasm-wire) tries again after 2, 4 and 8 s while it
+// says 404, each retry said; any other status counts at once, and the
+// unpublished-hash probe under missing is never retried. Phantom Burn's
+// scripts/verify-live.mjs has the same backoff.
+//
 // Exits 0 when every check passes, 1 otherwise, 2 on bad arguments.
 import fs from "node:fs";
 import crypto from "node:crypto";
@@ -59,6 +67,21 @@ async function get(url, init) {
   }
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const WASM_BACKOFF = [2000, 4000, 8000];
+const isWasm = (file) => /^play\/w\/[0-9a-f]{16}\/harkfell\.wasm$/.test(file);
+async function fetchWasm(url, init, leg) {
+  let r = await get(url, init);
+  for (const ms of WASM_BACKOFF) {
+    if (r.status !== 404) break;
+    await r.arrayBuffer();
+    console.log(`retry ${leg}: ${url} answered 404; again in ${ms / 1000} s`);
+    await sleep(ms);
+    r = await get(url, init);
+  }
+  return r;
+}
+
 // ---- every file ------------------------------------------------------------------
 {
   const bad = [];
@@ -69,7 +92,7 @@ async function get(url, init) {
       const e = queue.shift();
       const url = urlFor(e.file);
       try {
-        const r = await get(url);
+        const r = isWasm(e.file) ? await fetchWasm(url, undefined, "files") : await get(url);
         const buf = Buffer.from(await r.arrayBuffer());
         bytes += buf.length;
         if (r.status !== 200) bad.push(`${e.file}: ${r.status}`);
@@ -86,7 +109,7 @@ async function get(url, init) {
 const wasm = entries.find((e) => /^play\/w\/[0-9a-f]{16}\/harkfell\.wasm$/.test(e.file));
 if (!wasm) fail("wasm-headers", "the manifest names no play/w/<sha16>/harkfell.wasm");
 else {
-  const r = await get(`${base}/${wasm.file}`, { headers: { "accept-encoding": "br, gzip" } });
+  const r = await fetchWasm(`${base}/${wasm.file}`, { headers: { "accept-encoding": "br, gzip" } }, "wasm-headers");
   await r.arrayBuffer();
   const h = (n) => r.headers.get(n) || "";
   const detail = [];
@@ -107,7 +130,7 @@ else {
 // AND the right wasm. Identity encoding is a FAIL, not a note.
 if (wasm) {
   const url = new URL(`${base}/${wasm.file}`);
-  const raw = await new Promise((resolve, reject) => {
+  const rawGet = () => new Promise((resolve, reject) => {
     const lib = url.protocol === "https:" ? https : http;
     const req = lib.get(url, { headers: { "accept-encoding": "br, gzip" } }, (res) => {
       const chunks = [];
@@ -118,6 +141,13 @@ if (wasm) {
     req.on("error", reject);
     req.setTimeout(120000, () => req.destroy(new Error("timed out after 120 s")));
   }).catch((e) => ({ error: e.message }));
+  let raw = await rawGet();
+  for (const ms of WASM_BACKOFF) {   // t-975606, as fetchWasm
+    if (raw.status !== 404) break;
+    console.log(`retry wasm-wire: ${url} answered 404; again in ${ms / 1000} s`);
+    await sleep(ms);
+    raw = await rawGet();
+  }
   if (raw.error) fail("wasm-wire", `${url}: ${raw.error}`);
   else if (raw.status !== 200) fail("wasm-wire", `${url} answered ${raw.status}`);
   else if (raw.enc !== "br" && raw.enc !== "gzip") fail("wasm-wire", `${url} arrived ${raw.enc}-encoded: ${raw.body.length} bytes on the wire. Cloudflare is not compressing it; a phone would download all of it`);
