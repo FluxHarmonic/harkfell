@@ -62,7 +62,16 @@ WIN_EXE=build/windows-amd64/bin/harkfell.exe
 # shellcheck disable=SC2086
 newer=$(find $GAME -type f -newer "$LINUX_EXE" | head -3)
 [ -z "$newer" ] || die "$LINUX_EXE is older than game files it should contain (e.g. $(printf '%s' "$newer" | tr '\n' ' ')); rebuild"
-[ -f "$LINUX_EXE" ] && [ -d build/release/assets ] || die "build/release/assets missing"
+[ -d build/release/assets ] || die "build/release/assets missing"
+if [ -f "$WIN_EXE" ]; then
+  # shellcheck disable=SC2086
+  newer=$(find $GAME -type f -newer "$WIN_EXE" | head -3)
+  [ -z "$newer" ] || die "$WIN_EXE is older than game files it should contain (e.g. $(printf '%s' "$newer" | tr '\n' ' ')); rebuild or remove it"
+fi
+# A build made against redirected (unreleased, local) dependencies passes every check above but
+# contains code sigil.lock does not name: refuse while a redirects file or variable is in play.
+[ -z "${SIGIL_REDIRECTS:-}" ] || die "SIGIL_REDIRECTS is set; build and pack without dependency redirects"
+[ ! -e dev-redirects.sgl ] || die "dev-redirects.sgl exists; a build may have used unreleased dependencies (move it aside, rebuild, pack)"
 
 NAME="harkfell-$VERSION"
 DIST="${DIST:-dist}"
@@ -124,7 +133,7 @@ guix shell patchelf -- patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 "$
 check=$(scripts/check-linux-binary "$L/harkfell") || { printf '%s\n' "$check" >&2; die "the packed Linux executable is not portable"; }
 floor=$(printf '%s\n' "$check" | sed -n 's/^glibc-floor //p')
 cmp -s "$LINUX_EXE" "$L/harkfell" && die "patchelf left the executable unchanged"
-readme "$L" harkfell "Linux x86-64 with glibc $floor or newer (Ubuntu 22.04, Debian 12, Fedora 35
+readme "$L" harkfell "Linux x86-64 with glibc $floor or newer (Ubuntu 22.04, Debian 12, Fedora 36
 and later), an OpenGL driver, and PulseAudio or PipeWire."
 (cd "$WORK/$NAME-linux-amd64" && tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$WORK/$NAME-linux-amd64.tar.gz" "$NAME")
 made="$NAME-linux-amd64.tar.gz"
