@@ -1,0 +1,148 @@
+#!/bin/sh
+# The desktop downloads for itch.io: an archive per platform, and their
+# SHA256SUMS, under dist/. Native builds are distributed ONLY on itch
+# (David, 2026-09-29), never as GitHub or forge release assets; butler
+# pushes what this makes (~/Ops/artifacts/itch/scripts/itch-push).
+#
+#   scripts/release-archives VERSION        e.g. v0.2.0
+#
+# Needs the release build of that version's game in build/release
+# (scripts/dev sigil build --config release). A Windows archive is made
+# too when build/windows-amd64/bin/harkfell.exe exists; Harkfell has no
+# windows-amd64 config yet, so today it is Linux only, and the script says so.
+#
+# Each archive unpacks to harkfell-VERSION/ holding the game at the top:
+#   harkfell (or harkfell.exe)   the game, and nothing else from bin/ (motif's
+#                                own executable is bundled there by the build
+#                                and is not part of the download)
+#   assets/                      what build/release/assets holds (the art, the
+#                                tunes, the type, the fonts with OFL.txt, the
+#                                mark with RESERVED.md)
+#   world/                       world.sgl, regions/*.map, rooms/*/*.room: all
+#                                the native game reads ((harkfell source))
+#   LICENSE, README.txt, HOW-IT-WAS-MADE.txt, VERSION, .itch.toml
+# The game reads world/ and assets/ from the CURRENT directory and has no
+# install-directory lookup (Crash's enter-install-dir!), so the executable
+# sits beside them: a double-click in Explorer and a launch from the itch
+# app both start it there. README.txt says to start it from its folder.
+#
+# THE LINUX EXECUTABLE IS MADE PORTABLE HERE. A build on Guix asks for the
+# ELF interpreter at a /gnu/store path that no other distribution has; the
+# kernel refuses to start it there. The packed copy (never build/release's)
+# gets /lib64/ld-linux-x86-64.so.2 by patchelf, and scripts/check-linux-binary
+# must then pass on it or nothing is written. Proven in an Ubuntu 22.04
+# userland by scripts/test-release-archives.
+#
+# Refuses: a VERSION with no tag; game files (src world assets package.sgl
+# sigil.lock) that differ from the tag's, committed or not, or untracked
+# files among them; package.sgl's version not VERSION; a build older than any
+# of those files.
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+say() { printf 'release-archives: %s\n' "$*" >&2; }
+die() { say "REFUSED: $*"; exit 1; }
+
+VERSION="${1:-}"
+[ -n "$VERSION" ] || { say "give the version, e.g. v0.2.0"; exit 1; }
+case "$VERSION" in v[0-9]*.[0-9]*.[0-9]*) ;; *) die "'$VERSION' is not a version like v0.2.0" ;; esac
+git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null || die "no tag $VERSION in this repository"
+
+GAME="src world assets package.sgl sigil.lock"
+# shellcheck disable=SC2086
+git diff --quiet "$VERSION" -- $GAME || die "the game files here differ from $VERSION (git diff $VERSION -- $GAME); the archive would not be $VERSION's game"
+# shellcheck disable=SC2086
+untracked=$(git status --porcelain --untracked-files=all -- $GAME | grep '^??' || true)
+[ -z "$untracked" ] || die "untracked files among the game's: $(printf '%s' "$untracked" | head -3 | tr '\n' ' ')"
+pkgver=$(sed -n 's/^ *version: *"\([0-9][0-9.]*\)".*/\1/p' package.sgl | head -1)
+[ "v$pkgver" = "$VERSION" ] || die "package.sgl says version \"$pkgver\", not ${VERSION#v}"
+
+LINUX_EXE=build/release/bin/harkfell
+WIN_EXE=build/windows-amd64/bin/harkfell.exe
+[ -x "$LINUX_EXE" ] || die "$LINUX_EXE missing; scripts/dev sigil build --config release first"
+# shellcheck disable=SC2086
+newer=$(find $GAME -type f -newer "$LINUX_EXE" | head -3)
+[ -z "$newer" ] || die "$LINUX_EXE is older than game files it should contain (e.g. $(printf '%s' "$newer" | tr '\n' ' ')); rebuild"
+[ -f "$LINUX_EXE" ] && [ -d build/release/assets ] || die "build/release/assets missing"
+
+NAME="harkfell-$VERSION"
+DIST="${DIST:-dist}"
+mkdir -p "$DIST"
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/harkfell-archives.XXXXXX")
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+fill() {   # fill DIR EXE-SOURCE EXE-NAME
+  dir="$1"; src="$2"; exe="$3"
+  mkdir -p "$dir"
+  cp "$src" "$dir/$exe"
+  cp -r build/release/assets "$dir/assets"
+  git ls-files world | grep -E '^world/(world\.sgl|regions/[^/]+\.map|rooms/[^/]+/[^/]+\.room)$' | while read -r f; do
+    mkdir -p "$dir/$(dirname "$f")"
+    cp "$f" "$dir/$f"
+  done
+  [ -f "$dir/world/world.sgl" ] || die "world/world.sgl did not reach the archive"
+  cp LICENSE packaging/HOW-IT-WAS-MADE.txt "$dir/"
+  printf '%s\n' "$VERSION" > "$dir/VERSION"
+  # the itch app's launch manifest: which file "Launch" runs
+  printf '[[actions]]\nname = "play"\npath = "%s"\n' "$exe" > "$dir/.itch.toml"
+}
+
+readme() {   # readme DIR EXE-NAME PLATFORM-LINE
+  cat > "$1/README.txt" <<TXT
+Harkfell $VERSION
+https://harkfell.com
+
+A quiet little platformer about listening. Headphones bring it closest.
+
+Start $2 from this folder: it reads world/ and assets/ from the folder
+it is started in. A double-click, the itch app, or ./$2 in a terminal
+opened here all work.
+
+  Arrow keys or WASD   move, climb and swim
+  Space or Z           jump (cling to a wall and jump off it, too)
+  Down + jump          drop through birch branches
+  R                    back to where you came into the room
+  Escape               save and quit
+
+The game saves as you go, in harkfell/ under your data directory
+(XDG_DATA_HOME or ~/.local/share on Linux, %APPDATA% on Windows).
+
+$3
+
+The code is GPL-3.0-or-later (LICENSE). The art and music are CC BY 4.0,
+credit David Wilson / Flux Harmonic, except the Flux Harmonic mark
+(assets/RESERVED.md). IM Fell is by Igino Marini, under the SIL Open Font
+License (assets/fonts/OFL.txt). How the game was made, AI included, is
+in HOW-IT-WAS-MADE.txt. The source: https://github.com/FluxHarmonic/harkfell
+TXT
+}
+
+made=""
+# --- Linux ----------------------------------------------------------------
+L="$WORK/$NAME-linux-amd64/$NAME"
+fill "$L" "$LINUX_EXE" harkfell
+guix shell patchelf -- patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 "$L/harkfell"
+check=$(scripts/check-linux-binary "$L/harkfell") || { printf '%s\n' "$check" >&2; die "the packed Linux executable is not portable"; }
+floor=$(printf '%s\n' "$check" | sed -n 's/^glibc-floor //p')
+cmp -s "$LINUX_EXE" "$L/harkfell" && die "patchelf left the executable unchanged"
+readme "$L" harkfell "Linux x86-64 with glibc $floor or newer (Ubuntu 22.04, Debian 12, Fedora 35
+and later), an OpenGL driver, and PulseAudio or PipeWire."
+(cd "$WORK/$NAME-linux-amd64" && tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$WORK/$NAME-linux-amd64.tar.gz" "$NAME")
+made="$NAME-linux-amd64.tar.gz"
+
+# --- Windows, when a build exists ---------------------------------------------
+if [ -f "$WIN_EXE" ]; then
+  W="$WORK/$NAME-windows-amd64/$NAME"
+  fill "$W" "$WIN_EXE" harkfell.exe
+  readme "$W" harkfell.exe "Windows 10 or later, 64-bit."
+  (cd "$WORK/$NAME-windows-amd64" && guix shell zip -- zip -qrX "$WORK/$NAME-windows-amd64.zip" "$NAME")
+  made="$made $NAME-windows-amd64.zip"
+else
+  say "no $WIN_EXE: Linux only (Harkfell has no windows-amd64 build config yet)"
+fi
+
+for a in $made; do mv -f "$WORK/$a" "$DIST/$a"; done
+# shellcheck disable=SC2086
+(cd "$DIST" && sha256sum $made > SHA256SUMS)
+say "made in $DIST/: $made"
+printf '%s\n' "$check" | sed 's/^/release-archives: linux executable: /' >&2
+cat "$DIST/SHA256SUMS"

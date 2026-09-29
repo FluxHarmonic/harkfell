@@ -12,3 +12,6 @@
 
 # a developer's dependency redirects (sigil deps install --redirects dev-redirects.sgl), never the lock's
 dev-redirects.sgl
+
+# Release archives (scripts/release-archives)
+/dist/

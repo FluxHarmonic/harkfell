@@ -1,0 +1,161 @@
+#!/bin/sh
+# The gate for scripts/release-archives: makes the archives for VERSION into a
+# scratch directory and checks what a player would get.
+#
+#   scripts/test-release-archives VERSION      e.g. v0.2.0 (the build in
+#                                              build/release must be that game)
+#
+# Legs, each printed PASS or FAIL:
+#   refuse     release-archives refuses a version whose game differs from the
+#              working tree's (the tag before VERSION)
+#   sums       SHA256SUMS verifies the archive
+#   layout     the archive's top folder holds exactly the expected entries:
+#              the game, assets/, world/, LICENSE, README.txt,
+#              HOW-IT-WAS-MADE.txt, VERSION, .itch.toml (no bin/, no motif)
+#   content    assets/ equals build/release/assets; world/ holds every
+#              world.sgl, regions/*.map and rooms/*/*.room git tracks; VERSION
+#              says VERSION; the disclosure and the license are there
+#   portable   scripts/check-linux-binary passes on the packed executable, AND
+#              FAILS on build/release's own (the checker can go red)
+#   ubuntu     in an Ubuntu 22.04 userland (ubuntu-base, sha256-pinned, cached
+#              under ~/.cache/harkfell-test/), started from the unpacked
+#              folder: --room-check --parse-only passes with every room, and
+#              --replay prints exactly what build/release's does on this box;
+#              AND the unpatched build/release executable does NOT start there
+#              (the leg can go red)
+# The ubuntu leg needs unprivileged user namespaces (unshare -r) and the
+# network the first time. It reports SETUP-FAILED, not PASS, when it cannot run.
+#
+# Exit: 0 every leg PASS; 1 a FAIL; 125 SETUP-FAILED (a leg could not run).
+set -eu
+cd "$(dirname "$0")/.." || exit 1
+VERSION="${1:-}"
+[ -n "$VERSION" ] || { echo "test-release-archives: give the version, e.g. v0.2.0" >&2; exit 125; }
+ROOT=$(pwd)
+T=$(mktemp -d "${TMPDIR:-/tmp}/harkfell-archive-test.XXXXXX")
+trap 'rm -rf "$T"' EXIT INT TERM
+fails=0; setup=0
+pass() { echo "PASS $*"; }
+fail() { echo "FAIL $*"; fails=$((fails + 1)); }
+setupf() { echo "SETUP-FAILED $*"; setup=$((setup + 1)); }
+NAME="harkfell-$VERSION"
+ARCH="$NAME-linux-amd64.tar.gz"
+
+# --- refuse ------------------------------------------------------------------
+prev=$(git tag --list 'v*' --sort=-v:refname | grep -v -x "$VERSION" | head -1)
+if [ -n "$prev" ] && ! git diff --quiet "$prev" -- src world assets package.sgl sigil.lock; then
+  if DIST="$T/refuse" scripts/release-archives "$prev" > "$T/refuse.log" 2>&1; then
+    fail "refuse: release-archives $prev made archives from a tree holding another game"
+  elif grep -q 'REFUSED: the game files here differ' "$T/refuse.log"; then
+    pass "refuse: $prev refused (the game files differ from it)"
+  else
+    fail "refuse: $prev failed for another reason: $(tail -1 "$T/refuse.log")"
+  fi
+else
+  setupf "refuse: no earlier tag with a different game to try"
+fi
+
+# --- make the archives ---------------------------------------------------------
+if ! DIST="$T/dist" scripts/release-archives "$VERSION" > "$T/make.log" 2>&1; then
+  cat "$T/make.log"; echo "SETUP-FAILED release-archives $VERSION did not complete; no other leg ran"; exit 125
+fi
+
+# --- sums --------------------------------------------------------------------
+if (cd "$T/dist" && sha256sum -c SHA256SUMS > /dev/null 2>&1); then pass "sums"; else fail "sums: SHA256SUMS does not verify"; fi
+
+mkdir -p "$T/unpacked"
+tar -xzf "$T/dist/$ARCH" -C "$T/unpacked"
+G="$T/unpacked/$NAME"
+
+# --- layout ------------------------------------------------------------------
+want=".itch.toml
+HOW-IT-WAS-MADE.txt
+LICENSE
+README.txt
+VERSION
+assets
+harkfell
+world"
+got=$(ls -A "$G" | LC_ALL=C sort)
+if [ "$(ls -A "$T/unpacked")" = "$NAME" ] && [ "$got" = "$(printf '%s\n' "$want" | LC_ALL=C sort)" ]; then
+  pass "layout: $NAME/ holds $(printf '%s' "$got" | tr '\n' ' ')"
+else
+  fail "layout: top $(ls -A "$T/unpacked" | tr '\n' ' '); inside: $(printf '%s' "$got" | tr '\n' ' ')"
+fi
+
+# --- content -----------------------------------------------------------------
+wn=$(git ls-files world | grep -cE '^world/(world\.sgl|regions/[^/]+\.map|rooms/[^/]+/[^/]+\.room)$')
+an=$(cd "$G" && find world -type f | wc -l)
+rooms=$(git ls-files world | grep -cE '^world/rooms/[^/]+/[^/]+\.room$')
+c=0
+diff -r build/release/assets "$G/assets" > /dev/null 2>&1 || { fail "content: assets/ differs from build/release/assets"; c=1; }
+[ "$wn" = "$an" ] || { fail "content: world/ holds $an files, git tracks $wn to ship"; c=1; }
+[ "$(cat "$G/VERSION")" = "$VERSION" ] || { fail "content: VERSION says $(cat "$G/VERSION")"; c=1; }
+cmp -s packaging/HOW-IT-WAS-MADE.txt "$G/HOW-IT-WAS-MADE.txt" || { fail "content: HOW-IT-WAS-MADE.txt missing or changed"; c=1; }
+cmp -s LICENSE "$G/LICENSE" || { fail "content: LICENSE missing or changed"; c=1; }
+grep -q 'HOW-IT-WAS-MADE.txt' "$G/README.txt" || { fail "content: README.txt does not point at the disclosure"; c=1; }
+grep -q '^path = "harkfell"$' "$G/.itch.toml" || { fail "content: .itch.toml does not launch harkfell"; c=1; }
+[ "$c" = 0 ] && pass "content: assets identical, $an world files ($rooms rooms), VERSION, LICENSE, disclosure, README, .itch.toml"
+
+# --- portable ----------------------------------------------------------------
+if scripts/check-linux-binary "$G/harkfell" > "$T/check.log" 2>&1; then
+  if scripts/check-linux-binary build/release/bin/harkfell > "$T/check-orig.log" 2>&1; then
+    setupf "portable: build/release/bin/harkfell itself passes the check (not a Guix build?), so the checker's red was not shown"
+  else
+    pass "portable: the packed executable passes ($(grep glibc-floor "$T/check.log")); build/release's own fails ($(grep -m1 '^FAIL' "$T/check-orig.log"))"
+  fi
+else
+  fail "portable: $(grep '^FAIL' "$T/check.log" | head -2 | tr '\n' ' ')"
+fi
+
+# --- ubuntu ------------------------------------------------------------------
+UB_URL=https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-amd64.tar.gz
+UB_SHA=242cd8898b33ea806ef5f13b1076ed7c76f9f989d18384452f7166692438ff1a
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/harkfell-test"
+UB="$CACHE/ubuntu-base-22.04.5-base-amd64.tar.gz"
+mkdir -p "$CACHE"
+if [ ! -f "$UB" ] || [ "$(sha256sum "$UB" | cut -d' ' -f1)" != "$UB_SHA" ]; then
+  curl -sSfL -o "$UB.part" "$UB_URL" 2>"$T/curl.log" && mv "$UB.part" "$UB" || true
+fi
+UNSHARE=$(command -v unshare || true); CHROOT=$(command -v chroot || true)
+if [ ! -f "$UB" ] || [ "$(sha256sum "$UB" | cut -d' ' -f1)" != "$UB_SHA" ]; then
+  setupf "ubuntu: no ubuntu-base 22.04.5 with sha256 $UB_SHA (download: $(cat "$T/curl.log" 2>/dev/null | head -1))"
+elif [ -z "$UNSHARE" ] || [ -z "$CHROOT" ] || ! "$UNSHARE" -r true 2>/dev/null; then
+  setupf "ubuntu: no unprivileged user namespaces (unshare -r)"
+else
+  R="$T/rootfs"; mkdir -p "$R"
+  tar -xzf "$UB" -C "$R" 2>/dev/null || true
+  mkdir -p "$R/game"
+  cp -a "$G/." "$R/game/"
+  cp build/release/bin/harkfell "$R/game/harkfell-guix-build"
+  # a fresh mount and pid namespace, so /proc (which the game reads to find
+  # its own bundle) can be mounted inside the chroot
+  inside() { "$UNSHARE" -r -m -p -f "$CHROOT" "$R" /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp /bin/sh -c "mount -t proc proc /proc && cd /game && $1"; }
+  osr=$(inside 'sed -n "s/^PRETTY_NAME=//p" /etc/os-release; /lib/x86_64-linux-gnu/libc.so.6 | head -1' 2>&1 || true)
+  inside 'timeout 300 ./harkfell --room-check --parse-only > /tmp/parse.log 2>&1; echo $? > /tmp/parse.rc' > /dev/null 2>&1 || true
+  inside 'timeout 120 ./harkfell --replay > /tmp/replay.out 2> /tmp/replay.err; echo $? > /tmp/replay.rc' > /dev/null 2>&1 || true
+  inside 'timeout 60 ./harkfell-guix-build --replay > /tmp/neg.out 2> /tmp/neg.err; echo $? > /tmp/neg.rc' > /dev/null 2>&1 || true
+  timeout 120 build/release/bin/harkfell --replay > "$T/replay.host" 2>/dev/null || true
+  prc=$(cat "$R/tmp/parse.rc" 2>/dev/null || echo none)
+  rrc=$(cat "$R/tmp/replay.rc" 2>/dev/null || echo none)
+  nrc=$(cat "$R/tmp/neg.rc" 2>/dev/null || echo none)
+  echo "ubuntu: $(printf '%s' "$osr" | tr '\n' ' ')"
+  if [ "$prc" = none ] || [ "$rrc" = none ] || [ "$nrc" = none ]; then
+    setupf "ubuntu: the chroot did not run every command (parse $prc, replay $rrc, negative $nrc)"
+  else
+    u=0
+    if [ "$prc" = 0 ] && grep -q "^PASS room-check --parse-only: $rooms rooms" "$R/tmp/parse.log"; then :; else
+      fail "ubuntu: --room-check --parse-only rc=$prc: $(tail -2 "$R/tmp/parse.log" | tr '\n' ' ')"; u=1; fi
+    hl=$(wc -l < "$T/replay.host")
+    if [ "$rrc" = 0 ] && [ "$hl" -gt 100 ] && cmp -s "$T/replay.host" "$R/tmp/replay.out"; then :; else
+      fail "ubuntu: --replay rc=$rrc, $(wc -l < "$R/tmp/replay.out") lines against $hl on this box, $(cmp "$T/replay.host" "$R/tmp/replay.out" 2>&1 | head -1)"; u=1; fi
+    if [ "$nrc" = 0 ]; then
+      fail "ubuntu: the unpatched Guix build STARTED in Ubuntu, so this leg cannot tell a portable binary from one that is not"; u=1; fi
+    [ "$u" = 0 ] && pass "ubuntu: parse-only PASS with $rooms rooms; --replay identical to this box's ($hl lines); the unpatched build does not start (rc $nrc: $(head -1 "$R/tmp/neg.err"))"
+  fi
+fi
+
+echo "test-release-archives: $fails FAIL, $setup SETUP-FAILED"
+[ "$fails" = 0 ] || exit 1
+[ "$setup" = 0 ] || exit 125
+exit 0
