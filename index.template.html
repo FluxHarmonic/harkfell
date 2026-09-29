@@ -641,13 +641,15 @@
   </script>
   <script>
   // Substratic's page script (assets/substratic/substratic.js), here for the
-  // playtest reports only (?playtest: F1, F2, and the i and report buttons on a
-  // phone). This page keeps its own touch controls, focus handling, fullscreen
-  // button and update line, so those parts are off.
+  // playtest reports (?playtest: F1, F2, and the i and report buttons on a
+  // phone) and the WebGL 2 check (Substratic 0.2.3: without WebGL 2 the game
+  // is not started and a message says what to do; it must stay before the
+  // build's app marker). This page keeps its own touch controls, focus
+  // handling, fullscreen button and update line, so those parts are off.
   window.SUBSTRATIC = {
     canvas: "#stage", sticks: [], buttons: [], playtest: "param",
     reportUrl: "playtest-report", versionUrl: null, fullscreen: false,
-    gamepad: false, focus: false
+    gamepad: false, focus: false, webglCheck: true
   };
   </script>
   <script src="assets/substratic/substratic.js"></script>

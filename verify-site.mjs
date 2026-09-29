@@ -47,6 +47,11 @@
 //   preview   og:image and twitter:image are the 1200x528 Standing Stones
 //             shot with type, size and alt; twitter:card summary_large_image
 //   crosslink the landing's footer links Crash The Stack beside Flux Harmonic
+//   webgl     scripts/webgl-check.mjs on /play/, one Chrome per case: with
+//             WebGL off or only WebGL 1, substratic.js says the game needs
+//             WebGL 2 and the wasm is never fetched; with no context for the
+//             stage alone, the message replaces the raw error; with WebGL 2,
+//             no message and the game starts
 //   console   no console error and no exception over the run
 //
 // Any FAIL exits 1; SETUP-FAILED or a timeout exits 2. On ALL PASS it writes
@@ -88,7 +93,7 @@ fs.rmSync(VERIFIED, { force: true });
 // through, the manifest it checks against), HEAD, and whether the checkout had
 // tracked changes. publish-web compares each with the disk at publish time; a
 // gate edited, run, and restored is not the gate on disk.
-const GATE_FILES = ["verify-site.mjs", "scripts/serve-site.mjs", "scripts/tree-manifest"];
+const GATE_FILES = ["verify-site.mjs", "scripts/serve-site.mjs", "scripts/tree-manifest", "scripts/webgl-check.mjs"];
 const gate = GATE_FILES.map((g) => [g, sha256(fs.readFileSync(g))]);
 const gateHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const gateClean = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() === "";
@@ -605,6 +610,24 @@ const SUMMARY_MAX = 120;   // one line under "Press any key to step in."; LOOK o
   if (!/href="https:\/\/fluxharmonic\.com\/"/.test(foot)) detail.push("the footer lost the Flux Harmonic link");
   if (detail.length) fail("crosslink", detail.join("; "));
   else pass("crosslink", "the landing's footer links Crash The Stack beside the Flux Harmonic mark");
+}
+
+// ---- webgl (2026-09-29) ----------------------------------------------------------
+// A browser with no WebGL 2 got "Failed to start: sigil_wasm_start failed
+// (rc -1)". Substratic 0.2.3's check, through scripts/webgl-check.mjs
+// against this server, a Chrome of its own per case.
+for (const mode of ["off", "webgl1", "late", "on"]) {
+  const r = await new Promise((resolve) => {
+    const ch = spawn("node", ["scripts/webgl-check.mjs", "--url", `${origin}/play/`, "--mode", mode, "--wait", "2500"]);
+    let o = "";
+    ch.stdout.on("data", (d) => { o += d; }); ch.stderr.on("data", (d) => { o += d; });
+    const kill = setTimeout(() => ch.kill("SIGKILL"), 240000);
+    ch.on("close", (code) => { clearTimeout(kill); resolve({ status: code, out: o }); });
+  });
+  const verdict = r.out.trim().split("\n").pop();
+  if (r.status === 0 && verdict === `PASS ${mode}`) pass("webgl", `/play/ ${mode}: ${{ off: "WebGL off: the message, no wasm", webgl1: "WebGL 1 only: the message, no wasm",
+    late: "no context for the stage: the message, not the raw error", on: "WebGL 2: no message, the game started" }[mode]}`);
+  else fail("webgl", `/play/ ${mode}: rc ${r.status}: ${r.out.split("\n").filter((l) => /FAIL|SETUP|TIMED/.test(l)).join(" | ").slice(0, 400)}`);
 }
 
 // ---- console --------------------------------------------------------------------

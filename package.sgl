@@ -153,7 +153,7 @@
     ;; (Harkfell's players have settings and no version key).
     ;; 0.2.1 widens its sigil-graphics range to take 0.13.0; 0.2.2 draws the
     ;; page's fullscreen button as SVG (it was a glyph many fonts lack).
-    (from-git url: "github:substratic/substratic" version: "^0.2.2")
+    (from-git url: "github:substratic/substratic" version: "^0.2.3")
     ;; Drawing, both targets. 0.13.0: the text atlas (load-font unchanged).
     (from-git url: graphics-repo version: "^0.13.0")
     ;; Web only: the wasm runtime and loader, the WebGL2 bridge and app

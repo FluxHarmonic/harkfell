@@ -25,9 +25,9 @@
            version: "0.14.0")
   (package name: "substratic"
            url: "github:substratic/substratic"
-           ref: "^0.2.2"
-           sha: "8630cc51345b33d92026b238cfd4edde83a299af"
-           version: "0.2.2")
+           ref: "^0.2.3"
+           sha: "53190b06ff5157e3259909ebc4746c07e67c58bc"
+           version: "0.2.3")
   (package name: "sigil-graphics"
            url: "codeberg:sigil/sigil-graphics"
            ref: "^0.13.0"

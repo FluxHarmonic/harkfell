@@ -18,7 +18,8 @@
 #   - DIR still hashes, file for file, to DIR.manifest (scripts/tree-manifest,
 #     which also covers functions/ and wrangler.jsonc, and refuses symlinks);
 #   - DIR.verified names that manifest's sha256, and each gate file it names
-#     (verify-site.mjs, scripts/serve-site.mjs, scripts/tree-manifest) still
+#     (verify-site.mjs, scripts/serve-site.mjs, scripts/tree-manifest,
+#     scripts/webgl-check.mjs) still
 #     hashes to what it was when the verify run STARTED; the run was at HEAD on
 #     a clean checkout;
 #   - the game in DIR was built at HEAD and staged at HEAD, and the working
@@ -90,7 +91,7 @@ while read -r kw h g; do
   NGATE=$((NGATE+1))
   [ -f "$g" ] && [ "$(sha256sum "$g" | cut -d' ' -f1)" = "$h" ] || { say "REFUSED: $g is not the file that verified $DIR; rerun verify-site.mjs"; exit 1; }
 done < "$DIR.verified"
-[ "$NGATE" -ge 3 ] || { say "REFUSED: $DIR.verified names $NGATE gate files, not the 3 this pipeline has; rerun verify-site.mjs"; exit 1; }
+[ "$NGATE" -ge 4 ] || { say "REFUSED: $DIR.verified names $NGATE gate files, not the 4 this pipeline has; rerun verify-site.mjs"; exit 1; }
 HEAD_FULL="$(git rev-parse HEAD)"; HEAD12="$(git rev-parse --short=12 HEAD)"
 grep -qx "gate-head $HEAD_FULL" "$DIR.verified" || { say "REFUSED: $DIR was verified at another commit ($(sed -n 's/^gate-head //p' "$DIR.verified" | cut -c1-12)); rerun verify-site.mjs at HEAD"; exit 1; }
 grep -qx "gate-clean yes" "$DIR.verified" || { say "REFUSED: $DIR was verified from a checkout with tracked changes"; exit 1; }
