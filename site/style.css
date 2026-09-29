@@ -188,6 +188,21 @@ main.news { max-width: 40em; padding-top: 3rem; padding-bottom: 4rem; }
   color: var(--fur-2);
 }
 
+/* How it was made: David's disclosure, the same words as the itch page and the README */
+.made {
+  max-width: 34em;
+  margin: -2rem auto 4rem;
+  color: var(--fur-2);
+}
+.made h2 {
+  font-family: "IM Fell English SC", "IM Fell English", Georgia, serif;
+  font-weight: normal;
+  font-size: 1.25rem;
+  color: var(--fur-1);
+  margin: 0 0 0.5rem;
+}
+.made p { margin: 0; }
+
 a { color: var(--h2); }
 a:hover { color: var(--fur-1); }
 
