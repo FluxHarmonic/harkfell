@@ -52,7 +52,32 @@
 //             WebGL 2 and the wasm is never fetched; with no context for the
 //             stage alone, the message replaces the raw error; with WebGL 2,
 //             no message and the game starts
-//   console   no console error and no exception over the run
+//   analytics (scripts/plausible-check.mjs) every HTML page in the tree
+//             carries David's Plausible snippet with harkfell.com's script ID
+//             exactly once, in <head>; play/index.html carries the gated one
+//             (the script only on harkfell.com, so the itch.io build, the
+//             same page, sends nothing). Then in Chrome, at
+//             https://harkfell.com itself (every request for it sent to this
+//             server, and every https://plausible.io request to a stub: no
+//             internet), /, /news/, a post, a missing page and /play/ each
+//             load the script and send a pageview for harkfell.com that
+//             comes back 202; /play/ stays cross-origin isolated while it
+//             does (plausible.io's script carries CORP cross-origin; the stub
+//             does too)
+//   coep      /play/ at harkfell.com with a plausible.io that sends no CORP:
+//             the script is requested and blocked, the page stays isolated
+//             (so COEP really judges it, and analytics' pass means
+//             plausible.io's CORP is what lets it load)
+//   itch      /play/ played on another host (this server's loopback origin,
+//             as on itch.io) requests nothing from plausible.io
+//   privacy   the landing's footer says "Privacy-friendly analytics by
+//             Plausible: no cookies, no personal data."
+//   analytics-down  plausible.io unreachable (every request refused): / and
+//             /play/ at harkfell.com still work, the world loads, and the
+//             only errors are the refused plausible.io requests
+//   console   no console error and no exception over the run (the refused
+//             requests of analytics-down, and the missing page's own 404,
+//             excepted)
 //
 // Any FAIL exits 1; SETUP-FAILED or a timeout exits 2. On ALL PASS it writes
 // DIR.verified: the manifest's sha256, the sha256 of each gate file as it
@@ -64,6 +89,10 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { createHandler } from "./scripts/serve-site.mjs";
+import { auditTree, plausibleStub, isPlausibleFailure, PRIVACY } from "./scripts/plausible-check.mjs";
+
+const PLAUSIBLE_ID = "pa-N4Ba55rWhDJmIzpZceg0x";
+const PLAUSIBLE_HOST = "harkfell.com";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
@@ -93,7 +122,7 @@ fs.rmSync(VERIFIED, { force: true });
 // through, the manifest it checks against), HEAD, and whether the checkout had
 // tracked changes. publish-web compares each with the disk at publish time; a
 // gate edited, run, and restored is not the gate on disk.
-const GATE_FILES = ["verify-site.mjs", "scripts/serve-site.mjs", "scripts/tree-manifest", "scripts/webgl-check.mjs"];
+const GATE_FILES = ["verify-site.mjs", "scripts/serve-site.mjs", "scripts/tree-manifest", "scripts/webgl-check.mjs", "scripts/plausible-check.mjs"];
 const gate = GATE_FILES.map((g) => [g, sha256(fs.readFileSync(g))]);
 const gateHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const gateClean = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() === "";
@@ -164,6 +193,16 @@ let SHA16 = null;
   else pass("tree", `${all.length} files; wasm ${SHA16} (${fs.statSync(path.join(DIR, "play/w", SHA16, "harkfell.wasm")).size} bytes) is the only one and hashes to its name; /play/* isolated, / not; OFL.txt, 404.html; no em dash; the regions the landing names (${claim}) are all in the game's world`);
 }
 
+// ---- analytics (no browser): the tag on every HTML page ----------------------------
+{
+  const { pages, problems } = auditTree(DIR, PLAUSIBLE_ID, { gated: ["play/index.html"], host: PLAUSIBLE_HOST });
+  // a floor, so an empty walk is no pass
+  for (const p of ["index.html", "404.html", "news/index.html", "play/index.html"]) if (!pages.includes(p)) problems.push(`${p} is not in the tree`);
+  if (!pages.some((p) => /^news\/[a-z0-9-]+\/index\.html$/.test(p))) problems.push("no news post page in the tree");
+  if (problems.length) fail("analytics", problems.slice(0, 6).join("; "));
+  else pass("analytics", `${pages.length} HTML pages carry the snippet with ${PLAUSIBLE_ID} once, in <head>; play/index.html the gated one (${PLAUSIBLE_HOST} only): ${pages.join(", ")}`);
+}
+
 // ---- the browser -----------------------------------------------------------------
 const requests = [];   // [method, path, status] as served
 const server = http.createServer(createHandler(DIR, (m, p, s) => requests.push([m, p, s])));
@@ -196,7 +235,8 @@ process.on("SIGINT", () => shutdown(130));
 process.on("SIGTERM", () => shutdown(143));
 bail = shutdown;
 // the whole run is bounded; a hang says what it had and exits 2
-setTimeout(() => { console.log(`TIMED-OUT: after 180 s; results so far: ${results.join(", ") || "none"}; ${requests.length} requests served`); shutdown(2); }, 180000).unref();
+// (300 s since the analytics legs: a second load of /play/ and of the landing each)
+setTimeout(() => { console.log(`TIMED-OUT: after 300 s; results so far: ${results.join(", ") || "none"}; ${requests.length} requests served`); shutdown(2); }, 300000).unref();
 
 let pageWs = null;
 for (let i = 0; i < 50 && !pageWs; i++) {
@@ -208,9 +248,11 @@ const ws = new WebSocket(pageWs);
 let msgId = 0; const pending = new Map();
 const consoleLines = []; const consoleErrors = [];
 const net = new Map();   // requestId -> {url, status, mime, failed}
+let stub = null;         // plausible.io's stand-in (scripts/plausible-check.mjs)
 ws.addEventListener("message", (ev) => {
   const msg = JSON.parse(ev.data);
   if (msg.id && pending.has(msg.id)) { const { res, rej } = pending.get(msg.id); pending.delete(msg.id); msg.error ? rej(new Error(JSON.stringify(msg.error))) : res(msg.result); return; }
+  if (stub) stub.onMessage(msg);
   const p = msg.params || {};
   if (msg.method === "Runtime.consoleAPICalled") {
     const t = (p.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
@@ -229,6 +271,9 @@ function send(method, params = {}) {
 }
 await send("Page.enable"); await send("Runtime.enable"); await send("Network.enable"); await send("Log.enable");
 await send("Network.setCacheDisabled", { cacheDisabled: true });
+// no leg reaches the internet: https://plausible.io goes to a stub, and
+// https://harkfell.com (the analytics legs) to this server
+stub = await plausibleStub(send, { sites: { [`https://${PLAUSIBLE_HOST}`]: origin } });
 async function evalJS(expr) {
   const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails));
@@ -406,6 +451,11 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
   if (bad.length) detail.push(`requests not 2xx: ${bad.map((r) => `${r.url.replace(origin, "")} ${r.status ?? ""}${r.failed ?? ""}`).join(", ")}`);
   const served = requests.filter(([, p]) => p.startsWith("/play/")).length;
   await shot("play.png");
+  // itch: this is /play/ on a host that is not harkfell.com, as the itch.io build plays
+  const pl = list.filter((r) => /^https:\/\/plausible\.io\//.test(r.url || ""));
+  const loaded = await evalJS("!!(window.plausible && window.plausible.l)").catch(() => null);
+  if (pl.length || loaded !== false) fail("itch", `/play/ at ${origin} (not ${PLAUSIBLE_HOST}) asked plausible.io for ${pl.map((r) => r.url).join(", ") || "nothing"}; the script ${loaded ? "ran" : "did not run"}`);
+  else pass("itch", `/play/ at ${origin}, not ${PLAUSIBLE_HOST} (as on itch.io): no request to plausible.io, no script`);
   if (detail.length) fail("play", detail.join("; "));
   else pass("play", `a click on Play loads /play/, isolated; "${world}"; the wasm from /play/w/${SHA16}/harkfell.wasm (200 application/wasm); canvas ${bins[1]}x${bins[2]} with ${bins[0]} colour bins; ${list.length} requests (${served} under /play/), every URL answered 2xx${retried(list) ? ` (${retried(list)} aborted by the page and fetched again)` : ""}`);
 }
@@ -629,6 +679,111 @@ for (const mode of ["off", "webgl1", "late", "on"]) {
     late: "no context for the stage: the message, not the raw error", on: "WebGL 2: no message, the game started" }[mode]}`);
   else fail("webgl", `/play/ ${mode}: rc ${r.status}: ${r.out.split("\n").filter((l) => /FAIL|SETUP|TIMED/.test(l)).join(" | ").slice(0, 400)}`);
 }
+
+// ---- analytics, in Chrome, at https://harkfell.com ------------------------------------
+{
+  const detail = []; const got = [];
+  const H = `https://${PLAUSIBLE_HOST}`;
+  const missing = `/no-such-page-${Date.now()}`;
+  const post = newsPosts[0] && newsPosts[0].href;
+  if (!post) detail.push("no news post to visit (the news leg found none)");
+  for (const p of ["/", "/news/", post, missing, "/play/"].filter(Boolean)) {
+    const e0 = consoleErrors.length, l0 = consoleLines.length;
+    await send("Page.navigate", { url: H + p });
+    await waitFor(() => evalJS("document.readyState === 'complete'"), 15000);
+    if (p === "/play/") {
+      const world = await waitFor(async () => consoleLines.slice(l0).find((l) => /^harkfell: world \d+ files/.test(l)), 60000);
+      if (!world) detail.push(`${p}: the game never said "harkfell: world ..." at ${H}`);
+    }
+    const st = await waitFor(() => evalJS("window.__plausibleStub && window.__plausibleStub.length ? JSON.stringify({ href: location.href, st: window.__plausibleStub, coi: self.crossOriginIsolated }) : null"), 8000)
+      .then((v) => v && JSON.parse(v));
+    const evs = stub.events.filter((e) => e.body && e.body.u === H + p && e.body.n === "pageview");
+    if (!st) detail.push(`${p}: no event status came back to the page (the script did not run, or its POST failed)`);
+    else if (!st.st.includes(202)) detail.push(`${p}: the page got ${JSON.stringify(st.st)}, not 202`);
+    else if (st.href !== H + p) detail.push(`${p}: the status came from ${st.href}, not ${H + p}`);
+    if (!evs.length) detail.push(`${p}: the stub received no pageview for ${H + p}`);
+    if (p === "/play/" && (!st || st.coi !== true)) detail.push(`/play/ is not cross-origin isolated with the analytics loaded (${st && st.coi})`);
+    // the missing page's own 404 is the point, not an error
+    if (p === missing) for (let i = consoleErrors.length - 1; i >= e0; i--) if (/no-such-page-\d+|status of 404/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+    if (st) got.push(p === missing ? "(404)" : p);
+  }
+  const wrongScript = stub.scripts.filter((sc) => sc.id !== PLAUSIBLE_ID);
+  if (wrongScript.length) detail.push(`scripts requested for other IDs: ${[...new Set(wrongScript.map((sc) => sc.id))].join(", ")}`);
+  const wrongDomain = stub.events.filter((e) => !e.body || e.body.d !== PLAUSIBLE_HOST);
+  if (wrongDomain.length) detail.push(`${wrongDomain.length} event(s) not for ${PLAUSIBLE_HOST}: ${JSON.stringify(wrongDomain[0].body).slice(0, 120)}`);
+  if (detail.length) fail("analytics", detail.slice(0, 6).join("; "));
+  else pass("analytics", `at ${H}: ${got.join(", ")} each loaded the script and sent a pageview for ${PLAUSIBLE_HOST} that came back 202; /play/ cross-origin isolated with it (${stub.scripts.length} script requests, ${stub.events.length} events over the run)`);
+}
+
+// ---- coep: /play/ really judges plausible.io's CORP ----------------------------------
+// (the review, 2026-09-30: without this, "isolated with the script loaded"
+// could not tell "COEP passed the script" from "COEP never looked")
+{
+  const detail = [];
+  const H = `https://${PLAUSIBLE_HOST}`;
+  stub.setMode("nocorp");
+  const s0 = stub.scripts.length, e0 = stub.events.length, c0 = consoleErrors.length, l0 = consoleLines.length;
+  await send("Page.navigate", { url: `${H}/play/` });
+  const world = await waitFor(async () => consoleLines.slice(l0).find((l) => /^harkfell: world \d+ files/.test(l)), 60000);
+  if (!world) detail.push("/play/: the game never said \"harkfell: world ...\"");
+  await sleep(3000);
+  const st = await evalJS("JSON.stringify({ st: window.__plausibleStub || null, coi: self.crossOriginIsolated, l: !!(window.plausible && window.plausible.l) })").then(JSON.parse).catch(() => null);
+  if (stub.scripts.length === s0) detail.push("the script was never requested (the leg judged nothing)");
+  if (!st || st.coi !== true) detail.push(`/play/ is not cross-origin isolated (${st && st.coi})`);
+  else if (st.l || st.st || stub.events.length !== e0) detail.push(`a plausible.io script without CORP ran on the isolated page (events ${stub.events.length - e0}, status ${JSON.stringify(st.st)})`);
+  // the block is this leg's doing: its console line is not an error of the site's
+  for (let i = consoleErrors.length - 1; i >= c0; i--) if (/ERR_BLOCKED_BY_RESPONSE\.NotSameOriginAfterDefaultedToSameOriginByCoep https:\/\/plausible\.io\/\S+$/.test(consoleErrors[i])) consoleErrors.splice(i, 1);
+  stub.setMode("stub");
+  if (detail.length) fail("coep", detail.join("; "));
+  else pass("coep", "/play/ at harkfell.com asked for a plausible.io script sent without CORP and COEP blocked it; the page stayed isolated");
+}
+
+// ---- privacy ------------------------------------------------------------------------
+{
+  await send("Page.navigate", { url: `${origin}/` });
+  await waitFor(() => evalJS("document.readyState === 'complete'"), 15000);
+  const foot = await evalJS("(() => { const f = document.querySelector('footer'); if (!f) return null; const a = [...f.querySelectorAll('a')].find((a) => a.textContent.trim() === 'Plausible'); return { text: f.innerText, link: a ? a.href : null }; })()").catch(() => null);
+  if (!foot) fail("privacy", "the landing has no <footer>");
+  else if (!foot.text.includes(PRIVACY)) fail("privacy", `the landing's footer does not say "${PRIVACY}"`);
+  else if (foot.link !== "https://plausible.io/data-policy") fail("privacy", `the footer's "Plausible" links ${foot.link || "nowhere"}, not https://plausible.io/data-policy`);
+  else pass("privacy", `the landing's footer says "${PRIVACY}", Plausible linking its data policy`);
+}
+
+// ---- analytics-down: plausible.io unreachable ------------------------------------------
+{
+  stub.setMode("down");
+  const detail = []; const H = `https://${PLAUSIBLE_HOST}`;
+  const f0 = stub.failed.length;
+  const seen = [];
+  for (const p of ["/", "/play/"]) {
+    const e0 = consoleErrors.length, n0 = net.size, l0 = consoleLines.length;
+    await send("Page.navigate", { url: H + p });
+    await waitFor(() => evalJS("document.readyState === 'complete'"), 15000);
+    if (p === "/play/") {
+      const world = await waitFor(async () => consoleLines.slice(l0).find((l) => /^harkfell: world \d+ files, 0 problems/.test(l)), 60000);
+      if (!world) detail.push("/play/: the world never loaded with plausible.io unreachable");
+      const isolated = await evalJS("self.crossOriginIsolated").catch(() => null);
+      if (isolated !== true) detail.push(`/play/ is not cross-origin isolated (${isolated})`);
+    } else {
+      const h1 = await evalJS("document.querySelector('h1') && document.querySelector('h1').textContent.trim()").catch(() => null);
+      if (h1 !== "Harkfell") detail.push(`/: the landing did not render (h1 ${JSON.stringify(h1)})`);
+    }
+    await sleep(1000);
+    const errs = [...consoleErrors.slice(e0), ...badRequests(netSince(n0)).map((r) => `request ${r.url} ${r.status ?? ""}${r.failed ?? ""}`)];
+    const ours = errs.filter(isPlausibleFailure), other = errs.filter((e) => !isPlausibleFailure(e));
+    if (other.length) detail.push(`${p}: ${other.slice(0, 3).join(" | ")}`);
+    seen.push(ours.length);
+    // the refused requests are this leg's doing: out of the console leg
+    for (let i = consoleErrors.length - 1; i >= e0; i--) if (isPlausibleFailure(consoleErrors[i])) consoleErrors.splice(i, 1);
+  }
+  const refused = stub.failed.length - f0;
+  // the positive control: plausible.io really was refused on both pages
+  if (refused < 2 || seen.some((n) => n === 0)) detail.push(`plausible.io was not refused on both pages (${refused} refused; failures seen ${seen.join(" and ")})`);
+  stub.setMode("stub");
+  if (detail.length) fail("analytics-down", detail.join("; "));
+  else pass("analytics-down", `with plausible.io refused (${refused} requests), / renders and /play/ loads its world, isolated; the only errors were the refused requests`);
+}
+stub.close();
 
 // ---- console --------------------------------------------------------------------
 {
