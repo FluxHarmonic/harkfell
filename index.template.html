@@ -143,6 +143,12 @@
     #fs.on .enter { display: none; }
     #fs.on .exit { display: block; }
   </style>
+  <!-- Privacy-friendly analytics by Plausible (on harkfell.com only: a copy played elsewhere, such as the itch.io build, sends nothing) -->
+  <script>
+    if (/^(www\.)?harkfell\.com$/.test(location.hostname)) (function (s) { s.async = true; s.src = "https://plausible.io/js/pa-N4Ba55rWhDJmIzpZceg0x.js"; document.head.appendChild(s); })(document.createElement("script"));
+    window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+    plausible.init()
+  </script>
 </head>
 <body>
   <!-- D39: the game's container, what fullscreen takes: the canvas and
