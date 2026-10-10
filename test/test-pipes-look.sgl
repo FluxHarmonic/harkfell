@@ -26,12 +26,16 @@
         (assert-equal 1.0 (room-dark-extra rm 0.0))
         (assert-equal 0.0 (room-dark-extra rm 1.0)))
       (region-rooms LOOK-CONTENT 'pipes)))
-  (test "the Hollow bowl has no cave blackout or moth navigation rings"
-    ;; it keeps the lighting track's approved dawn shade: its own light:
-    (let ((rm (content-room LOOK-CONTENT 4 3)))
-      (assert-false (moth-lit? rm))
-      (assert-equal 0.0 (room-dark-extra rm 0.0))
-      (assert-equal (room-light rm) (room-render-light rm))))
+  (test "both Hollow bowl rooms use full daylight without cave blackout or moth rings"
+    (for-each
+      (lambda (x)
+        (let ((rm (content-room LOOK-CONTENT x 3)))
+          (assert-false (moth-lit? rm))
+          (assert-equal 0.0 (room-dark-extra rm 0.0))
+          (assert-equal 1.0 (room-light rm))
+          (assert-equal 1.0 (room-render-light rm))
+          (assert-equal 0.35 (room-sun-value rm))))
+      '(4 5)))
   (test "A, D and X use neutral environment light with and without H3"
     (for-each
       (lambda (position)

@@ -5,7 +5,6 @@
   title: "Standing Stones"
   intent: "a row of old standing stones to climb along, on the path between the bowl and the rim"
   bed: (wind 0.5 hum 0.2 drone 0.4)
-  light: 0.83
   sun: 0.35
   grid:
   ("                         "

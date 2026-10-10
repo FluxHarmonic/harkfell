@@ -108,16 +108,14 @@
                   (assert-equal 0.0 (room-sun-value rm))
                   (assert-false (room-moth-cave? rm)))
                 rooms)))
-  (test "only the two bowl interiors have half-step shade"
+  (test "every Hollow room, including both bowl interiors, is full daylight"
     (for-each (lambda (p)
                 (let ((rm (placed-data p)))
                   (when (eq? (room-region rm) 'hollow)
                     (assert-false (room-daylight-pools? rm))
-                    (assert-equal (if (and (= (room-y rm) 3)
-                                          (memv (room-x rm) '(4 5)))
-                                     0.5
-                                     0.0)
-                                  (dark-steps (room-light rm))))))
+                    (assert-equal 1.0 (room-light rm))
+                    (assert-equal 1.0 (room-render-light rm))
+                    (assert-equal 0.0 (dark-steps (room-light rm))))))
               (content-rooms CT)))
   (test "local sun-edge strength is constant outside the occluding bowl rim"
     (assert-equal '(1.0 1.0 1.0 1.0 1.0 1.0 1.0)
@@ -126,7 +124,7 @@
     (assert-equal '(1.0 1.0 1.0 0.35 0.35 1.0 1.0)
                   (map (lambda (x) (room-sun-value (content-room CT x 3)))
                        '(1 2 3 4 5 6 7))))
-  (test "Hollow shade keeps copper and turf; other regions keep their dark lookup"
+  (test "the optional Hollow dark lookup keeps copper and turf"
     (assert-equal (slot-of 'accent) (lookup HOLLOW-SHADE (slot-of 'accent)))
     (assert-equal (slot-of 'leaf-1) (lookup HOLLOW-SHADE (slot-of 'leaf-2)))
     (assert-equal DARK (region-dark-lookup 'glasswood))
@@ -151,7 +149,7 @@
            (warm (strip-bytes rgb HOLLOW-SHADE)))
       (assert-equal (bytevector-copy original 0 (* 6 32 4))
                     (bytevector-copy warm 0 (* 6 32 4)))))
-  (test "bowl-rim shade does not set its dawn moths back into cave darkness"
+  (test "the daylight bowl does not set its dawn moths back into cave darkness"
     (let* ((rm (content-room CT 4 3))
            (cs (critters-step (critters-new rm 0 0) 184.0 88.0 1 '(2) #t))
            (moths (filter (lambda (c) (eqv? (critter-drawn c) 2))
