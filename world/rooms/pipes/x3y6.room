@@ -1,5 +1,6 @@
 ;; A thin lip (row 7) with static on it at 9-10; the dry way runs under the
-;; lip from its gap (4-5) to the floor below F's shaft. O below at 21-22.
+;; lip from its gap (4-5) to the floor below F's shaft. O below (21-22), through
+;; a drop-through ledge so the way in from J has no drop at its landing.
 (room
   region: pipes
   at: (3 6)
@@ -17,7 +18,7 @@
    "         xx       ||     "
    "####  #########   ||     "
    "#                 ||     "
-   "####################%  %#"
+   "####################%==%#"
    "####################%  %#")
   things: ((lantern-moth at: (4 2) count: 3 drawn: 3))
   decor: auto)
