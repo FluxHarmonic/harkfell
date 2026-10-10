@@ -1,0 +1,122 @@
+;;; Local listening evidence. Run with an audio-capable Sigil test harness:
+;;;   build/dev/bin/harkfell-test --no-strict tools/pipes-recordings.sgl
+;;; Output stays in build/pipes-listening; no network, publishing or library edits.
+;;; Reuse an audio harness at the task lock. A fresh harness build must use
+;;; the shared heavy-build lock and the task's load/RAM preflight.
+(import (sigil test)
+        (sigil fs)
+        (sigil path)
+        (sigil io)
+        (sigil math)
+        (sigil list)
+        (sigil string)
+        (motif tune)
+        (motif tune player)
+        (harkfell sound)
+        (harkfell tunes))
+
+(define RATE 32000)
+(define OUTPUT "build/pipes-listening")
+(define BLOCK 512)
+(define BUFFER (make-bytevector (* 8 BLOCK) 0))
+
+(define (u32! bv at value bytes)
+  (let loop ((i 0) (v value))
+    (when (< i bytes)
+      (bytevector-u8-set! bv (+ at i) (modulo v 256))
+      (loop (+ i 1) (quotient v 256)))))
+
+(define (ascii! bv at s)
+  (let loop ((i 0))
+    (when (< i (string-length s))
+      (bytevector-u8-set! bv (+ at i) (char->integer (string-ref s i)))
+      (loop (+ i 1)))))
+
+;; IEEE float stereo WAV. Same 32 kHz rate as the game's phone/headless gate.
+(define (wav-header frames)
+  (let ((h (make-bytevector 44 0)) (bytes (* frames 8)))
+    (ascii! h 0 "RIFF")
+    (u32! h 4 (+ 36 bytes) 4)
+    (ascii! h 8 "WAVEfmt ")
+    (u32! h 16 16 4)
+    (u32! h 20 3 2)
+    (u32! h 22 2 2)
+    (u32! h 24 RATE 4)
+    (u32! h 28 (* RATE 8) 4)
+    (u32! h 32 8 2)
+    (u32! h 34 32 2)
+    (ascii! h 36 "data")
+    (u32! h 40 bytes 4)
+    h))
+
+(define (pull-or-silence! p out n)
+  (unless (player-pull! p out 0 n)
+    (bytevector-copy! out 0 (make-bytevector (bytevector-length out) 0))))
+
+(define (write-preview name seconds players mono?)
+  (let* ((frames (* RATE seconds))
+         (port (open-binary-output-file (path-join OUTPUT (string-append name ".wav"))))
+         (bufs (map (lambda (p) (make-bytevector (* 8 BLOCK) 0)) players)))
+    (write-bytevector (wav-header frames) port)
+    (let loop ((left frames) (peak 0.0))
+      (if (> left 0)
+          (let ((n (min BLOCK left)))
+            (for-each (lambda (p b) (pull-or-silence! p b n)) players bufs)
+            (let samples ((i 0) (peak peak))
+              (if (< i n)
+                  (let* ((at (* 8 i))
+                         (l (apply + (map (lambda (b) (bytevector-ieee-single-ref b at 'little)) bufs)))
+                         (r (apply + (map (lambda (b) (bytevector-ieee-single-ref b (+ at 4) 'little)) bufs)))
+                         (m (* 0.5 (+ l r)))
+                         (fade (min 1.0 (/ (- left i) (* RATE 0.3)))))
+                    (bytevector-ieee-single-set! BUFFER at (* fade (if mono? m l)) 'little)
+                    (bytevector-ieee-single-set! BUFFER (+ at 4) (* fade (if mono? m r)) 'little)
+                    (samples (+ i 1) (max peak (abs l) (abs r))))
+                  (begin
+                    (write-bytevector (bytevector-copy BUFFER 0 (* n 8)) port)
+                    (loop (- left n) peak)))))
+          (begin
+            (close-port port)
+            (for-each player-close! players)
+            (display name) (display " peak ") (display peak) (newline)
+            (assert-true (> peak 0.00001))
+            (assert-true (< peak 1.0)))))))
+
+(define (bed-player carry)
+  (let ((p (open-tune-player (strip-uncarried (tune-parsed "pipes-bed") carry) RATE loop: #t)))
+    (for-each (lambda (e) (player-set-channel-volume! p (car e) (cdr e)))
+              '((1 . 0.1) (2 . 0.55) (3 . 0.7) (4 . 0.36) (5 . 0.36) (6 . 0.36)))
+    p))
+
+(define (named-player name)
+  (open-tune-player (tune-parsed name) RATE loop: #f))
+
+(test-group "pipes: listening recordings"
+  (test "render comparable unnormalized previews and mono search/carry pairs"
+    (unless (directory? "build") (make-directory "build"))
+    (unless (directory? OUTPUT) (make-directory OUTPUT))
+    (write-preview "bed-full-cycle-mono" 100 (list (bed-player '(2))) #t)
+    (write-preview "bed-h2-mono" 40 (list (bed-player '(2))) #t)
+    (write-preview "bed-h2-h4-mono" 40 (list (bed-player '(2 4))) #t)
+    (write-preview "bed-h2-h3-h4-mono" 40 (list (bed-player '(2 3 4))) #t)
+    (let ((tone (named-player "tone-h4")))
+      ;; J is roughly 2.83 rooms away: the director's tone gain before stillness.
+      (player-set-channel-volume! tone 1 0.17)
+      (write-preview "search-j-mono" 30 (list (bed-player '(2)) tone) #t))
+    (for-each
+      (lambda (name)
+        (write-preview name
+                       (if (member name '("snail-scrape" "snail-h4" "pickup-h4")) 5 40)
+                       (list (named-player name)) #t))
+      '("wind-in-stone" "three-echoes" "the-pipes-breathe" "air-below"
+        "seep-song" "hollow-octave" "pickup-h4" "snail-scrape" "snail-h4"))
+    (let ((warning (named-player "static-crackle")))
+      (player-set-channel-volume! warning 1 0.3)
+      (write-preview "warning-under-moment-mono" 18
+                     (list (named-player "wind-in-stone") warning) #t))
+    (for-each
+      (lambda (name)
+        (let ((p (named-player name)))
+          (player-set-channel-volume! p 1 (if (string=? name "static-crackle") 0.3 0.2))
+          (write-preview name 8 (list p) #t)))
+      '("static-crackle" "exit-low" "exit-high"))))
