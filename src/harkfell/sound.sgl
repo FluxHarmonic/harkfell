@@ -54,8 +54,7 @@
 ;;;   (sound-hush) (sound-bed-levels) (sound-moment-playing)   for the gates
 
 (define-library (harkfell sound)
-  (import (sigil core)
-          (sigil math)
+  (import (sigil math)
           (sigil struct)
           (sigil list)
           (sigil string)
@@ -71,7 +70,7 @@
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
-          place-wander place-moment-carrying place-moment-still place-moment-key place-hums UPWARD-ID
+          place-wander place-moment-carrying place-moment-still place-moment-key place-hums place-exits place-static UPWARD-ID
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
@@ -145,7 +144,9 @@
       (carry default: #f) (tones default: #f) (stones default: '()) (news default: '())
       (wander default: '()) (moment-carrying default: #f) (moment-still default: #f) (moment-key default: #f)
       (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f)
-      (hums default: '()) (light default: 1.0))
+      (hums default: '()) (light default: 1.0)
+      ;; Local unpitched sources: ((high|low x y) ...) and ((x y) ...).
+      (exits default: '()) (static default: '()))
 
     ;; --- state ---------------------------------------------------------------------
     (define *say* (lambda parts #f))
@@ -225,6 +226,7 @@
       (when *moment* (player-close! (cdr *moment*)))
       (for-each (lambda (m) (player-close! (cdr m))) *moments*)
       (for-each (lambda (v) (player-close! (vector-ref (cdr v) 0))) *voices*)
+      (set! *exit-kinds* '())
       (set! *voices* '()) (set! *hum-n* #f) (set! *pending-cues* '())
       (set! *hush* (hush-new)) (set! *key* #f) (set! *region* #f) (set! *groups* '())
       (set! *bed-player* #f) (set! *bed-src* #f) (set! *levels* '()) (set! *moments* '())
@@ -677,7 +679,8 @@
     ;; seconds later if you are still there and the hush still allows.
     ;; David, 2026-09-24: the slice's two wandering moments
     (define WANDER-TAGS '(("stones-remember" . open-sky) ("seed-wind" . water)
-                          ("glaze-wind" . open-sky) ("under-ice" . water)))
+                          ("glaze-wind" . open-sky) ("under-ice" . water)
+                          ("air-below" . pipes) ("seep-song" . water)))
     (define WANDER-DELAY-LO 3.0)
     (define WANDER-DELAY-HI 8.0)
     (define *wander-due* #f)      ; (name key t)
@@ -691,6 +694,7 @@
             (case (cdr e)
               ((open-sky) (let ((w (named-level levels 'wind))) (and w (>= w 0.5))))
               ((water) (let ((w (named-level levels 'water))) (and w (>= w 0.6))))
+              ((pipes) (let ((p (named-level levels 'pipes))) (and p (>= p 0.6))))
               (else #t)))))
 
     (define (maybe-wander! pl now)
@@ -1072,6 +1076,7 @@
     ;; UPWARD-R. It is NOT a finding tone: H7 is in no pickup, so nothing here
     ;; enters tone-spots, and the ears never point at it. With no tone-h7 tune
     ;; written yet, the voice does not open (voice-open! needs the tune).
+    (define LOCAL-TUNES '("exit-low" "exit-high" "static-crackle"))
     (define UPWARD-ID "upward-hum")
     (define UPWARD-R 112.0)        ; px: 7 tiles, the hollow behind the fall
     (define UPWARD-GAIN 0.2)
@@ -1092,6 +1097,61 @@
                  (dx (/ (- (cadr h) (place-px pl)) 200.0)))
             (voice-set! UPWARD-ID (* UPWARD-GAIN (- 1.0 (/ d UPWARD-R))) (clamp (- MAX-PAN) MAX-PAN dx) #f now)))
         (set! *upward-n* n)))
+
+    ;; Persistent route and hazard sources bypass the moment duck. They never
+    ;; enter the finding/calling roster, and cannot select the ears' direction.
+    ;; At most two nearest exits and one nearest static patch sound together.
+    (define *exit-kinds* '())
+
+    (define (local-distance pl x y)
+      (sqrt (+ (expt (- x (place-px pl)) 2)
+               (expt (- y (place-py pl)) 2))))
+
+    (define (local-voice! id tune x y radius gain pl now)
+      (let ((d (local-distance pl x y)))
+        (if (< d radius)
+            (begin
+              (unless (assoc id *voices*) (voice-open! id tune now))
+              (voice-set! id (* gain (- 1.0 (/ d radius)))
+                          (clamp (- MAX-PAN) MAX-PAN (/ (- x (place-px pl)) 200.0))
+                          #f now))
+            (voice-fade! id now))))
+
+    (define (local-frame! pl now)
+      (let* ((exits (list-sort
+                     (lambda (a b)
+                       (< (local-distance pl (cadr a) (caddr a))
+                          (local-distance pl (cadr b) (caddr b))))
+                     (place-exits pl)))
+             (near (cond ((null? exits) '())
+                         ((null? (cdr exits)) exits)
+                         (else (list (car exits) (cadr exits))))))
+        (for-each
+          (lambda (i)
+            (let* ((id (string-append "local-exit-" (number->string i)))
+                   (e (and (< i (length near)) (list-ref near i)))
+                   (kind (and e (car e)))
+                   (old (assv i *exit-kinds*)))
+              (unless (and old (eq? kind (cdr old)))
+                (voice-fade! id now))
+              (if e
+                  (local-voice! id (if (eq? kind 'high) "exit-high" "exit-low")
+                                (cadr e) (caddr e) 240.0 0.24 pl now)
+                  (voice-fade! id now))))
+          '(0 1))
+        (set! *exit-kinds*
+              (map (lambda (i)
+                     (cons i (and (< i (length near)) (car (list-ref near i)))))
+                   '(0 1))))
+      (let ((patches (list-sort
+                      (lambda (a b)
+                        (< (local-distance pl (car a) (cadr a))
+                           (local-distance pl (car b) (cadr b))))
+                      (place-static pl))))
+        (if (pair? patches)
+            (local-voice! "local-static" "static-crackle"
+                          (caar patches) (cadar patches) 176.0 0.45 pl now)
+            (voice-fade! "local-static" now))))
 
     (define (still-frame! pl dt now)
       (set! *still-for* (if (place-still pl) (+ *still-for* dt) 0.0))
@@ -1185,6 +1245,11 @@
             (list 'ice-shatter "ice-shatter" 0.0 0.0 0.2)
             ;; H3 (the Old Birch) and its creatures; H4, the blue stones
             (list 'pickup-h3 "pickup-h3" 0.0 0.0 0.55)
+            (list 'pickup-h4 "pickup-h4" 0.0 0.0 0.55)
+            (list 'snail-scrape "snail-scrape" 0.0 0.0 0.16)
+            (list 'snail-h4 "snail-h4" 0.0 0.0 0.18)
+            (list 'miss-h5 "miss-h5" 0.0 0.0 0.29)
+            (list 'ring-h5 "ring-h5" 0.0 0.0 0.5)
             (list 'moth-h3 "moth-h3" 0.0 0.0 0.12)
             (list 'owl-h3 "owl-h3" 0.0 0.0 0.44)
             (list 'vole "vole" 0.0 0.0 0.34)
@@ -1255,6 +1320,14 @@
             ((pickup) (let ((c (harmonic-cue "pickup-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
             ((ring) (let ((c (harmonic-cue "ring-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
             ((near-miss) (let ((c (harmonic-cue "miss-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((chord)
+             ;; CONTENT supplies the carried series; the stone answers it locally.
+             (for-each
+               (lambda (n)
+                 (let ((c (harmonic-cue "ring-h" n)))
+                   (when (spot-ref c)
+                     (gate-cue! c (* 0.3 (spot-gain c)) (caddr item) pl))))
+               (cadr item)))
             ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
             ((call) (unless *moment* (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
             ;; Glasswood's ice ((harkfell ice), and thin ice in (harkfell world)):
@@ -1428,9 +1501,9 @@
             (reeds (room-level (place-levels pl) 'reeds))
             (water (room-level (place-levels pl) 'water))
             (bx (- (place-px pl) (* ROOM-W (place-rx pl)))))
-        (when (and (> reeds 0.2) (due? 'bird now 14.0 32.0))
+        (when (and (not (eq? (place-region pl) 'pipes)) (> reeds 0.2) (due? 'bird now 14.0 32.0))
           (cue! 'bird (* 0.35 reeds 1.5) (rand-in (- MAX-PAN) MAX-PAN)))
-        (when (and (> water 0.3) (due? 'plop now 7.0 18.0))
+        (when (and (not (eq? (place-region pl) 'pipes)) (> water 0.3) (due? 'plop now 7.0 18.0))
           (cue! 'plop (* 0.4 water) (rand-in (- MAX-PAN) MAX-PAN)))))
 
     ;; --- A4: the creature's movement ----------------------------------------------------
@@ -1545,7 +1618,7 @@
       (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
       (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
-      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) (map cadr SPOTS))))
+      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) LOCAL-TUNES (map cadr SPOTS))))
 
     ;; One piece of deferred work a frame: a cue render or a moment open,
     ;; whichever has its text; never while a moment plays.
@@ -1667,6 +1740,7 @@
         (call-frame! pl now)
         (hum-frame! pl now)
         (upward-frame! pl now)
+        (local-frame! pl now)
         (news-frame! pl)
         (movement-frame! pl)
         (pending-cues-frame!)

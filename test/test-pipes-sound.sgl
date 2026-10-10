@@ -1,0 +1,111 @@
+;;; Pipes sound contract: authored pitches, real content and explicit routing.
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (motif tune)
+        (engine worldmap)
+        (engine mixer)
+        (harkfell source)
+        (harkfell content)
+        (harkfell cues)
+        (harkfell sound)
+        (harkfell tunes))
+
+(define CT (load-content (read-world-source "world")))
+(define PIPES
+  (filter (lambda (p) (eq? (room-region (placed-data p)) 'pipes))
+          (content-rooms CT)))
+(define BED (tune-parsed "pipes-bed"))
+(define (cells t)
+  (apply append (map tune-pattern-cells (tune-patterns t))))
+(define (notes t ch)
+  (filter (lambda (c) (and (= ch (cell-channel c))
+                          (number? (cell-note c))))
+          (cells t)))
+(define NEW-TUNES
+  '("pipes-bed" "wind-in-stone" "three-echoes" "the-pipes-breathe"
+    "air-below" "seep-song" "hollow-octave" "pickup-h4" "snail-scrape"
+    "snail-h4" "exit-low" "exit-high" "static-crackle" "tone-h5" "ring-h5" "miss-h5"))
+
+(test-group "pipes: sound assets and carry"
+  (test "every new asset reads and validates"
+    (for-each (lambda (n)
+                (assert-true (tune-exists? n))
+                (assert-equal '() (tune-errors (tune-parsed n))))
+              NEW-TUNES))
+  (test "ambient pipes use only A3 E4 C4 and occasional F4, never D4"
+    (let ((ns (map (lambda (c) (midi->note-name (cell-note c))) (notes BED 3))))
+      (assert-equal '("A-3" "E-4" "C-4" "F-4" "A-3") ns)))
+  (test "H4 is silent before pickup and present with H2/H4 or all three"
+    (assert-equal '() (notes (strip-uncarried BED '(2 3)) 6))
+    (assert-equal '("D-4") (map (lambda (c) (midi->note-name (cell-note c))) (notes (strip-uncarried BED '(2 4)) 6)))
+    (assert-equal '("D-4") (map (lambda (c) (midi->note-name (cell-note c))) (notes (strip-uncarried BED '(2 3 4)) 6))))
+  (test "each room authors a pipes level; the bed groups preserve channel order"
+    (assert-equal 24 (length PIPES))
+    (for-each (lambda (p) (assert-true (memq 'pipes (room-bed (placed-data p))))) PIPES)
+    (assert-equal '((wind . (1)) (water . (2)) (pipes . (3)) (drone . (4 5 6 7 8)))
+                  (bed-channels-of '(wind water pipes drone))))
+  (test "drips have DELAY while the dry hazard and route breaths have no send"
+    (let ((params (tune-instrument-params (tune-find-instrument BED 2))))
+      (assert-true (= 0.31 (cdr (assq 'echo params))))
+      (assert-true (= 0.55 (cdr (assq 'feedback params)))))
+    (for-each (lambda (n)
+                (let* ((t (tune-parsed n)) (i (tune-find-instrument t 1)))
+                  (assert-true (= 0 (tune-instrument-send i)))
+                  (assert-false (assq 'echo (tune-instrument-params i)))
+                  (assert-true (= 0 (cdr (assq 'mix (tune-bus t)))))))
+              '("static-crackle" "exit-low" "exit-high")))
+  (test "drip intervals stay between three and nine seconds, including the loop"
+    ;; Pattern 0 initializes; B01 repeats pattern 1. Its last and first drip
+    ;; rows are 122 and 3, leaving nine rows across the boundary.
+    (let* ((p (tune-find-pattern BED 1))
+           (rs (map cell-row (filter (lambda (c) (= 2 (cell-channel c)))
+                                    (tune-pattern-cells p))))
+           (seconds (/ (* 2.5 (tune-speed BED)) (tune-tempo BED))))
+      (let loop ((rs (append rs (list (+ 128 (car rs))))))
+        (when (pair? (cdr rs))
+          (let ((gap (* seconds (- (cadr rs) (car rs)))))
+            (assert-true (<= 3.0 gap 9.0)))
+          (loop (cdr rs))))))
+  (test "H4 pickup and snail answer are registered, the shell answer is short D4"
+    (for-each (lambda (n) (assert-true (memq n (sound-cue-names))))
+              '(pickup-h4 snail-scrape snail-h4 miss-h5 ring-h5))
+    (let ((t (tune-parsed "snail-h4")))
+      (assert-equal '("D-4") (map (lambda (c) (midi->note-name (cell-note c))) (notes t 1)))
+      (assert-true (< (* (tune-pattern-rows (tune-find-pattern t 0))
+                         (/ (* 2.5 (tune-speed t)) (tune-tempo t))) 1.0))))
+  (test "wandering pieces fit explicit pipe and water thresholds"
+    (assert-true (assoc "air-below" WANDER-TAGS))
+    (assert-true (assoc "seep-song" WANDER-TAGS))
+    (assert-true (wander-fits? "air-below" '((pipes . 0.6) (wind . 0))))
+    (assert-false (wander-fits? "air-below" '((pipes . 0.59) (wind . 1))))
+    (assert-true (wander-fits? "seep-song" '((water . 0.6))))
+    (assert-false (wander-fits? "seep-song" '((water . 0.59)))))
+  (test "only I/P have static sources, all advertised exits are actual openings"
+    (for-each
+      (lambda (p)
+        (let* ((rm (placed-data p)) (ss (room-static-cells rm)))
+          (assert-equal (if (member (room-label rm) '("pipes:3,6" "pipes:4,7")) #t #f)
+                        (pair? ss))
+          (for-each (lambda (e)
+                      (assert-false (char=? #\# (room-char rm (cadr e) (caddr e))))
+                      (assert-false (char=? #\% (room-char rm (cadr e) (caddr e)))))
+                    (room-exits rm))))
+      PIPES)))
+
+(test-group "pipes: quiet between authored calls"
+  (test "no generic reed birds or extra water plops leak into Pipes rooms"
+    (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+    (sound-reset!)
+    (sound-set-work-in-frame! #f)
+    (sound-set-rng! 20261010)
+    (let ((p (place key: "pipes-quiet" region: 'pipes bed-tune: #f
+                    groups: '(wind water pipes drone) levels: '((water . 0.8))
+                    carry: '(2) tones: '() stones: '())))
+      (let loop ((i 0))
+        (when (< i 2100)
+          (sound-frame! (/ i 30.0) (/ 1.0 30.0) p)
+          (loop (+ i 1)))))
+    (let ((n (sound-spots-played)))
+      (sound-set-work-in-frame! #t)
+      (assert-equal 0 n))))

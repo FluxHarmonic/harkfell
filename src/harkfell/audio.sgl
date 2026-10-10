@@ -12,8 +12,7 @@
 ;;;   (audio-lines)              the readout's sound lines
 
 (define-library (harkfell audio)
-  (import (sigil core)
-          (sigil time)
+  (import (sigil time)
           (sigil math)
           (sigil list)
           (sigil string)
@@ -27,6 +26,7 @@
           (harkfell tunes)
           (harkfell sound)
           (harkfell gates)
+          (harkfell cues)
           (harkfell hush)
           (harkfell bench))
 
@@ -307,6 +307,23 @@
                            wander: (region-wander reg)
                            frogs: frogs
                            hums: hums
+                           exits: (if (or (eq? (room-region rm) 'pipes)
+                                          (string=? (room-label rm) "hollow:2,3"))
+                                      (map (lambda (e)
+                                             (list (if (< (caddr e) 5) 'high 'low)
+                                                   (+ (* 400.0 (room-x rm)) (* TILE (cadr e)) 8.0)
+                                                   (+ (* 176.0 (room-y rm)) (* TILE (caddr e)) 8.0)))
+                                           (filter (lambda (e)
+                                                     (or (eq? (room-region rm) 'pipes)
+                                                         (eq? (car e) 'south)))
+                                                   (room-exits rm)))
+                                      '())
+                           static: (if (eq? (room-region rm) 'pipes)
+                                       (map (lambda (p)
+                                              (list (+ (* 400.0 (room-x rm)) (* TILE (car p)) 8.0)
+                                                    (+ (* 176.0 (room-y rm)) (* TILE (cdr p)) 8.0)))
+                                            (room-static-cells rm))
+                                       '())
                            ;; ABSOLUTE world pixels: the map's pixels start at its
                            ;; westmost and northmost room (x0 y0), not at room (0 0)
                            px: (+ (body-x b) 4.0 (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)))
