@@ -418,6 +418,9 @@
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
                                                  ((pipes) (pipes-backdrop-bytes))
+                                                 ((pipes-0) (pipes-backdrop-bytes 0))
+                                                 ((pipes-1) (pipes-backdrop-bytes 1))
+                                                 ((pipes-2) (pipes-backdrop-bytes 2))
                                                  ((glasswood) (glasswood-bytes 1.0))
                                                  ((glasswood-sun-0) (glasswood-bytes 0.0))
                                                  ((glasswood-sun-1) (glasswood-bytes 0.25))
@@ -460,7 +463,7 @@
     ;; The room's backdrop: its region's sky, or earth when it lies under
     ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
-      (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) 'pipes)
+      (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
                                  ((and (not (under? rm)) (glasswood-sheet? rm))
                                   ;; Glasswood's sky by the room's sun, in quarters
                                   (vector-ref (vector (quote glasswood-sun-0) (quote glasswood-sun-1) (quote glasswood-sun-2) (quote glasswood-sun-3) (quote glasswood-sun-4))
@@ -525,7 +528,9 @@
              (cave? (and (under? rm) (mat-cells sheet "cave") #t)))
         ;; under water nothing grows: a solid with water on it takes the mask
         ;; of one covered from above (no turf on a pool's floor)
-        (each-tile rm solid-mat?
+        (each-tile rm (if (eq? (room-region rm) 'pipes)
+                          (lambda (m) (memq m (list 'ledge 'hazard)))
+                          solid-mat?)
                    (lambda (mat x y m gc gr)
                      (let ((m (if (and (not (mask-has? m MASK-UP)) (eq? (material-at gc (- gr 1)) 'water))
                                   (+ m MASK-UP)
@@ -675,6 +680,12 @@
           (atlas-ensure!)
           (with-render-target *solid-rt*
             (set-blend-mode 'normal)
+            ;; the Pipes' limestone is painted from global pixels ((harkfell pipes look))
+            (when (eq? (room-region rm) 'pipes)
+              (let ((g (global-tile rm 0 0)))
+                (draw-pipes-solids! rm
+                                    (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
+                                    (* S (car g)) (* S (cdr g)))))
             (draw-solids! rm)
             (draw-drifts! rm)
             (draw-sun-on-branches! rm)
