@@ -20,6 +20,6 @@
    "    ||||     ############"
    "########%  %#############"
    "########%  %#############")
-  things: ((lantern-moth at: (15 3) count: 3 drawn: 3)
-           (mural at: (5 1) image: bearers))
+  things: ((lantern-moth at: (8 3) count: 3 drawn: 3)
+           (mural at: (13 3) image: bearers))
   decor: auto)
