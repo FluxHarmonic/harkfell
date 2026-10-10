@@ -19,3 +19,6 @@
 # must never be answered from a cache.
 /version.json
   Cache-Control: no-store
+
+/play/sw.js
+  Cache-Control: no-cache

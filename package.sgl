@@ -97,12 +97,15 @@
 (define (stamp-web-version ctx)
   (let* ((out (config-output-dir (context-config ctx)))
          (page-path (path-join out "index.html"))
-         (page (read-file-string page-path)))
+         (page (read-file-string page-path))
+         (stamp (web-version)))
     (write-file-string (path-join out "_headers") (read-file-string "web/_headers"))
     (write-file-string page-path
-                       (string-replace (string-replace page "__VERSION__" (web-version))
+                       (string-replace (string-replace page "__VERSION__" stamp)
                                        "__WORLD__" (world-json)))
-    (display "  web version ") (display (web-version)) (newline)
+    (unless (= 0 (process-run "node" "scripts/build-pwa.mjs" out stamp))
+      (error "PWA shell generation failed"))
+    (display "  web version ") (display stamp) (newline)
     ctx))
 
 (package

@@ -680,6 +680,16 @@ for (const mode of ["off", "webgl1", "late", "on"]) {
   else fail("webgl", `/play/ ${mode}: rc ${r.status}: ${r.out.split("\n").filter((l) => /FAIL|SETUP|TIMED/.test(l)).join(" | ").slice(0, 400)}`);
 }
 
+// Browser-level worker script fetches bypass the page's Fetch interception.
+// Crash's virtual-host analytics pattern: defer registration on the fake
+// production origin, so these legs stay local. The real loopback /play/
+// worker is exercised by scripts/verify-pwa.mjs, including offline updates.
+const noSw = await send("Page.addScriptToEvaluateOnNewDocument", {
+  source: `if (location.hostname === ${JSON.stringify(PLAUSIBLE_HOST)} && navigator.serviceWorker) {
+    navigator.serviceWorker.register = function () { return new Promise(function () {}); };
+  }`
+});
+
 // ---- analytics, in Chrome, at https://harkfell.com ------------------------------------
 {
   const detail = []; const got = [];
@@ -784,6 +794,7 @@ for (const mode of ["off", "webgl1", "late", "on"]) {
   else pass("analytics-down", `with plausible.io refused (${refused} requests), / renders and /play/ loads its world, isolated; the only errors were the refused requests`);
 }
 stub.close();
+await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: noSw.identifier });
 
 // ---- console --------------------------------------------------------------------
 {
