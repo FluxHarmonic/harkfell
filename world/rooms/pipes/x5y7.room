@@ -1,3 +1,5 @@
+;; A sheltered shelf between two tall pipes, K's shaft (11-12) landing on
+;; it, and the floor stepping down east toward the long pipe.
 (room
   region: pipes
   at: (5 7)
@@ -6,16 +8,16 @@
   bed: (wind 0.1 water 0.3 pipes 0.5 drone 0.7)
   light: 0.33
   grid:
-  ("###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "#                       #"
-   "                         "
-   "                         "
+  ("##########%  %###########"
+   "#####  || %  % ||########"
+   "###    || %  % || #######"
+   "#      || %  % ||   #####"
+   "       ||      ||     ###"
+   "       ||      ||    |  #"
+   "       ||      ||    ||  "
+   "#################    ||  "
+   "###################  ||  "
    "#########################"
    "#########################")
-  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  things: ((lantern-moth at: (19 3) count: 3 drawn: 3))
   decor: auto)

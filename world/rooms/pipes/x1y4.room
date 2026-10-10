@@ -1,3 +1,5 @@
+;; A dome with one tall bore (columns 10-13) rising into the dark; a rank of
+;; standing pipes climbs into it. Dry floor for the snail; D below (19-20).
 (room
   region: pipes
   at: (1 4)
@@ -7,17 +9,17 @@
   light: 0.33
   grid:
   ("#########################"
-   "#########################"
-   "#########################"
-   "###       ###############"
-   "###        ##############"
-   "###        ##############"
-   "#                       #"
-   "#                        "
-   "#                        "
-   "###########%  %##########"
-   "###########%  %##########")
-  things: ((lantern-moth at: (9 6) count: 4 drawn: 3)
-           (stone-snail at: (21 8)))
+   "##########    ###########"
+   "########## |  ###########"
+   "######   # || #   #######"
+   "####      |||       #####"
+   "###       ||||        ###"
+   "##    |   ||||  |        "
+   "#     |   ||||  ||       "
+   "####  |   ||||  ||       "
+   "##################%  %###"
+   "##################%  %###")
+  things: ((lantern-moth at: (7 4) count: 4 drawn: 3)
+           (stone-snail at: (8 8)))
   moment: (tune: wind-in-stone when: first-visit)
   decor: auto)

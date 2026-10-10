@@ -1,3 +1,6 @@
+;; Old Cut's rough throat (columns 2-5) drops onto a dry landing; the cut leans
+;; east under hanging pipes, low west to B, high east to C up the rough pillar
+;; (column 23), and down to E through the rough shaft at columns 20-21.
 (room
   region: pipes
   at: (2 4)
@@ -7,15 +10,15 @@
   light: 0.5
   grid:
   ("##%  %###################"
-   "##%  %###################"
-   "##%  %###################"
-   "##%  %###################"
-   "##%  %###################"
-   "##%  %###################"
-   "#                       #"
-   "                         "
-   "                         "
-   "###########%  %##########"
-   "###########%  %##########")
-  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+   "##%  %##########  ##  ###"
+   "##%  %#######  #  ##   ##"
+   "##%  %###  ##  #  ##     "
+   "##%  %##   ## |   ##     "
+   "##%  %  |  ## |        %#"
+   "       |||    | |      %#"
+   "       |||    | |      %#"
+   "       |||    | |      %#"
+   "###################%  %##"
+   "###################%  %##")
+  things: ((lantern-moth at: (14 3) count: 3 drawn: 3))
   decor: auto)

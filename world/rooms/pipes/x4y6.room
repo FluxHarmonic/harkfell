@@ -1,3 +1,5 @@
+;; A shallow bowl under a hanging slab, a ring of short pipes beneath the
+;; slab, the panel of the sealing on the wall to the west.
 (room
   region: pipes
   at: (4 6)
@@ -7,16 +9,16 @@
   light: 0.33
   grid:
   ("#########################"
-   "#########################"
-   "#########################"
-   "#########################"
-   "#########################"
-   "#########################"
+   "#####    ######   #######"
+   "###      ######     #####"
+   "##       ######       ###"
+   "#                      ##"
    "#                       #"
-   "                         "
-   "                         "
-   "#########################"
+   "                        #"
+   "       |  ||||   |       "
+   "    ## |  ||||   | ##    "
+   "###### |  ||||   | ######"
    "#########################")
-  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
-           (mural at: (6 5) image: sealed-bowl))
+  things: ((lantern-moth at: (20 4) count: 3 drawn: 3)
+           (mural at: (4 3) image: sealed-bowl))
   decor: auto)

@@ -1,3 +1,6 @@
+;; A carved bore with chisel shelves stepping down to F (columns 6-7); the
+;; rough face under the top shelf (column 3) is the climb back. A side
+;; alcove holds a small rank of pipes.
 (room
   region: pipes
   at: (3 4)
@@ -7,15 +10,15 @@
   light: 0.33
   grid:
   ("#########################"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%==%##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "#          %==%         #"
-   "                    ### #"
-   "                 ###### #"
-   "###########%==%##########"
-   "###########%  %##########")
-  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+   "####           ##########"
+   "####           ##########"
+   "               ##      ##"
+   "               ##  |   ##"
+   "####====       ##  ||  ##"
+   "###%           ## |||| ##"
+   "###%      ====    |||| ##"
+   "###%              |||| ##"
+   "#####%  %################"
+   "#####%  %################")
+  things: ((lantern-moth at: (9 3) count: 3 drawn: 3))
   decor: auto)

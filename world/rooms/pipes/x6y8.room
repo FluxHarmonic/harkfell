@@ -1,3 +1,5 @@
+;; The bottom of the last pipe: R's shaft (17-18) drops into a ring of
+;; small pipes; H4 rests on the dry pedestal to the east.
 (room
   region: pipes
   at: (6 8)
@@ -6,17 +8,17 @@
   bed: (wind 0 water 0.2 pipes 0.3 drone 0.8)
   light: 0.33
   grid:
-  ("###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "#                       #"
-   "                        #"
-   "                        #"
+  ("################%  %#####"
+   "################%  %#####"
+   "#######  #   #  %  %   ##"
+   "###  #          %  %    #"
+   "##              %  %   |#"
+   "#             | %  %   |#"
+   "#            ||        |#"
+   "             ||     ###|#"
+   "             ||     ###|#"
    "#########################"
    "#########################")
-  things: ((lantern-moth at: (9 6) count: 4 drawn: 3)
-           (harmonic at: (19 8) overtone: 4))
+  things: ((lantern-moth at: (7 4) count: 4 drawn: 3)
+           (harmonic at: (21 6) overtone: 4))
   decor: auto)

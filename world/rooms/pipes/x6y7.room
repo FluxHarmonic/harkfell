@@ -1,3 +1,6 @@
+;; L's shaft (5-6) lands in the west hall; a carved tube leads to the long
+;; pipe (16-19), a tall bore of standing pipes whose floor ledge (17-18)
+;; drops through to X.
 (room
   region: pipes
   at: (6 7)
@@ -6,17 +9,17 @@
   bed: (wind 0.1 water 0.2 pipes 0.8 drone 0.7)
   light: 0.33
   grid:
-  ("###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%==%##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "#          %  %         #"
-   "                        #"
-   "                        #"
-   "###########%==%##########"
-   "###########%  %##########")
-  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  ("####%  %#################"
+   "####%  %######## |  #####"
+   "####%  %######## || #####"
+   "##  %  %########||| #####"
+   "#   %  % #######||||#####"
+   "#   %  % #######||||#####"
+   "                ||||#####"
+   "                ||||#####"
+   "                ||||#####"
+   "################%==%#####"
+   "################%  %#####")
+  things: ((lantern-moth at: (2 5) count: 3 drawn: 3))
   moment: (tune: the-pipes-breathe when: first-visit)
   decor: auto)

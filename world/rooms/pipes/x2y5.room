@@ -1,3 +1,6 @@
+;; Carved steps climb east from the foot (H below at 9-10) to the shelf
+;; under A's shaft and the high way to F; a rank of pipes falls in height
+;; beside the bearers' panel.
 (room
   region: pipes
   at: (2 5)
@@ -6,17 +9,17 @@
   bed: (wind 0.2 water 0.2 pipes 0.5 drone 0.4)
   light: 0.33
   grid:
-  ("###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "###########%  %##########"
-   "#                       #"
-   "                         "
-   "                         "
-   "###########%  %##########"
-   "###########%  %##########")
-  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
-           (mural at: (6 5) image: bearers))
+  ("###################%  %##"
+   "################  #%  %##"
+   "#####     ###  #   %  %##"
+   "####       ##      %  %  "
+   "### |      ##            "
+   "##  ||             ######"
+   "#   |||          ########"
+   "    ||||       ##########"
+   "    ||||     ############"
+   "########%  %#############"
+   "########%  %#############")
+  things: ((lantern-moth at: (15 3) count: 3 drawn: 3)
+           (mural at: (5 1) image: bearers))
   decor: auto)
