@@ -1,0 +1,57 @@
+;;; Visual policy at real region/gate interfaces, without a graphics device.
+(import (sigil test)
+        (sigil list)
+        (harkfell source)
+        (harkfell content)
+        (harkfell draw)
+        (harkfell palette)
+        (harkfell art cells)
+        (engine body)
+        (engine worldmap)
+        (harkfell world)
+        (harkfell gates)
+        (harkfell feel)
+        (harkfell check))
+
+(define LOOK-CONTENT (load-content (read-world-source "world")))
+
+(test-group "Pipes look: cave lighting and source colours"
+  (test "all Pipes rooms retain black arrival and an H3-lit cave"
+    (for-each
+      (lambda (rm)
+        (assert-true (moth-lit? rm))
+        (assert-true (< (room-render-light rm) 1.0))
+        (assert-equal 1.0 (room-dark-extra rm 0.0))
+        (assert-equal 0.0 (room-dark-extra rm 1.0)))
+      (region-rooms LOOK-CONTENT 'pipes)))
+  (test "the Hollow bowl has no cave blackout or moth navigation rings"
+    (let ((rm (content-room LOOK-CONTENT 4 3)))
+      (assert-false (moth-lit? rm))
+      (assert-equal 0.0 (room-dark-extra rm 0.0))
+      (assert-equal 1.0 (room-render-light rm))))
+  (test "A, D and X use neutral environment light with and without H3"
+    (for-each
+      (lambda (position)
+        (let* ((rm (content-room LOOK-CONTENT (car position) (cadr position)))
+               (g (local->global LOOK-CONTENT rm 9 8))
+               (wm (content-map LOOK-CONTENT))
+               (b (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g))))
+          (for-each
+            (lambda (carry)
+              (let ((w (world-populate (world-at wm b)
+                                      (content-stones LOOK-CONTENT)
+                                      (content-pickups LOOK-CONTENT)
+                                      carry)))
+                (assert-equal (slot-of 'sky-4) (room-hue w))))
+            '((2) (2 3)))))
+      '((2 4) (1 5) (6 8)))))
+
+(test-group "Pipes look: required authored art"
+  (test "every local creature and mural image has its authored frame"
+    (for-each
+      (lambda (name)
+        (assert-true (assoc name CELLS)))
+      '("creatures/snail-rest" "creatures/snail-crawl-a" "creatures/snail-crawl-b"
+        "pipes/mural-bearers" "pipes/mural-sealed-bowl"
+        "pipes/mural-empty-hands" "pipes/mural-violet-well"
+        "pipes/stone-body"))))

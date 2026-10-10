@@ -48,13 +48,14 @@
           (harkfell palette)
           (harkfell render)
           (harkfell atlas)
+          (harkfell pipes look)
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
           slot player-frame set-look-sound! region-colours set-look-waking! waking-frame
-          floating-reeds room-hue)
+          floating-reeds room-hue room-render-light room-dark-extra moth-lit?)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -167,7 +168,9 @@
     ;; The material at a global tile; outside every room, rock (so a closed
     ;; border does not draw a rim against nothing).
     (define (material-at gc gr)
-      (char-material (world-char *content* gc gr)))
+      (if (member (cons gc gr) *passage-air*)
+          #f
+          (char-material (world-char *content* gc gr))))
 
     ;; Each tile of the room whose material satisfies pick?, as
     ;; (draw! mat x y mask gc gr).
@@ -176,10 +179,10 @@
         (when (< r ROOM-ROWS)
           (let cl ((c 0))
             (when (< c ROOM-COLS)
-              (let* ((mat (char-material (room-char rm c r))))
+              (let* ((g (global-tile rm c r))
+                     (mat (material-at (car g) (cdr g))))
                 (when (and mat (pick? mat))
-                  (let* ((g (global-tile rm c r))
-                         (gc (car g)) (gr (cdr g))
+                  (let* ((gc (car g)) (gr (cdr g))
                          (m (tile-mask (lambda (cc rr) (eq? (material-at cc rr) mat)) gc gr)))
                     (draw! mat (* S c) (* S r) m gc gr))))
               (cl (+ c 1))))
@@ -413,6 +416,7 @@
                                                (case key
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
+                                                 ((pipes) (pipes-backdrop-bytes))
                                                  ((glasswood) (glasswood-bytes 1.0))
                                                  ((glasswood-sun-0) (glasswood-bytes 0.0))
                                                  ((glasswood-sun-1) (glasswood-bytes 0.25))
@@ -455,7 +459,8 @@
     ;; The room's backdrop: its region's sky, or earth when it lies under
     ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
-      (let ((tex (backdrop (cond ((and (not (under? rm)) (glasswood-sheet? rm))
+      (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) 'pipes)
+                                 ((and (not (under? rm)) (glasswood-sheet? rm))
                                   ;; Glasswood's sky by the room's sun, in quarters
                                   (vector-ref (vector (quote glasswood-sun-0) (quote glasswood-sun-1) (quote glasswood-sun-2) (quote glasswood-sun-3) (quote glasswood-sun-4))
                                               (exact (round (* 4 (room-sun rm))))))
@@ -524,7 +529,11 @@
                      (let ((m (if (and (not (mask-has? m MASK-UP)) (eq? (material-at gc (- gr 1)) 'water))
                                   (+ m MASK-UP)
                                   m)))
-                       (solid-tile! sheet (if (and cave? (eq? mat (quote rock))) (quote cave) mat) x y m gc gr))))))
+                       (solid-tile! sheet (if (and cave? (eq? mat (quote rock))) (quote cave) mat) x y m gc gr))))
+        ;; The rose stone remains behind the closed blue-linked rock face.
+        (when (and (bowl? rm) (null? *passage-air*))
+          (let ((g (global-tile rm 21 6)))
+            (solid-tile! sheet 'rock (* 21 S) (* 6 S) 15 (car g) (cdr g))))))
 
     ;; Reeds: a column's cells, top over mid over base, one variant per
     ;; column so a stalk runs on from cell to cell.
@@ -579,16 +588,17 @@
         ;; Glasswood's low sun on the bark, before the weights so it sways with it
         (draw-sun-on-trunks! rm)
         ;; the sway weight in G, row by row: 0 at a stalk's root, 1 at its tip
-        (with-additive-blend
-          (each-tile rm (lambda (m) (eq? m 'reeds))
-                     (lambda (mat x y m gc gr)
-                       (let* ((below (- (reed-run-down gc gr) 1))
-                              (n (+ below (reed-run-up gc gr))))
-                         (let rows ((py 0))
-                           (when (< py S)
-                             (set-color 0.0 (/ (+ (* below S) (- S py)) (* 1.0 n S)) 0.0 1.0)
-                             (draw-filled-rect x (+ y py) S 1)
-                             (rows (+ py 1))))))))))
+        (unless (eq? (room-region rm) 'pipes)
+          (with-additive-blend
+            (each-tile rm (lambda (m) (eq? m 'reeds))
+                       (lambda (mat x y m gc gr)
+                         (let* ((below (- (reed-run-down gc gr) 1))
+                                (n (+ below (reed-run-up gc gr))))
+                           (let rows ((py 0))
+                             (when (< py S)
+                               (set-color 0.0 (/ (+ (* below S) (- S py)) (* 1.0 n S)) 0.0 1.0)
+                               (draw-filled-rect x (+ y py) S 1)
+                               (rows (+ py 1)))))))))))
 
     ;; Front decoration (a room's decor: auto): a tuft of grass on about one
     ;; bare top in three of rock or rough rock (one with air above it), in
@@ -633,30 +643,50 @@
     (define *front-rt* #f)
     (define *foliage-rt* #f)
     (define *layers-key* #f)       ; the room the layers hold
+    (define *passage-air* '())     ; global cells revealed in this room now
+
+    (define (bowl? rm)
+      (and (eq? (room-region rm) 'hollow) (= (room-x rm) 4) (= (room-y rm) 3)))
+
+    (define (stone-visible? rm st)
+      (not (and (bowl? rm) (= (stone-overtone st) 5) (null? *passage-air*))))
+
+    (define (revealed-cells rm tm)
+      (if (not tm)
+          '()
+          (filter-map
+            (lambda (cell)
+              (let ((g (global-tile rm (car cell) (cadr cell))))
+                (and (eq? (tilemap-ref tm (car g) (cdr g)) 'air) g)))
+            (apply append
+              (map (lambda (thing) (thing-kw thing "cells"))
+                   (room-things-of rm 'stone-passage))))))
 
     ;; Bake the room's layers if they are not this room's. Outside any pass.
-    (define (prepare-layers! rm)
+    (define (prepare-layers! rm . live)
       (unless *solid-rt*
         (set! *solid-rt* (make-render-target VIEW-W VIEW-H 'nearest))
         (set! *foliage-rt* (make-render-target VIEW-W VIEW-H (quote nearest)))
         (set! *front-rt* (make-render-target VIEW-W VIEW-H (quote nearest))))
-      (unless (eq? *layers-key* rm)
-        (atlas-ensure!)
-        (with-render-target *solid-rt*
-          (set-blend-mode 'normal)
-          (draw-solids! rm)
-          (draw-drifts! rm)
-          (draw-sun-on-branches! rm)
-          (draw-water-bed! rm))
-        (with-render-target *foliage-rt*
-          (set-blend-mode 'normal)
-          (draw-foliage! rm))
-        (with-render-target *front-rt*
-          (set-blend-mode (quote normal))
-          (draw-front! rm))
-        (set! *glints* (room-glints rm))
-        (set! *crusts* (room-crusts rm))
-        (set! *layers-key* rm)))
+      (let ((revealed (revealed-cells rm (and (pair? live) (car live)))))
+        (unless (and (eq? *layers-key* rm) (equal? revealed *passage-air*))
+          (set! *passage-air* revealed)
+          (atlas-ensure!)
+          (with-render-target *solid-rt*
+            (set-blend-mode 'normal)
+            (draw-solids! rm)
+            (draw-drifts! rm)
+            (draw-sun-on-branches! rm)
+            (draw-water-bed! rm))
+          (with-render-target *foliage-rt*
+            (set-blend-mode 'normal)
+            (draw-foliage! rm))
+          (with-render-target *front-rt*
+            (set-blend-mode (quote normal))
+            (draw-front! rm))
+          (set! *glints* (room-glints rm))
+          (set! *crusts* (room-crusts rm))
+          (set! *layers-key* rm))))
 
     ;; Glints on the glaze (Glasswood's bible, "Moving pictures"): points of
     ;; light along the tops of glazed branches and ice, each catching the
@@ -1188,6 +1218,14 @@
         (and p q (= (placed-x p) (placed-x q)) (= (placed-y p) (placed-y q)))))
 
     (define (room-hue w)
+      (if (and (world-room w)
+               (eq? (room-region (placed-data (world-room w))) 'pipes))
+          ;; Environment light is cream. Harmonic atlas/glyph pixels keep
+          ;; their own slots even at a bright core in the resolve shader.
+          (slot-of 'sky-4)
+          (room-harmonic-hue w)))
+
+    (define (room-harmonic-hue w)
       (let* ((stones (filter (lambda (st) (cell-in-room? w (stone-cell st))) (world-stones w)))
              (pickups (filter (lambda (pk) (cell-in-room? w (pickup-cell pk))) (world-pickups w)))
              (cs (let ((c (world-critters w))) (if c (critters-list c) '())))
@@ -1241,7 +1279,7 @@
       (let* ((c (body-center b HARKFELL-FEEL))
              (arr (moth-arrival moths (car c) (cdr c)))
              (dark (+ (dark-steps (room-light rm)) (room-dark-extra rm arr))))
-        (when (> dark 0.0)
+        (when (and (under? rm) (> dark 0.0))
           (let* ((unit (/ dark DARK-GAIN))
                  (drawn (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths))
                  (cx (- (car c) ox)) (cy (- (cdr c) oy 4)))
@@ -1262,7 +1300,13 @@
     ;; hazards only in the light; a dark room with no moths (Behind the Fall, at
     ;; the blue hour) keeps the dark its light: gives (the review: it was two
     ;; steps down for good).
-    (define (moth-lit? rm) (and (room-dark? rm) (room-has-drawn-moths? rm)))
+    (define (moth-lit? rm)
+      (and (under? rm) (room-dark? rm) (room-has-drawn-moths? rm)))
+
+    ;; David, 2026-10-10: stepped dither and navigation rings belong to
+    ;; caves. Keep authored outdoor lighting data available to its track.
+    (define (room-render-light rm)
+      (if (under? rm) (room-light rm) 1.0))
 
     ;; Glints at the tips of a moth-lit room's hanging icicles, whether or not the
     ;; moth light has reached them (David, playing b22a4d6: he ran into an icicle
@@ -1276,7 +1320,7 @@
         ;; open yet reads in the black (the Cave Mouth, the dark before H3)
         (when (moth-lit? rm)
           (for-each (lambda (st)
-                      (when (eq? (stone-state st) 'shut)
+                      (when (and (stone-visible? rm st) (eq? (stone-state st) 'shut))
                         (let* ((cell (stone-cell st)) (s (tilemap-size (world-tiles w)))
                                (x (+ (- (* s (car cell)) ox) 8.0)) (y (+ (- (* s (cdr cell)) oy) 8.0)))
                           (when (in-room? x y)
@@ -1329,20 +1373,28 @@
                    (kind? (lambda (k) (lambda (c) (eq? (critter-kind c) k))))
                    (eyes? (lambda (c) (eq? (critter-frame c) 'eyes))))
               (draw-backdrop! rm)
+              (draw-aurora! rm (and (world-aurora-at w)
+                                   (- t (world-aurora-at w))))
               (set-blend-mode 'normal)
               (draw-clouds! rm t)
-              (sway-composite! *foliage-rt* t (wind-at t))
+              (sway-composite! *foliage-rt* t
+                               (if (eq? (room-region rm) 'pipes) 0.0 (wind-at t)))
               (for-each (lambda (st)
                           (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                  (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
-                            (when (in-room? x y) (draw-stone st x y t (world-carry w) (stone-slot rm)))))
+                            (when (and (stone-visible? rm st) (in-room? x y))
+                              (if (eq? (room-region rm) 'pipes)
+                                  (draw-stone st x y t (world-carry w) (stone-slot rm) "pipes")
+                                  (draw-stone st x y t (world-carry w) (stone-slot rm))))))
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
+              (draw-pipes-panels! rm)
               ;; falling ice ((harkfell ice)), in front of the rock it hangs from
               (draw-ice! w ox oy t)
               ;; D43: the upward icicle, where the room has one
               (draw-upward! rm)
+              (draw-upward-drips! rm t)
               ;; a reedling perched on a reed tip rides the tip's sway
               (for-each (lambda (c)
                           (unless (eyes? c)
@@ -1358,6 +1410,7 @@
               (draw-crusts!)
               (draw-snow! rm t)
               (for-each (lambda (c) (draw-critter c ox oy t slot)) (filter eyes? cs))
+              (draw-pipes-cues! rm t)
               ;; front decoration, in front of the creature, swaying
               (set-blend-mode (quote normal))
               (sway-composite! *front-rt* t (wind-at t))
@@ -1372,7 +1425,8 @@
                   (for-each (lambda (st)
                               (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                      (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
-                                (when (in-room? x y) (draw-stone-light st x y t slot))))
+                                (when (and (stone-visible? rm st) (in-room? x y))
+                                  (draw-stone-light st x y t slot))))
                             (world-stones w))
                   (for-each (lambda (pk)
                               (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
@@ -1382,6 +1436,7 @@
                   (draw-moth-light! moths b rm ox oy t)
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
+                  (draw-pipes-lights! rm t)
                   (draw-glints! t)
                   (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
@@ -1402,7 +1457,7 @@
       (let* ((p (world-room w))
              (rm (and p (placed-data p)))
              (region (if rm (room-region rm) 'none)))
-        (when rm (prepare-layers! rm))
+        (when rm (prepare-layers! rm (world-tiles w)))
         (use-region! region)
         (with-render-target (room-index-rt)
           (set-blend-mode 'normal)
@@ -1413,7 +1468,7 @@
         (resolve! (world-ticks w)
                   (max (world-dim w) (if (pair? black) (car black) 0.0))
                   (if rm (room-hue w) (slot-of 'h2))
-                  (if rm (room-light rm) 1.0)
+                  (if rm (room-render-light rm) 1.0)
                   (if rm
                       (let ((c (body-center (world-body w) HARKFELL-FEEL))
                             (cs (world-critters w)))
@@ -1464,6 +1519,11 @@
       (sway-composite! *foliage-rt* 0 0.0)
       (set-color 1.0 1.0 1.0 1.0)
       (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
+      (draw-pipes-panels! rm)
+      (draw-pipes-cues! rm 0)
+      (draw-upward-drips! rm 0)
+      (with-additive-blend
+        (draw-pipes-lights! rm 0))
       (draw-water! rm))
 
     ;; Outside any pass: every room of the overview resolved, once.
@@ -1478,7 +1538,7 @@
               (set-blend-mode 'normal)
               (draw-room-still rm)
               (draw-strips! *strips*))
-            (resolve! 0 0.0 (slot-of 'h2) (room-light rm))
+            (resolve! 0 0.0 (slot-of 'sky-4) (room-render-light rm))
             (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
               (with-render-target rt
                 (with-blend-mode 'none

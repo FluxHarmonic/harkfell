@@ -233,7 +233,7 @@
        "    L = L - u_dark / 5.0;\n"
        ;; light: B against the threshold: lit, lit twice, the light's colour
        "    if (L > 0.0) {\n"
-       "        if (L > 0.72 + th * 0.28) c = strip(0, int(u_hue));\n"
+       "        if (L > 0.72 + th * 0.28) c = strip(0, (slot >= 16 && slot <= 20) ? slot : int(u_hue));\n"
        "        else if (L > 0.36 + th * 0.36) c = strip(5, lslot);\n"
        "        else if (L > th * 0.36) c = strip(4, lslot);\n"
        "    }\n"
