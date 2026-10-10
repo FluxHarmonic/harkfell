@@ -73,6 +73,7 @@
           region-map region-map? region-map-region region-map-rooms region-map-origin
           region-rooms
           thing-kw thing-at room-things-of grid-standable?
+          static-placement-problems
           icicle-floor-row icicle-placement-problems
           room-thin-ice thin-ice-placement-problems room-dark? room-has-drawn-moths?
           moment-forms moment-kw room-moments moment-key)
@@ -312,6 +313,39 @@
               (list (string-append "thin-ice at: " at " is not over ~ (over: the cell under it must be meltwater)")))
           (if (and above (or (ice-air? above) (char=? above #\+))) '()
               (list (string-append "thin-ice at: " at " has no open cell above it (a floor: it is walked on)"))))))
+
+    ;; Pipes' static is a fixed, short ground lip. Its banks and full jump
+    ;; headroom must remain safe even before any moth arrives.
+    (define (static-placement-problems grid)
+      (let ((ps '())
+            (hazard? (lambda (c r)
+                       (let ((ch (grid-char grid c r))) (and ch (char=? ch #\x))))))
+        (let row ((r 0))
+          (when (< r (length grid))
+            (let col ((c 0))
+              (when (< c ROOM-COLS)
+                (when (and (hazard? c r) (not (hazard? (- c 1) r)))
+                  (let* ((end (let lip ((e c)) (if (hazard? (+ e 1) r) (lip (+ e 1)) e)))
+                         (at (cell-name c r))
+                         (report! (lambda (msg) (set! ps (cons (string-append "static at: " at " " msg) ps)))))
+                    (unless (and (> c 0) (< end (- ROOM-COLS 1)) (> r 0) (< r (- ROOM-ROWS 1)))
+                      (report! "is on an edge"))
+                    (when (> (+ 1 (- end c)) 2) (report! "is longer than a two-tile lip"))
+                    (unless (and (grid-standable? grid (- c 1) r)
+                                 (grid-standable? grid (+ end 1) r))
+                      (report! "has no safe standing bank on both sides"))
+                    (let ceiling ((y (- r 4)))
+                      (when (< y r)
+                        (let span ((x (- c 1)))
+                          (when (<= x (+ end 1))
+                            (let ((ch (grid-char grid x y)))
+                              (unless (and ch (ice-air? ch))
+                                (report! "has blocked jump headroom")))
+                            (span (+ x 1))))
+                        (ceiling (+ y 1))))))
+                (col (+ c 1))))
+            (row (+ r 1))))
+        (reverse ps)))
 
     ;; --- a room's fixed moments (Glasswood: moment: as a list) -----------------------------
     ;; A room's moment: field is one moment, (tune: NAME when: first-visit ...),
@@ -717,6 +751,9 @@
             (let ((u (roomfile-field rf 'unreached '())))
               (unless (and (list? u) (every (lambda (p) (and (int-pair? p) (< -1 (car p) ROOM-COLS) (< -1 (cadr p) ROOM-ROWS))) u))
                 (add! "unreached: is not ((C R) ...) with cells inside the grid" "unreached"))))
+          (when (eq? region-sym 'pipes)
+            (for-each (lambda (msg) (add! msg "grid"))
+                      (static-placement-problems (roomfile-grid rf))))
           ;; light: (Glasswood, for the dark caves the moths light, D42) how lit
           ;; the room is, a number above 0 and at most 1 (1, daylight, if absent)
           (let ((l (roomfile-field rf 'light NO-LIGHT)))

@@ -115,3 +115,30 @@
               (assert-true (< (critter-x snail) 384))
               (if (= n 0) (assert-true heard) (loop cs (- n 1) heard))))))
       '((1 4) (1 7) (3 8)))))
+
+(test-group "Pipes: revealed entry restore"
+  (test "a saved stair bank restores after its blue stone without falling back"
+    (let* ((w (ticks (at 4 3 22 8 '(2 3 4)) 100))
+           (g (cell 4 3 22 6))
+           (entry (cell-body (world-tiles w) HARKFELL-FEEL (car g) (cdr g)))
+           (d (save-datum CT entry (world-carry w) (world-stones w) '() 10 #t #t))
+           (r (save-restore CT d)))
+      (assert-equal g (restored-cell r))
+      (assert-equal '() (restored-notes r)))))
+
+(test-group "Pipes: static placement sabotage"
+  (test "a low ceiling or an extended unsafe lip is rejected"
+    (let* ((grid (room-grid (content-room CT 3 6)))
+           (ceiling (map (lambda (row r)
+                           (if (= r 5)
+                               (string-append (substring row 0 18) "#" (substring row 19 25))
+                               row))
+                         grid (iota ROOM-ROWS)))
+           (bank (map (lambda (row r)
+                        (if (= r 6)
+                            (string-append (substring row 0 17) "x" (substring row 18 25))
+                            row))
+                      grid (iota ROOM-ROWS))))
+      (assert-equal '() (static-placement-problems grid))
+      (assert-true (pair? (static-placement-problems ceiling)))
+      (assert-true (pair? (static-placement-problems bank))))))
