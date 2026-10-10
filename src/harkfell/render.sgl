@@ -78,17 +78,19 @@
 
     ;; rgb: a vector of SLOT-COUNT (r g b), a region's colours. The strips
     ;; as RGBA bytes, STRIP-W x STRIP-ROWS, top row first: base, water,
-    ;; deep, reflect, lit, lit twice.
-    (define (strip-bytes rgb)
-      (let ((bv (make-bytevector (* 4 STRIP-W STRIP-ROWS) 0))
-            (rows (list (lambda (i) i)
-                        (lambda (i) (lookup WATER i))
-                        (lambda (i) (lookup DEEP i))
-                        (lambda (i) (lookup REFLECT i))
-                        (lambda (i) (lookup LIT i))
-                        (lambda (i) (lookup LIT (lookup LIT i)))
-                        (lambda (i) (lookup DARK i))
-                        (lambda (i) (lookup DARK (lookup DARK i))))))
+    ;; deep, reflect, lit, lit twice, dark, dark twice. A region may supply
+    ;; its own darkness lookup while keeping the other transforms shared.
+    (define (strip-bytes rgb . dark-table)
+      (let* ((dark (if (pair? dark-table) (car dark-table) DARK))
+             (bv (make-bytevector (* 4 STRIP-W STRIP-ROWS) 0))
+             (rows (list (lambda (i) i)
+                         (lambda (i) (lookup WATER i))
+                         (lambda (i) (lookup DEEP i))
+                         (lambda (i) (lookup REFLECT i))
+                         (lambda (i) (lookup LIT i))
+                         (lambda (i) (lookup LIT (lookup LIT i)))
+                         (lambda (i) (lookup dark i))
+                         (lambda (i) (lookup dark (lookup dark i))))))
         (let loop ((rs rows) (r 0))
           (unless (null? rs)
             (let slots ((i 0))
@@ -104,8 +106,13 @@
             (loop (cdr rs) (+ r 1))))
         bv))
 
-    (define (make-strips rgb) (make-texture-from-pixels STRIP-W STRIP-ROWS (strip-bytes rgb) 'nearest))
-    (define (strips-update! tex rgb) (update-texture tex (strip-bytes rgb)))
+    (define (make-strips rgb . dark-table)
+      (make-texture-from-pixels STRIP-W STRIP-ROWS
+                               (apply strip-bytes rgb dark-table)
+                               'nearest))
+
+    (define (strips-update! tex rgb . dark-table)
+      (update-texture tex (apply strip-bytes rgb dark-table)))
 
     ;; The strips under the view, in the current (index) pass, overwriting.
     (define (draw-strips! tex)

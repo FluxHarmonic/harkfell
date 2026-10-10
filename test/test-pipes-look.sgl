@@ -5,6 +5,8 @@
         (harkfell content)
         (harkfell draw)
         (harkfell palette)
+        (harkfell render)
+        (harkfell pipes look)
         (harkfell art cells)
         (engine body)
         (engine worldmap)
@@ -54,4 +56,20 @@
       '("creatures/snail-rest" "creatures/snail-crawl-a" "creatures/snail-crawl-b"
         "pipes/mural-bearers" "pipes/mural-sealed-bowl"
         "pipes/mural-empty-hands" "pipes/mural-violet-well"
-        "pipes/stone-body"))))
+        "pipes/stone-body")))
+  (test "distant limestone walls never brighten under either darkness step"
+    (let* ((region (find (lambda (r) (eq? (region-name r) 'pipes))
+                         (content-regions LOOK-CONTENT)))
+           (rgb (region-rgb-vector (region-field region 'palette)
+                                   (content-palette LOOK-CONTENT)))
+           (bytes (strip-bytes rgb PIPES-DARK)))
+      (let slots ((slot 0))
+        (when (< slot 4)
+          (let channels ((channel 0))
+            (when (< channel 3)
+              (let ((base (bytevector-u8-ref bytes (+ (* 4 slot) channel)))
+                    (dark (bytevector-u8-ref bytes (+ (* 4 (+ slot (* 6 32))) channel)))
+                    (dark2 (bytevector-u8-ref bytes (+ (* 4 (+ slot (* 7 32))) channel))))
+                (assert-true (<= dark2 dark base)))
+              (channels (+ channel 1))))
+          (slots (+ slot 1)))))))

@@ -1,0 +1,117 @@
+;;; Read-only snapshots through the actual renderer and world simulation.
+;;; Run in the locked graphics-capable native test VM, on a private Xvfb:
+;;; PIPES_LOOK_CASE=i-dark scripts/dev build/look-harness/bin/harkfell-test
+;;;   --no-strict tools/pipes-look-review.sgl
+;;; PIPES_LOOK_CONTROL may name a local file containing a case name, to
+;;; switch snapshots in one window. "sheet" uses authored light levels;
+;;; "sheet-lit" is explicitly a full-colour structural art preview.
+;;; This tool opens no save or audio device. The world's real ticks advance
+;;; before its pose is held for capture; arrival shots use tick 1, not still.
+(import (sigil test)
+        (sigil process)
+        (sigil fs)
+        (sigil string)
+        (sigil io)
+        (sigil desktop)
+        (sigil graphics)
+        (sigil list)
+        (engine body)
+        (engine worldmap)
+        (harkfell content)
+        (harkfell source)
+        (harkfell draw)
+        (harkfell render)
+        (harkfell world)
+        (harkfell gates)
+        (harkfell check)
+        (harkfell feel))
+
+(define REVIEW (load-content (read-world-source "world")))
+(define CASE (or (getenv "PIPES_LOOK_CASE") "i-dark"))
+(define CONTROL (getenv "PIPES_LOOK_CONTROL"))
+(define CASES
+  '(("a-dark" 2 4 9 8 (2) 1)
+    ("a-arriving" 2 4 9 8 (2 3) 1)
+    ("a-gathering" 2 4 9 8 (2 3) 60)
+    ("a-lit" 2 4 9 8 (2 3) 240)
+    ("d-dark" 1 5 5 8 (2) 240)
+    ("d-lit" 1 5 5 8 (2 3) 240)
+    ("x-dark" 6 8 18 8 (2) 240)
+    ("x-lit" 6 8 18 8 (2 3) 240)
+    ("i-dark" 3 6 17 6 (2) 240)
+    ("i-dark-flicker" 3 6 17 6 (2) 245)
+    ("i-arriving" 3 6 17 6 (2 3) 1)
+    ("i-lit" 3 6 17 6 (2 3) 240)
+    ("p-dark" 4 7 7 6 (2) 240)
+    ("p-lit" 4 7 7 6 (2 3) 240)
+    ("bearers" 2 5 8 8 (2 3) 240)
+    ("sealed-bowl" 4 6 8 8 (2 3) 240)
+    ("empty-hands" 6 6 8 8 (2 3) 240)
+    ("snail" 1 7 20 8 (2 3) 240)
+    ("violet-well" 1 8 8 8 (2 3) 240)
+    ("bowl-closed" 4 3 19 8 (2) 240)
+    ("bowl-rose-aurora" 4 3 22 8 (2 3 4) 160)
+    ("ice-well" -2 6 14 9 (2 3 4) 240)
+    ("root-ice-dark" -1 5 15 7 (2) 240)
+    ("root-ice-lit" -1 5 15 7 (2 3) 240)
+    ("first-sight" -1 3 9 8 (2 3) 240)
+    ("reed-bridge" 9 3 6 8 (2) 240)))
+
+(define (review-world spec)
+  (let* ((rm (content-room REVIEW (list-ref spec 1) (list-ref spec 2)))
+         (g (local->global REVIEW rm (list-ref spec 3) (list-ref spec 4)))
+         (wm (content-map REVIEW))
+         (b (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g)))
+         (w (world-populate (world-at wm b)
+                           (content-stones REVIEW)
+                           (content-pickups REVIEW)
+                           (list-ref spec 5))))
+    (let loop ((w w) (n (list-ref spec 6)))
+      (if (= n 0)
+          w
+          (loop (cdr (world-take-news (world-tick w (intent)))) (- n 1))))))
+
+(define (selected-case)
+  (if (and CONTROL (file-exists? CONTROL))
+      (string-trim (read-file-string CONTROL))
+      CASE))
+
+(test "read-only actual renderer snapshot"
+  (assert-equal '() (content-problems REVIEW))
+  (let* ((rooms (region-rooms REVIEW 'pipes))
+         (lit-rooms (map (lambda (rm) (room rm light: 1.0)) rooms)))
+    (run-game "Pipes LOOK review" 1200 528
+      (lambda ()
+        (gfx-setup)
+        (set-draw-content! REVIEW)
+        (set-viewport #f)
+        (let loop ((current #f) (w #f))
+          (wait-frame)
+          (let* ((selected (selected-case))
+                 (changed? (not (equal? current selected)))
+                 (sheet? (or (string=? selected "sheet") (string=? selected "sheet-lit")))
+                 (sheet-rooms (if (string=? selected "sheet-lit")
+                                  lit-rooms
+                                  rooms))
+                 (spec (assoc selected CASES))
+                 (w (if changed? (and spec (review-world spec)) w)))
+            (unless (or spec sheet?) (error "Unknown review case" selected))
+            (when changed?
+              (let ((size (if sheet? (overview-size rooms 1 8) '(1200 528))))
+                (window-set-size! (car size) (cadr size))))
+            (if sheet?
+                (prepare-overview! sheet-rooms)
+                (present-play! w (lambda () #f)))
+            (begin-frame)
+            (if sheet?
+                (draw-overview sheet-rooms 1 8 #t)
+                (begin
+                  (set-color 1.0 1.0 1.0 1.0)
+                  (draw-render-target (room-color-rt) 0 0 1200 528)))
+            (end-frame)
+            (when changed?
+              (display "LOOK frame ready: ")
+              (display selected)
+              (newline)
+              (flush-output-port (current-output-port)))
+            (unless (quit-requested?) (loop selected w))))))))
