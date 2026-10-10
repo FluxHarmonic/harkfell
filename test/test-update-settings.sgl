@@ -1,0 +1,58 @@
+;;; D38: initial launch stays quiet, each update is announced once, and
+;;; a waiting worker never erases the running release's announcement.
+(import (sigil test)
+        (sigil time)
+        (sigil fs)
+        (substratic store kv)
+        (harkfell settings))
+
+(define DIR
+  (string-append "/tmp/harkfell-update-settings-" (number->string (current-jiffy))))
+(set-store-root! DIR)
+(define INFO "{\"version\":\"0.3.0\",\"summary\":\"Offline play and small fixes.\"}")
+(define LINE "New in 0.3.0: Offline play and small fixes.")
+
+(test-group "D38 settings"
+  (test "the first launch has nothing to announce and records the baseline"
+    (settings-update-reset!)
+    (assert-true (settings-update-info! INFO))
+    (assert-equal (list #f #f) (settings-update-lines))
+    (settings-update-shown!)
+    (assert-equal "0.3.0" (store-read-datum "update-seen")))
+  (test "an update appears once per version and stays for the current launch"
+    (store-write-datum! "update-seen" "0.2.0")
+    (settings-update-reset!)
+    (settings-update-info! INFO)
+    (assert-equal LINE (cadr (settings-update-lines)))
+    (settings-update-shown!)
+    (assert-equal LINE (cadr (settings-update-lines)))
+    (settings-update-reset!)
+    (settings-update-info! INFO)
+    (assert-equal (list #f #f) (settings-update-lines)))
+  (test "a returning pre-D38 player sees the update without losing the save"
+    (store-remove! "update-seen")
+    (store-set! "save" "existing-save")
+    (settings-update-reset!)
+    (settings-update-info! INFO)
+    (assert-equal LINE (cadr (settings-update-lines)))
+    (assert-equal "existing-save" (store-get "save")))
+  (test "a waiting worker adds the exact reload line alongside the news"
+    (settings-update-waiting! #t)
+    (assert-equal "A new version is ready. Reload to step into it."
+                  (car (settings-update-lines)))
+    (assert-equal LINE (cadr (settings-update-lines))))
+  (test "missing or malformed metadata stays quiet and does not mark the version"
+    (store-remove! "update-seen")
+    (settings-update-reset!)
+    (assert-false (settings-update-info! "not-json"))
+    (assert-equal (list #f #f) (settings-update-lines))
+    (settings-update-shown!)
+    (assert-false (store-get "update-seen")))
+  (test "the first public release stays quiet even with a save"
+    (settings-update-reset!)
+    (settings-update-info! "{\"version\":\"0.1.0\",\"summary\":\"The first release.\"}")
+    (assert-equal (list #f #f) (settings-update-lines))))
+
+(store-remove! "save")
+(store-remove! "update-seen")
+(delete-directory DIR)

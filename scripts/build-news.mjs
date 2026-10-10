@@ -111,6 +111,15 @@ const dup = versions.find((v, i) => versions.indexOf(v) !== i);
 if (dup) die(`two posts for version ${dup}`);
 posts.sort((a, b) => (b.date + b.version).localeCompare(a.date + a.version));
 
+const mine = posts.find((p) => p.version === VERSION);
+if (!mine) console.error(`build-news: WARNING: no post for version ${VERSION} (posts: ${versions.join(", ")}); version.json carries no summary and verify-site.mjs will refuse the tree`);
+const vj = { version: VERSION, date: TODAY, build: STAMP, summary: mine ? mine.summary : "", news: mine ? `${SITE}/news/${mine.slug}/` : `${SITE}/news/` };
+fs.mkdirSync(TREE, { recursive: true });
+fs.writeFileSync(path.join(TREE, "version.json"), JSON.stringify(vj, null, 2) + "\n");
+// The worker caches the running release's metadata beside its page. The
+// site's /version.json remains uncached and can describe a newer release.
+if (args.includes("--metadata-only")) process.exit(0);
+
 fs.mkdirSync(path.join(TREE, "news"), { recursive: true });
 for (const p of posts) {
   fs.mkdirSync(path.join(TREE, "news", p.slug), { recursive: true });
@@ -162,8 +171,4 @@ const jsonFeed = {
 fs.writeFileSync(path.join(TREE, "news", "feed.xml"), rss);
 fs.writeFileSync(path.join(TREE, "news", "feed.json"), JSON.stringify(jsonFeed, null, 2) + "\n");
 
-const mine = posts.find((p) => p.version === VERSION);
-if (!mine) console.error(`build-news: WARNING: no post for version ${VERSION} (posts: ${versions.join(", ")}); version.json carries no summary and verify-site.mjs will refuse the tree`);
-const vj = { version: VERSION, date: TODAY, build: STAMP, summary: mine ? mine.summary : "", news: mine ? `${SITE}/news/${mine.slug}/` : `${SITE}/news/` };
-fs.writeFileSync(path.join(TREE, "version.json"), JSON.stringify(vj, null, 2) + "\n");
 console.log(`build-news: ${posts.length} post(s) -> news/ (+ feed.xml, feed.json); version.json ${VERSION} ${STAMP} ${mine ? "-> " + vj.news : "(NO POST)"}`);

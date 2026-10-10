@@ -70,7 +70,7 @@ for f in index.html 404.html style.css _headers favicon.png favicon.ico mark.png
 done
 [ -n "$(find site/fonts -name '*.woff2')" ] || { echo "stage-web: site/fonts has no woff2"; exit 1; }
 [ -e site/play ] && { echo "stage-web: site/play exists; the site must not claim the game's path"; exit 1; }
-for f in index.html sw.js pwa.js harkfell.wasm sigil-wasm-bridges.js sigil-wasm-bridges.json assets/sigil-web-app.js; do
+for f in index.html sw.js pwa.js version.json harkfell.wasm sigil-wasm-bridges.js sigil-wasm-bridges.json assets/sigil-web-app.js; do
   [ -f "$WEB/$f" ] || { echo "stage-web: $WEB/$f missing; build --config web first (or set HARKFELL_WEB_DIR)"; exit 1; }
 done
 STAMP="$(grep -o 'version: "[^"]*"' "$WEB/index.html" | head -1 | cut -d'"' -f2)"
@@ -88,14 +88,21 @@ cp -r site/. "$DIR/"
 # /news/ and /version.json (D38), into the tree the gate will check
 node scripts/build-news.mjs news "$DIR" --version "$VERSION" --stamp "$STAMP"
 [ -f "$DIR/version.json" ] && [ -f "$DIR/news/index.html" ] || { echo "stage-web: build-news wrote no version.json or news/index.html"; exit 1; }
+node --input-type=module - "$WEB/version.json" "$DIR/version.json" <<'JS'
+import fs from 'node:fs';
+const [built, staged] = process.argv.slice(2).map((file) => JSON.parse(fs.readFileSync(file, 'utf8')));
+for (const field of ['version', 'build', 'summary', 'news']) {
+  if (built[field] !== staged[field]) throw new Error(`stage-web: cached version.json differs in ${field}; rebuild the game`);
+}
+JS
 
 mkdir -p "$DIR/play"
-for f in index.html sw.js pwa.js sigil-wasm-bridges.js sigil-wasm-bridges.json; do cp "$WEB/$f" "$DIR/play/$f"; done
+for f in index.html sw.js pwa.js version.json sigil-wasm-bridges.js sigil-wasm-bridges.json; do cp "$WEB/$f" "$DIR/play/$f"; done
 cp -r "$WEB/assets" "$DIR/play/assets"
 # what the build left beside the page that is not staged, said out loud: a
 # new file the page loads would show here first (and in verify-site's play
 # leg as a failed request)
-SKIPPED="$(cd "$WEB" && ls -A | grep -v -x -E 'index.html|sw.js|pwa.js|sigil-wasm-bridges.js|sigil-wasm-bridges.json|assets|harkfell.wasm|bin|native|_headers|asyncify-onlylist.generated.txt|BUILD-SHA|BUILD-SIGIL|.sigil-package-cache' || true)"
+SKIPPED="$(cd "$WEB" && ls -A | grep -v -x -E 'index.html|sw.js|pwa.js|version.json|sigil-wasm-bridges.js|sigil-wasm-bridges.json|assets|harkfell.wasm|bin|native|_headers|asyncify-onlylist.generated.txt|BUILD-SHA|BUILD-SIGIL|.sigil-package-cache' || true)"
 [ -z "$SKIPPED" ] || echo "stage-web: NOT staged from $WEB (unknown to this script): $(echo $SKIPPED)"
 
 SHA16="$(sha256sum "$WEB/harkfell.wasm" | cut -c1-16)"

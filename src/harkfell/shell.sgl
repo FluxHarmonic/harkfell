@@ -276,6 +276,7 @@
 
     (define (shell-boot!)
       (set-store-app! "harkfell")
+      (settings-update-reset!)
       (set! *settings* (map (lambda (st)
                               (let* ((d (store-read-datum (setting-key st))))
                                 (cons (setting-id st)

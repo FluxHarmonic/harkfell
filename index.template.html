@@ -61,6 +61,9 @@
         });
         urls.push("assets/mark/mark@" + k + ".png");
       });
+      // D38's runtime italic face uses the same held-byte path, so the
+      // long cue-rendering frames cannot cancel its first fetch.
+      urls.push("assets/fonts/IMFeENit28P.ttf");
       var held = {};
       var baseFetch = window.fetch.bind(window);
       urls.forEach(function (u) {
@@ -75,12 +78,12 @@
         if (held[u]) {
           var p = held[u];
           delete held[u];                      // once: a later ask goes to the network
-          return p.then(function (buf) { return new Response(buf, { status: 200, headers: { "content-type": "image/png" } }); },
+          return p.then(function (buf) { return new Response(buf, { status: 200, headers: { "content-type": /\.ttf$/.test(u) ? "font/ttf" : "image/png" } }); },
                         function () { return baseFetch(input, init); });
         }
         return baseFetch(input, init);
       };
-      if (params.has("trace")) console.log("harkfell: page preload " + urls.length + " images at x" + ks.join(",x") + " " + kind);
+      if (params.has("trace")) console.log("harkfell: page preload " + urls.length + " resources at x" + ks.join(",x") + " " + kind);
     })();
   </script>
   <!-- version: "__VERSION__" -->

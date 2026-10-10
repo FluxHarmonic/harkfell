@@ -30,11 +30,16 @@
                   (settings-defaults table-settings-defaults)
                   (settings-value table-settings-value)
                   (settings-with table-settings-with)
-                  (settings-step table-settings-step)))
+                  (settings-step table-settings-step))
+          (substratic store kv)
+          (substratic update check)
+          (substratic update version))
 
   (export setting setting? setting-id setting-name setting-values setting-default setting-key
           SETTINGS SETTINGS-TABLE SETTING-IDS setting-ref setting-value?
-          settings-defaults settings-value settings-with settings-step)
+          settings-defaults settings-value settings-with settings-step
+          settings-update-info! settings-update-waiting! settings-update-lines
+          settings-update-shown! settings-update-reset!)
 
   (begin
     ;; Built with list, not quoted (Crash's wasm literal hazard).
@@ -51,4 +56,46 @@
     (define (settings-defaults) (table-settings-defaults SETTINGS-TABLE))
     (define (settings-value s id) (table-settings-value SETTINGS-TABLE s id))
     (define (settings-with s id v) (table-settings-with SETTINGS-TABLE s id v))
-    (define (settings-step s id delta) (table-settings-step SETTINGS-TABLE s id delta))))
+    (define (settings-step s id delta) (table-settings-step SETTINGS-TABLE s id delta))
+
+    ;; D38: Substratic owns parsing and persistence; Harkfell owns the voice
+    ;; and when a launch counts as seen. Keep the launch's announcement in
+    ;; memory after marking it, until this process ends.
+    (define *updater* #f)
+    (define *last-version* #f)
+    (define *update-waiting* #f)
+    (define *update-shown* #f)
+
+    (define (settings-update-reset!)
+      (set! *updater* #f)
+      (set! *last-version* #f)
+      (set! *update-waiting* #f)
+      (set! *update-shown* #f))
+
+    (define (settings-update-info! text)
+      (let ((info (parse-version-info text)))
+        (and info
+             (begin
+               (unless *updater*
+                 (set! *updater* (make-updater (version-info-version info) 'web))
+                 (set! *last-version*
+                       (or (updater-last-seen)
+                           ;; Saves predate D38. A returning player has seen
+                           ;; the first public release; a fresh install has not.
+                           (and (store-get "save") "0.1.0"))))
+               (updater-set-info! *updater* text)))))
+
+    (define (settings-update-waiting! on)
+      (set! *update-waiting* (and on #t)))
+
+    (define (settings-update-lines)
+      (list (and *update-waiting*
+                 "A new version is ready. Reload to step into it.")
+            (and *updater*
+                 (eq? (updater-status *updater* *last-version*) 'new-in)
+                 (updater-line *updater* 'new-in))))
+
+    (define (settings-update-shown!)
+      (when (and *updater* (not *update-shown*))
+        (when (updater-mark-seen! *updater*)
+          (set! *update-shown* #t))))))

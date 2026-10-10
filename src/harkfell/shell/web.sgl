@@ -98,6 +98,7 @@
           (engine body)
           (harkfell world)
           (harkfell shell)
+          (harkfell settings)
           (harkfell replay)
           (harkfell envelope)
           (harkfell feel)
@@ -107,7 +108,7 @@
           (substratic store kv)
           (harkfell images)
           (harkfell shell web-images)
-          (only (harkfell title) start-words-landed?))
+          (only (harkfell title) start-words-landed? start-update-hit?))
 
   (export web-main web-dispatch)
 
@@ -195,6 +196,23 @@
 
     (define (web-dispatch type payload)
       (cond ((string=? type "frame") (web-tick payload) 0)
+            ((string=? type "update-info")
+             (if (settings-update-info! payload) 1 0))
+            ((string=? type "update")
+             (settings-update-waiting! (string=? payload "waiting"))
+             0)
+            ((string=? type "update-tap")
+             (let ((xy (fields payload)))
+               (if (and (= (length xy) 2) (car xy) (cadr xy)
+                        (memq (shell-frame-phase) '(start-in start))
+                        (start-update-hit? (car xy) (cadr xy)))
+                   1
+                   0)))
+            ((string=? type "update-lines")
+             (for-each (lambda (line)
+                         (when line (say "update-line" line)))
+                       (settings-update-lines))
+             0)
             ;; ?playtest (the page forwards every parameter as ("param", ...)),
             ;; then the playtest's own events and F1/F2, and every key while a
             ;; report is open

@@ -48,17 +48,22 @@
           (sigil list)
           (sigil string)
           (sigil graphics)
+          (sigil graphics font)
           (harkfell view)
           (harkfell palette)
           (harkfell render)
           (harkfell atlas)
           (harkfell content)
           (harkfell draw)
-          (harkfell images))
+          (harkfell images)
+          (harkfell settings))
+
+  (cond-expand
+    (wasm (import (sigil browser gles3))))
 
   (export title-set-content! start-reset! draw-start! draw-card! draw-reveal!
           card-fade CARD-SECONDS start-moths TEXT-LAYOUT type-scale
-          start-over-hit? over-id WORDS-FADE-S WORDS-STAGGER-S start-words-landed?)
+          start-over-hit? start-update-hit? over-id WORDS-FADE-S WORDS-STAGGER-S start-words-landed?)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -79,7 +84,7 @@
     (define TEXT-LAYOUT
       (list (list "listen" 200 84 (quote fur-2))
             (list "step" 200 101 (quote fur-2))
-            (list "over" 200 122 (quote fur-2))))
+            (list "over" 200 148 (quote fur-2))))
     ;; --- the palette ------------------------------------------------------------------------
 
     (define *content* #f)
@@ -278,7 +283,82 @@
           (- 1.0 alpha))
         (present-view! f)
         (set-blend-mode 'normal)
-        (draw-start-words! f alpha secs kind over)))
+        (draw-start-words! f alpha secs kind over)
+        (draw-start-updates! f alpha secs)))
+
+    ;; D38: IM Fell italic at the window's own resolution. The font is
+    ;; loaded once, after the start words land and the boot's long frames
+    ;; have finished. Native keeps these states empty in this release.
+    (define *update-face* #f)
+    (define *update-fetch* #f)
+    (define *update-fonts* '())
+    (define *update-rect* #f)
+
+    (cond-expand
+      (wasm
+       (define (update-face!)
+         (unless *update-fetch*
+           (set! *update-fetch* (gles3-fetch-image "assets/fonts/IMFeENit28P.ttf")))
+         (when (and (not *update-face*) (gles3-image-ready? *update-fetch*))
+           (set! *update-face*
+                 (load-typeface-from-memory (gles3-image-ptr *update-fetch*)
+                                            (gles3-image-size *update-fetch*))))
+         *update-face*))
+      (else
+       (define (update-face!)
+         (unless *update-face*
+           (set! *update-face* (load-typeface "assets/fonts/IMFeENit28P.ttf")))
+         *update-face*)))
+
+    (define (update-font! size)
+      (let ((entry (assv size *update-fonts*)))
+        (if entry
+            (cdr entry)
+            (let ((face (update-face!)))
+              (and face
+                   (let ((font (make-font face size)))
+                     (set! *update-fonts* (cons (cons size font) *update-fonts*))
+                     font))))))
+
+    (define (draw-start-updates! f alpha secs)
+      (set! *update-rect* #f)
+      (when *words-since*
+        (let* ((s (/ (fit-w f) (* 1.0 VIEW-W)))
+               (a (* 0.55 alpha
+                     (ramp (/ (- secs *words-since* (* 2 WORDS-STAGGER-S)) WORDS-FADE-S))))
+               (lines (settings-update-lines))
+               (font (and (or (car lines) (cadr lines)) (update-font! (* 9.5 s)))))
+          (when (> a 0.0)
+            (when (or font (not (cadr lines)))
+              (settings-update-shown!))
+            (when font
+              (let ((rgb (vector-ref (rgb) (slot-of 'fur-2))))
+                (set-color (car rgb) (cadr rgb) (caddr rgb) a))
+              (let loop ((lines lines) (y 116) (i 0))
+                (when (pair? lines)
+                  (when (car lines)
+                    (let* ((text (car lines))
+                           ;; A long summary shrinks to fit, staying one quiet line.
+                           (width (text-width font text))
+                           (font (if (> width (* 376 s))
+                                     (update-font! (* 9.5 s (/ (* 376 s) width)))
+                                     font))
+                           (width (text-width font text))
+                           (x (- (+ (fit-x f) (* 200 s)) (/ width 2)))
+                           (baseline (+ (fit-y f) (* y s))))
+                      (draw-text font text x baseline)
+                      (when (= i 0)
+                        (set! *update-rect*
+                              (list (- x (* 4 s)) (- baseline (* 10 s))
+                                    (+ width (* 8 s)) (* 14 s))))))
+                  (loop (cdr lines) (+ y 14) (+ i 1)))))))))
+
+    (define (start-update-hit? x y)
+      (and *update-rect*
+           (>= x (car *update-rect*))
+           (< x (+ (car *update-rect*) (caddr *update-rect*)))
+           (>= y (cadr *update-rect*))
+           (< y (+ (cadr *update-rect*) (cadddr *update-rect*)))))
 
     ;; The start screen's words (playtest 1, #1: on the phone the second
     ;; line came before the first, each drawn as its image landed). Every
