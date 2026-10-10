@@ -1,0 +1,24 @@
+;; A dry chalk ledge with two flowstone columns, the snail's floor, above a
+;; dark seep pool with a tooth under its drip and a rest under G's shaft.
+(room
+  region: pipes
+  at: (1 7)
+  title: "Chalk Rest"
+  intent: "a dry ledge overlooks a dark seep pool where a snail moves slowly: a breath"
+  bed: (wind 0.1 water 0.8 pipes 0.4 drone 0.5)
+  light: 0.33
+  grid:
+  ("##################%  %###"
+   "##################%  %###"
+   "## |# |####  ##  #%  %###"
+   "#  |  | ##    #   %  % ##"
+   "#  |  |       #   %  %  #"
+   "#  |  |           %  %  #"
+   "##########              #"
+   "###########        ##    "
+   "###########~~~#~~~~##~#  "
+   "###########~~~#~~~~##~###"
+   "#########################")
+  things: ((lantern-moth at: (12 4) count: 3 drawn: 3)
+           (stone-snail at: (5 5)))
+  decor: auto)

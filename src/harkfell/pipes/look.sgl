@@ -1,0 +1,616 @@
+;;; Limestone art and local, non-harmonic tells. All coordinates are room
+;;; pixels; tells use actual authored openings and the fixed hazard cells.
+(define-library (harkfell pipes look)
+  (import (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (harkfell content)
+          (harkfell cues)
+          (harkfell palette)
+          (harkfell render)
+          (harkfell atlas))
+
+  (export PIPES-DARK pipes-backdrop-bytes pipes-backdrop-key draw-pipes-solids!
+          stone-bytes draw-pipes-panels! draw-pipes-cues!
+          draw-pipes-lights! draw-upward-drips! draw-aurora!)
+
+  (begin
+    (define (pixel x) (exact (floor x)))
+
+    ;; The first four slots are cave walls, rather than an outdoor sky.
+    ;; The generic sky-1 -> ground-2 would brighten wall-2 at step two.
+    (define PIPES-DARK
+      (cons (cons 'sky-1 'ground-1) DARK))
+
+    ;; --- shared pattern helpers -------------------------------------------
+
+    (define BAYER4 (vector 0 8 2 10 12 4 14 6 3 11 1 9 15 7 13 5))
+    (define (bayer x y)
+      (/ (+ 0.5 (vector-ref BAYER4 (+ (* 4 (modulo y 4)) (modulo x 4)))) 16.0))
+
+    ;; A small deterministic hash of two integers and a salt: 0..65520.
+    ;; Every product stays well inside a fixnum.
+    (define (hash3 a b k)
+      (let* ((h (modulo (+ (* (modulo a 65521) 7919) (* (modulo b 65521) 104729)
+                           (* k 31337) 17)
+                        65521))
+             (h (modulo (+ (* h h) 12345) 65521)))
+        (modulo (+ (* h 40503) k) 65521)))
+
+    (define (put! bv x y s)
+      (let ((o (* 4 (+ x (* y VIEW-W)))))
+        (bytevector-u8-set! bv o s)
+        (bytevector-u8-set! bv (+ o 3) 255)))
+
+    ;; --- the far wall: an organ front --------------------------------------
+    ;; Ranks of distant pipes in towers and flats, each with a rim, a
+    ;; highlight down its lit side and a mouth near its foot; limestone
+    ;; drapery hangs from the roof between them. Cave-wall slots only, and
+    ;; dark: the near limestone reads in front of it. SEED picks one of a
+    ;; few arrangements so neighbouring rooms do not repeat the same wall.
+    (define (pipes-backdrop-bytes . seed)
+      (let* ((k (if (pair? seed) (car seed) 0))
+             (bv (make-bytevector (* 4 VIEW-W VIEW-H) 0))
+             (s0 (slot-of 'sky-1)) (s1 (slot-of 'sky-2))
+             (s2 (slot-of 'sky-3)) (s3 (slot-of 'sky-4))
+             (floor-y 150))
+        ;; the wall itself
+        (let rows ((y 0))
+          (when (< y VIEW-H)
+            (let cols ((x 0))
+              (when (< x VIEW-W)
+                (put! bv x y s0)
+                (cols (+ x 1))))
+            (rows (+ y 1))))
+        ;; drapery: tapering spikes from the roof
+        (let spikes ((x 0))
+          (when (< x VIEW-W)
+            (let* ((h (hash3 x k 3))
+                   (len (+ 3 (modulo h 22)))
+                   (w (+ 1 (modulo (quotient h 7) 3))))
+              (when (< (modulo (quotient h 13) 5) 2)
+                (let down ((y 0))
+                  (when (< y len)
+                    (let ((half (exact (floor (* w (- 1.0 (/ y len)))))))
+                      (let across ((dx (- half)) )
+                        (when (<= dx half)
+                          (let ((xx (+ x dx)))
+                            (when (< -1 xx VIEW-W) (put! bv xx y s1)))
+                          (across (+ dx 1)))))
+                    (down (+ y 1)))))
+              (spikes (+ x 3 (modulo h 5))))))
+        ;; the far ledge the pipes stand on
+        (let cols ((x 0))
+          (when (< x VIEW-W)
+            (put! bv x floor-y s2)
+            (let below ((y (+ floor-y 1)))
+              (when (< y VIEW-H)
+                (put! bv x y (if (< (bayer x y) 0.3) s1 s0))
+                (below (+ y 1))))
+            (cols (+ x 1))))
+        ;; towers and flats: groups of pipes whose heights rise to the
+        ;; middle (a tower) or fall to it (a flat)
+        (let groups ((gx -6) (g 0))
+          (when (< gx VIEW-W)
+            (let* ((gh (hash3 g k 21))
+                   (n (if (= 0 (modulo (quotient gh 23) 3)) 0 (+ 3 (modulo gh 4))))
+                   (tower? (even? (quotient gh 5)))
+                   (base (+ 36 (modulo (quotient gh 11) 38)))
+                   (step (+ 4 (modulo (quotient gh 17) 5))))
+              (let pipes ((i 0) (x gx))
+                (if (< i n)
+                    (let* ((w (+ 5 (modulo (hash3 g (+ i 1) (+ k 5)) 4)))
+                           (mid (/ (- n 1) 2.0))
+                           (d (abs (- i mid)))
+                           (top (exact (floor (if tower? (+ base (* step d)) (- (+ base (* step mid)) (* step d))))))
+                           (mouth (- floor-y 18 (modulo (hash3 g i 9) 6))))
+                      (let rows ((y top))
+                        (when (< y floor-y)
+                          (let cols ((dx 0))
+                            (when (< dx w)
+                              (let* ((xx (+ x dx))
+                                     (u (/ (+ dx 0.5) w))
+                                     (s (cond ((= y top) (if (and (= dx 1) (even? (+ g i))) s3 s2))
+                                              ((= y (+ top 1)) s0)
+                                              ((and (>= y mouth) (< y (+ mouth 3)) (> u 0.25) (< u 0.75))
+                                               (if (= y mouth) s2 s0))
+                                              ((> y (- floor-y 6))
+                                               ;; the foot tapers to the ledge
+                                               (if (< (abs (- u 0.5)) (* 0.5 (/ (- floor-y y) 6.0))) s1 #f))
+                                              ((< u 0.18) s0)
+                                              ((< u 0.34) s2)
+                                              ((< u 0.8) s1)
+                                              (else s0))))
+                                (when (and s (< -1 xx VIEW-W)) (put! bv xx y s)))
+                              (cols (+ dx 1))))
+                          (rows (+ y 1))))
+                      (pipes (+ i 1) (+ x w 1)))
+                    (groups (+ x 4 (modulo (quotient gh 3) 9) (if (= n 0) (+ 24 (modulo gh 30)) 0)) (+ g 1)))))))
+        bv))
+
+    ;; --- the near limestone --------------------------------------------------
+    ;; The grid's # and % are drawn from one shared STONE texture, built
+    ;; once, whose patterns repeat every 320 x 160 px. A cell takes the
+    ;; 16 x 16 window at its GLOBAL pixel (modulo the period), so a carved
+    ;; flute, a bedding plane or a fractured course runs on from cell to cell
+    ;; and room to room instead of repeating one tile. # is carved pipe:
+    ;; vertical flutes that shift at each bedding plane, wet streaks and rare
+    ;; ochre; a cell with stone all round uses a quieter copy so silhouettes
+    ;; lead; a column of # one to three cells wide is one or two whole pipes.
+    ;; % is fractured limestone: blocks of uneven width in uneven courses,
+    ;; with dark joints (the holds). Exposed edges get a cream top lip, a
+    ;; dark rim at the sides, and a lip, a shadow and drips underneath.
+    ;; One texture for the region keeps the sampler pool and the per-frame
+    ;; draw budget where the tiles had them.
+
+    (define PERIOD-X 320)
+    (define PERIOD-Y 160)
+    (define STONE-W (+ PERIOD-X 16))
+    (define BAND (+ PERIOD-Y 16))
+    ;; the four bands of the stone texture, top to bottom
+    (define ROCK-Y 0)
+    (define DEEP-Y BAND)
+    (define ROUGH-Y (* 2 BAND))
+    (define PIPE-Y (* 3 BAND))
+    (define DRIP-Y (* 4 BAND))
+    (define STONE-H (+ (* 4 BAND) 1))
+
+    ;; widths of the flutes in each 64 px run (each sums to 64; 5 runs a period)
+    (define FLUTES
+      (vector (list 9 12 10 14 8 11) (list 16 10 12 8 18) (list 11 11 9 13 10 10)
+              (list 14 8 12 10 20) (list 10 13 9 12 8 12)))
+    ;; the bedding planes in a period (sums to 160): the flutes shift at each
+    (define BEDS (vector (list 52 38 70)))
+    ;; heights of the fractured courses in each 40 px band (each sums to 40)
+    (define COURSES
+      (vector (list 8 11 7 14) (list 10 9 12 9) (list 13 8 8 11) (list 7 12 10 11)))
+    ;; widths of the fractured blocks in each 64 px run (each sums to 64)
+    (define BLOCKS
+      (vector (list 11 7 14 16 16) (list 9 13 8 18 16) (list 15 10 12 11 16)
+              (list 7 17 9 15 16) (list 20 12 16 16) (list 13 9 26 16)))
+
+    ;; Where g falls in its run of parts, the run's pattern chosen by its
+    ;; index modulo CYCLE (so the whole repeats): (index offset width).
+    (define (part-at v period cycle salt g)
+      (let* ((block (modulo (exact (floor (/ g period))) cycle))
+             (ws (vector-ref v (modulo (hash3 block 0 salt) (vector-length v)))))
+        (let loop ((ws ws) (o (modulo g period)) (i 0))
+          (if (or (null? (cdr ws)) (< o (car ws)))
+              (list (+ (* block 8) i) o (car ws))
+              (loop (cdr ws) (- o (car ws)) (+ i 1))))))
+
+    ;; A flute's tone across its width, lit from the left: 1..4 = ground-1..4.
+    (define (flute-tone u b)
+      (cond ((< u 0.08) 1)
+            ((< u 0.18) 2)
+            ((< u 0.24) 3)
+            ((< u 0.3) (if (< b 0.35) 4 3))
+            ((< u 0.42) 3)
+            ((< u 0.58) (if (< b (- 1.0 (/ (- u 0.42) 0.16))) 3 2))
+            ((< u 0.86) 2)
+            (else (if (< b 0.5) 1 2))))
+
+    ;; One pixel of carved limestone: flute ID at U across its width, BY rows
+    ;; below its bedding plane, in a bed H rows tall. X, Y: periodic pixel.
+    (define (rock-tone id u by h x y b)
+      (let ((tone (flute-tone u b))
+            (streak (+ 6 (modulo (hash3 id 4 7) 26))))
+        (cond ((= by 0) 1)
+              ((= by 1) (if (and (> u 0.12) (< u 0.5)) 4 3))
+              ((= by 2) (max 2 (- tone 1)))
+              ((>= by (- h 1)) (max 1 (- tone 1)))
+              ((and (= 0 (modulo (hash3 id 3 7) 3)) (> u 0.42) (< u 0.62) (< by (+ 3 streak)))
+               (max 1 (- tone 1)))
+              ((and (>= tone 2) (< b 0.5)
+                    (= 0 (modulo (hash3 (quotient x 6) (quotient y 5) 11) 47)))
+               'ochre)
+              (else tone))))
+
+    ;; Narrow columns: the pipe band holds a 16 px pipe at x 0, a 32 px pipe
+    ;; at x 16 and two 24 px pipes at x 48 (for three cells).
+    (define (pipe-tone x y b)
+      (let* ((bed (part-at BEDS PERIOD-Y 1 3 y))
+             (spec (cond ((< x 16) (list 0 16 0))
+                         ((< x 48) (list 16 32 1))
+                         ((< x 72) (list 48 24 2))
+                         (else (list 72 24 3))))
+             (o (- x (car spec))) (w (cadr spec)))
+        (rock-tone (+ 900 (caddr spec)) (/ (+ 0.5 o) w) (cadr bed) (caddr bed) x y b)))
+
+    ;; The stone texture's pixels. Rows and columns are tabulated first (the
+    ;; bed of each row, the flute of each column in each bed, the course and
+    ;; block of each fractured pixel), so a pixel costs a few lookups.
+    (define (stone-bytes)
+      (let* ((bv (make-bytevector (* 4 STONE-W STONE-H) 0))
+             (g (vector (slot-of 'ground-1) (slot-of 'ground-1) (slot-of 'ground-2)
+                        (slot-of 'ground-3) (slot-of 'ground-4)))
+             (ochre (slot-of 'accent))
+             (deep-of (vector 2 2 2 3 3))
+             (set (lambda (x y s)
+                    (let ((o (* 4 (+ x (* y STONE-W)))))
+                      (bytevector-u8-set! bv o s)
+                      (bytevector-u8-set! bv (+ o 3) 255))))
+             (table (lambda (n f) (list->vector (map f (iota n)))))
+             (beds (table PERIOD-Y (lambda (y) (part-at BEDS PERIOD-Y 1 3 y))))
+             (courses (table PERIOD-Y (lambda (y) (part-at COURSES 40 4 5 y))))
+             (ochre-at (table (* 54 32) (lambda (i) (= 0 (modulo (hash3 (modulo i 54) (quotient i 54) 11) 47)))))
+             (cache (lambda (make)
+                      (let ((seen '()))
+                        (lambda (key)
+                          (let ((e (assv key seen)))
+                            (if e (cdr e)
+                                (let ((v (make key))) (set! seen (cons (cons key v) seen)) v)))))))
+             ;; per bed: each column's #(id u streak? streak-length)
+             (flutes-of
+              (cache (lambda (bid)
+                       (let ((shift (modulo (hash3 bid 0 4) 64)))
+                         (table PERIOD-X
+                                (lambda (x)
+                                  (let* ((f (part-at FLUTES 64 5 1 (modulo (+ x shift) PERIOD-X)))
+                                         (id (hash3 (car f) bid 2)))
+                                    (vector (/ (+ 0.5 (cadr f)) (caddr f))
+                                            (= 0 (modulo (hash3 id 3 7) 3))
+                                            (+ 6 (modulo (hash3 id 4 7) 26))))))))))
+             ;; per course: each column's #(bx width hash)
+             (blocks-of
+              (cache (lambda (cid)
+                       (let ((shift (modulo (hash3 cid 2 6) 64)) (salt (+ 6 (modulo cid 7))))
+                         (table PERIOD-X
+                                (lambda (x)
+                                  (let ((blk (part-at BLOCKS 64 5 salt (modulo (+ x shift) PERIOD-X))))
+                                    (vector (cadr blk) (caddr blk) (hash3 (car blk) cid 8))))))))))
+        (let rows ((y 0))
+          (when (< y BAND)
+            (let* ((py (modulo y PERIOD-Y))
+                   (bed (vector-ref beds py)) (by (cadr bed)) (bh (caddr bed))
+                   (flutes (flutes-of (car bed)))
+                   (course (vector-ref courses py))
+                   (cid (car course)) (cy (cadr course)) (ch (caddr course))
+                   (blocks (blocks-of cid))
+                   (lower (> cy (quotient ch 2)))
+                   (joint (if lower 1 0)))
+              (let cols ((x 0))
+                (when (< x STONE-W)
+                  (let* ((px (modulo x PERIOD-X))
+                         (b (bayer px py))
+                         ;; carved
+                         (fl (vector-ref flutes px))
+                         (u (vector-ref fl 0))
+                         (tone (flute-tone u b))
+                         (rock (cond ((= by 0) 1)
+                                     ((= by 1) (if (and (> u 0.12) (< u 0.5)) 4 3))
+                                     ((= by 2) (max 2 (- tone 1)))
+                                     ((>= by (- bh 1)) (max 1 (- tone 1)))
+                                     ((and (vector-ref fl 1) (> u 0.42) (< u 0.62) (< by (+ 3 (vector-ref fl 2))))
+                                      (max 1 (- tone 1)))
+                                     ((and (>= tone 2) (< b 0.5)
+                                           (vector-ref ochre-at (+ (quotient px 6) (* 54 (quotient py 5)))))
+                                      0)
+                                     (else tone)))
+                         ;; fractured
+                         (bk (vector-ref blocks px))
+                         (bx (vector-ref bk 0)) (wb (vector-ref bk 1)) (hb (vector-ref bk 2))
+                         (wet (= 0 (modulo hb 4)))
+                         (rough (cond ((= cy 0) 1)
+                                      ((= bx joint) 1)
+                                      ((and lower (= bx 0)) 2)
+                                      ((and (= 1 (modulo hb 5)) (= (- bx cy) (quotient wb 2))) 1)
+                                      ((= cy 1) (if wet 2 (if (< bx (* 0.6 wb)) 4 3)))
+                                      ((= bx (+ joint 1)) (if wet 2 3))
+                                      ((>= cy (- ch 1)) (if (< b 0.5) 1 2))
+                                      ((>= bx (- wb 1)) 2)
+                                      (wet (if (< b 0.5) 1 2))
+                                      ((< cy (quotient ch 3)) (if (< b 0.6) 3 2))
+                                      (else (if (< b 0.2) 3 2)))))
+                    (set x (+ ROCK-Y y) (if (= rock 0) ochre (vector-ref g rock)))
+                    (set x (+ DEEP-Y y) (vector-ref g (vector-ref deep-of rock)))
+                    (set x (+ ROUGH-Y y) (vector-ref g rough))
+                    (when (< x 96)
+                      (let ((p (pipe-tone x py b)))
+                        (set x (+ PIPE-Y y) (if (eq? p 'ochre) ochre (vector-ref g p))))))
+                  (cols (+ x 1)))))
+            (rows (+ y 1))))
+        ;; the drip strip: one row, a drop under about one column in five
+        (let drips ((x 0))
+          (when (< x STONE-W)
+            (when (= 0 (modulo (hash3 (modulo x PERIOD-X) 5 13) 5))
+              (set x DRIP-Y (vector-ref g 2)))
+            (drips (+ x 1))))
+        bv))
+
+    (define *stone* #f)
+    (define (stone-texture)
+      (unless *stone*
+        (set! *stone* (make-texture-from-pixels STONE-W STONE-H (stone-bytes) 'nearest)))
+      *stone*)
+
+    ;; Draw the room's # and % into the current (slot) target. KIND-AT:
+    ;; local (c r), -1..25 and -1..11, to the material there; GX0, GY0: the
+    ;; room's top-left global pixel.
+    ;; Draw the room's # and % into the current (slot) target. KIND-AT:
+    ;; local (c r), -1..25 and -1..11, to the material there; GX0, GY0: the
+    ;; room's top-left global pixel. Like cells merge into runs: one stone
+    ;; window per run of a row, two rects per lip or rim run and one drip
+    ;; strip per underside, so the region costs about what its tiles did
+    ;; (some rooms more, some less; the overview bakes a region in one frame).
+    (define (draw-pipes-solids! rm kind-at gx0 gy0)
+      (let* ((tex (stone-texture))
+             (cols (+ ROOM-COLS 2))
+             (kinds (make-vector (* cols (+ ROOM-ROWS 2)) #f))
+             (kind (lambda (c r) (vector-ref kinds (+ (+ c 1) (* (+ r 1) cols)))))
+             (solid? (lambda (c r) (memq (kind c r) '(rock rough))))
+             (cells (make-vector (* ROOM-COLS ROOM-ROWS) #f))
+             (cell (lambda (c r) (vector-ref cells (+ c (* r ROOM-COLS)))))
+             (rect! (lambda (s x y w h) (paint-slot! (slot-of s)) (draw-filled-rect x y w h)))
+             ;; W px of a band from periodic column SX, split at the wrap
+             (strip! (lambda (x y w h sx sy)
+                       (let loop ((x x) (w w) (sx sx))
+                         (when (> w 0)
+                           (let ((seg (min w (- STONE-W sx))))
+                             (set-color 1.0 1.0 1.0 1.0)
+                             (draw-texture-region tex x y seg h sx sy seg h)
+                             (loop (+ x seg) (- w seg) (modulo (+ sx seg) PERIOD-X)))))))
+             ;; (emit first last key) for each maximal run of equal, true keys
+             (runs (lambda (n key emit)
+                     (let loop ((i 0) (start #f) (k #f))
+                       (let ((ki (and (< i n) (key i))))
+                         (if (and start (equal? ki k))
+                             (loop (+ i 1) start k)
+                             (begin
+                               (when start (emit start (- i 1) k))
+                               (when (< i n) (loop (+ i 1) (and ki i) ki)))))))))
+        (let fill ((r -1))
+          (when (<= r ROOM-ROWS)
+            (let cl ((c -1))
+              (when (<= c ROOM-COLS)
+                (vector-set! kinds (+ (+ c 1) (* (+ r 1) cols)) (kind-at c r))
+                (cl (+ c 1))))
+            (fill (+ r 1))))
+        ;; each stone cell: #(kind up dn lf rt deep pipe-sx)
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (let cl ((c 0))
+              (when (< c ROOM-COLS)
+                (let ((k (kind c r)))
+                  (when (memq k '(rock rough))
+                    ;; water above covers a top: no cream lip on a pool's floor
+                    (let* ((up (not (or (solid? c (- r 1)) (eq? (kind c (- r 1)) 'water))))
+                           (dn (not (solid? c (+ r 1))))
+                           (lf (not (solid? (- c 1) r))) (rt (not (solid? (+ c 1) r)))
+                           (deep (and (not (or up dn lf rt))
+                                      (solid? (- c 1) (- r 1)) (solid? (+ c 1) (- r 1))
+                                      (solid? (- c 1) (+ r 1)) (solid? (+ c 1) (+ r 1))))
+                           (run-l (let l ((i c)) (if (and (> i 0) (eq? (kind (- i 1) r) 'rock)) (l (- i 1)) i)))
+                           (run-r (let l ((i c)) (if (and (< i (- ROOM-COLS 1)) (eq? (kind (+ i 1) r) 'rock)) (l (+ i 1)) i)))
+                           (n (+ 1 (- run-r run-l)))
+                           (pipe? (and (eq? k 'rock) (<= n 3)
+                                       (not (solid? (- run-l 1) r)) (not (solid? (+ run-r 1) r)))))
+                      (vector-set! cells (+ c (* r ROOM-COLS))
+                                   (vector k up dn lf rt deep
+                                           (and pipe? (+ (case n ((1) 0) ((2) 16) (else 48))
+                                                         (* 16 (- c run-l)))))))))
+                (cl (+ c 1))))
+            (rows (+ r 1))))
+        (set-blend-mode 'normal)
+        (set-color 1.0 1.0 1.0 1.0)
+        ;; the stone itself, and the lips along each row
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (let* ((y (* 16 r))
+                   (py (modulo (+ gy0 y) PERIOD-Y))
+                   (h-of (lambda (v) (if (vector-ref v 2) 13 16))))
+              (let cl ((c 0))
+                (when (< c ROOM-COLS)
+                  (let ((v (cell c r)))
+                    (when (and v (vector-ref v 6))
+                      (set-color 1.0 1.0 1.0 1.0)
+                      (draw-texture-region tex (* 16 c) y 16 (h-of v)
+                                           (vector-ref v 6) (+ PIPE-Y py) 16 (h-of v))))
+                  (cl (+ c 1))))
+              (runs ROOM-COLS
+                    (lambda (c)
+                      (let ((v (cell c r)))
+                        (and v (not (vector-ref v 6))
+                             (list (cond ((eq? (vector-ref v 0) 'rough) ROUGH-Y)
+                                         ((vector-ref v 5) DEEP-Y)
+                                         (else ROCK-Y))
+                                   (h-of v)))))
+                    (lambda (c0 c1 key)
+                      (strip! (* 16 c0) y (* 16 (+ 1 (- c1 c0))) (cadr key)
+                              (modulo (+ gx0 (* 16 c0)) PERIOD-X) (+ (car key) py))))
+              (runs ROOM-COLS
+                    (lambda (c) (let ((v (cell c r))) (and v (vector-ref v 1))))
+                    (lambda (c0 c1 key)
+                      (let ((w (* 16 (+ 1 (- c1 c0)))))
+                        (rect! 'ground-4 (* 16 c0) y w 1)
+                        (rect! 'ground-3 (* 16 c0) (+ y 1) w 1))))
+              (runs ROOM-COLS
+                    (lambda (c) (let ((v (cell c r))) (and v (vector-ref v 2) (vector-ref v 0))))
+                    (lambda (c0 c1 k)
+                      (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))))
+                        (rect! (if (eq? k 'rock) 'ground-4 'ground-3) x (+ y 13) w 1)
+                        (rect! 'ground-1 x (+ y 14) w 1)
+                        (set-color 1.0 1.0 1.0 1.0)
+                        (strip! x (+ y 15) w 1 (modulo (+ gx0 x) PERIOD-X) DRIP-Y)))))
+            (rows (+ r 1))))
+        ;; the rims down each column's exposed sides
+        (let cl ((c 0))
+          (when (< c ROOM-COLS)
+            (let ((x (* 16 c))
+                  (height (lambda (r0 r1) (- (* 16 (+ 1 (- r1 r0))) (if (vector-ref (cell c r1) 2) 3 0)))))
+              (runs ROOM-ROWS
+                    (lambda (r) (let ((v (cell c r))) (and v (vector-ref v 3) (vector-ref v 0))))
+                    (lambda (r0 r1 k)
+                      (rect! 'ground-1 x (* 16 r0) 1 (height r0 r1))
+                      (rect! (if (eq? k 'rock) 'ground-4 'ground-3) (+ x 1) (* 16 r0) 1 (height r0 r1))))
+              (runs ROOM-ROWS
+                    (lambda (r) (let ((v (cell c r))) (and v (vector-ref v 4) #t)))
+                    (lambda (r0 r1 k)
+                      (rect! 'ground-1 (+ x 15) (* 16 r0) 1 (height r0 r1))
+                      (rect! 'ground-2 (+ x 14) (* 16 r0) 1 (height r0 r1)))))
+            (cl (+ c 1))))))
+
+    ;; Which far wall a room shows: three arrangements, by position.
+    (define (pipes-backdrop-key rm)
+      (case (modulo (+ (* 2 (room-x rm)) (room-y rm)) 3)
+        ((0) 'pipes-0) ((1) 'pipes-1) (else 'pipes-2)))
+
+    (define (slot-rect! name x y w h)
+      (paint-slot! (slot-of name))
+      (draw-filled-rect x y w h))
+
+    ;; The incisions have no captions or route instructions. Their tiny
+    ;; points are drawn separately so each keeps its fixed harmonic colour.
+    (define (draw-pipes-panels! rm)
+      (for-each
+        (lambda (thing)
+          (let* ((at (thing-at thing))
+                 (image (thing-kw thing "image"))
+                 (i (and (symbol? image)
+                         (atlas-index
+                           (string-append "pipes/mural-" (symbol->string image)))))
+                 (x (* 16 (car at)))
+                 (y (+ 20 (* 16 (cdr at)))))
+            (when i
+              (set-color 1.0 1.0 1.0 1.0)
+              (atlas-draw! i x y 1)
+              (case image
+                ((bearers)
+                 (let loop ((hs '(h2 h3 h4 h5)) (k 0))
+                   (unless (null? hs)
+                     (slot-rect! (car hs) (+ x 12 (* k 13)) (+ y 5 (* k 3)) 2 2)
+                     (loop (cdr hs) (+ k 1)))))
+                ((empty-hands)
+                 (let loop ((hs '(h2 h3 h4)) (k 0))
+                   (unless (null? hs)
+                     (slot-rect! (car hs) (+ x 13 (* k 14)) (+ y 13) 2 2)
+                     (loop (cdr hs) (+ k 1))))
+                 (slot-rect! 'h5 (+ x 55) (+ y 18) 1 2))
+                ((violet-well)
+                 (slot-rect! 'h7 (+ x 18) (+ y 12) 28 1)
+                 (slot-rect! 'h7 (+ x 18) (+ y 12) 1 9)
+                 (slot-rect! 'h7 (+ x 45) (+ y 12) 1 9))
+                (else #f)))))
+        (room-things-of rm 'mural)))
+
+    ;; Cream edge marks never advertise a closed wall. Their shape points
+    ;; into the real opening; neither they nor static require moth arrival.
+    (define (each-exit rm draw!)
+      (for-each
+        (lambda (exit)
+          (let ((side (car exit))
+                (x (+ 8 (* 16 (cadr exit))))
+                (y (+ 8 (* 16 (caddr exit)))))
+            (draw! side
+                   (case side ((west) 2) ((east) (- VIEW-W 3)) (else x))
+                   (case side ((north) 2) ((south) (- VIEW-H 3)) (else y)))))
+        (room-exits rm)))
+
+    (define (draw-pipes-cues! rm t)
+      (when (eq? (room-region rm) 'pipes)
+        (each-exit rm
+          (lambda (side x y)
+            (slot-rect! 'ground-4 x y 1 1)
+            (case side
+              ((west east)
+               (slot-rect! 'ground-3 x (- y 3) 1 2)
+               (slot-rect! 'ground-3 x (+ y 2) 1 2))
+              (else
+               (slot-rect! 'ground-3 (- x 3) y 2 1)
+               (slot-rect! 'ground-3 (+ x 2) y 2 1)))))
+        (for-each
+          (lambda (cell)
+            (let ((x (* 16 (car cell)))
+                  (y (* 16 (cdr cell))))
+              ;; The faint rectangular afterglow encloses the entire
+              ;; collision cell, throughout every animation phase.
+              (paint-slot! (slot-of 'ground-2))
+              (draw-rect x y 16 16)
+              (paint-slot! (slot-of 'ground-4))
+              (let hairs ((k 0))
+                (when (< k 4)
+                  (let* ((phase (modulo (+ (quotient t 3) (* k 11) (* x 3)) 19))
+                         (hx (+ x 2 (* k 3)))
+                         (hy (+ y 2 (modulo phase 4)))
+                         (len (+ 4 (modulo phase 7))))
+                    (draw-filled-rect hx hy 1 len)
+                    (draw-filled-rect (+ hx 1) (+ hy 2) 1 1))
+                  (hairs (+ k 1))))))
+          (room-static-cells rm))))
+
+    (define (disc! cx cy radius amount)
+      (paint-light! amount)
+      (let loop ((dy (- radius)))
+        (when (<= dy radius)
+          (let ((half (pixel (sqrt (- (* radius radius) (* dy dy))))))
+            (draw-filled-rect (- cx half) (+ cy dy) (+ 1 (* 2 half)) 1))
+          (loop (+ dy 1)))))
+
+    (define (draw-pipes-lights! rm t)
+      (when (eq? (room-region rm) 'pipes)
+        (each-exit rm
+          (lambda (side x y)
+            (disc! x y 4 0.48)))
+        (for-each
+          (lambda (cell)
+            (let ((x (* 16 (car cell)))
+                  (y (* 16 (cdr cell))))
+              ;; Tiny neutral stone pool; it never illuminates a room.
+              (disc! (+ x 8) (+ y 8) 13 0.14)
+              (paint-light! 0.44)
+              (draw-filled-rect x y 16 16)))
+          (room-static-cells rm))
+        ;; A travelling strip only on the wet edge of a carved lip.
+        (let rows ((r 1))
+          (when (< r ROOM-ROWS)
+            (let cols ((c 1))
+              (when (< c (- ROOM-COLS 1))
+                (when (and (char=? (room-char rm c r) #\#)
+                           (char=? (room-char rm c (+ r 1)) #\~))
+                  (let ((u (modulo (+ (quotient t 8) (* c 5)) 16)))
+                    (paint-light! (+ 0.12 (* 0.06 (sin (* t 0.012)))))
+                    (draw-filled-rect (+ (* 16 c) u) (+ (* 16 r) 15) 2 1)))
+                (cols (+ c 1))))
+            (rows (+ r 1))))))
+
+    ;; Water beading upward is a local wrong thing, never a collectible.
+    ;; The small H7 line belongs to the hint; ordinary seep remains neutral.
+    (define (draw-upward-drips! rm t)
+      (for-each
+        (lambda (cell)
+          (let* ((x (+ 8 (* 16 (car cell))))
+                 (base (+ 14 (* 16 (cdr cell))))
+                 (u (modulo t 180))
+                 (y (- base (quotient u 6))))
+            (slot-rect! 'water x y 1 2)
+            (slot-rect! 'ground-4 x y 1 1)
+            (slot-rect! 'h7 (- x 2) (- base 29) 5 1)
+            (with-additive-blend
+              (disc! x y 3 0.5)
+              (disc! x (- base 29) 4 0.4))))
+        (room-upward-drops rm)))
+
+    ;; A brief third-homecoming: three broad drifting curtains, drawn
+    ;; with whole indexed pixels and a sparse fade instead of blended RGB.
+    (define (draw-aurora! rm age)
+      (when (and (number? age) (<= 0 age) (< age 720)
+                 (eq? (room-region rm) 'hollow)
+                 (= (room-x rm) 4) (= (room-y rm) 3))
+        (let ((fade (min 1.0 (/ age 120.0) (/ (- 720 age) 240.0))))
+          (let bands ((hs '(h2 h3 h4)) (k 0))
+            (unless (null? hs)
+              (paint-slot! (slot-of (car hs)))
+              (let cols ((x 28))
+                (when (< x 372)
+                  (let ((crest (+ 24 (* k 10)
+                                  (pixel (* 8 (sin (+ (* x 0.017) (* age 0.002) k))))
+                                  (pixel (* 3 (sin (+ (* x 0.051) (* age -0.003))))))))
+                    (let rows ((d 0))
+                      (when (< d 12)
+                        (when (< (/ (modulo (+ (* x 5) (* d 3) (* k 7)) 16) 16.0)
+                                 (* fade (- 0.7 (/ d 18.0))))
+                          (draw-filled-rect x (+ crest d) 1 1))
+                        (rows (+ d 1)))))
+                  (cols (+ x 1))))
+              (bands (cdr hs) (+ k 1)))))))))

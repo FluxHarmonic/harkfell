@@ -1,0 +1,25 @@
+;; The blue stone (4,8) under rock in the west wall, Cave Mouth's vestibule
+;; behind it; a chalk hall with a stepped pipe rank, B's shaft (19-20) and
+;; the drop to G (10-11) between the door and E.
+(room
+  region: pipes
+  at: (1 5)
+  title: "Chalk Door"
+  intent: "a cold blue stone faces the black mouth of the glass caves, a way home seen before it opens"
+  bed: (wind 0.1 water 0.2 pipes 0.5 drone 0.5)
+  light: 0.33
+  grid:
+  ("##################%  %###"
+   "##################%  %###"
+   "######  #    #|   %  %###"
+   "####### #    #|   %  %###"
+   "####### #    #|   %  %###"
+   "#####         ||  %  % ##"
+   "#####         |||       #"
+   "    #         |||        "
+   "    o         |||        "
+   "#########%  %############"
+   "#########%  %############")
+  things: ((lantern-moth at: (11 5) count: 3 drawn: 3)
+           (ring-stone at: (4 8) overtone: 4))
+  decor: auto)

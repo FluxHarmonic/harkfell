@@ -51,6 +51,21 @@
   (glw-birch-3 "#f2e8da" "bark lit, warm white")
   (glw-melt "#2f5f8f" "blue ice and dark meltwater")
   (glw-copper "#cc7f45" "the low sun: Glasswood's one warm accent")
+  ;; Pipes: warm dry chalk, black wet joints, cream lips and ochre stains.
+  ;; Slots 0..3 are the distant cave wall; 8..10 are hanging limestone.
+  (pip-wall-1 "#25221f" "distant wet limestone")
+  (pip-wall-2 "#3c3730" "distant pipe shadows")
+  (pip-wall-3 "#625a4d" "distant dry chalk")
+  (pip-wall-4 "#d8cdb4" "neutral cream light and far lips")
+  (pip-stone-1 "#191817" "near-black wet joints")
+  (pip-stone-2 "#514b42" "limestone in shade")
+  (pip-stone-3 "#958b78" "dry chalk and carved walls")
+  (pip-stone-4 "#e5dbc5" "cream edges and static hairs")
+  (pip-curtain-1 "#302c26" "hanging pipes in shadow")
+  (pip-curtain-2 "#716655" "hanging stone")
+  (pip-curtain-3 "#b4a58a" "hanging pipe lips")
+  (pip-seep "#777974" "ordinary clear seep, without harmonic blue")
+  (pip-ochre "#b17d45" "the Pipes' one warm accent: ochre stains")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")

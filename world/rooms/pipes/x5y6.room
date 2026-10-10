@@ -1,0 +1,24 @@
+;; An organ front stands in the west hall; the tall pipe (10-14) has rungs
+;; at rows 6 and 3, a rest alcove east of the lower rung, the high way to L
+;; above, and Q below (11-12).
+(room
+  region: pipes
+  at: (5 6)
+  title: "Pipe Rungs"
+  intent: "narrow stone shelves cross a tall pipe, climbed and dropped through with a place to rest between them"
+  bed: (wind 0.1 water 0.3 pipes 0.7 drone 0.6)
+  light: 0.33
+  grid:
+  ("#########################"
+   "##########               "
+   "#####  ###               "
+   "###|  | ##=====##########"
+   "## || |  #         ######"
+   "# ||| || #         ######"
+   "# |||||| #=====##########"
+   "  ||||||       ##########"
+   "  ||||||       ##########"
+   "##########%  %###########"
+   "##########%  %###########")
+  things: ((lantern-moth at: (12 4) count: 3 drawn: 3))
+  decor: auto)

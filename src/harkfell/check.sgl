@@ -39,6 +39,7 @@
           (engine roomfile)
           (engine worldmap)
           (engine reach)
+          (harkfell passages)
           (harkfell feel)
           (harkfell content))
 
@@ -72,8 +73,8 @@
                (and rm (local->global ct rm (car (caddr s)) (cadr (caddr s))))))))
 
     ;; The standable cells of a room, global.
-    (define (room-standable-cells ct rm)
-      (let ((tm (worldmap-tiles (content-map ct)))
+    (define (room-standable-cells ct rm . tiles)
+      (let ((tm (if (pair? tiles) (car tiles) (worldmap-tiles (content-map ct))))
             (o (room-tile-origin ct rm)))
         (filter (lambda (cell) (standable? tm (car cell) (cdr cell)))
                 (apply append
@@ -179,7 +180,11 @@
     ;; The world's tilemap with the stones keyed to carry open (air).
     (define (tiles-carrying ct carry)
       (let loop ((ss (content-stone-cells ct)) (tm (worldmap-tiles (content-map ct))))
-        (cond ((null? ss) tm)
+        (cond ((null? ss)
+               (passage-tiles (content-map ct) tm
+                 (lambda (cell)
+                   (find (lambda (s) (and (equal? (cdr s) cell) (memv (car s) carry)))
+                         (content-stone-cells ct)))))
               ((memv (car (car ss)) carry)
                (loop (cdr ss) (tilemap-set tm (car (cdr (car ss))) (cdr (cdr (car ss))) 'air)))
               (else (loop (cdr ss) tm)))))
@@ -449,10 +454,21 @@
     ;;   gated      ((cell . carry) ...): reached, but not carrying nothing; carry
     ;;              is the first set (in search order) that reaches it
     (define (classify ct sets)
-      (let* ((tm (graph-tm (cset-graph (car sets)))))
+      (let* ((tm (graph-tm (cset-graph (car sets))))
+             (opened (tiles-carrying ct (map car (content-pickup-cells ct)))))
         (map (lambda (p)
                (let* ((rm (placed-data p))
-                      (cells (room-standable-cells ct rm))
+                      (cells (let* ((base (room-standable-cells ct rm))
+                                    (revealed (apply append
+                                                (map (lambda (t)
+                                                       (map (lambda (a) (local->global ct rm (car a) (cadr a)))
+                                                            (thing-kw t "cells")))
+                                                     (room-things-of rm (quote stone-passage))))))
+                               (append base
+                                 (filter (lambda (c)
+                                           (and (not (member c base))
+                                                (standable? opened (car c) (cdr c))))
+                                         revealed))))
                       (idx (lambda (c) (cell-index tm (car c) (cdr c))))
                       (declared (room-unreached rm))
                       (local (lambda (c) (global->local ct rm c)))

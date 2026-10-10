@@ -1,0 +1,23 @@
+;; Rimstone terraces step down east, each holding a shallow seep pool under
+;; a fringe of drips; D's shaft (10-11) above the middle pool, M below (19-20).
+(room
+  region: pipes
+  at: (1 6)
+  title: "Seep Shelf"
+  intent: "water gathers on a broad shelf where the last outside wind thins to drips: a breath"
+  bed: (wind 0.1 water 0.7 pipes 0.4 drone 0.4)
+  light: 0.33
+  grid:
+  ("#########%  %############"
+   "#########%  %############"
+   "######  #%  %# #  #######"
+   "###  #   %  %  #    # ###"
+   "##       %  %       #  ##"
+   "#        %  %|        | #"
+   "#            |        ||#"
+   "###~~~~~#    |        || "
+   "###########~~~~#      || "
+   "##################%  %###"
+   "##################%  %###")
+  things: ((lantern-moth at: (16 4) count: 3 drawn: 3))
+  decor: auto)

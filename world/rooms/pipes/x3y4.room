@@ -1,0 +1,24 @@
+;; A carved bore with chisel shelves stepping down to F (columns 6-7); the
+;; rough face under the top shelf (column 3) is the climb back. A side
+;; alcove holds a small rank of pipes.
+(room
+  region: pipes
+  at: (3 4)
+  title: "The Cut Stair"
+  intent: "chisel marks follow narrow shelves down a carved shaft, with rough stone beside them for the climb back"
+  bed: (wind 0.2 water 0.2 pipes 0.6 drone 0.3)
+  light: 0.33
+  grid:
+  ("#########################"
+   "####           ##########"
+   "####           ##########"
+   "               ##      ##"
+   "               ##  |   ##"
+   "####====       ##  ||  ##"
+   "###%           ## |||| ##"
+   "###%      ====    |||| ##"
+   "###%              |||| ##"
+   "#####%  %################"
+   "#####%  %################")
+  things: ((lantern-moth at: (9 3) count: 3 drawn: 3))
+  decor: auto)

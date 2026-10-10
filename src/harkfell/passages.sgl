@@ -1,0 +1,31 @@
+;;; Stone-linked internal reveals. Geometry is shared by play, restore and reach.
+(define-library (harkfell passages)
+  (import (sigil list)
+          (engine tilemap)
+          (engine worldmap)
+          (harkfell content))
+  (export passage-tiles)
+  (begin
+    ;; OPENED? receives a global stone cell. All revealed cells are interior
+    ;; rock checked by content; a reveal cannot create a new room seam.
+    (define (passage-tiles wm tm opened?)
+      (let ((out tm))
+        (for-each
+          (lambda (p)
+            (let ((rm (placed-data p))
+                  (ox (* (worldmap-cols wm) (- (placed-x p) (worldmap-x0 wm))))
+                  (oy (* (worldmap-rows wm) (- (placed-y p) (worldmap-y0 wm)))))
+              (when rm
+                (for-each
+                  (lambda (t)
+                    (let ((a (thing-at t)))
+                      (when (opened? (cons (+ ox (car a)) (+ oy (cdr a))))
+                        (for-each
+                          (lambda (cell)
+                            (let ((x (+ ox (car cell))) (y (+ oy (cadr cell))))
+                              (unless (eq? (tilemap-ref out x y) 'air)
+                                (set! out (tilemap-set out x y 'air)))))
+                          (thing-kw t "cells")))))
+                  (room-things-of rm 'stone-passage)))))
+          (worldmap-rooms wm))
+        out))))

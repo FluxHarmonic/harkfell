@@ -12,7 +12,8 @@
 ;;;     (moments KEY ...)             the fixed moments heard (the hush's spent
 ;;;                                   rooms), so none plays twice (D20)
 ;;;     (played SECONDS)              seconds of play (the play note's clock)
-;;;     (revealed #t|#f))             the wordmark has had its one showing (D35)
+;;;     (revealed #t|#f)
+;;;     (aurora #t|#f))              added in 0.3; absent in older v1 saves means #f             the wordmark has had its one showing (D35)
 ;;;
 ;;; Plain symbols and lists, no keywords: a keyword does not write out as text
 ;;; and read back (measured: it prints as #<object>).
@@ -42,12 +43,13 @@
           (harkfell feel)
           (harkfell content)
           (harkfell check)
+          (harkfell passages)
           (harkfell gates))
 
   (export SAVE-KEY SAVE-VERSION
           save-datum save-restore
           restored restored? restored-cell restored-carry restored-stones
-          restored-moments restored-played restored-revealed restored-notes
+          restored-moments restored-played restored-revealed restored-aurora restored-notes
           body-room-cell)
 
   (begin
@@ -64,6 +66,7 @@
       (moments default: '())
       (played default: 0.0)
       (revealed default: #f)
+      (aurora default: #f)
       (notes default: '()))
 
     ;; A save's field: (NAME . rest) -> rest, or #f.
@@ -115,7 +118,8 @@
                                            stones)))
                      (cons 'moments moments)
                      (list 'played played)
-                     (list 'revealed (and (pair? revealed) (car revealed) #t)))))))
+                     (list 'revealed (and (pair? revealed) (car revealed) #t))
+                     (list 'aurora (and (pair? revealed) (pair? (cdr revealed)) (cadr revealed) #t)))))))
 
     ;; A moment heard, as the save keeps it, in this content's terms (Glasswood:
     ;; spent per moment). 0.1 kept a fixed moment's ROOM ("hollow:4,3"), one
@@ -179,6 +183,8 @@
                  ;; the tilemap with those stones open, to judge the cell against
                  (tm (let loop ((ss stones) (tm (worldmap-tiles (content-map ct))))
                        (if (null? ss) tm (let ((cell (car (car ss)))) (loop (cdr ss) (tilemap-set tm (car cell) (cdr cell) 'air))))))
+                 (tm (passage-tiles (content-map ct) tm
+                       (lambda (cell) (find (lambda (s) (equal? (car s) cell)) stones))))
                  (rm (and (list? room) (= (length room) 3) (symbol? (car room))
                           (integer? (cadr room)) (integer? (caddr room))
                           (let ((r (content-room ct (cadr room) (caddr room))))
@@ -196,4 +202,5 @@
                            moments: (if (list? moments) (map (lambda (k) (moment-key-now ct k)) (filter string? moments)) '())
                            played: (if (number? played) played 0.0)
                            revealed: (let ((v (field fields 'revealed))) (and (pair? v) (eq? (car v) #t)))
+                           aurora: (let ((v (field fields 'aurora))) (and (pair? v) (eq? (car v) #t)))
                            notes: (reverse notes))))))))

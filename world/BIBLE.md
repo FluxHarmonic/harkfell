@@ -82,6 +82,54 @@ Three rows: the surface (y 3) is sky and reeds, the under-fen (y 4) is roots and
 - **`moment:` as a list**, for the start room's second homecoming (`hollow-fifth`).
 - A shut stone whose note you carry calls you from up to three rooms away (D45): no room field; every stone does it.
 
+## The Pipes (0.3)
+
+The approved bible and map are `topics/harkfell-pipes-bible` and
+`topics/harkfell-pipes-map` (David approved all six decisions on 2026-10-10).
+The 24-room elbow occupies x1..3/y4..5 and x1..6/y6..8. The empty slots
+inside its bounds remain sealed reservations; no Underhum or Wrongwater
+room is part of this row.
+
+Old Cut's amber door seals the entire shaft. H2 alone reaches every main
+Pipes room and returns home: H3 changes moth light rather than terrain.
+Every room has H3 moths. The Chalk Door's blue stone opens the optional
+Cave Mouth return; its green cave door keeps its own H3 condition.
+
+Static uses fixed `x` cells only in Crackle Step and Broken Choir. Each
+lip is at most two tiles, has safe standing banks and four clear rows of
+jump headroom. Crackle Step also has an independent dry passage below.
+Never place static at a seam, under an entrance drop, beside a door or
+pickup, or on a mural's viewing path. The visual tell and positional dry
+crackle remain available without H3 and while a moment plays.
+
+New room things:
+
+- `(stone-snail at: (C R))`: a harmless walker confined to its dry floor
+  and room. Its local scrape becomes a short H4 shell answer after H4.
+- `(mural at: (C R) image: bearers|sealed-bowl|empty-hands|violet-well)`:
+  authored images on the wall, with no interaction or required timer.
+- `(upward-drip at: (C R))`: an upward-water hint with local H7 hum,
+  separate from the harmonic finding targets.
+- `(standing-stone at: (C R))`: a local carried-chord source when at least
+  two harmonics are carried. It answers at most once every twelve seconds.
+- `(stone-passage at: (C R) cells: ((C R) ...))`: an internal reveal linked
+  to the ring-stone at that cell. Only interior rock cells may open. Play,
+  save restoration and reach use the same geometry.
+
+The bowl keeps its amber (16,8), green (21,8) and blue (23,8) identities.
+Blue reveals the enclosed rough stair to rose (21,6); the stair's roof
+prevents reaching it from above while green is shut. The pocket beyond
+rose stays sealed in 0.3. The new `hollow-octave` moment follows the first
+two homecomings. The aurora triggers once per save at home with H2/H3/H4,
+in either H3/H4 order. Older version-1 saves without the new `aurora` field
+restore with that flag false.
+
+`(harkfell cues)` supplies actual edge openings and fixed static cells for
+marks and local sources independently of moth arrival. LOOK owns drawing;
+SOUND owns cue/tune assets and their playback. The bed groups are
+`(wind water pipes drone)`, with a `pipes` level in every room. The pipe
+breaths never sustain D4, leaving that note to H4.
+
 ## Rulings
 
 None yet. They arrive with D-numbers from `topics/harkfell-phase-plan` in the notes.

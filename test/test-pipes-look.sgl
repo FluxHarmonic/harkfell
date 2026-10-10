@@ -1,0 +1,120 @@
+;;; Visual policy at real region/gate interfaces, without a graphics device.
+(import (sigil test)
+        (sigil list)
+        (harkfell source)
+        (harkfell content)
+        (harkfell draw)
+        (harkfell palette)
+        (harkfell render)
+        (harkfell pipes look)
+        (harkfell art cells)
+        (engine body)
+        (engine worldmap)
+        (harkfell world)
+        (harkfell gates)
+        (harkfell feel)
+        (harkfell check))
+
+(define LOOK-CONTENT (load-content (read-world-source "world")))
+
+(test-group "Pipes look: cave lighting and source colours"
+  (test "all Pipes rooms retain black arrival and an H3-lit cave"
+    (for-each
+      (lambda (rm)
+        (assert-true (moth-lit? rm))
+        (assert-true (< (room-render-light rm) 1.0))
+        (assert-equal 1.0 (room-dark-extra rm 0.0))
+        (assert-equal 0.0 (room-dark-extra rm 1.0)))
+      (region-rooms LOOK-CONTENT 'pipes)))
+  (test "the Hollow bowl has no cave blackout or moth navigation rings"
+    ;; it keeps the lighting track's approved dawn shade: its own light:
+    (let ((rm (content-room LOOK-CONTENT 4 3)))
+      (assert-false (moth-lit? rm))
+      (assert-equal 0.0 (room-dark-extra rm 0.0))
+      (assert-equal (room-light rm) (room-render-light rm))))
+  (test "A, D and X use neutral environment light with and without H3"
+    (for-each
+      (lambda (position)
+        (let* ((rm (content-room LOOK-CONTENT (car position) (cadr position)))
+               (g (local->global LOOK-CONTENT rm 9 8))
+               (wm (content-map LOOK-CONTENT))
+               (b (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g))))
+          (for-each
+            (lambda (carry)
+              (let ((w (world-populate (world-at wm b)
+                                      (content-stones LOOK-CONTENT)
+                                      (content-pickups LOOK-CONTENT)
+                                      carry)))
+                (assert-equal (slot-of 'sky-4) (room-hue w))))
+            '((2) (2 3)))))
+      '((2 4) (1 5) (6 8)))))
+
+(test-group "Pipes look: required authored art"
+  (test "every local creature and mural image has its authored frame"
+    (for-each
+      (lambda (name)
+        (assert-true (assoc name CELLS)))
+      '("creatures/snail-rest" "creatures/snail-crawl-a" "creatures/snail-crawl-b"
+        "pipes/mural-bearers" "pipes/mural-sealed-bowl"
+        "pipes/mural-empty-hands" "pipes/mural-violet-well"
+        "pipes/stone-body")))
+  (test "distant limestone walls never brighten under either darkness step"
+    (let* ((region (find (lambda (r) (eq? (region-name r) 'pipes))
+                         (content-regions LOOK-CONTENT)))
+           (rgb (region-rgb-vector (region-field region 'palette)
+                                   (content-palette LOOK-CONTENT)))
+           (bytes (strip-bytes rgb PIPES-DARK)))
+      (let slots ((slot 0))
+        (when (< slot 4)
+          (let channels ((channel 0))
+            (when (< channel 3)
+              (let ((base (bytevector-u8-ref bytes (+ (* 4 slot) channel)))
+                    (dark (bytevector-u8-ref bytes (+ (* 4 (+ slot (* 6 32))) channel)))
+                    (dark2 (bytevector-u8-ref bytes (+ (* 4 (+ slot (* 7 32))) channel))))
+                (assert-true (<= dark2 dark base)))
+              (channels (+ channel 1))))
+          (slots (+ slot 1)))))))
+
+(test-group "Pipes look: the shared stone texture"
+  (test "its bands are opaque ground or ochre slots, the drip row is sparse, and the margins repeat the period"
+    (let* ((bv (stone-bytes))
+           (w 336) (band 176)
+           (ok (list (slot-of 'ground-1) (slot-of 'ground-2) (slot-of 'ground-3)
+                     (slot-of 'ground-4) (slot-of 'accent)))
+           (at (lambda (x y) (* 4 (+ x (* y w)))))
+           (slot (lambda (x y) (bytevector-u8-ref bv (at x y))))
+           (alpha (lambda (x y) (bytevector-u8-ref bv (+ 3 (at x y))))))
+      (assert-equal (* 4 w (+ (* 4 band) 1)) (bytevector-length bv))
+      ;; four bands; the pipe band holds 96 px of columns
+      (let ((bad (let rows ((y 0) (n 0))
+                   (if (= y (* 4 band))
+                       n
+                       (rows (+ y 1)
+                             (let cols ((x 0) (n n))
+                               (if (= x (if (< y (* 3 band)) w 96))
+                                   n
+                                   (cols (+ x 1)
+                                         (if (and (= 255 (alpha x y)) (memv (slot x y) ok)) n (+ n 1))))))))))
+        (assert-equal 0 bad))
+      ;; the drip row: some drops, mostly clear
+      (let ((drops (let cols ((x 0) (n 0)) (if (= x w) n (cols (+ x 1) (if (= 255 (alpha x (* 4 band))) (+ n 1) n))))))
+        (assert-true (> drops 20))
+        (assert-true (< drops (quotient w 2))))
+      ;; the wrap margins equal the start of the period, across and down,
+      ;; so a window that runs past 320 or 160 continues the pattern
+      (let ((seams (let bands ((b 0) (n 0))
+                     (if (= b 3)
+                         n
+                         (bands (+ b 1)
+                                (let px ((i 0) (n n))
+                                  (if (= i 16)
+                                      n
+                                      (px (+ i 1)
+                                          (let py ((y 0) (n n))
+                                            (if (= y 160)
+                                                n
+                                                (py (+ y 1)
+                                                    (+ n
+                                                       (if (= (slot i (+ y (* b band))) (slot (+ i 320) (+ y (* b band)))) 0 1)
+                                                       (if (= (slot (+ y 100) (+ i (* b band))) (slot (+ y 100) (+ i 160 (* b band)))) 0 1)))))))))))))
+        (assert-equal 0 seams)))))

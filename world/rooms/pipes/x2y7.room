@@ -1,0 +1,24 @@
+;; A round chamber; one hanging pipe drips into the hollow stone below it.
+;; T below at 19-20.
+(room
+  region: pipes
+  at: (2 7)
+  title: "The Drip Bowl"
+  intent: "one drop strikes a hollow stone and answers twice more in the dark: a breath"
+  bed: (wind 0.1 water 0.8 pipes 0.4 drone 0.5)
+  light: 0.33
+  grid:
+  ("#########################"
+   "######      ##    #######"
+   "####        ##      #####"
+   "###         ##       ####"
+   "##          ##        ###"
+   "#   |                   #"
+   "#   ||                |  "
+   "    ||                || "
+   "    ||    ##~~##      || "
+   "##################%  %###"
+   "##################%  %###")
+  things: ((lantern-moth at: (7 3) count: 3 drawn: 3))
+  moment: (tune: three-echoes still: 8)
+  decor: auto)

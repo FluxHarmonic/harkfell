@@ -85,18 +85,19 @@
 
     ;; rgb: a vector of SLOT-COUNT (r g b), a region's colours. The strips
     ;; as RGBA bytes, STRIP-W x STRIP-ROWS, top row first: base, water,
-    ;; deep, reflect, lit, lit twice.
-    (define (strip-bytes rgb . opt)
-      (define dark (if (pair? opt) (car opt) DARK))
-      (let ((bv (make-bytevector (* 4 STRIP-W STRIP-ROWS) 0))
-            (rows (list (lambda (i) i)
-                        (lambda (i) (lookup WATER i))
-                        (lambda (i) (lookup DEEP i))
-                        (lambda (i) (lookup REFLECT i))
-                        (lambda (i) (lookup LIT i))
-                        (lambda (i) (lookup LIT (lookup LIT i)))
-                        (lambda (i) (lookup dark i))
-                        (lambda (i) (lookup dark (lookup dark i))))))
+    ;; deep, reflect, lit, lit twice, dark, dark twice. A region may supply
+    ;; its own darkness lookup while keeping the other transforms shared.
+    (define (strip-bytes rgb . dark-table)
+      (let* ((dark (if (pair? dark-table) (car dark-table) DARK))
+             (bv (make-bytevector (* 4 STRIP-W STRIP-ROWS) 0))
+             (rows (list (lambda (i) i)
+                         (lambda (i) (lookup WATER i))
+                         (lambda (i) (lookup DEEP i))
+                         (lambda (i) (lookup REFLECT i))
+                         (lambda (i) (lookup LIT i))
+                         (lambda (i) (lookup LIT (lookup LIT i)))
+                         (lambda (i) (lookup dark i))
+                         (lambda (i) (lookup dark (lookup dark i))))))
         (let loop ((rs rows) (r 0))
           (unless (null? rs)
             (let slots ((i 0))
@@ -112,10 +113,13 @@
             (loop (cdr rs) (+ r 1))))
         bv))
 
-    (define (make-strips rgb . opt)
-      (make-texture-from-pixels STRIP-W STRIP-ROWS (apply strip-bytes rgb opt) 'nearest))
-    (define (strips-update! tex rgb . opt)
-      (update-texture tex (apply strip-bytes rgb opt)))
+    (define (make-strips rgb . dark-table)
+      (make-texture-from-pixels STRIP-W STRIP-ROWS
+                               (apply strip-bytes rgb dark-table)
+                               'nearest))
+
+    (define (strips-update! tex rgb . dark-table)
+      (update-texture tex (apply strip-bytes rgb dark-table)))
 
     ;; The strips under the view, in the current (index) pass, overwriting.
     (define (draw-strips! tex)
@@ -277,7 +281,7 @@
        "    L = L - u_dark / 5.0;\n"
        ;; light: B against the threshold: lit, lit twice, the light's colour
        "    if (L > 0.0) {\n"
-       "        if (L > 0.72 + th * 0.28) c = strip(0, int(u_hue));\n"
+       "        if (L > 0.72 + th * 0.28) c = strip(0, (slot >= 16 && slot <= 20) ? slot : int(u_hue));\n"
        "        else if (L > 0.36 + th * 0.36) c = strip(5, lslot);\n"
        "        else if (L > th * 0.36) c = strip(4, lslot);\n"
        "    }\n"

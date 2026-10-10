@@ -13,27 +13,26 @@
    "                         "
    "                         "
    "  #                   #  "
-   " |#|                 |#| "
-   "##### |           | #####"
-   "#######         #########"
-   "#########       o    o o#"
+   " |#|               ##### "
+   "##### |           |# o##%"
+   "#######         ########%"
+   "#########       o    o o%"
    "#########################"
    "#########################")
   things: ((ring-stone at: (16 8) overtone: 2)
            (ring-stone at: (21 8) overtone: 3)
            (ring-stone at: (23 8) overtone: 4)
-           (lantern-moth at: (19 6) count: 3 drawn: 3)
+           (ring-stone at: (21 6) overtone: 5)
+           (stone-passage at: (23 8) cells: ((23 7) (23 6) (22 6)))
+           (standing-stone at: (2 5))
+           (standing-stone at: (22 5))
+           (lantern-moth at: (18 6) count: 3 drawn: 3)
            (lantern-moth at: (11 5) count: 4 drawn: 2))
   moment: ((tune: hollow-answers when: first-visit carrying: 2)
-           (tune: hollow-fifth when: first-visit carrying: 3))
+           (tune: hollow-fifth when: first-visit carrying: 3)
+           (tune: hollow-octave when: first-visit carrying: 4))
+  unreached: ((20 6))
   decor: auto)
-;; Where the game starts: at the bottom of the bowl, beside the H2 stone
-;; (16,8), a door into the fell. Coming home carrying H2 it rings and sinks;
-;; behind it the H3 stone (21,8), pale green, stays shut: the way down to
-;; the Underhum, directly below, shown and sealed. Two old standing stones
-;; stand on the rims (columns 2 and 22).
-;; Glasswood (D44): carrying H3 home, the green stone sinks too, and behind
-;; it, in a one-cell pocket (22,8), a cold blue stone (23,8), keyed to H4,
-;; stays shut: amber, green, blue. A few moths drawn to H3 gather at the
-;; green stone. Its second moment, hollow-fifth (first visit, carrying: 3),
-;; is listed after hollow-answers: the same stones, ringing up A's series.
+;; Existing amber, green and blue identities stay fixed. Blue reveals only
+;; the interior rough stair to rose; the eastern and southern seams stay shut.
+;; The small pocket beyond H5 is reserved and explicitly unreachable in 0.3.

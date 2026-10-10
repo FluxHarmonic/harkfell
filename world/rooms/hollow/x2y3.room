@@ -15,12 +15,11 @@
    "            %############"
    "   #####    %############"
    "   #####                 "
-   " |####  |     |     | |  "
-   "#########################"
-   "#########################"
-   "#########################")
+   " |#   o |     |     | |  "
+   "##%  %###################"
+   "##%  %###################"
+   "##%  %###################")
+  things: ((ring-stone at: (6 7) overtone: 2))
   decor: auto)
-;; The doorway is the low recess at columns 6-7, row 7, cut into the block of
-;; old stone (columns 3-7), and the fallen rock fills it behind (columns
-;; 3-5); a fallen block (column 2) is a step up onto it. The fell's rough
-;; west face (column 12) climbs to the Heather Shelf.
+;; Amber seals the entire one-cell approach under the cut roof. The shaft
+;; inside has rough return faces and a standing bank west of the door.

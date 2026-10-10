@@ -1,0 +1,50 @@
+;;; Authored local cues, in room cells, independent of moth arrival.
+(define-library (harkfell cues)
+  (import (sigil list)
+          (engine worldmap)
+          (harkfell content)
+          (harkfell legend))
+  (export room-exits room-static-cells room-upward-drops room-standing-stones)
+  (begin
+    ;; (SIDE C R) at the middle of each contiguous real edge opening.
+    ;; Reserved slots have sealed edges, so they never advertise an exit.
+    (define (room-exits rm)
+      (apply append
+        (map
+          (lambda (side)
+            (let* ((vertical (memq side '(west east)))
+                   (n (if vertical ROOM-ROWS ROOM-COLS))
+                   (cell (lambda (i)
+                           (if vertical
+                               (cons (if (eq? side 'west) 0 (- ROOM-COLS 1)) i)
+                               (cons i (if (eq? side 'north) 0 (- ROOM-ROWS 1))))))
+                   (mark (lambda (a b)
+                           (let ((p (cell (quotient (+ a b) 2))))
+                             (list side (car p) (cdr p))))))
+              (let loop ((i 0) (start #f) (out '()))
+                (if (= i n)
+                    (reverse (if start (cons (mark start (- i 1)) out) out))
+                    (let* ((p (cell i))
+                           (open (kind-open? (char-kind (room-char rm (car p) (cdr p))))))
+                      (cond (open (loop (+ i 1) (or start i) out))
+                            (start (loop (+ i 1) #f (cons (mark start (- i 1)) out)))
+                            (else (loop (+ i 1) #f out))))))))
+          '(west east north south))))
+
+    (define (room-static-cells rm)
+      (let ((out '()))
+        (let row ((r 0))
+          (when (< r ROOM-ROWS)
+            (let col ((c 0))
+              (when (< c ROOM-COLS)
+                (when (char=? (room-char rm c r) #\x)
+                  (set! out (cons (cons c r) out)))
+                (col (+ c 1))))
+            (row (+ r 1))))
+        (reverse out)))
+
+    (define (room-upward-drops rm)
+      (map thing-at (room-things-of rm 'upward-drip)))
+
+    (define (room-standing-stones rm)
+      (map thing-at (room-things-of rm 'standing-stone)))))

@@ -1,0 +1,24 @@
+;; A tall vault under E's shaft (9-10): roost ledges high on each side, a
+;; few standing pipes between them, the floor rising to the way into I.
+(room
+  region: pipes
+  at: (2 6)
+  title: "Moth Roost"
+  intent: "pale moths wait on dry stone and come close only to the fifth you carry"
+  bed: (wind 0.1 water 0.3 pipes 0.5 drone 0.4)
+  light: 0.33
+  grid:
+  ("########%  %#############"
+   "### # ##%  %# # # #######"
+   "# # # # %  %#   # # #####"
+   "# #   # %  %      # # ###"
+   "#     # %  % |      #    "
+   "#       %  % ||          "
+   "#  ===      |||===       "
+   "            |||   #######"
+   "            |||   #######"
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (4 4) count: 2 drawn: 3)
+           (lantern-moth at: (16 4) count: 2 drawn: 3))
+  decor: auto)

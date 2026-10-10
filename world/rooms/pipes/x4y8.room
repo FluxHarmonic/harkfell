@@ -1,0 +1,23 @@
+;; Under the choir: the broken pipes' ends hang from the roof, and P's
+;; rough chimney (walls 10 and 13) is the way back up.
+(room
+  region: pipes
+  at: (4 8)
+  title: "Under the Choir"
+  intent: "below the cracked pipes, rough walls bring you back to their dry shelf"
+  bed: (wind 0.1 water 0.3 pipes 0.5 drone 0.5)
+  light: 0.33
+  grid:
+  ("##########%  %###########"
+   "##########%  %###########"
+   "## ## ##  %  % ##  ## ###"
+   "#  ## ##  %  % ##  ##  ##"
+   "#     ##  %  %     ##   #"
+   "          %  %          #"
+   "                 |       "
+   "                 ||      "
+   "#######          ||      "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (4 5) count: 3 drawn: 3))
+  decor: auto)

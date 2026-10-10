@@ -24,6 +24,10 @@
         (harkfell hush)
         (harkfell sound))
 
+;; Every scenario starts without a carried harmonic, even when another
+;; test file exercised a pickup in the same native harness.
+(sound-set-carry! (quote ()))
+
 (define RATE 32000)
 (define GROUPS '(wind water reeds drone))
 

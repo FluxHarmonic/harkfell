@@ -1,0 +1,67 @@
+;;; Run through sigil test's native audio harness, not the bare interpreter.
+(import (sigil test)
+        (sigil list)
+        (engine mixer)
+        (harkfell sound))
+
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(define SAID '())
+(sound-boot! '("wind-in-stone") (lambda parts (set! SAID (cons parts SAID))))
+(sound-reset!)
+(define ROOM
+  (place key: "pipes:1,4" region: 'pipes bed-tune: "pipes-bed"
+         groups: '(wind water pipes drone)
+         levels: '((wind . 0.5) (water . 0.4) (pipes . 0.7) (drone . 0.6))
+         carry: '(2) tones: '((4 100.0 350.0)) stones: '() still: #t moment: "wind-in-stone"
+         px: 100.0 py: 100.0 rx: 0 ry: 0
+         exits: '((low 20.0 120.0) (high 200.0 20.0))
+         static: '((160.0 120.0))))
+(define (advance p a b)
+  (let loop ((i a))
+    (when (<= i b)
+      (sound-frame! (/ i 30.0) (/ 1.0 30.0) p)
+      (mixer-pump! (/ i 30.0))
+      (loop (+ i 1)))))
+(advance ROOM 0 90)
+(define MOMENT (sound-moment-playing))
+(define STATIC (sound-voice-source "local-static"))
+(define LOW (sound-voice-source "local-exit-0"))
+(define HIGH (sound-voice-source "local-exit-1"))
+(define EARS (sound-ears))
+(define STATIC-GAIN (and STATIC (source-gain STATIC 3.0)))
+(define H4-BEFORE (sound-bed-notes 6))
+(sound-frame! 3.1 0.1
+  (place ROOM carry: '(2 4) tones: '() news: '((pickup 4 100.0 100.0) (chord (2 4) 100.0 100.0))))
+(define PICKUP-SAID SAID)
+(define H4-AFTER (sound-bed-notes 6))
+(define FINDING-AFTER (sound-voice-source "tone-h4"))
+(advance (place ROOM exits: '() static: '()) 96 120)
+
+(test-group "pipes: native local audio and event routing"
+  (test "the fixed moment really started"
+    (assert-equal "wind-in-stone" MOMENT))
+  (test "both real exit timbres and static persist under the moment"
+    (assert-true LOW)
+    (assert-true HIGH)
+    (assert-true STATIC)
+    (assert-true (> STATIC-GAIN 0.0)))
+  (test "local sources leave the harmonic ears alone"
+    (assert-equal 'below EARS))
+  (test "H4 pickup routes while a moment is playing"
+    (assert-false (member '("sound" "cue-missing" "pickup-h4") PICKUP-SAID))
+    (assert-true (or (member '("sound" "cue" "pickup-h4") PICKUP-SAID)
+                     (member '("sound" "cue-waiting" "pickup-h4") PICKUP-SAID))))
+  (test "standing stone routes both carried voices under the moment"
+    (for-each
+      (lambda (n)
+        (assert-true (or (member (list "sound" "cue" n) PICKUP-SAID)
+                         (member (list "sound" "cue-waiting" n) PICKUP-SAID))))
+      '("ring-h2" "ring-h4")))
+  (test "pickup adds the octave and ends the finding voice"
+    (assert-equal 0 H4-BEFORE)
+    (assert-true (> H4-AFTER 0))
+    (assert-false FINDING-AFTER))
+  (test "leaving clears every local source"
+    (assert-false (sound-voice-source "local-static"))
+    (assert-false (sound-voice-source "local-exit-0"))
+    (assert-false (sound-voice-source "local-exit-1"))))

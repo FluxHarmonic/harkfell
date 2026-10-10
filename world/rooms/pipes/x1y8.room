@@ -1,0 +1,25 @@
+;; A local hint only: no pickup and no seam to future content. One drop
+;; rises from the small pool (11-13) toward its stain.
+(room
+  region: pipes
+  at: (1 8)
+  title: "Against the Drip"
+  intent: "behind a thin stone curtain one drop rises toward its ceiling stain: a breath and a wrong thing"
+  bed: (wind 0 water 0.7 pipes 0.2 drone 0.3)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "###########   ###########"
+   "###########   ###########"
+   "#########             ###"
+   "#########         |   ###"
+   "#########         ||     "
+   "########          ||     "
+   "########          ||     "
+   "###########~~~###########"
+   "#########################")
+  things: ((lantern-moth at: (20 5) count: 3 drawn: 3)
+           (upward-drip at: (12 8))
+           (mural at: (14 5) image: violet-well))
+  decor: auto)
