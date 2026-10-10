@@ -1,0 +1,23 @@
+(room
+  region: pipes
+  at: (1 4)
+  title: "Wind's Mouth"
+  intent: "a broad pipe mouth catches the wind far above and holds one long breath: a place to listen"
+  bed: (wind 0.5 water 0.1 pipes 0.9 drone 0.3)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "###       ###############"
+   "###        ##############"
+   "###        ##############"
+   "#                       #"
+   "#                        "
+   "#                        "
+   "###########%  %##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 4 drawn: 3)
+           (stone-snail at: (21 8)))
+  moment: (tune: wind-in-stone when: first-visit)
+  decor: auto)

@@ -1,0 +1,21 @@
+(room
+  region: pipes
+  at: (3 5)
+  title: "Twin Bore"
+  intent: "two carved walls stand close enough to kick between, beside a rough way down"
+  bed: (wind 0.1 water 0.3 pipes 0.6 drone 0.4)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%==%##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "#          %  %         #"
+   "                        #"
+   "                        #"
+   "###########%==%##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

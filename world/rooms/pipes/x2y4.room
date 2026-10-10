@@ -1,0 +1,21 @@
+(room
+  region: pipes
+  at: (2 4)
+  title: "Wind Throat"
+  intent: "below an amber door, the outside wind passes through a cut in the limestone and the first dark begins"
+  bed: (wind 0.5 water 0.2 pipes 0.6 drone 0.3)
+  light: 0.5
+  grid:
+  ("##%  %###################"
+   "##%  %###################"
+   "##%  %###################"
+   "##%  %###################"
+   "##%  %###################"
+   "##%  %###################"
+   "#                       #"
+   "                         "
+   "                         "
+   "###########%  %##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

@@ -1,0 +1,21 @@
+(room
+  region: pipes
+  at: (2 6)
+  title: "Moth Roost"
+  intent: "pale moths wait on dry stone and come close only to the fifth you carry"
+  bed: (wind 0.1 water 0.3 pipes 0.5 drone 0.4)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "#                       #"
+   "                         "
+   "                         "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (9 6) count: 4 drawn: 3))
+  decor: auto)

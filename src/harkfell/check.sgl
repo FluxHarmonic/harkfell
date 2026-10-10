@@ -39,6 +39,7 @@
           (engine roomfile)
           (engine worldmap)
           (engine reach)
+          (harkfell passages)
           (harkfell feel)
           (harkfell content))
 
@@ -179,7 +180,11 @@
     ;; The world's tilemap with the stones keyed to carry open (air).
     (define (tiles-carrying ct carry)
       (let loop ((ss (content-stone-cells ct)) (tm (worldmap-tiles (content-map ct))))
-        (cond ((null? ss) tm)
+        (cond ((null? ss)
+               (passage-tiles (content-map ct) tm
+                 (lambda (cell)
+                   (find (lambda (s) (and (equal? (cdr s) cell) (memv (car s) carry)))
+                         (content-stone-cells ct)))))
               ((memv (car (car ss)) carry)
                (loop (cdr ss) (tilemap-set tm (car (cdr (car ss))) (cdr (cdr (car ss))) 'air)))
               (else (loop (cdr ss) tm)))))

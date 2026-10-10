@@ -1,0 +1,23 @@
+;; The blue door is inside the room, with a standing vestibule west of it.
+(room
+  region: pipes
+  at: (1 5)
+  title: "Chalk Door"
+  intent: "a cold blue stone faces the black mouth of the glass caves, a way home seen before it opens"
+  bed: (wind 0.1 water 0.2 pipes 0.5 drone 0.5)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "#   #                   #"
+   "    #                    "
+   "    o                    "
+   "###########%  %##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
+           (ring-stone at: (4 8) overtone: 4))
+  decor: auto)

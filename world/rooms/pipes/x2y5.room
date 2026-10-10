@@ -1,0 +1,22 @@
+(room
+  region: pipes
+  at: (2 5)
+  title: "The Bearers"
+  intent: "figures carry small lights down steps cut into the wall beside the path"
+  bed: (wind 0.2 water 0.2 pipes 0.5 drone 0.4)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "#                       #"
+   "                         "
+   "                         "
+   "###########%  %##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
+           (mural at: (6 5) image: bearers))
+  decor: auto)

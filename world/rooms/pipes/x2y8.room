@@ -1,0 +1,21 @@
+(room
+  region: pipes
+  at: (2 8)
+  title: "The Thin Curtain"
+  intent: "water stains stop at a thin limestone curtain that air moves through"
+  bed: (wind 0.1 water 0.5 pipes 0.4 drone 0.4)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "#  +                    #"
+   "   +                     "
+   "   +                     "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

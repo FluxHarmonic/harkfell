@@ -1,0 +1,21 @@
+(room
+  region: pipes
+  at: (3 7)
+  title: "Crossing Air"
+  intent: "drafts pass through a low crossing and the blue note is heard at the edge of its range"
+  bed: (wind 0.2 water 0.3 pipes 0.6 drone 0.5)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "#                       #"
+   "                         "
+   "                         "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

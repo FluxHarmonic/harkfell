@@ -415,7 +415,8 @@
                                          s))
                                    (content-stones *content*)))
                       (w (world-at (content-map *content*) (body-in-cell (restored-cell r)))))
-                 (set! *world* (world-populate w stones (content-pickups *content*) (restored-carry r)))
+                 (set! *world* (world (world-populate w stones (content-pickups *content*) (restored-carry r))
+                                      aurora: (restored-aurora r)))
                  (set! *mode* 'play)
                  (*save-set* (restored-moments r) (restored-played r))
                  ;; D40: a save to continue, so the start screen offers starting over
@@ -428,7 +429,7 @@
       (and *content* *world* (world-gates *world*)
            (let ((x (*save-get*)))
              (save-datum *content* (world-entry *world*) (world-carry *world*) (world-stones *world*)
-                         (car x) (cadr x) *revealed*))))
+                         (car x) (cadr x) *revealed* (world-aurora *world*)))))
 
     ;; Write the save when what it holds has changed: the entry (a room
     ;; entered), the carry, the stones opened, the moments heard. Not the
@@ -438,7 +439,7 @@
              (sig (list (body-x e) (body-y e) (world-carry *world*)
                         (length (filter stone-open? (world-stones *world*)))
                         (car (*save-get*))
-                        *revealed*)))
+                        *revealed* (world-aurora *world*))))
         (unless (equal? sig *save-sig*)
           (let ((d (current-save)))
             (when d

@@ -1,0 +1,21 @@
+(room
+  region: pipes
+  at: (5 8)
+  title: "The Last Drips"
+  intent: "the drips thin beside the final pipe and leave its blue note alone: a breath"
+  bed: (wind 0 water 0.7 pipes 0.2 drone 0.6)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#                       #"
+   "                         "
+   "                         "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

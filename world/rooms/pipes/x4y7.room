@@ -1,0 +1,22 @@
+;; Two separate fixed lips; the central rough chimney returns from V.
+(room
+  region: pipes
+  at: (4 7)
+  title: "Broken Choir"
+  intent: "two cracked pipe lips make small separate patches of static, with a dry rest between them"
+  bed: (wind 0.1 water 0.3 pipes 0.5 drone 0.5)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "##         ####         #"
+   "##         ####         #"
+   "##         ####         #"
+   "##         ####         #"
+   "#    xx           xx    #"
+   "   #######      #######  "
+   "                         "
+   "###########%  %##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

@@ -1,0 +1,21 @@
+(room
+  region: pipes
+  at: (5 6)
+  title: "Pipe Rungs"
+  intent: "narrow stone shelves cross a tall pipe, climbed and dropped through with a place to rest between them"
+  bed: (wind 0.1 water 0.3 pipes 0.7 drone 0.6)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#          %  %         #"
+   "                         "
+   "                         "
+   "###########%==%##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

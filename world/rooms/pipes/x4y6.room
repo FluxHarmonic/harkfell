@@ -1,0 +1,22 @@
+(room
+  region: pipes
+  at: (4 6)
+  title: "The Sealed Bowl"
+  intent: "beneath a picture of the familiar bowl being closed, a blue note begins to sound from below"
+  bed: (wind 0.1 water 0.3 pipes 0.5 drone 0.6)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#                       #"
+   "                         "
+   "                         "
+   "#########################"
+   "#########################")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
+           (mural at: (6 5) image: sealed-bowl))
+  decor: auto)

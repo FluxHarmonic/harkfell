@@ -1,0 +1,22 @@
+;; Fixed static on the upper lip; the dry passage below is independent.
+(room
+  region: pipes
+  at: (3 6)
+  title: "Crackle Step"
+  intent: "a broken limestone lip crackles before you reach it, with dry ground on either side"
+  bed: (wind 0.1 water 0.3 pipes 0.4 drone 0.4)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %        ##"
+   "###########%  %        ##"
+   "###########%  %        ##"
+   "###########%  %        ##"
+   "#                 xx    #"
+   "                ######   "
+   "                         "
+   "###########%  %##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3))
+  decor: auto)

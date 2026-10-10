@@ -1,0 +1,22 @@
+(room
+  region: pipes
+  at: (6 6)
+  title: "Four Empty Hands"
+  intent: "four figures hold their hands to pipe mouths, one empty, while the note below grows clearer"
+  bed: (wind 0.1 water 0.3 pipes 0.7 drone 0.7)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#                       #"
+   "                        #"
+   "                        #"
+   "###########%  %##########"
+   "###########%  %##########")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
+           (mural at: (6 5) image: empty-hands))
+  decor: auto)

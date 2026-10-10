@@ -1,0 +1,40 @@
+;; Approved 24-room elbow; all six reserved slots in the bounds stay shut.
+(map
+  region: pipes
+  origin: (1 4)
+  layout:
+  ("B-A-C      "
+   "| | |      "
+   "D-E-F      "
+   "| | |      "
+   "G-H-I-J-K-L"
+   "|   |   | |"
+   "M-N-O-P-Q-R"
+   "  |   |   |"
+   "S-T-U-V-W-X")
+  rooms:
+  ((A "Wind Throat" "below an amber door, the outside wind passes through a cut in the limestone and the first dark begins")
+   (B "Wind's Mouth" "a broad pipe mouth catches the wind far above and holds one long breath: a place to listen")
+   (C "The Cut Stair" "chisel marks follow narrow shelves down a carved shaft, with rough stone beside them for the climb back")
+   (D "Chalk Door" "a cold blue stone faces the black mouth of the glass caves, a way home seen before it opens")
+   (E "The Bearers" "figures carry small lights down steps cut into the wall beside the path")
+   (F "Twin Bore" "two carved walls stand close enough to kick between, beside a rough way down")
+   (G "Seep Shelf" "water gathers on a broad shelf where the last outside wind thins to drips: a breath")
+   (H "Moth Roost" "pale moths wait on dry stone and come close only to the fifth you carry")
+   (I "Crackle Step" "a broken limestone lip crackles before you reach it, with dry ground on either side")
+   (J "The Sealed Bowl" "beneath a picture of the familiar bowl being closed, a blue note begins to sound from below")
+   (K "Pipe Rungs" "narrow stone shelves cross a tall pipe, climbed and dropped through with a place to rest between them")
+   (L "Four Empty Hands" "four figures hold their hands to pipe mouths, one empty, while the note below grows clearer")
+   (M "Chalk Rest" "a dry ledge overlooks a dark seep pool where a snail moves slowly: a breath")
+   (N "The Drip Bowl" "one drop strikes a hollow stone and answers twice more in the dark: a breath")
+   (O "Crossing Air" "drafts pass through a low crossing and the blue note is heard at the edge of its range")
+   (P "Broken Choir" "two cracked pipe lips make small separate patches of static, with a dry rest between them")
+   (Q "The Listening Shelf" "a sheltered shelf between tall pipes brings the blue note forward when you stop")
+   (R "The Long Pipe" "a pipe opens down toward the blue note, its breath giving way to the drone")
+   (S "Against the Drip" "behind a thin stone curtain one drop rises toward its ceiling stain: a breath and a wrong thing")
+   (T "The Thin Curtain" "water stains stop at a thin limestone curtain that air moves through")
+   (U "Dry Teeth" "small dry limestone teeth stand above ordinary water, with a snail on the bank: a breath")
+   (V "Under the Choir" "below the cracked pipes, rough walls bring you back to their dry shelf")
+   (W "The Last Drips" "the drips thin beside the final pipe and leave its blue note alone: a breath")
+   (X "The Last Pipe" "a cold blue note rests on dry limestone at the bottom of the last pipe"))
+  borders: ((A north) (D west)))

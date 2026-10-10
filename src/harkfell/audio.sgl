@@ -289,7 +289,7 @@
                     ;; D43: the upward icicles of the room, (7 x y) in ABSOLUTE world pixels
                     ;; (the middle of its cell), for their hum (the director's upward-frame!)
                     (hums (filter-map (lambda (t)
-                                        (and (pair? t) (eq? (car t) 'upward-icicle)
+                                        (and (pair? t) (memq (car t) '(upward-icicle upward-drip))
                                              (let ((at (kw-ref (cdr t) "at")))
                                                (and (pair? at)
                                                     (list 7 (+ (* 400.0 (room-x rm)) (* TILE (car at)) (/ TILE 2.0))

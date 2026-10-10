@@ -1,0 +1,117 @@
+;;; Pipes state and safety regressions: real simulation, saves and authored cues.
+(import (sigil test)
+        (sigil list)
+        (engine body)
+        (engine tilemap)
+        (engine worldmap)
+        (harkfell content)
+        (harkfell source)
+        (harkfell cues)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell world)
+        (harkfell save)
+        (harkfell creatures))
+
+(define CT (load-content (read-world-source "world")))
+(define (cell x y c r) (local->global CT (content-room CT x y) c r))
+(define (at x y c r carry)
+  (let* ((g (cell x y c r))
+         (wm (content-map CT))
+         (b (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g))))
+    (world-populate (world-at wm b) (content-stones CT) (content-pickups CT) carry)))
+(define (ticks w n)
+  (if (= n 0) w (ticks (world-tick w (intent)) (- n 1))))
+(define (kind tm x y c r)
+  (let ((g (cell x y c r))) (tilemap-ref tm (car g) (cdr g))))
+
+(test-group "Pipes: content and local cues"
+  (test "the 24-room elbow and all existing seams parse cleanly"
+    (assert-equal '() (content-problems CT))
+    (assert-equal 24 (length (region-rooms CT 'pipes))))
+  (test "every room has H3 moths and reserved slots advertise no exit"
+    (for-each (lambda (rm)
+                (assert-true (room-has-drawn-moths? rm))
+                (assert-equal 3 (thing-kw (car (room-things-of rm 'lantern-moth)) "drawn")))
+              (region-rooms CT 'pipes))
+    (assert-false (find (lambda (e) (eq? (car e) 'east))
+                       (room-exits (content-room CT 3 4))))
+    (assert-false (find (lambda (e) (eq? (car e) 'north))
+                       (room-exits (content-room CT 4 6)))))
+  (test "only I and P have fixed static footprints"
+    (assert-equal '((3 . 6) (4 . 7))
+                  (map (lambda (rm) (cons (room-x rm) (room-y rm)))
+                       (filter (lambda (rm) (pair? (room-static-cells rm)))
+                               (region-rooms CT 'pipes))))))
+
+(test-group "Pipes: blue door reveal and soft return"
+  (test "the stair remains rock until the blue stone actually finishes opening"
+    (let* ((w (at 4 3 22 8 '(2 3 4)))
+           (waiting (ticks w 30))
+           (open (ticks waiting 70)))
+      (assert-equal 'solid (kind (world-tiles waiting) 4 3 23 7))
+      (assert-equal 'air (kind (world-tiles open) 4 3 23 7))
+      (assert-equal 'air (kind (world-tiles open) 4 3 22 6))
+      (assert-equal 'solid (kind (world-tiles open) 4 3 21 6))
+      (assert-equal 'solid (kind (world-tiles open) 4 3 23 10))))
+  (test "H4 without H3 reveals the same stair but preserves the green barrier"
+    (let* ((tm (tiles-carrying CT '(2 4))))
+      (assert-equal 'air (kind tm 4 3 23 7))
+      (assert-equal 'solid (kind tm 4 3 21 8))))
+  (test "fixed static dims and returns to a safe entry without dropping carry"
+    (let* ((safe (at 3 6 17 6 '(2)))
+           (g (cell 3 6 18 6))
+           (hit (world safe body: (cell-body (world-tiles safe) HARKFELL-FEEL (car g) (cdr g))))
+           (dark (world-tick hit (intent)))
+           (back (ticks dark 30)))
+      (assert-equal 'dark (world-phase dark))
+      (assert-equal 1 (world-returns back))
+      (assert-equal '(2) (world-carry back))
+      (assert-equal (body-x (world-entry safe)) (body-x (world-body back))))))
+
+(test-group "Pipes: homecoming and save migration"
+  (test "all three trigger once at home, independent of collection order"
+    (for-each
+      (lambda (carry)
+        (let* ((w (world-tick (at 4 3 15 8 carry) (intent)))
+               (quiet (world-tick (cdr (world-take-news w)) (intent))))
+          (assert-true (world-aurora w))
+          (assert-true (integer? (world-aurora-at w)))
+          (assert-true (find (lambda (n) (eq? (car n) 'aurora)) (world-news w)))
+          (assert-false (find (lambda (n) (eq? (car n) 'aurora)) (world-news quiet)))))
+      '((2 3 4) (4 2 3) (3 4 2))))
+  (test "two harmonics or all three away from home do not trigger"
+    (assert-false (world-aurora (world-tick (at 4 3 15 8 '(2 4)) (intent))))
+    (assert-false (world-aurora (world-tick (at 6 8 18 8 '(2 3 4)) (intent)))))
+  (test "legacy v1 saves migrate quietly and the new aurora flag round trips"
+    (let* ((w (at 4 3 15 8 '(2 3 4)))
+           (d (save-datum CT (world-entry w) (world-carry w) (world-stones w) '() 10 #t #t))
+           (legacy (cons (car d) (cons (cadr d)
+                          (filter (lambda (f) (not (eq? (car f) 'aurora))) (cddr d)))))
+           (r (save-restore CT d)))
+      (assert-true (restored-aurora r))
+      (assert-false (restored-aurora (save-restore CT legacy)))
+      (assert-equal '() (restored-notes r))
+      (assert-false (world-aurora-at (world w aurora: (restored-aurora r))))))
+  (test "standing stones answer two carried harmonics with a bounded cooldown"
+    (let* ((w (world-tick (at 5 3 8 7 '(2 4)) (intent)))
+           (quiet (world-tick (cdr (world-take-news w)) (intent))))
+      (assert-true (find (lambda (n) (eq? (car n) 'chord)) (world-news w)))
+      (assert-false (find (lambda (n) (eq? (car n) 'chord)) (world-news quiet))))))
+
+(test-group "Pipes: snail safety"
+  (test "snails stay on their dry floor, turn before edges and answer H4 locally"
+    (for-each
+      (lambda (xy)
+        (let ((rm (content-room CT (car xy) (cadr xy))))
+          (let loop ((cs (critters-new rm 0 0)) (n 1000) (heard #f))
+            (let* ((cs (critters-step cs 200 130 0 '(4) #t))
+                   (snail (find (lambda (c) (eq? (critter-kind c) 'snail)) (critters-list cs)))
+                   (heard (or heard (find (lambda (n) (and (eq? (car n) 'call) (eq? (cadr n) 'snail-h4)))
+                                         (critters-news cs)))))
+              (assert-true (= 144 (critter-y snail)))
+              (assert-true (>= (critter-x snail) 16))
+              (assert-true (< (critter-x snail) 384))
+              (if (= n 0) (assert-true heard) (loop cs (- n 1) heard))))))
+      '((1 4) (1 7) (3 8)))))

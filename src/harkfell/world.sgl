@@ -34,7 +34,8 @@
 ;;; to the entry (or, if that is rock too, to the room's start).
 
 (define-library (harkfell world)
-  (import (sigil struct)
+  (import (sigil list)
+          (sigil struct)
           (sigil math)
           (engine tilemap)
           (engine collide)
@@ -45,7 +46,10 @@
           (substratic time clock)
           (substratic time tween)
           (harkfell feel)
+          (harkfell passages)
           (harkfell gates)
+          (harkfell cues)
+          (harkfell content)
           (harkfell creatures)
           (harkfell ice))
 
@@ -56,7 +60,8 @@
           world-origin
           entry-body cell-body
           world-gates world-carry world-news world-still world-take-news world-populate
-          world-stones world-pickups world-critters world-ice map-shift map-cell-shift)
+          world-stones world-pickups world-critters world-ice world-aurora world-aurora-at
+          map-shift map-cell-shift)
 
   (begin
     (define DIM-TICKS 15)
@@ -75,6 +80,9 @@
       (ticks default: 0)
       (returns default: 0)
       (entered default: 0)
+      (chord-wait default: 0)
+      (aurora default: #f)         ; the third-homecoming has happened in this save
+      (aurora-at default: #f)      ; tick of this session's one showing
       (ground default: #f)          ; the last body that stood on ground
       (provisional default: #f)     ; the entry is waiting for the first standing tick
       ;; A3: the harmonics carried, the pickups left, the ring-stones ((harkfell
@@ -95,7 +103,11 @@
     ;; open the tilemap.
     (define (world-populate w stones pickups carry)
       (let* ((carry (carry-normal carry))
-             (tm (open-stone-tiles (world-tiles w) stones)))
+             (tm (passage-tiles (world-wm w)
+                                (open-stone-tiles (world-tiles w) stones)
+                                (lambda (cell)
+                                  (find (lambda (s) (and (equal? (stone-cell s) cell) (stone-open? s)))
+                                        stones)))))
         (world w
                wm: (worldmap (world-wm w) tiles: tm)
                critters: (room-critters (world-wm w) (world-room w))
@@ -190,10 +202,15 @@
                                    (body-center b f)
                                    (list (body-x b) (body-y b) (feel-box-w f) (feel-box-h f))
                                    (eq? (world-phase w) 'play)))
-                   (tm (gstate-tiles g2)))
+                   (tm (if (eq? (gstate-tiles g2) (world-tiles w))
+                           (gstate-tiles g2)
+                           (passage-tiles (world-wm w) (gstate-tiles g2)
+                             (lambda (cell)
+                               (find (lambda (s) (and (equal? (stone-cell s) cell) (stone-open? s)))
+                                     (gstate-stones g2)))))))
               (world w
                      wm: (if (eq? tm (world-tiles w)) (world-wm w) (worldmap (world-wm w) tiles: tm))
-                     gates: (gstate g2 news: '())
+                     gates: (gstate g2 tiles: tm news: '())
                      news: (append (world-news w) (gstate-news g2)))))))
 
     (define (still-tick w)
@@ -257,8 +274,50 @@
                       (world w phase: 'dark timer: DIM-TICKS)
                       w))))))
 
+    ;; At home with all three, in either collection order. Persist the flag,
+    ;; but keep animation time local to this session so continuing is quiet.
+    (define (homecoming-tick w)
+      (let* ((p (world-room w))
+             (rm (and p (placed-data p)))
+             (carry (world-carry w)))
+        (if (and rm (not (world-aurora w)) (eq? (world-phase w) 'play)
+                 (eq? (room-region rm) 'hollow) (= (room-x rm) 4) (= (room-y rm) 3)
+                 (memv 2 carry) (memv 3 carry) (memv 4 carry))
+            (let ((c (body-center (world-body w) HARKFELL-FEEL)))
+              (world w aurora: #t aurora-at: (world-ticks w)
+                     news: (append (world-news w) (list (list 'aurora (car c) (cdr c))))))
+            w)))
+
+    ;; Standing stones answer the carried chord, with space between answers.
+    ;; Coordinates remain world pixels, like the other positional news.
+    (define (standing-chord-tick w)
+      (let* ((wait (max 0 (- (world-chord-wait w) 1)))
+             (w (world w chord-wait: wait))
+             (p (world-room w))
+             (rm (and p (placed-data p))))
+        (if (and rm (= wait 0) (eq? (world-phase w) 'play)
+                 (>= (length (world-carry w)) 2))
+            (let* ((o (world-origin w))
+                   (b (body-center (world-body w) HARKFELL-FEEL))
+                   (near (find
+                           (lambda (a)
+                             (let ((dx (- (+ (car o) (* 16 (car a)) 8) (car b)))
+                                   (dy (- (+ (cdr o) (* 16 (cdr a)) 8) (cdr b))))
+                               (< (+ (* dx dx) (* dy dy)) (* 64 64))))
+                           (room-standing-stones rm))))
+              (if near
+                  (world w chord-wait: 720
+                         news: (append (world-news w)
+                                 (list (list 'chord (world-carry w)
+                                             (+ (car o) (* 16 (car near)) 8)
+                                             (+ (cdr o) (* 16 (cdr near)) 8)))))
+                  w))
+            w)))
+
     (define (world-tick w in)
-      (ice-tick (critters-tick (still-tick (gates-tick (world-tick-body w in))) w) w))
+      (homecoming-tick
+        (standing-chord-tick
+          (ice-tick (critters-tick (still-tick (gates-tick (world-tick-body w in))) w) w))))
 
     (define (world-tick-body w in)
       (let ((w (world w ticks: (+ (world-ticks w) 1))))

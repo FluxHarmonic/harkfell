@@ -55,4 +55,4 @@
    (T "The Ice Well" "a well of clear ice going down from the meltwater to a cold blue stone: somewhere deeper, not yet")
    (U "Root Ice" "a low cave where the birches' roots hang down through the ice: a breath in the dark")
    (V "Cave Mouth" "the caves' east end, black until you carry a light: a green stone that rings and opens as you come carrying H3, and the climb up to the scree"))
-  borders: ((A east)))
+  borders: ((A east) (V east)))

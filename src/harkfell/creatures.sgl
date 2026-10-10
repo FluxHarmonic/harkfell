@@ -215,6 +215,13 @@
                                                    timer: (+ 120 (exact (floor (* 600 (list-ref rs (+ 1 (* 2 j))))))))))
                                       (iota n))))
                      (loop (cdr ts) (+ i 1) (append (reverse moths) acc) perches)))
+                  ((and (eq? k 'stone-snail) at)
+                   (let ((f (feet (car at) (cdr at))))
+                     (loop (cdr ts) (+ i 1)
+                           (cons (critter kind: 'snail x: (car f) y: (cdr f)
+                                          home: f state: 'walk frame: 'crawl
+                                          facing: -1 rng: seed timer: 300) acc)
+                           perches)))
                   ((and (eq? k 'snow-owl) at)
                    (let ((f (feet (car at) (cdr at))))
                      (loop (cdr ts) (+ i 1)
@@ -313,6 +320,7 @@
                            ((moth) (moth-step c cs ctx say!))
                            ((owl) (owl-step c cs ctx say!))
                            ((vole) (vole-step c cs ctx say!))
+                           ((snail) (snail-step c cs ctx say!))
                            (else c)))
                        (critters-list cs))))
         (critters cs
@@ -639,6 +647,39 @@
     ;; A drawn moth chimes in its harmonic's partials: moth-hN.
     (define (moth-cue c)
       (string->symbol (string-append "moth-h" (number->string (critter-drawn c)))))
+
+    ;; Snails follow a continuous dry floor, turning before a drop or water.
+    ;; Their shell answers locally; it is never a finding target.
+    (define (snail-step c cs ctx say!)
+      (if (not (ctx-playing ctx)) c
+          (let* ((timer (- (critter-timer c) 1))
+                 (x (+ (critter-x c) (* 0.12 (critter-facing c))))
+                 (ahead (+ x (* 5.0 (critter-facing c))))
+                 (left (* 400 (exact (floor (/ (car (critter-home c)) 400)))))
+                 (floor (find (lambda (p)
+                                (and (< (+ left 16) (car p) (+ left 384))
+                                     (< (abs (- (car p) ahead)) 8.0)
+                                     (< (abs (- (cdr p) (critter-y c))) 1.0)))
+                              (critters-stand cs)))
+                 (water (find (lambda (p)
+                                (and (< (abs (- (car p) ahead)) 8.0)
+                                     (< (abs (- (cdr p) (critter-y c))) 20.0)))
+                              (critters-water cs)))
+                 (pause (> (critter-t c) 300)))
+            (when (<= timer 0)
+              (say! (if (memv 4 (ctx-carry ctx)) 'snail-h4 'snail-scrape)
+                    (critter-x c) (critter-y c)))
+            (cond ((or (not floor) water)
+                   (critter c facing: (- (critter-facing c)) t: 0
+                            timer: (if (<= timer 0) 480 timer)))
+                  (pause
+                   (critter c state: 'rest frame: 'rest
+                            t: (if (> (critter-t c) 420) 0 (+ (critter-t c) 1))
+                            timer: (if (<= timer 0) 480 timer)))
+                  (else
+                   (critter c x: x state: 'walk frame: 'crawl
+                            t: (+ (critter-t c) 1) anim: (+ (critter-anim c) 1)
+                            timer: (if (<= timer 0) 480 timer)))))))
 
     ;; --- lantern moths ------------------------------------------------------------------------
     (define (moth-step c cs ctx say!)

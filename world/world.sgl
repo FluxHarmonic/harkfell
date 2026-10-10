@@ -93,7 +93,7 @@
             hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
   tiles: hollow
   roster: (reedling lantern-moth)
-  moments: (high-fell hollow-answers hollow-fifth)
+  moments: (high-fell hollow-answers hollow-fifth hollow-octave)
   wander: (stones-remember)
   gives: ())
 
@@ -149,3 +149,20 @@
 (creature heron-shape behaviour: giant)
 (creature snow-owl behaviour: perch)
 (creature snow-vole behaviour: burrow)
+(creature stone-snail behaviour: walk)
+
+;; Pipes: LOOK replaces the palette/tiles with limestone assets on its branch.
+(region pipes
+  name: "The Pipes"
+  bounds: ((1 4) (6 8))
+  overtone: 4
+  bed: "pipes-bed"
+  bed-channels: (wind water pipes drone)
+  mode: aeolian
+  palette: (hol-sky-1 hol-sky-2 hol-sky-3 hol-sky-4 hol-stone-1 hol-stone-2 hol-stone-3 hol-stone-4
+            hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
+  tiles: hollow
+  roster: (lantern-moth stone-snail)
+  moments: (wind-in-stone three-echoes the-pipes-breathe)
+  wander: (air-below seep-song)
+  gives: ((overtone 4)))

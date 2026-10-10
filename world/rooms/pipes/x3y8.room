@@ -1,0 +1,22 @@
+(room
+  region: pipes
+  at: (3 8)
+  title: "Dry Teeth"
+  intent: "small dry limestone teeth stand above ordinary water, with a snail on the bank: a breath"
+  bed: (wind 0 water 0.7 pipes 0.3 drone 0.4)
+  light: 0.33
+  grid:
+  ("#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#                       #"
+   "                         "
+   "     ~~#~       ~~#~     "
+   "#####~~~~#######~~~~#####"
+   "#########################")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
+           (stone-snail at: (21 8)))
+  decor: auto)

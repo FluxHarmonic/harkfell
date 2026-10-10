@@ -1,0 +1,22 @@
+(room
+  region: pipes
+  at: (1 7)
+  title: "Chalk Rest"
+  intent: "a dry ledge overlooks a dark seep pool where a snail moves slowly: a breath"
+  bed: (wind 0.1 water 0.8 pipes 0.4 drone 0.5)
+  light: 0.33
+  grid:
+  ("###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "###########%  %##########"
+   "#                       #"
+   "#                        "
+   "#  ~~~~~                 "
+   "###~~~~~#################"
+   "#########################")
+  things: ((lantern-moth at: (9 6) count: 3 drawn: 3)
+           (stone-snail at: (21 8)))
+  decor: auto)
