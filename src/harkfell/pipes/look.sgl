@@ -11,11 +11,16 @@
           (harkfell render)
           (harkfell atlas))
 
-  (export pipes-backdrop-bytes draw-pipes-panels! draw-pipes-cues!
+  (export PIPES-DARK pipes-backdrop-bytes draw-pipes-panels! draw-pipes-cues!
           draw-pipes-lights! draw-upward-drips! draw-aurora!)
 
   (begin
     (define (pixel x) (exact (floor x)))
+
+    ;; The first four slots are cave walls, rather than an outdoor sky.
+    ;; The generic sky-1 -> ground-2 would brighten wall-2 at step two.
+    (define PIPES-DARK
+      (cons (cons 'sky-1 'ground-1) DARK))
 
     ;; Distant bores: repeated straight lips, uneven natural cross-joints
     ;; and vertical wet stains. These use the four cave-wall slots only.

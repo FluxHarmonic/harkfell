@@ -175,6 +175,8 @@
       (draw-filled-rect (+ x 3) (+ y 1) 8 1)
       (draw-filled-rect (+ x 2) (+ y 2) 1 5))
 
+    ;; A local sheet optionally supplies the body and keeps a shut key
+    ;; coloured; missing body art falls back to the usual ring-stone.
     (define (draw-stone st x y t carry slot . sheet)
       (let* ((n (stone-overtone st))
              (key (slot (harmonic-role n)))
