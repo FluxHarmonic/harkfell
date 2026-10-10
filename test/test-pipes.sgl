@@ -112,7 +112,12 @@
                    (snail (find (lambda (c) (eq? (critter-kind c) 'snail)) (critters-list cs)))
                    (heard (or heard (find (lambda (n) (and (eq? (car n) 'call) (eq? (cadr n) 'snail-h4)))
                                          (critters-news cs)))))
-              (assert-true (= (cdr (critter-home snail)) (critter-y snail)))
+              ;; a snail only moves sideways, so check where it stands: rock
+              ;; under its feet and open air at them, wherever it walks
+              (let ((c (exact (floor (/ (critter-x snail) 16))))
+                    (r (exact (floor (/ (critter-y snail) 16)))))
+                (assert-true (memv (room-char rm c r) (list #\# #\%)))
+                (assert-false (memv (room-char rm c (- r 1)) (list #\# #\% #\~))))
               (assert-true (>= (critter-x snail) 16))
               (assert-true (< (critter-x snail) 384))
               (if (= n 0) (assert-true heard) (loop cs (- n 1) heard))))))

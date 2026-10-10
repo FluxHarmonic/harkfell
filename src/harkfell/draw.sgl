@@ -417,7 +417,6 @@
                                                (case key
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
-                                                 ((pipes) (pipes-backdrop-bytes))
                                                  ((pipes-0) (pipes-backdrop-bytes 0))
                                                  ((pipes-1) (pipes-backdrop-bytes 1))
                                                  ((pipes-2) (pipes-backdrop-bytes 2))

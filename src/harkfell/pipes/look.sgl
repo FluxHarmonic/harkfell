@@ -207,32 +207,6 @@
                'ochre)
               (else tone))))
 
-    ;; One pixel of fractured limestone at periodic (x, y): the vertical
-    ;; cracks step halfway down a course, some blocks are split by a
-    ;; diagonal crack, some are wet and dark.
-    (define (rough-tone x y b)
-      (let* ((course (part-at COURSES 40 4 5 y))
-             (cid (car course)) (by (cadr course)) (h (caddr course))
-             (blk (part-at BLOCKS 64 5 (+ 6 (modulo cid 7))
-                           (modulo (+ x (modulo (hash3 cid 2 6) 64)) PERIOD-X)))
-             (bid (car blk)) (bx (cadr blk)) (wb (caddr blk))
-             (lower (> by (quotient h 2)))
-             (joint (if lower 1 0))
-             (hb (hash3 bid cid 8))
-             (wet (= 0 (modulo hb 4)))
-             (face (cond (wet (if (< b 0.5) 1 2))
-                         ((< by (quotient h 3)) (if (< b 0.6) 3 2))
-                         (else (if (< b 0.2) 3 2)))))
-        (cond ((= by 0) 1)
-              ((= bx joint) 1)
-              ((and lower (= bx 0)) 2)
-              ((and (= 1 (modulo hb 5)) (= (- bx by) (quotient wb 2))) 1)
-              ((= by 1) (if wet 2 (if (< bx (* 0.6 wb)) 4 3)))
-              ((= bx (+ joint 1)) (if wet 2 3))
-              ((>= by (- h 1)) (if (< b 0.5) 1 2))
-              ((>= bx (- wb 1)) 2)
-              (else face))))
-
     ;; Narrow columns: the pipe band holds a 16 px pipe at x 0, a 32 px pipe
     ;; at x 16 and two 24 px pipes at x 48 (for three cells).
     (define (pipe-tone x y b)
@@ -358,8 +332,8 @@
     ;; local (c r), -1..25 and -1..11, to the material there; GX0, GY0: the
     ;; room's top-left global pixel. Like cells merge into runs: one stone
     ;; window per run of a row, two rects per lip or rim run and one drip
-    ;; strip per underside, so a room costs fewer draws than its tiles did
-    ;; (the overview bakes every room of a region in one frame).
+    ;; strip per underside, so the region costs about what its tiles did
+    ;; (some rooms more, some less; the overview bakes a region in one frame).
     (define (draw-pipes-solids! rm kind-at gx0 gy0)
       (let* ((tex (stone-texture))
              (cols (+ ROOM-COLS 2))
@@ -400,7 +374,9 @@
               (when (< c ROOM-COLS)
                 (let ((k (kind c r)))
                   (when (memq k '(rock rough))
-                    (let* ((up (not (solid? c (- r 1)))) (dn (not (solid? c (+ r 1))))
+                    ;; water above covers a top: no cream lip on a pool's floor
+                    (let* ((up (not (or (solid? c (- r 1)) (eq? (kind c (- r 1)) 'water))))
+                           (dn (not (solid? c (+ r 1))))
                            (lf (not (solid? (- c 1) r))) (rt (not (solid? (+ c 1) r)))
                            (deep (and (not (or up dn lf rt))
                                       (solid? (- c 1) (- r 1)) (solid? (+ c 1) (- r 1))
@@ -477,8 +453,8 @@
 
     ;; Which far wall a room shows: three arrangements, by position.
     (define (pipes-backdrop-key rm)
-      (vector-ref (vector 'pipes-0 'pipes-1 'pipes-2)
-                  (modulo (+ (* 2 (room-x rm)) (room-y rm)) 3)))
+      (case (modulo (+ (* 2 (room-x rm)) (room-y rm)) 3)
+        ((0) 'pipes-0) ((1) 'pipes-1) (else 'pipes-2)))
 
     (define (slot-rect! name x y w h)
       (paint-slot! (slot-of name))

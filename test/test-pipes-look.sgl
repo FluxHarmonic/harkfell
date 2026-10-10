@@ -73,3 +73,47 @@
                 (assert-true (<= dark2 dark base)))
               (channels (+ channel 1))))
           (slots (+ slot 1)))))))
+
+(test-group "Pipes look: the shared stone texture"
+  (test "its bands are opaque ground or ochre slots, the drip row is sparse, and the margins repeat the period"
+    (let* ((bv (stone-bytes))
+           (w 336) (band 176)
+           (ok (list (slot-of 'ground-1) (slot-of 'ground-2) (slot-of 'ground-3)
+                     (slot-of 'ground-4) (slot-of 'accent)))
+           (at (lambda (x y) (* 4 (+ x (* y w)))))
+           (slot (lambda (x y) (bytevector-u8-ref bv (at x y))))
+           (alpha (lambda (x y) (bytevector-u8-ref bv (+ 3 (at x y))))))
+      (assert-equal (* 4 w (+ (* 4 band) 1)) (bytevector-length bv))
+      ;; four bands; the pipe band holds 96 px of columns
+      (let ((bad (let rows ((y 0) (n 0))
+                   (if (= y (* 4 band))
+                       n
+                       (rows (+ y 1)
+                             (let cols ((x 0) (n n))
+                               (if (= x (if (< y (* 3 band)) w 96))
+                                   n
+                                   (cols (+ x 1)
+                                         (if (and (= 255 (alpha x y)) (memv (slot x y) ok)) n (+ n 1))))))))))
+        (assert-equal 0 bad))
+      ;; the drip row: some drops, mostly clear
+      (let ((drops (let cols ((x 0) (n 0)) (if (= x w) n (cols (+ x 1) (if (= 255 (alpha x (* 4 band))) (+ n 1) n))))))
+        (assert-true (> drops 20))
+        (assert-true (< drops (quotient w 2))))
+      ;; the wrap margins equal the start of the period, across and down,
+      ;; so a window that runs past 320 or 160 continues the pattern
+      (let ((seams (let bands ((b 0) (n 0))
+                     (if (= b 3)
+                         n
+                         (bands (+ b 1)
+                                (let px ((i 0) (n n))
+                                  (if (= i 16)
+                                      n
+                                      (px (+ i 1)
+                                          (let py ((y 0) (n n))
+                                            (if (= y 160)
+                                                n
+                                                (py (+ y 1)
+                                                    (+ n
+                                                       (if (= (slot i (+ y (* b band))) (slot (+ i 320) (+ y (* b band)))) 0 1)
+                                                       (if (= (slot (+ y 100) (+ i (* b band))) (slot (+ y 100) (+ i 160 (* b band)))) 0 1)))))))))))))
+        (assert-equal 0 seams)))))
