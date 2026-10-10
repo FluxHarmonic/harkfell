@@ -5,6 +5,7 @@
   title: "Reed Bridge"
   intent: "the first open water; a breath after the Hollow's climbs"
   bed: (wind 0.4 water 0.8 reeds 0.5)
+  sun: 0
   grid:
   ("                         "
    "                         "
@@ -19,7 +20,8 @@
    "#########################")
   things: ((bellfrog at: (19 7))
            (bellfrog at: (5 7))
-           (reedling flock: 5 zone: reeds))
+           (reedling flock: 5 zone: reeds)
+           (firefly at: (14 5) count: 3 drawn: 2))
   moment: (tune: first-open-water when: first-visit)
   decor: auto)
 ;; A plank bridge (one-way: you jump up through it) over a pool two deep.

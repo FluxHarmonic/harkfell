@@ -66,7 +66,7 @@
           region region? region-name region-field
           room room? room-path room-region room-x room-y room-title room-intent
           room-grid room-things room-bed room-moment room-decor room-start
-          room-unreached room-file room-light
+          room-unreached room-file room-light room-sun-value
           content-room room-key parse-room-key room-label
           room-char world-char
           read-room-source room-placed
@@ -75,6 +75,7 @@
           thing-kw thing-at room-things-of grid-standable?
           icicle-floor-row icicle-placement-problems
           room-thin-ice thin-ice-placement-problems room-dark? room-has-drawn-moths?
+          room-under? room-moth-cave? room-firefly-cave? room-daylight-pools?
           moment-forms moment-kw room-moments moment-key)
 
   (begin
@@ -103,7 +104,8 @@
       (decor default: 'auto)
       (start default: #f)           ; (c . r) or #f
       (unreached default: '())      ; ((c . r) ...) declared unreachable
-      (light default: 1.0))         ; Glasswood: how lit the room is, 0 < light <= 1 (1 daylight)
+      (light default: 1.0)        ; 0 < light <= 1; daylight when absent
+      (sun-value default: #f))     ; optional 0..1 override; #f derives Glasswood sun
 
     ;; A region map: ((letter x y title intent) ...), which neighbours are
     ;; joined, and (A4) which of its rooms open onto another region's.
@@ -293,6 +295,32 @@
     (define (room-has-drawn-moths? rm)
       (and (find (lambda (t) (thing-kw t "drawn")) (room-things-of rm (quote lantern-moth))) #t))
 
+    ;; The same ceiling rule drives the backdrop and cave-light behavior.
+    ;; An open room below another room still belongs to the sky.
+    (define (room-under? rm)
+      (> (length (filter (lambda (c)
+                           (memq (char-kind (room-char rm c 0)) '(solid climbable)))
+                         (iota ROOM-COLS)))
+         15))
+
+    (define (room-moth-cave? rm)
+      (and (room-under? rm) (room-dark? rm) (room-has-drawn-moths? rm)))
+
+    ;; The covered fen keeps a readable shade and broad daylight pools.
+    ;; Open sky and other regions retain their existing lighting treatment.
+    (define (room-daylight-pools? rm)
+      (and (eq? (room-region rm) 'reedfen) (room-under? rm)))
+
+    ;; Fireflies lift only the authored shade under the fen's ceiling.
+    ;; They never trigger the moth caves' extra black step or setback.
+    (define (room-firefly-cave? rm)
+      (and (eq? (room-region rm) 'reedfen)
+           (room-under? rm)
+           (room-dark? rm)
+           (and (find (lambda (t) (thing-kw t "drawn"))
+                      (room-things-of rm 'firefly))
+                #t)))
+
     ;; The room's thin-ice cells, ((c . r) ...).
     (define (room-thin-ice rm)
       (map (lambda (a) (cons (car a) (cadr a)))
@@ -467,7 +495,7 @@
     (define NO-LIGHT (list 'no-light))
 
     (define ROOM-FIELDS
-      (list 'region 'at 'title 'intent 'bed 'grid 'things 'moment 'decor 'start 'unreached 'light))
+      (list 'region 'at 'title 'intent 'bed 'grid 'things 'moment 'decor 'start 'unreached 'light 'sun))
     (define ROOM-REQUIRED (list 'region 'at 'title 'intent 'grid))
 
     ;; A room file read and checked on its own and against the regions: (room . problems).
@@ -704,6 +732,12 @@
           (let ((l (roomfile-field rf 'light NO-LIGHT)))
             (when (and (not (eq? l NO-LIGHT)) (not (and (number? l) (> l 0) (<= l 1))))
               (add! (string-append "light: " (datum->string l) " is not a number above 0 and at most 1") "light")))
+          ;; sun: optional low-sun strength; explicit zero disables it.
+          (let ((sun (roomfile-field rf 'sun NO-LIGHT)))
+            (when (and (not (eq? sun NO-LIGHT))
+                       (not (and (number? sun) (<= 0 sun 1))))
+              (add! (string-append "sun: " (datum->string sun)
+                                   " is not a number from 0 to 1") "sun")))
           (let* ((grid-ps (check-grid rf ROOM-COLS ROOM-ROWS LEGEND-CHARS))
                  (all (append (roomfile-problems rf) (reverse ps) (if (roomfile-ok? rf) grid-ps '())))
                  (u (roomfile-field rf 'unreached '()))
@@ -722,6 +756,8 @@
                         decor: (roomfile-field rf 'decor 'auto)
                         start: (and (int-pair? s) (cons (car s) (cadr s)))
                         light: (let ((l (roomfile-field rf 'light 1.0))) (if (and (number? l) (> l 0) (<= l 1)) (inexact l) 1.0))
+                        sun-value: (let ((sun (roomfile-field rf 'sun)))
+                                     (and (number? sun) (<= 0 sun 1) (inexact sun)))
                         unreached: (if (and (list? u) (every int-pair? u))
                                        (map (lambda (p) (cons (car p) (cadr p))) u)
                                        '()))

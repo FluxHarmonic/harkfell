@@ -5,6 +5,8 @@
   title: "Moth Hollow"
   intent: "a hollow behind a false wall that a careful eye finds, where the moths sleep"
   bed: (wind 0.1 hum 0.3 drone 0.8)
+  light: 1
+  sun: 1
   grid:
   ("#########################"
    "#########################"

@@ -5,6 +5,8 @@
   title: "The Old Cut"
   intent: "a doorway the old people cut into the fell, blocked by fallen rock, and the wind sounding a note inside: the way to the Pipes, heard and not yet"
   bed: (wind 0.4 hum 0.3 drone 0.3)
+  light: 1
+  sun: 1
   grid:
   ("#           %############"
    "            %############"

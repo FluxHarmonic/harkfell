@@ -30,12 +30,13 @@
           (sigil string)
           (sigil graphics)
           (harkfell render)
+          (harkfell palette)
           (harkfell atlas)
           (harkfell gates)
           (harkfell creatures))
 
   (export draw-critter draw-critter-glow draw-stone draw-stone-light draw-pickup draw-pickup-light
-          draw-flash draw-flash-light harmonic-role)
+          draw-flash draw-flash-light harmonic-role firefly-halo-pixels)
 
   (begin
     (define (harmonic-role n)
@@ -79,6 +80,24 @@
             (atlas-draw! i (- (floor-int x) (quotient* (car sz) 2)) (- (floor-int y) (cdr sz)) face)))))
 
     ;; --- creatures ---------------------------------------------------------------------------
+    ;; A faint amber halo stays within three pixels of its point. Coverage
+    ;; follows the blink; a phase offset keeps the small patterns staggered.
+    (define (firefly-halo-pixels glow phase)
+      (let rows ((dy -3) (acc '()))
+        (if (> dy 3)
+            acc
+            (let cols ((dx -3) (acc acc))
+              (if (> dx 3)
+                  (rows (+ dy 1) acc)
+                  (let* ((d2 (+ (* dx dx) (* dy dy)))
+                         (coverage (* 0.35 (min 1.0 (max 0.0 glow))
+                                      (- 1.0 (/ (sqrt d2) 4.0)))))
+                    (cols (+ dx 1)
+                          (if (and (> d2 0) (<= d2 9)
+                                   (< (dither-threshold (+ dx phase) dy) coverage))
+                              (cons (cons dx dy) acc)
+                              acc))))))))
+
     (define (draw-critter c ox oy t slot)
       (let ((x (- (critter-x c) ox)) (y (- (critter-y c) oy)) (face (critter-facing c))
             (a (critter-anim c)))
@@ -112,6 +131,15 @@
                                            (symbol->string (harmonic-role (or (critter-drawn c) 2))))
                             (if up "moth-up" "moth-down"))))
              (cell! name x (+ y 2) face)))
+          ((firefly)
+           (when (> (critter-glow c) 0.1)
+             (paint-slot! (slot 'h2))
+             (for-each (lambda (p)
+                         (draw-filled-rect (+ (floor-int x) (car p))
+                                           (+ (floor-int y) (cdr p)) 1 1))
+                       (firefly-halo-pixels (critter-glow c) (modulo a 4)))
+             (cell! (if (< (modulo a 8) 4) "firefly-up@h2" "firefly-down@h2")
+                    x (+ y 1) face)))
           ;; Glasswood: the snow owl (perch, perch-down, doze, fly) and the
           ;; snow vole (hidden, peek, up), by the frame the behaviour names
           ((owl)

@@ -5,6 +5,8 @@
   title: "The Drowned Bell"
   intent: "a bell the old people sank, hanging in deep water: swim down and listen"
   bed: (water 0.6 drone 0.8)
+  light: 0.67
+  sun: 0
   grid:
   ("##########~~~~###########"
    "#####~~~~~~~~~~~##~~~####"

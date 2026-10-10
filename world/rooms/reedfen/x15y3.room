@@ -5,6 +5,7 @@
   title: "Cattails"
   intent: "tall reeds gone to seed, the down drifting on the wind: a breath"
   bed: (wind 0.7 reeds 0.8 drone 0.2)
+  sun: 0
   grid:
   ("                         "
    "                         "
@@ -17,7 +18,8 @@
    "#################%   %###"
    "#################%   %###"
    "#################%   %###")
-  things: ((reedling flock: 7 zone: reeds))
+  things: ((reedling flock: 7 zone: reeds)
+           (firefly at: (14 6) count: 3 drawn: 2))
   decor: auto)
 ;; The tallest reeds in the fen. The hole at columns 18-20 drops to the
 ;; Seep; its root walls are the way back up.

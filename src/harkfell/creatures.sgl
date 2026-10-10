@@ -39,6 +39,11 @@
 ;;;            them) and orbit at a distance, glowing in H's colour, tinking
 ;;;            in H's partials; stand still and they settle closer and slower
 ;;;
+;;; FIREFLIES (follow; Reedfen). (firefly at: (C R) count: N drawn: 2)
+;;; uses the moth steering silently, with a smaller orbit. Idle ones blink
+;;; out of phase; carrying H2 gathers them with a steady amber glow. They
+;;; never take the moth caves’ first-tick setback or extra darkness.
+;;;
 ;;; SNOW OWLS (perch; Glasswood). (snow-owl at: (C R)) sits on that standable
 ;;; cell, a high branch.
 ;;;   perched  it watches you, warily: its head follows you, and looks down
@@ -71,7 +76,7 @@
           critter critter? critter-kind critter-x critter-y critter-state critter-t
           critter-facing critter-frame critter-glow critter-drawn critter-anim critter-home critter-vx critter-vy
           critter-tx critter-ty
-          ALARM FLEE DRAW-R SONG-GAP MOTH-AWAY moth-arrival)
+          ALARM FLEE DRAW-R SONG-GAP MOTH-AWAY moth-arrival firefly-blink)
 
   (begin
     (define TILE 16)
@@ -89,7 +94,7 @@
 
     ;; kind: reedling | bellfrog | moth. state: per kind (below). t: ticks in
     ;; the state. home: (x . y). tx ty: a target. anim: a free-running frame
-    ;; clock offset. glow: 0..1 (moths). drawn: a moth's harmonic. rng: its
+    ;; clock offset. glow: 0..1 (moths and fireflies). drawn: a moth's harmonic. rng: its
     ;; own random state. extra: the kind's scratch (a flock's id, a timer).
     (define-struct critter
       (kind default: #f)
@@ -160,7 +165,7 @@
         (let loop ((ts things) (i 0) (acc '()) (perches '()))
           (if (null? ts)
               (critters list: (reverse acc)
-                        dark: (room-dark? rm)
+                        dark: (room-moth-cave? rm)
                         perches: perches
                         stand: (map (lambda (cr) (feet (car cr) (cdr cr))) stand)
                         water: (map (lambda (cr) (cons (+ ox (* TILE (car cr)) (/ TILE 2.0)) (+ oy (* TILE (cdr cr)) 3.0))) water))
@@ -201,13 +206,13 @@
                                           timer: (+ 90 (modulo seed 300)))
                                  acc)
                            perches)))
-                  ((and (eq? k 'lantern-moth) at)
+                  ((and (memq k '(lantern-moth firefly)) at)
                    (let* ((n (or (thing-kw t "count") 3))
                           (h (cons (+ ox (* TILE (car at)) (/ TILE 2.0)) (+ oy (* TILE (cdr at)) (/ TILE 2.0))))
                           (rs (seed-rands seed (* 2 n)))
                           (moths (map (lambda (j)
                                         (let ((a (* 6.2831853 (list-ref rs (* 2 j)))))
-                                          (critter kind: 'moth
+                                          (critter kind: (if (eq? k 'firefly) 'firefly 'moth)
                                                    x: (+ (car h) (* 14.0 (cos a))) y: (+ (cdr h) (* 8.0 (sin a)))
                                                    home: h state: 'idle drawn: (thing-kw t "drawn")
                                                    anim: (exact (floor (* 997 (list-ref rs (+ 1 (* 2 j))))))
@@ -257,7 +262,7 @@
     ;; averaged over the drawn moths; 0 when none is drawn. The moth light and
     ;; the dark's lifting are drawn from it (the light is where the moths are).
     (define (moth-arrival moths bx by)
-      (let ((drawn (filter (lambda (c) (and (eq? (critter-kind c) 'moth) (eq? (critter-state c) 'drawn))) moths)))
+      (let ((drawn (filter (lambda (c) (and (memq (critter-kind c) '(moth firefly)) (eq? (critter-state c) 'drawn))) moths)))
         (if (null? drawn)
             0.0
             (/ (apply + (map (lambda (c)
@@ -311,6 +316,11 @@
                            ((reedling) (reedling-step c cs ctx (memv (critter-flock c) alarm-flocks) (eq? c singer) say!))
                            ((bellfrog) (frog-step c cs ctx say!))
                            ((moth) (moth-step c cs ctx say!))
+                           ((firefly)
+                            (let ((f (moth-step c cs ctx (lambda args #f))))
+                              (if (eq? (critter-state f) 'drawn)
+                                  f
+                                  (critter f glow: (firefly-blink (critter-anim f))))))
                            ((owl) (owl-step c cs ctx say!))
                            ((vole) (vole-step c cs ctx say!))
                            (else c)))
@@ -640,6 +650,12 @@
     (define (moth-cue c)
       (string->symbol (string-append "moth-h" (number->string (critter-drawn c)))))
 
+    ;; Silent fen fireflies use the same steering, with a smaller orbit.
+    ;; Three-second idle pulse; per-creature anim offsets keep it staggered.
+    (define (firefly-blink phase)
+      (let ((pulse (max 0.0 (sin (* 0.035 phase)))))
+        (* 0.5 pulse pulse)))
+
     ;; --- lantern moths ------------------------------------------------------------------------
     (define (moth-step c cs ctx say!)
       (let* ((c (critter c t: (+ (critter-t c) 1) anim: (+ (critter-anim c) 1)))
@@ -656,7 +672,10 @@
         (if drawn
             ;; orbit you: wider while you move, close and slow while you stand
             (let* ((calm (ctx-calm ctx))
-                   (rad (if calm (+ 19.0 (* 4.0 (sin (+ ph (* 0.013 k))))) (+ 27.0 (* 6.0 (sin (+ ph (* 0.021 k)))))))
+                   (rad (* (if (eq? (critter-kind c) 'firefly) 0.65 1.0)
+                           (if calm
+                               (+ 19.0 (* 4.0 (sin (+ ph (* 0.013 k)))))
+                               (+ 27.0 (* 6.0 (sin (+ ph (* 0.021 k))))))))
                    (w (if calm 0.012 0.024))
                    (a (+ ph (* w k)))
                    (tx (+ bx (* rad (cos a))))

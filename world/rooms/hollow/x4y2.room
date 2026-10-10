@@ -5,6 +5,8 @@
   title: "Above the Bowl"
   intent: "the bowl's north rim, where the stones below make a ring you can only see from here"
   bed: (wind 0.6 hum 0.4 drone 0.5)
+  light: 1
+  sun: 1
   grid:
   ("                         "
    "                         "

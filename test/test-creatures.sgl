@@ -60,10 +60,10 @@
       (assert-equal 5 (length (of-kind w 'reedling)))
       (assert-true (every (lambda (s) (eq? s 'perched)) (states w 'reedling)))
       (assert-equal 2 (length (of-kind w 'bellfrog)))))
-  (test "Behind the Stone: five moths drawn to 2"
+  (test "Behind the Stone: five fireflies drawn to 2"
     (let ((w (world-standing 11 3 8 8 '(2))))
-      (assert-equal 5 (length (of-kind w 'moth)))
-      (assert-true (every (lambda (c) (eqv? 2 (critter-drawn c))) (of-kind w 'moth))))))
+      (assert-equal 5 (length (of-kind w 'firefly)))
+      (assert-true (every (lambda (c) (eqv? 2 (critter-drawn c))) (of-kind w 'firefly))))))
 
 ;; Reed Bridge: the reedlings perch in the east bank's reeds (cols 17-22,
 ;; seeded) and a bellfrog sits at (19 7). The body starts on the bridge
@@ -121,15 +121,15 @@
 ;; about 8 tiles off.
 (define (moth-spread w)
   (let ((c (body-c w)))
-    (apply max (map (lambda (m) (dist (cons (critter-x m) (critter-y m)) c)) (of-kind w 'moth)))))
+    (apply max (map (lambda (m) (dist (cons (critter-x m) (critter-y m)) c)) (of-kind w 'firefly)))))
 (define (moth-home-spread w)
-  (apply max (map (lambda (m) (dist (cons (critter-x m) (critter-y m)) (critter-home m))) (of-kind w 'moth))))
+  (apply max (map (lambda (m) (dist (cons (critter-x m) (critter-y m)) (critter-home m))) (of-kind w 'firefly))))
 
-(test-group "creatures: lantern moths"
-  (test "carrying H2: within 10 s every moth is within 40 px of you, and they chimed"
+(test-group "creatures: fen fireflies"
+  (test "carrying H2: within 10 s every firefly is within 40 px of you, silently"
     (let ((r (run (world-standing 11 3 6 8 '(2)) STILL 600)))
       (assert-true (< (moth-spread (car r)) 40.0))
-      (assert-true (pair? (calls (cdr r) 'moth-h2)))))
+      (assert-false (pair? (calls (cdr r) 'moth-h2)))))
   (test "carrying nothing: they stay within 30 px of home, far from you"
     (let ((r (run (world-standing 11 3 6 8 '()) STILL 600)))
       (assert-true (< (moth-home-spread (car r)) 30.0))

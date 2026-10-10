@@ -5,6 +5,8 @@
   title: "Root Stair"
   intent: "roots to climb from the dark back up into the sky"
   bed: (wind 0.2 water 0.3)
+  light: 0.67
+  sun: 0
   grid:
   ("##%   %##################"
    "##%   %##################"
@@ -17,7 +19,7 @@
    "      |   ||    |   |    "
    "#########################"
    "#########################")
-  things: ((lantern-moth at: (14 5) count: 3 drawn: 2))
+  things: ((firefly at: (14 5) count: 3 drawn: 2))
   decor: auto)
 ;; The shaft (columns 3-5) is walled with roots on both sides: jump, hold
 ;; either wall and climb, up through the hole into the Stone's Shadow.

@@ -12,7 +12,15 @@
         (harkfell content)
         (harkfell source)
         (harkfell save)
-        (harkfell shell))
+        (harkfell shell)
+        (harkfell render)
+        (harkfell palette)
+        (harkfell creatures)
+        (harkfell sprites)
+        (harkfell draw)
+        (harkfell check)
+        (engine tilemap)
+        (engine worldmap))
 
 (define SRC (read-world-source "world"))
 
@@ -34,12 +42,12 @@
 (define (problems src) (map problem-message (content-problems (load-content src))))
 (define (has? ps s) (and (find (lambda (p) (string-contains? p s)) ps) #t))
 
-(define DARK (with-light "0.3"))
+(define DARK-SOURCE (with-light "0.3"))
 
 (test-group "light: the room file"
   (test "light: 0.3 loads clean and is read"
-    (assert-equal '() (problems DARK))
-    (assert-equal 0.3 (room-light (content-room (load-content DARK) -1 3))))
+    (assert-equal '() (problems DARK-SOURCE))
+    (assert-equal 0.3 (room-light (content-room (load-content DARK-SOURCE) -1 3))))
   (test "a room without it is daylight"
     (assert-equal 1.0 (room-light (content-room (load-content SRC) -1 3))))
   (test "light: 1 is allowed (daylight, written)"
@@ -54,7 +62,7 @@
 (shell-boot!)
 (set-store-root! DIR)
 (store-remove! SAVE-KEY)
-(shell-load-content! DARK)
+(shell-load-content! DARK-SOURCE)
 (define IN-DARK (and (shell-goto! "glasswood:-1,3") (shell-room-light)))
 (define IN-LIGHT (and (shell-goto! "glasswood:0,3") (shell-room-light)))
 
@@ -63,3 +71,183 @@
     (assert-equal 0.3 IN-DARK))
   (test "next door, without light:, 1.0"
     (assert-equal 1.0 IN-LIGHT)))
+
+;; sun overrides distinguish an absent field from explicit zero or #f.
+(define (with-sun value)
+  (map (lambda (e)
+         (if (string-contains? (car e) "glasswood/x-1y3.room")
+             (cons (car e) (swap (cdr e) BED
+                                (string-append BED "\n  sun: " value)))
+             e))
+       SRC))
+
+(test-group "sun: the optional room field"
+  (test "absent keeps the derived default; explicit zero survives"
+    (assert-false (room-sun-value (content-room (load-content SRC) -1 3)))
+    (assert-equal 0.0 (room-sun-value (content-room (load-content (with-sun "0")) -1 3))))
+  (test "one and fractions load clean"
+    (assert-equal '() (problems (with-sun "1")))
+    (assert-equal 0.4 (room-sun-value (content-room (load-content (with-sun "0.4")) -1 3))))
+  (test "negative, over one, word and false are rejected"
+    (for-each (lambda (v)
+                (assert-true (has? (problems (with-sun v)) "is not a number from 0 to 1")))
+              '("-0.1" "1.1" "copper" "#f"))))
+
+(define CT (load-content SRC))
+(test-group "H-A and R-A: authored light"
+  (test "only covered Reedfen rooms use daylight pools; open sky stays daylight"
+    (let ((rooms (filter (lambda (rm) (eq? (room-region rm) 'reedfen)) (map placed-data (content-rooms CT)))))
+      (assert-equal 22 (length rooms))
+      (assert-equal 12 (length (filter room-under? rooms)))
+      (for-each (lambda (rm)
+                  (let ((covered (> (room-y rm) 3)))
+                    (assert-equal covered (room-under? rm))
+                    (assert-equal covered (room-daylight-pools? rm))
+                    (assert-equal (if covered 0.67 1.0) (room-light rm))
+                    (assert-equal (if covered 1.0 0.0) (dark-steps (room-light rm))))
+                  (assert-equal 0.0 (room-sun-value rm))
+                  (assert-false (room-moth-cave? rm)))
+                rooms)))
+  (test "only the two bowl interiors have half-step shade"
+    (for-each (lambda (p)
+                (let ((rm (placed-data p)))
+                  (when (eq? (room-region rm) 'hollow)
+                    (assert-false (room-daylight-pools? rm))
+                    (assert-equal (if (and (= (room-y rm) 3)
+                                          (memv (room-x rm) '(4 5)))
+                                     0.5
+                                     0.0)
+                                  (dark-steps (room-light rm))))))
+              (content-rooms CT)))
+  (test "local sun-edge strength is constant outside the occluding bowl rim"
+    (assert-equal '(1.0 1.0 1.0 1.0 1.0 1.0 1.0)
+                  (map (lambda (x) (room-sun-value (content-room CT x 2)))
+                       '(1 2 3 4 5 6 7)))
+    (assert-equal '(1.0 1.0 1.0 0.35 0.35 1.0 1.0)
+                  (map (lambda (x) (room-sun-value (content-room CT x 3)))
+                       '(1 2 3 4 5 6 7))))
+  (test "Hollow shade keeps copper and turf; other regions keep their dark lookup"
+    (assert-equal (slot-of 'accent) (lookup HOLLOW-SHADE (slot-of 'accent)))
+    (assert-equal (slot-of 'leaf-1) (lookup HOLLOW-SHADE (slot-of 'leaf-2)))
+    (assert-equal DARK (region-dark-lookup 'glasswood))
+    (assert-equal DARK (region-dark-lookup 'reedfen)))
+  (test "Hollow retains the exact original dawn colours"
+    (let* ((region (find (lambda (r) (eq? (region-name r) 'hollow))
+                         (content-regions CT)))
+           (rgb (region-rgb-vector (region-field region 'palette)
+                                   (content-palette CT))))
+      (assert-equal
+        (map hex->rgb '("#65718e" "#9298ad" "#c6b7b2" "#e8d1ac"
+                       "#2d2b2c" "#4d4a48" "#767470" "#a7a59b"
+                       "#435234" "#66763f" "#9aa25e" "#465a6b" "#b0643a"))
+        (map (lambda (i) (vector-ref rgb i)) (iota 13)))))
+  (test "custom shade leaves the six non-dark palette strips exactly unchanged"
+    (let* ((rgb (region-rgb-vector
+                  (region-field (find (lambda (r) (eq? (region-name r) 'hollow))
+                                      (content-regions CT))
+                                'palette)
+                  (content-palette CT)))
+           (original (strip-bytes rgb))
+           (warm (strip-bytes rgb HOLLOW-SHADE)))
+      (assert-equal (bytevector-copy original 0 (* 6 32 4))
+                    (bytevector-copy warm 0 (* 6 32 4)))))
+  (test "bowl-rim shade does not set its dawn moths back into cave darkness"
+    (let* ((rm (content-room CT 4 3))
+           (cs (critters-step (critters-new rm 0 0) 184.0 88.0 1 '(2) #t))
+           (moths (filter (lambda (c) (eqv? (critter-drawn c) 2))
+                          (critters-list cs))))
+      (assert-equal 4 (length moths))
+      (for-each (lambda (c)
+                  (assert-true (< (abs (- (critter-x c) (car (critter-home c)))) 21.0))
+                  (assert-true (< (abs (- (critter-y c) (cdr (critter-home c)))) 21.0)))
+                moths)))
+  (test "daylight and absent light resolve to zero dark exactly"
+    (assert-equal 0.0 (dark-steps 1.0))
+    (assert-equal 0.0 (dark-steps (room-light (content-room CT -1 3)))))
+  (test "idle fireflies blink down to dark, staggered over their cycle"
+    (assert-equal 0.0 (firefly-blink 0))
+    (assert-true (> (firefly-blink 45) 0.49))
+    (assert-equal 0.0 (firefly-blink 135)))
+  (test "a firefly's faint halo stays within three pixels and follows its blink"
+    (for-each (lambda (phase)
+                (assert-equal '() (firefly-halo-pixels 0.0 phase))
+                (let ((pixels (firefly-halo-pixels 1.0 phase)))
+                  (assert-true (> (length pixels) 0))
+                  (assert-true (<= (length pixels) 10))
+                  (for-each (lambda (p)
+                              (assert-true (<= (+ (* (car p) (car p))
+                                                   (* (cdr p) (cdr p)))
+                                                9)))
+                            pixels)))
+              '(0 1 2 3)))
+  (test "covered firefly light follows arrival and never exceeds the authored dark"
+    (let ((covered (content-room CT 14 4))
+          (open (content-room CT 11 3)))
+      (assert-true (room-firefly-cave? covered))
+      (assert-false (room-moth-cave? covered))
+      (assert-false (room-firefly-cave? open))
+      (assert-false (room-firefly-cave? (content-room CT 14 5)))
+      (assert-equal '(4.0 3.0 2.0) FIREFLY-RINGS)
+      (assert-equal 36.0 (+ (car FIREFLY-RINGS) LIGHT-POOL-REACH))
+      (assert-equal 4.0 LIGHT-POOL-EDGE)
+      (for-each (lambda (arrival)
+                  (assert-equal 0.0 (firefly-light-budget open arrival))
+                  (assert-equal (max 0.0 (min 1.0 arrival))
+                                (firefly-light-budget covered arrival)))
+                '(-1.0 0.0 0.5 1.0 2.0))))
+  (test "only enclosed dark moth rooms use cave lighting"
+    (assert-true (room-moth-cave? (content-room CT -1 5)))
+    (assert-false (room-daylight-pools? (content-room CT -1 5)))
+    (assert-false (room-moth-cave? (content-room CT 4 3)))
+    (let ((open (content-room (load-content DARK-SOURCE) -1 3)))
+      (assert-true (room-dark? open))
+      (assert-false (room-under? open))
+      (assert-false (room-moth-cave? open)))))
+
+;; The reach search only sees tiles, keyed stones, pickups and start cells.
+;; Removing every lighting field must leave those inputs identical, for
+;; every combination of carried harmonics, including unopened stones.
+(define WITHOUT-LIGHT
+  (load-content
+    (map (lambda (entry)
+           (cons (car entry)
+                 (string-join
+                   (filter (lambda (line)
+                             (let ((line (string-trim line)))
+                               (not (or (string-starts-with? line "light:")
+                                        (string-starts-with? line "sun:")))))
+                           (string-split (cdr entry) "\n"))
+                   "\n")))
+         SRC)))
+
+(define (carry-sets hs)
+  (if (null? hs)
+      '(())
+      (let ((rest (carry-sets (cdr hs))))
+        (append rest
+                (map (lambda (carry) (cons (car hs) carry)) rest)))))
+
+(define (tile-input tm)
+  (list (tilemap-cols tm) (tilemap-rows tm) (tilemap-size tm)
+        (tilemap-edge tm) (tilemap-cells tm)))
+
+(test-group "lighting leaves reach inputs unchanged"
+  (test "the world still parses without lighting fields"
+    (assert-equal '() (content-problems WITHOUT-LIGHT)))
+  (test "start, pickups and keyed stones are identical"
+    (assert-equal (start-cell CT) (start-cell WITHOUT-LIGHT))
+    (assert-equal (content-pickup-cells CT) (content-pickup-cells WITHOUT-LIGHT))
+    (assert-equal (content-stone-cells CT) (content-stone-cells WITHOUT-LIGHT)))
+  (test "all 32 carry sets have exactly the same collision tilemap"
+    (for-each (lambda (carry)
+                (assert-equal (tile-input (tiles-carrying CT carry))
+                              (tile-input (tiles-carrying WITHOUT-LIGHT carry))))
+              (carry-sets '(1 2 3 4 5))))
+  (test "every room has the same start and declared unreachable cells"
+    (for-each (lambda (p)
+                (let* ((rm (placed-data p))
+                       (unlit (content-room WITHOUT-LIGHT (room-x rm) (room-y rm))))
+                  (assert-equal (room-start-cell CT rm)
+                                (room-start-cell WITHOUT-LIGHT unlit))
+                  (assert-equal (room-unreached rm) (room-unreached unlit))))
+              (content-rooms CT))))

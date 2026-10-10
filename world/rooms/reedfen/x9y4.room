@@ -5,6 +5,8 @@
   title: "Drowned Channel"
   intent: "too wide to jump: the first swim, bank to bank"
   bed: (wind 0.1 water 0.9)
+  light: 0.67
+  sun: 0
   grid:
   ("#########################"
    "#########################"
@@ -17,7 +19,8 @@
    "    ####~~~~~~~~####     "
    "  ||####~~~~~~~~####||   "
    "#########################")
-  things: ((pike at: (11 9)))
+  things: ((pike at: (11 9))
+           (firefly at: (14 6) count: 3 drawn: 2))
   decor: auto)
 ;; Eight tiles of still water between two banks; a jump reaches three.
 ;; Swim, and leap out when your head is above the surface.

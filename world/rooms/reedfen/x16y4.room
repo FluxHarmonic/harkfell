@@ -5,6 +5,8 @@
   title: "Under the Heron's Water"
   intent: "a long swim beneath the widest water to the far bank"
   bed: (water 1.0)
+  light: 0.67
+  sun: 0
   grid:
   ("####~~~~~~~##~~##########"
    "#####~~~~~~##~~##########"
@@ -17,6 +19,7 @@
    "###############~~~~~~~~~~"
    "#########################"
    "#########################")
+  things: ((firefly at: (16 4) count: 3 drawn: 2))
   decor: auto)
 ;; All water, down from the Heron's Water and east to the Mound's Roots,
 ;; with an air pocket halfway (columns 16-21): a ledge to stand on and

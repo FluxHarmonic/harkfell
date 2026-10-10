@@ -5,6 +5,8 @@
   title: "Wind Gap"
   intent: "a notch in the fell where the wind is loudest, crossed at a run; miss, and you drop to the stones"
   bed: (wind 1.0 drone 0.3)
+  light: 1
+  sun: 1
   grid:
   ("                         "
    "                         "
