@@ -11,7 +11,7 @@
    "                         "
    "                         "
    "  #                   #  "
-   " |#|               ##|#| "
+   " |#|               ##### "
    "##### |           |# o##%"
    "#######         ########%"
    "#########       o    o o%"
@@ -24,7 +24,7 @@
            (stone-passage at: (23 8) cells: ((23 7) (23 6) (22 6)))
            (standing-stone at: (2 5))
            (standing-stone at: (22 5))
-           (lantern-moth at: (19 6) count: 3 drawn: 3)
+           (lantern-moth at: (18 6) count: 3 drawn: 3)
            (lantern-moth at: (11 5) count: 4 drawn: 2))
   moment: ((tune: hollow-answers when: first-visit carrying: 2)
            (tune: hollow-fifth when: first-visit carrying: 3)

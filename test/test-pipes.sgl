@@ -58,7 +58,9 @@
   (test "H4 without H3 reveals the same stair but preserves the green barrier"
     (let* ((tm (tiles-carrying CT '(2 4))))
       (assert-equal 'air (kind tm 4 3 23 7))
-      (assert-equal 'solid (kind tm 4 3 21 8))))
+      (assert-equal 'solid (kind tm 4 3 21 8))
+      (assert-equal 'solid (kind tm 4 3 23 5))
+      (assert-equal 'solid (kind tm 4 3 22 5))))
   (test "fixed static dims and returns to a safe entry without dropping carry"
     (let* ((safe (at 3 6 17 6 '(2)))
            (g (cell 3 6 18 6))
