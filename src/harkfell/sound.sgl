@@ -1501,7 +1501,7 @@
             (reeds (room-level (place-levels pl) 'reeds))
             (water (room-level (place-levels pl) 'water))
             (bx (- (place-px pl) (* ROOM-W (place-rx pl)))))
-        (when (and (> reeds 0.2) (due? 'bird now 14.0 32.0))
+        (when (and (not (eq? (place-region pl) 'pipes)) (> reeds 0.2) (due? 'bird now 14.0 32.0))
           (cue! 'bird (* 0.35 reeds 1.5) (rand-in (- MAX-PAN) MAX-PAN)))
         (when (and (not (eq? (place-region pl) 'pipes)) (> water 0.3) (due? 'plop now 7.0 18.0))
           (cue! 'plop (* 0.4 water) (rand-in (- MAX-PAN) MAX-PAN)))))

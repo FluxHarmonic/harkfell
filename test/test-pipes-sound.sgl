@@ -4,6 +4,7 @@
         (sigil string)
         (motif tune)
         (engine worldmap)
+        (engine mixer)
         (harkfell source)
         (harkfell content)
         (harkfell cues)
@@ -34,7 +35,7 @@
               NEW-TUNES))
   (test "ambient pipes use only A3 E4 C4 and occasional F4, never D4"
     (let ((ns (map (lambda (c) (midi->note-name (cell-note c))) (notes BED 3))))
-      (assert-equal '("A-3" "E-4" "C-4" "F-4") ns)))
+      (assert-equal '("A-3" "E-4" "C-4" "F-4" "A-3") ns)))
   (test "H4 is silent before pickup and present with H2/H4 or all three"
     (assert-equal '() (notes (strip-uncarried BED '(2 3)) 6))
     (assert-equal '("D-4") (map (lambda (c) (midi->note-name (cell-note c))) (notes (strip-uncarried BED '(2 4)) 6)))
@@ -91,3 +92,20 @@
                       (assert-false (char=? #\% (room-char rm (cadr e) (caddr e)))))
                     (room-exits rm))))
       PIPES)))
+
+(test-group "pipes: quiet between authored calls"
+  (test "no generic reed birds or extra water plops leak into Pipes rooms"
+    (mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+    (sound-reset!)
+    (sound-set-work-in-frame! #f)
+    (sound-set-rng! 20261010)
+    (let ((p (place key: "pipes-quiet" region: 'pipes bed-tune: #f
+                    groups: '(wind water pipes drone) levels: '((water . 0.8))
+                    carry: '(2) tones: '() stones: '())))
+      (let loop ((i 0))
+        (when (< i 2100)
+          (sound-frame! (/ i 30.0) (/ 1.0 30.0) p)
+          (loop (+ i 1)))))
+    (let ((n (sound-spots-played)))
+      (sound-set-work-in-frame! #t)
+      (assert-equal 0 n))))
