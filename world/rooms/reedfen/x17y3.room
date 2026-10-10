@@ -5,6 +5,7 @@
   title: "The Far Mound"
   intent: "the fen's far end under the whole sky, and the note you followed, lying on the mound"
   bed: (wind 0.8 reeds 0.3 drone 0.6)
+  sun: 0
   grid:
   ("                        #"
    "                        #"
@@ -18,7 +19,7 @@
    "###########%   %#########"
    "###########%   %#########")
   things: ((harmonic at: (22 3) overtone: 2)
-           (lantern-moth at: (20 2) count: 3 drawn: 2))
+           (firefly at: (20 2) count: 3 drawn: 2))
   decor: auto)
 ;; The world ends at the stone on the right. The Mound's Roots come up
 ;; through the hole at columns 12-14; the mound climbs east in steps to H2.

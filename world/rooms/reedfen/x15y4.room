@@ -5,6 +5,8 @@
   title: "The Seep"
   intent: "wet rough rock beside a falling trickle: the climb up to the cattails"
   bed: (water 0.5 reeds 0.1)
+  light: 0.67
+  sun: 0
   grid:
   ("#################%   %###"
    "#################%   %###"
@@ -17,6 +19,7 @@
    "    |||     |||    |    #"
    "#########################"
    "#########################")
+  things: ((firefly at: (14 6) count: 3 drawn: 2))
   decor: auto)
 ;; The shaft at columns 18-20 is walled with wet rough rock: jump, hold,
 ;; climb, and come out among the cattails.

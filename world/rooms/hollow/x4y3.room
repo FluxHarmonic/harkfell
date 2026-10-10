@@ -5,6 +5,8 @@
   title: "The Hollow"
   intent: "where you wake: a bowl of turf over a low hum, and a mute stone at its heart"
   bed: (wind 0.3 water 0.1 hum 1.0 drone 0.7)
+  light: 0.83
+  sun: 0.35
   grid:
   ("                         "
    "                         "

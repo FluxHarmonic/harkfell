@@ -51,7 +51,8 @@
           paint-slot! paint-slot-a! paint-water! paint-light!
           strip-bytes make-strips strips-update! draw-strips!
           ensure-render! room-index-rt room-color-rt
-          resolve! dark-steps DARK-GAIN sway-composite! sway-offset draw-texture-scattered! draw-texture-dissolved!
+          resolve! dark-steps DARK-GAIN LIGHT-POOL-REACH LIGHT-POOL-EDGE
+          sway-composite! sway-offset draw-texture-scattered! draw-texture-dissolved!
           GLSL-PREFIX VERT-SOURCE)
 
   (begin
@@ -59,7 +60,13 @@
     (define VIEW-H 176)
     (define STRIP-ROWS 8)                 ; base water deep reflect lit lit2 dark dark2
     (define STRIP-W 32)                   ; slots per strip (SLOT-COUNT fits)
+    ;; A scratch band carries horizontal light distances in the same texture;
+    ;; the graphics API binds one sampler. It is never drawn into the view.
     (define INDEX-H (+ VIEW-H STRIP-ROWS))
+    (define POOL-Y INDEX-H)
+    (define POOL-INDEX-H (+ POOL-Y VIEW-H))
+    (define LIGHT-POOL-REACH 32.0)
+    (define LIGHT-POOL-EDGE 4.0)
 
     ;; --- painting slots -----------------------------------------------------
 
@@ -79,7 +86,8 @@
     ;; rgb: a vector of SLOT-COUNT (r g b), a region's colours. The strips
     ;; as RGBA bytes, STRIP-W x STRIP-ROWS, top row first: base, water,
     ;; deep, reflect, lit, lit twice.
-    (define (strip-bytes rgb)
+    (define (strip-bytes rgb . opt)
+      (define dark (if (pair? opt) (car opt) DARK))
       (let ((bv (make-bytevector (* 4 STRIP-W STRIP-ROWS) 0))
             (rows (list (lambda (i) i)
                         (lambda (i) (lookup WATER i))
@@ -87,8 +95,8 @@
                         (lambda (i) (lookup REFLECT i))
                         (lambda (i) (lookup LIT i))
                         (lambda (i) (lookup LIT (lookup LIT i)))
-                        (lambda (i) (lookup DARK i))
-                        (lambda (i) (lookup DARK (lookup DARK i))))))
+                        (lambda (i) (lookup dark i))
+                        (lambda (i) (lookup dark (lookup dark i))))))
         (let loop ((rs rows) (r 0))
           (unless (null? rs)
             (let slots ((i 0))
@@ -104,8 +112,10 @@
             (loop (cdr rs) (+ r 1))))
         bv))
 
-    (define (make-strips rgb) (make-texture-from-pixels STRIP-W STRIP-ROWS (strip-bytes rgb) 'nearest))
-    (define (strips-update! tex rgb) (update-texture tex (strip-bytes rgb)))
+    (define (make-strips rgb . opt)
+      (make-texture-from-pixels STRIP-W STRIP-ROWS (apply strip-bytes rgb opt) 'nearest))
+    (define (strips-update! tex rgb . opt)
+      (update-texture tex (apply strip-bytes rgb opt)))
 
     ;; The strips under the view, in the current (index) pass, overwriting.
     (define (draw-strips! tex)
@@ -160,6 +170,24 @@
        "    return (float(m[(y & 3) * 4 + (x & 3)]) + 0.5) / 16.0;\n"
        "}\n"))
 
+    ;; First half of the Euclidean distance transform: nearest positive B
+    ;; pixel along each row, stored as an exact byte distance (255: absent).
+    ;; Resolve completes the vertical search, giving circular pools for every
+    ;; shared-channel source without changing their ordinary light colours.
+    (define POOL-FRAGMENT
+      (string-append
+       GLSL-PREFIX FRAG-COMMON
+       "void main() {\n"
+       "    ivec2 m = ivec2(floor(texUV * u_size));\n"
+       "    int x = m.x; int y = int(u_size.y) - 1 - m.y;\n"
+       "    int near = 255;\n"
+       "    for (int dx = -32; dx <= 32; dx++) {\n"
+       "        int sx = x + dx;\n"
+       "        if (sx >= 0 && sx < int(u_size.x) && px(sx, y).b > 0.0) near = min(near, abs(dx));\n"
+       "    }\n"
+       "    fragColor = vec4(float(near) / 255.0, 0.0, 0.0, 1.0);\n"
+       "}\n"))
+
     (define RESOLVE-FRAGMENT
       (string-append
        GLSL-PREFIX
@@ -168,6 +196,19 @@
        "uniform float u_black;\n"
        "uniform float u_hue;\n"
        "uniform float u_dark;\n"
+       "uniform float u_pool;\n"
+       "uniform float u_pool_y;\n"
+       "float daylightPool(int x, int y) {\n"
+       "    if (u_pool < 0.5) return 0.0;\n"
+       "    float nearest = 100000.0;\n"
+       "    for (int dy = -32; dy <= 32; dy++) {\n"
+       "        int sy = y + dy;\n"
+       "        if (sy < 0 || sy >= int(u_view_h)) continue;\n"
+       "        float dx = floor(px(x, sy + int(u_pool_y)).r * 255.0 + 0.5);\n"
+       "        nearest = min(nearest, dx * dx + float(dy * dy));\n"
+       "    }\n"
+       "    return clamp((32.0 - sqrt(nearest)) / 4.0, 0.0, 1.0);\n"
+       "}\n"
        "vec3 strip(int row, int slot) {\n"
        "    return texelFetch(iTexChannel0_iSmpChannel0, ivec2(slot, int(u_size.y) - 1 - (int(u_view_h) + row)), 0).rgb;\n"
        "}\n"
@@ -204,7 +245,7 @@
        ;; in a dark room the share thins with depth instead (the leader's dressing
        ;; note: the Ice Well's water dithered, not one flat slab): shallow water
        ;; glows, deep water goes dark
-       "            float share = (u_dark > 0.0) ? max(0.08, 0.45 - float(d) * 0.012) : min(0.3 + float(d) * 0.012, 0.55);\n"
+       "            float share = (u_dark > 0.0 && u_pool < 0.5) ? max(0.08, 0.45 - float(d) * 0.012) : min(0.3 + float(d) * 0.012, 0.55);\n"
        "            if (th < share) { c = strip(0, 11); own = true; }\n"
        ;; the mirror of the world above: streaks on alternate rows, fading
        ;; out over seven, each row drifting sideways on its own
@@ -225,6 +266,9 @@
        "    int ds = (s.g > 0.5) ? (own ? 11 : lslot) : slot;\n"
        "    float L = s.b;\n"
        "    float dk = u_dark - L * 5.0;\n"
+       ;; Pool interiors restore daylight; only the four-pixel edge band
+       ;; interpolates DARK coverage. Outside the pool the full step is clean.
+       "    if (u_pool > 0.5) dk = u_dark * (1.0 - daylightPool(x, y));\n"
        "    if (dk > 0.0) {\n"
        "        if (dk > 2.0 + th) c = vec3(0.0);\n"
        "        else if (dk > 1.0 + th) c = strip(7, ds);\n"
@@ -237,6 +281,9 @@
        "        else if (L > 0.36 + th * 0.36) c = strip(5, lslot);\n"
        "        else if (L > th * 0.36) c = strip(4, lslot);\n"
        "    }\n"
+       ;; Covered water retains its blue pigment, including under bright
+       ;; light; the remaining pixels still show depth and submerged detail.
+       "    if (u_pool > 0.5 && s.g > 0.5 && own) c = strip(0, 11);\n"
        "    if (u_black > th) c = vec3(0.0);\n"
        "    fragColor = vec4(c, 1.0);\n"
        "}\n"))
@@ -366,6 +413,9 @@
     (define *color-rt* #f)
     (define *resolve* #f)
     (define *sway* #f)
+    (define *pool* #f)
+    (define *pool-rt* #f)
+    (define *pool-index-rt* #f)
 
     (define (ensure-render!)
       (unless *index-rt*
@@ -374,6 +424,25 @@
       (unless *resolve*
         (set! *resolve* (load-shader VERT-SOURCE RESOLVE-FRAGMENT 'none))
         (set! *sway* (load-shader VERT-SOURCE SWAY-FRAGMENT 'normal))))
+
+    (define (prepare-light-pools!)
+      (unless *pool*
+        (set! *pool* (load-shader VERT-SOURCE POOL-FRAGMENT 'none))
+        (set! *pool-rt* (make-render-target VIEW-W VIEW-H 'nearest))
+        (set! *pool-index-rt* (make-render-target VIEW-W POOL-INDEX-H 'nearest)))
+      (set-shader-uniform *pool* 'u_size (list (inexact VIEW-W) (inexact INDEX-H)))
+      (with-render-target *pool-rt*
+        (with-blend-mode 'none
+          (set-color 1.0 1.0 1.0 1.0)
+          (with-shader *pool*
+            (draw-render-target *index-rt* 0.0 0.0 (inexact VIEW-W) (inexact INDEX-H)))))
+      ;; Entering a render-target pass clears it, so assemble into a separate
+      ;; target. Copy the scene and strips first, then append distances.
+      (with-render-target *pool-index-rt*
+        (with-blend-mode 'none
+          (set-color 1.0 1.0 1.0 1.0)
+          (draw-render-target *index-rt* 0.0 0.0 (inexact VIEW-W) (inexact INDEX-H))
+          (draw-render-target *pool-rt* 0.0 (inexact POOL-Y) (inexact VIEW-W) (inexact VIEW-H)))))
 
     (define (room-index-rt) *index-rt*)
     (define (room-color-rt) *color-rt*)
@@ -390,18 +459,28 @@
       ;; up to 3 in all; a third step is black (a dark room before its moths
       ;; arrive: (harkfell draw) room-dark-extra)
       (define extra (if (and (pair? opt) (pair? (cdr opt))) (cadr opt) 0.0))
+      ;; pools? (optional, false): clean base shade with broad daylight pools
+      ;; from every positive shared light pixel, and readable blue water.
+      (define pools? (and (pair? opt) (pair? (cdr opt))
+                          (pair? (cddr opt)) (caddr opt)))
+      (define dark (inexact (min 3.0 (+ (dark-steps light) extra))))
+      (define height (if pools? POOL-INDEX-H INDEX-H))
       (ensure-render!)
-      (set-shader-uniform *resolve* 'u_size (list (inexact VIEW-W) (inexact INDEX-H)))
+      (when pools? (prepare-light-pools!))
+      (set-shader-uniform *resolve* 'u_size (list (inexact VIEW-W) (inexact height)))
       (set-shader-uniform *resolve* 'u_view_h (inexact VIEW-H))
       (set-shader-uniform *resolve* 'u_t (inexact t))
       (set-shader-uniform *resolve* 'u_black (inexact black))
       (set-shader-uniform *resolve* 'u_hue (inexact hue))
-      (set-shader-uniform *resolve* (quote u_dark) (inexact (min 3.0 (+ (dark-steps light) extra))))
+      (set-shader-uniform *resolve* 'u_dark dark)
+      (set-shader-uniform *resolve* 'u_pool (if pools? 1.0 0.0))
+      (set-shader-uniform *resolve* 'u_pool_y (inexact POOL-Y))
       (with-render-target *color-rt*
         (set-blend-mode 'none)
         (set-color 1.0 1.0 1.0 1.0)
         (with-shader *resolve*
-          (draw-render-target *index-rt* 0.0 0.0 (inexact VIEW-W) (inexact INDEX-H)))))
+          (draw-render-target (if pools? *pool-index-rt* *index-rt*)
+                              0.0 0.0 (inexact VIEW-W) (inexact height)))))
 
     ;; A foliage layer (a VIEW-W x VIEW-H target of slots, the sway weight in
     ;; G) composited onto the current (index) pass, bent by wind 0..1.

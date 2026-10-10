@@ -5,6 +5,8 @@
   title: "Climb Back"
   intent: "rough rock taught where a fall costs nothing, then the climb home to the stone"
   bed: (wind 0.2 water 0.2)
+  light: 0.67
+  sun: 0
   grid:
   ("###  %###################"
    "###  %###################"
@@ -17,7 +19,8 @@
    "  |      |  ||  %########"
    "  ||    ||| ||| %########"
    "#########################")
-  things: ((fen-vole at: (12 9)))
+  things: ((fen-vole at: (12 9))
+           (firefly at: (14 6) count: 3 drawn: 2))
   decor: auto)
 ;; The shelf on the right has a rough face: climb it, look around, drop
 ;; off. The rough column at 5 goes up through the hole into the Old Stone.

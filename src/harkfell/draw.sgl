@@ -54,7 +54,7 @@
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
           slot player-frame set-look-sound! region-colours set-look-waking! waking-frame
-          floating-reeds room-hue)
+          floating-reeds room-hue FIREFLY-RINGS firefly-light-budget)
 
   (begin
     (define (floor-int x) (exact (floor x)))
@@ -113,9 +113,11 @@
     (define (use-region! name)
       (let ((e (assq name *strip-texs*)))
         (cond ((not e)
-               (set! *strip-texs* (cons (cons name (make-strips (region-rgb name))) *strip-texs*)))
+               (set! *strip-texs*
+                     (cons (cons name (make-strips (region-rgb name) (region-dark-lookup name)))
+                           *strip-texs*)))
               ((memq name *strips-stale*)
-               (strips-update! (cdr e) (region-rgb name))
+               (strips-update! (cdr e) (region-rgb name) (region-dark-lookup name))
                (set! *strips-stale* (filter (lambda (r) (not (eq? r name))) *strips-stale*)))
               (else #f))
         (set! *strips* (cdr (assq name *strip-texs*)))))
@@ -216,8 +218,7 @@
     ;; --- the backdrop -----------------------------------------------------------------------
 
     ;; The Bayer 4x4 threshold, 0..1.
-    (define BAYER (vector 0 8 2 10 12 4 14 6 3 11 1 9 15 7 13 5))
-    (define (bayer x y) (/ (+ 0.5 (vector-ref BAYER (+ (* 4 (modulo y 4)) (modulo x 4)))) 16.0))
+    (define bayer dither-threshold)
 
     ;; A region's backdrop, as slots. The sky is four flat bands, sky-1 at
     ;; the top to sky-4 low down, each meeting the next in a dithered seam
@@ -285,6 +286,24 @@
                     (bytevector-u8-set! bv o s)
                     (bytevector-u8-set! bv (+ o 3) 255))
                   (rows (+ y 1)))))
+            (cols (+ x 1))))
+        bv))
+
+    ;; Open fen haze is pale sky coverage in the distance, not DARK. As in
+    ;; Glasswood's valley, softly tapered bands follow a low, uneven horizon.
+    (define (reedfen-bytes)
+      (let ((bv (backdrop-bytes 'reedfen)))
+        (let cols ((x 0))
+          (when (< x VIEW-W)
+            (let rows ((y 78))
+              (when (< y 134)
+                (let* ((upper (+ 94 (* 3.0 (sin (* x 0.019)))))
+                       (lower (+ 117 (* 4.0 (sin (+ 1.2 (* x 0.012))))))
+                       (mist (max (* 0.18 (max 0.0 (- 1.0 (/ (abs (- y upper)) 8.0))))
+                                  (* 0.30 (max 0.0 (- 1.0 (/ (abs (- y lower)) 10.0)))))))
+                  (when (< (bayer x y) mist)
+                    (bytevector-u8-set! bv (* 4 (+ x (* y VIEW-W))) (slot-of 'sky-4))))
+                (rows (+ y 1))))
             (cols (+ x 1))))
         bv))
 
@@ -419,6 +438,7 @@
                                                  ((glasswood-sun-2) (glasswood-bytes 0.5))
                                                  ((glasswood-sun-3) (glasswood-bytes 0.75))
                                                  ((glasswood-sun-4) (glasswood-bytes 1.0))
+                                                 ((reedfen) (reedfen-bytes))
                                                  (else (backdrop-bytes key)))
                                                'nearest)))
               (set! *backdrops* (cons (cons key t) *backdrops*))
@@ -428,11 +448,7 @@
     ;; more than 15 of its 25 cells solid or climbable) has earth behind it.
     ;; Not "a room above it": the Hollow stacks two rows of open-air rooms
     ;; under one sky, and the first rule drew its dawn bowl as a cave.
-    (define (under? rm)
-      (let loop ((c 0) (n 0))
-        (if (= c ROOM-COLS)
-            (> n 15)
-            (loop (+ c 1) (if (memq (char-kind (room-char rm c 0)) (list (quote solid) (quote climbable))) (+ n 1) n)))))
+    (define under? room-under?)
 
     ;; The focus pull (D16, section 7's depth): while a music moment plays the
     ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
@@ -577,7 +593,9 @@
                            (begin (paint! 'leaf-2)
                                   (draw-filled-rect (+ x 4) y 1 S) (draw-filled-rect (+ x 10) y 1 S))))))
         ;; Glasswood's low sun on the bark, before the weights so it sways with it
-        (draw-sun-on-trunks! rm)
+        (if (glasswood-sheet? rm)
+            (draw-sun-on-trunks! rm)
+            (draw-hollow-sun! rm))
         ;; the sway weight in G, row by row: 0 at a stalk's root, 1 at its tip
         (with-additive-blend
           (each-tile rm (lambda (m) (eq? m 'reeds))
@@ -712,24 +730,38 @@
 
     (define (glasswood-sheet? rm) (string=? (region-sheet (room-region rm)) "glasswood"))
 
-    ;; How much low sun a room has: 1 at its region's east edge (Glasswood's
-    ;; wood's edge, where the sun comes in low over the fell), 0.35 less a
-    ;; room west, none from three rooms in; none outside the glasswood
-    ;; sheet. A room with light: under 1 loses what copper it has to the dark
-    ;; anyway (DARK sends the accent to shade). PROPOSED to CONTENT: a room
-    ;; field sun: (0..1) to set this per room instead of by position.
+    ;; Explicit per-room sun overrides the original Glasswood position rule.
+    ;; Other regions remain sunless unless authored; ceilings shelter both.
     (define (room-sun rm)
-      (if (or (not (glasswood-sheet? rm)) (under? rm))
-          0.0
-          (let* ((r (and *content* (content-region *content* (room-region rm))))
-                 (b (and r (region-field r 'bounds)))
-                 (xe (if (and (list? b) (= 2 (length b)) (list? (cadr b))) (car (cadr b)) (room-x rm))))
-            (max 0.0 (min 1.0 (- 1.0 (* 0.35 (- xe (room-x rm)))))))))
+      (cond ((under? rm) 0.0)
+            ((room-sun-value rm) (room-sun-value rm))
+            ((not (glasswood-sheet? rm)) 0.0)
+            (else
+             (let* ((r (and *content* (content-region *content* (room-region rm))))
+                    (b (and r (region-field r 'bounds)))
+                    (xe (if (and (list? b) (= 2 (length b)) (list? (cadr b)))
+                            (car (cadr b))
+                            (room-x rm))))
+               (max 0.0 (min 1.0 (- 1.0 (* 0.35 (- xe (room-x rm))))))))))
 
     ;; A copper pixel at (x, y) where the hash of (gc, k) falls under p.
     (define (sun-pixel! x y gc k p)
       (when (< (tile-variant (+ gc 13) (+ k 5) 100) (* 100.0 p))
         (draw-filled-rect x y 1 1)))
+
+    ;; West light catches the Hollow’s stone lips and the grass above them.
+    ;; Use its existing copper/bracken accent, baked before foliage sway.
+    (define (draw-hollow-sun! rm)
+      (when (and (eq? (room-region rm) 'hollow) (> (room-sun rm) 0.0))
+        (paint! 'accent)
+        (each-tile rm (lambda (m) (memq m '(rock rough)))
+                   (lambda (mat x y mask gc gr)
+                     (unless (mask-has? mask MASK-UP)
+                       (let cols ((c 1))
+                         (when (< c 15)
+                           (sun-pixel! (+ x c) (- y 1) gc (+ (* 16 gr) c)
+                                       (* 0.3 (room-sun rm)))
+                           (cols (+ c 1)))))))))
 
     ;; Copper on the birches' sunlit edge: the lit column of each trunk
     ;; variant (a b c stand at columns 6-9, 9-11, 3-7), in runs of two rows,
@@ -788,7 +820,7 @@
     (define SHAFTS (list 30 150 280))
     (define (draw-shafts! rm t)
       (let ((sun (room-sun rm)))
-        (when (and (> sun 0.0) (not (under? rm)))
+        (when (and (glasswood-sheet? rm) (> sun 0.0) (not (under? rm)))
           (paint-light! (* sun (+ 0.09 (* 0.03 (sin (* t 0.004))))))
           (for-each (lambda (x0)
                       (let rows ((y 64))
@@ -891,6 +923,28 @@
         (paint-water!)
         (each-tile rm (lambda (m) (eq? m 'water))
                    (lambda (mat x y m gc gr) (draw-filled-rect x y S S)))))
+
+    ;; Thin drifting mist just above exposed water, behind creatures and
+    ;; the foreground. Skip solid/reed cells so the banks remain crisp.
+    (define (draw-reedfen-water-haze! rm t)
+      (when (eq? (room-region rm) 'reedfen)
+        (paint! 'sky-4)
+        (each-tile rm (lambda (m) (eq? m 'water))
+                   (lambda (mat x y mask gc gr)
+                     (when (or (= y 0) (not (eq? (material-at gc (- gr 1)) 'water)))
+                       (let cols ((dx 0))
+                         (when (< dx S)
+                           (let* ((px (+ x dx))
+                                  (centre (+ (- y 5) (* 1.5 (sin (+ (* px 0.035) (* t 0.004)))))))
+                             (let rows ((py (max 0 (- y 11))))
+                               (when (< py y)
+                                 (when (and (not (char-material
+                                                  (room-char rm (quotient* px S) (quotient* py S))))
+                                            (< (bayer px py)
+                                               (* 0.22 (max 0.0 (- 1.0 (/ (abs (- py centre)) 6.0))))))
+                                   (draw-filled-rect px py 1 1))
+                                 (rows (+ py 1)))))
+                           (cols (+ dx 1)))))))))
 
     ;; --- the body ----------------------------------------------------------------------------
 
@@ -1191,7 +1245,7 @@
       (let* ((stones (filter (lambda (st) (cell-in-room? w (stone-cell st))) (world-stones w)))
              (pickups (filter (lambda (pk) (cell-in-room? w (pickup-cell pk))) (world-pickups w)))
              (cs (let ((c (world-critters w))) (if c (critters-list c) '())))
-             (moth (find (lambda (c) (and (eq? (critter-kind c) 'moth) (critter-drawn c))) cs)))
+             (moth (find (lambda (c) (and (memq (critter-kind c) '(moth firefly)) (critter-drawn c))) cs)))
         (slot-of (harmonic-role
                   (cond ((pair? pickups) (pickup-overtone (car pickups)))
                         ((pair? stones) (stone-overtone (car stones)))
@@ -1227,6 +1281,25 @@
     ;; room and the moths' own glows look as they do by day (a moth's glow
     ;; stacked on a brighter circle burned white).
     (define MOTH-RINGS (list 36.0 27.0 19.0))
+    (define FIREFLY-RINGS (list 4.0 3.0 2.0))
+
+    ;; Covered fen rooms use one clean DARK step. The shared distance pass
+    ;; extends this four-pixel light footprint by 32 pixels, with a four-pixel
+    ;; transition at the edge; its centre never exceeds the daylight budget.
+    (define (firefly-light-budget rm arrival)
+      (if (room-firefly-cave? rm)
+          (* (dark-steps (room-light rm)) (max 0.0 (min 1.0 arrival)))
+          0.0))
+
+    (define (draw-firefly-light! fireflies b rm ox oy)
+      (when (room-firefly-cave? rm)
+        (let* ((centre (body-center b HARKFELL-FEEL))
+               (arrival (moth-arrival fireflies (car centre) (cdr centre)))
+               (amount (/ (firefly-light-budget rm arrival) (* 3.0 DARK-GAIN))))
+          (for-each (lambda (radius)
+                      (light-disc! (- (car centre) ox) (- (cdr centre) oy 4)
+                                   (* radius (+ 0.5 (* 0.5 arrival))) amount))
+                    FIREFLY-RINGS))))
     ;; The challenge-and-danger pass (David, 2026-09-27: "I was never fully in
     ;; the dark"): the circle is drawn from where the drawn moths ARE
     ;; ((harkfell creatures) moth-arrival: their nearness times their glow),
@@ -1241,7 +1314,7 @@
       (let* ((c (body-center b HARKFELL-FEEL))
              (arr (moth-arrival moths (car c) (cdr c)))
              (dark (+ (dark-steps (room-light rm)) (room-dark-extra rm arr))))
-        (when (> dark 0.0)
+        (when (and (room-moth-cave? rm) (> dark 0.0))
           (let* ((unit (/ dark DARK-GAIN))
                  (drawn (filter (lambda (c) (eq? (critter-state c) 'drawn)) moths))
                  (cx (- (car c) ox)) (cy (- (cdr c) oy 4)))
@@ -1261,8 +1334,9 @@
     ;; with moths drawn to some harmonic. Only these start black and show their
     ;; hazards only in the light; a dark room with no moths (Behind the Fall, at
     ;; the blue hour) keeps the dark its light: gives (the review: it was two
-    ;; steps down for good).
-    (define (moth-lit? rm) (and (room-dark? rm) (room-has-drawn-moths? rm)))
+    ;; steps down for good). The Hollow's dawn bowl shade is not a cave.
+    (define (moth-lit? rm)
+      (room-moth-cave? rm))
 
     ;; Glints at the tips of a moth-lit room's hanging icicles, whether or not the
     ;; moth light has reached them (David, playing b22a4d6: he ran into an icicle
@@ -1339,6 +1413,7 @@
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
+              (draw-reedfen-water-haze! rm t)
               ;; falling ice ((harkfell ice)), in front of the rock it hangs from
               (draw-ice! w ox oy t)
               ;; D43: the upward icicle, where the room has one
@@ -1351,7 +1426,7 @@
                                          (sway-offset (floor-int (- (critter-x c) ox)) t (wind-at t) 1.0)
                                          0)))
                               (draw-critter c (- ox d) oy t slot))))
-                        (filter (lambda (c) (not ((kind? 'moth) c))) cs))
+                        (filter (lambda (c) (not (memq (critter-kind c) '(moth firefly)))) cs))
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (draw-water! rm)
               (cover-thin-water! w ox oy)
@@ -1365,7 +1440,7 @@
                           (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
                             (when (in-room? x y) (draw-pickup (pickup-overtone pk) x y t slot))))
                         (world-pickups w))
-              (let ((moths (filter (kind? 'moth) cs)))
+              (let ((moths (filter (lambda (c) (memq (critter-kind c) '(moth firefly))) cs)))
                 (for-each (lambda (c) (draw-critter c ox oy t slot)) moths)
                 ;; light last: B, added
                 (with-additive-blend
@@ -1378,8 +1453,10 @@
                               (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
                                 (when (in-room? x y) (draw-pickup-light (pickup-overtone pk) x y t))))
                             (world-pickups w))
-                  (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) moths)
-                  (draw-moth-light! moths b rm ox oy t)
+                  (let ((cave-moths (filter (kind? 'moth) moths)))
+                    (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) cave-moths)
+                    (draw-moth-light! cave-moths b rm ox oy t))
+                  (draw-firefly-light! (filter (kind? 'firefly) moths) b rm ox oy)
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
                   (draw-glints! t)
@@ -1418,7 +1495,8 @@
                       (let ((c (body-center (world-body w) HARKFELL-FEEL))
                             (cs (world-critters w)))
                         (room-dark-extra rm (moth-arrival (if cs (critters-list cs) '()) (car c) (cdr c))))
-                      0.0))))
+                      0.0)
+                  (and rm (room-daylight-pools? rm)))))
 
     ;; --- the overviews: the region sheet and the atlas ----------------------------------
 
@@ -1464,6 +1542,7 @@
       (sway-composite! *foliage-rt* 0 0.0)
       (set-color 1.0 1.0 1.0 1.0)
       (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
+      (draw-reedfen-water-haze! rm 0)
       (draw-water! rm))
 
     ;; Outside any pass: every room of the overview resolved, once.
@@ -1478,7 +1557,8 @@
               (set-blend-mode 'normal)
               (draw-room-still rm)
               (draw-strips! *strips*))
-            (resolve! 0 0.0 (slot-of 'h2) (room-light rm))
+            (resolve! 0 0.0 (slot-of 'h2) (room-light rm) 0.0
+                      (room-daylight-pools? rm))
             (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
               (with-render-target rt
                 (with-blend-mode 'none

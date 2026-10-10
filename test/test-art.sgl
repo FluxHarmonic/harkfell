@@ -144,7 +144,7 @@
                             (assert-true (memq (car e) SLOTS))
                             (assert-true (memq (cdr e) SLOTS)))
                           table))
-              (list WATER DEEP REFLECT LIT)))
+              (list WATER DEEP REFLECT LIT DARK HOLLOW-SHADE)))
   (test "sky under water turns to the water's colour (the water reads as water)"
     (assert-equal (slot-of 'water) (lookup WATER (slot-of 'sky-2))))
   ;; David, 2026-09-27: a stone's body may take its region's colours, but the
@@ -154,7 +154,7 @@
     (for-each (lambda (table)
                 (for-each (lambda (h) (assert-equal (slot-of h) (lookup table (slot-of h))))
                           (list 'h2 'h3 'h4 'h5 'h7)))
-              (list WATER DEEP REFLECT LIT DARK))))
+              (list WATER DEEP REFLECT LIT DARK HOLLOW-SHADE))))
 
 (test-group "art: autotiling"
   (test "an overlay keeps under '.', erases under '_', replaces elsewhere"
@@ -333,3 +333,12 @@
                                                                (number->string (caddr e)) ")"))
                                     (floating-reeds WORLD))
                                " "))))
+
+(test-group "art: fen fireflies"
+  (test "both tiny wing frames keep the abdomen in the harmonic slot"
+    (for-each (lambda (name)
+                (let ((rows (cell name)))
+                  (assert-equal 3 (length rows))
+                  (assert-true (every (lambda (row) (= 3 (string-length row))) rows))
+                  (assert-equal ".h." (list-ref rows 2))))
+              '("creatures/firefly-up" "creatures/firefly-down"))))

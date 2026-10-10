@@ -2,7 +2,7 @@
 # One room as a PNG, drawn by the web build (?room=KEY&still): what the room
 # looks like before anyone plays it (section 8, "The review loop").
 #
-#   scripts/room-shot reedfen:9,3 [OUT.png] [--scale N]
+#   scripts/room-shot reedfen:9,3 [OUT.png] [--scale N] [--live --carry N,N --at C,R --wait MS]
 #
 # OUT defaults to build/shots/<region>-x<X>y<Y>.png; the scale (whole view
 # pixels per texel) to 2. Needs build/web (scripts/dev sigil build --config

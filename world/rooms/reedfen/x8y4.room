@@ -5,6 +5,8 @@
   title: "Root Hollow"
   intent: "a breath under the reeds: low, dark and still, found by falling"
   bed: (wind 0.1 water 0.3)
+  light: 0.67
+  sun: 0
   grid:
   ("####################  %##"
    "####################  %##"
@@ -18,7 +20,7 @@
    "#  ||   |||    |||       "
    "#########################")
   things: ((fen-vole at: (6 9))
-           (lantern-moth at: (10 6) count: 4 drawn: 2))
+           (firefly at: (10 6) count: 4 drawn: 2))
   decor: auto)
 ;; The shaft from the Fen Edge lands at columns 20-21. The rough column
 ;; beside it (22) is the way back up: jump and hold it.

@@ -5,6 +5,8 @@
   title: "West Slope"
   intent: "rough rock taught where a fall only lands you back in the grass"
   bed: (wind 0.3 hum 0.3 drone 0.3)
+  light: 1
+  sun: 1
   grid:
   ("##########%              "
    "##########%              "

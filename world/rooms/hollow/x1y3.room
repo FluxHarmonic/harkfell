@@ -5,6 +5,8 @@
   title: "Scree End"
   intent: "the Hollow's west edge, where an old stone door opens onto scree falling into mist, and birches stand far off"
   bed: (wind 0.6 water 0.2 hum 0.1)
+  light: 1
+  sun: 1
   grid:
   ("#########################"
    "##############           "

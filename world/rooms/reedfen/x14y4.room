@@ -3,8 +3,10 @@
   region: reedfen
   at: (14 4)
   title: "Root Hall"
-  intent: "a long low hall of roots where moths drift: a breath in the dark"
+  intent: "a long low hall of roots where fireflies drift: a breath in the dark"
   bed: (water 0.4 drone 0.5)
+  light: 0.67
+  sun: 0
   grid:
   ("#########################"
    "#########################"
@@ -17,8 +19,8 @@
    "   |||  |||     ||| |||  "
    "##########~~~~###########"
    "##########~~~~###########")
-  things: ((lantern-moth at: (6 5) count: 4 drawn: 2)
-           (lantern-moth at: (19 5) count: 3 drawn: 2))
+  things: ((firefly at: (6 5) count: 4 drawn: 2)
+           (firefly at: (19 5) count: 3 drawn: 2))
   decor: auto)
 ;; The pool in the floor (columns 10-13) is deep: it goes down to the
 ;; Drowned Bell.

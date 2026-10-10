@@ -5,6 +5,8 @@
   title: "Cairn"
   intent: "the highest stone, alone on the top where the chimney comes out: a place to stand still"
   bed: (wind 0.8 hum 0.1 drone 0.5)
+  light: 1
+  sun: 1
   grid:
   ("                         "
    "                         "

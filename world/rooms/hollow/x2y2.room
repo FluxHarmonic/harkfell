@@ -5,6 +5,8 @@
   title: "Heather Shelf"
   intent: "a breath on a high shelf of heather, where reedlings feed"
   bed: (wind 0.7 hum 0.1 drone 0.3)
+  light: 1
+  sun: 1
   grid:
   ("#                        "
    "#                        "

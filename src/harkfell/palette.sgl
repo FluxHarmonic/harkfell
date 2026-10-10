@@ -44,8 +44,8 @@
 
   (export SLOTS REGION-SLOT-COUNT SLOT-COUNT WORLD-SLOTS
           slot-of slot-name hex->rgb
-          WATER DEEP REFLECT LIT DARK lookup
-          region-rgb-vector MAGENTA)
+          WATER DEEP REFLECT LIT DARK HOLLOW-SHADE region-dark-lookup lookup
+          region-rgb-vector dither-threshold MAGENTA)
 
   (begin
     (define SLOTS
@@ -58,6 +58,11 @@
 
     (define REGION-SLOT-COUNT 16)
     (define SLOT-COUNT 22)
+
+    ;; Palette effects use sparse whole-slot coverage, never blended indices.
+    (define BAYER (vector 0 8 2 10 12 4 14 6 3 11 1 9 15 7 13 5))
+    (define (dither-threshold x y)
+      (/ (+ 0.5 (vector-ref BAYER (+ (* 4 (modulo y 4)) (modulo x 4)))) 16.0))
 
     ;; The world-wide slots: the role of the same name in the world palette.
     (define WORLD-SLOTS (list 'h2 'h3 'h4 'h5 'h7 'black))
@@ -139,6 +144,17 @@
             (cons 'leaf-1 'ground-1) (cons 'leaf-2 'ground-2) (cons 'leaf-3 'ground-3)
             (cons 'accent 'ground-2)
             (cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2)))
+
+    ;; Bowl-rim shade keeps the Hollow's original dawn palette: turf stays
+    ;; on its own ramp and the localized bracken/copper edges keep their hue.
+    (define HOLLOW-SHADE
+      (list (cons 'sky-2 'sky-1) (cons 'sky-3 'sky-2) (cons 'sky-4 'sky-3)
+            (cons 'ground-2 'ground-1) (cons 'ground-3 'ground-2) (cons 'ground-4 'ground-3)
+            (cons 'leaf-2 'leaf-1) (cons 'leaf-3 'leaf-2)
+            (cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2)))
+
+    (define (region-dark-lookup name)
+      (if (eq? name 'hollow) HOLLOW-SHADE DARK))
 
     ;; The slot a lookup table sends slot i to.
     (define (lookup table i)

@@ -5,6 +5,8 @@
   title: "Under the Stone"
   intent: "the low way east beneath the Old Stone's wall, found over the Climb Back's shelf"
   bed: (wind 0.1 water 0.3)
+  light: 0.67
+  sun: 0
   grid:
   ("#########################"
    "#########################"
@@ -17,6 +19,7 @@
    "############   |    |    "
    "#########################"
    "#########################")
+  things: ((firefly at: (14 6) count: 3 drawn: 2))
   decor: auto)
 ;; The Climb Back's shelf runs on into this room at row 4, under the rock
 ;; that carries Behind the Stone overhead. The floor steps down east in

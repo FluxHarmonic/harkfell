@@ -5,6 +5,8 @@
   title: "The Chimney"
   intent: "two walls a jump apart over soft turf: the first wall-jump, where a slip costs nothing"
   bed: (wind 0.2 hum 0.2 drone 0.3)
+  light: 1
+  sun: 1
   grid:
   ("          ##  ###########"
    "          ##  ###########"
