@@ -1,0 +1,79 @@
+;;; Look review: read-only frames through the actual renderer, without a
+;;; release or web build. Run it in a native test harness that loads this
+;;; tree's src/ (procedures/harkfell-look-review-harness in the notes), on
+;;; your own Xvfb, with PIPES_LOOK_CONTROL naming a file that holds the case.
+;;; The file is re-read every frame; a changed case reloads world/ (so room
+;;; edits show without restarting) and prints "LOOK frame ready: CASE".
+;;;   sheet:REGION        every room of REGION at its authored light
+;;;   sheet-lit:REGION    the same at light 1.0 (a structural preview)
+;;;   atlas               every room of the world at 1/4, as the ?atlas door
+;;;   room:REGION:X:Y:C:R:CARRY:TICKS
+;;;                       one room in play: body at cell (C R), carrying
+;;;                       CARRY (e.g. 2-3), after TICKS world ticks
+;;; Anything after the documented fields is ignored, so appending ":2" makes
+;;; a fresh case of the same view. Art and code changes need a restart.
+;;; It opens no save and no audio device.
+(import (sigil test) (sigil process) (sigil fs) (sigil string) (sigil io)
+        (sigil desktop) (sigil graphics) (sigil list)
+        (engine body) (engine worldmap)
+        (harkfell content) (harkfell source) (harkfell draw) (harkfell render)
+        (harkfell world) (harkfell gates) (harkfell check) (harkfell feel))
+
+(define CONTROL (getenv "PIPES_LOOK_CONTROL"))
+(define (load-review) (load-content (read-world-source "world")))
+(define (parse-case s) (string-split s ":"))
+(define (num s) (string->number s))
+(define (carry-of s) (map string->number (string-split s "-")))
+
+(define (review-world ct parts)
+  (let* ((rm (content-room ct (num (list-ref parts 2)) (num (list-ref parts 3))))
+         (g (local->global ct rm (num (list-ref parts 4)) (num (list-ref parts 5))))
+         (wm (content-map ct))
+         (b (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g)))
+         (w (world-populate (world-at wm b) (content-stones ct) (content-pickups ct)
+                            (carry-of (list-ref parts 6)))))
+    (let loop ((w w) (n (num (list-ref parts 7))))
+      (if (= n 0) w (loop (cdr (world-take-news (world-tick w (intent)))) (- n 1))))))
+
+(define (selected) (string-trim (read-file-string CONTROL)))
+
+(test "review"
+  (run-game "Opus review" 1200 528
+    (lambda ()
+      (gfx-setup)
+      (set-viewport #f)
+      (let loop ((current #f) (w #f) (rooms '()) (ct #f))
+        (wait-frame)
+        (let* ((sel (selected))
+               (changed? (not (equal? current sel)))
+               (ct (if changed? (let ((c (load-review))) (set-draw-content! c) c) ct))
+               (parts (parse-case sel))
+               (kind (car parts))
+               (atlas? (string=? kind "atlas"))
+               (sheet? (or atlas? (string=? kind "sheet") (string=? kind "sheet-lit")))
+               (k (if atlas? 0.25 1)) (gap (if atlas? 2 8))
+               (rooms (if changed?
+                          (if (and sheet? (not atlas?))
+                              (let ((rs (region-rooms ct (string->symbol (cadr parts)))))
+                                (if (string=? kind "sheet-lit") (map (lambda (rm) (room rm light: 1.0)) rs) rs))
+                              (if atlas? (map placed-data (content-rooms ct)) '()))
+                          rooms))
+               (w (if changed? (and (not sheet?) (review-world ct parts)) w)))
+          (when changed?
+            (unless (null? (content-problems ct))
+              (display "PROBLEMS: ") (display (content-problems ct)) (newline))
+            (let ((size (if sheet? (overview-size rooms k gap) '(1200 528))))
+              (window-set-size! (car size) (cadr size))
+              (display "SIZE ") (display (car size)) (display " ") (display (cadr size)) (newline))
+            (when sheet? (prepare-overview! rooms)))
+          (unless sheet? (present-play! w (lambda () #f)))
+          (begin-frame)
+          (if sheet?
+              (draw-overview rooms k gap #t)
+              (begin (set-color 1.0 1.0 1.0 1.0)
+                     (draw-render-target (room-color-rt) 0 0 1200 528)))
+          (end-frame)
+          (when changed?
+            (display "LOOK frame ready: ") (display sel) (newline)
+            (flush-output-port (current-output-port)))
+          (unless (quit-requested?) (loop sel w rooms ct)))))))
