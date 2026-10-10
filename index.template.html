@@ -118,8 +118,10 @@
     /* The page guard's card: the game died (a trap, a FATAL, a lost WebGL
        context). A tap reloads. No words (D8): a circle arrow. */
     #dead { position: fixed; inset: 0; z-index: 3; display: flex; align-items: center;
-            justify-content: center; background: rgba(0, 0, 0, 0.8); color: #ddd; font: 48px sans-serif; }
+            justify-content: center; width: 100%; height: 100%; padding: 0; border: 0;
+            background: rgba(0, 0, 0, 0.8); color: #ddd; cursor: pointer; }
     #dead[hidden] { display: none; }
+    #dead svg { display: block; width: 48px; height: 48px; }
 
     /* ?bench: the measurement's lines, and the tap that starts it */
     #bench { position: fixed; left: 0; right: 0; top: 0; z-index: 4; max-height: 70vh; overflow: auto;
@@ -169,7 +171,12 @@
     <svg class="enter" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"><path d="M2 7V2h5M13 2h5v5M18 13v5h-5M7 18H2v-5"/></svg>
     <svg class="exit" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"><path d="M7 2v5H2M18 7h-5V2M13 18v-5h5M2 13h5v5"/></svg>
   </button>
-  <div id="dead" hidden>&#x21bb;</div>
+  <button id="dead" type="button" aria-label="Reload game" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 11a9 9 0 1 0-2.7 6.4M21 3v8h-8"/>
+    </svg>
+  </button>
   <pre id="bench" hidden></pre>
   <div id="status"></div>
   </div>
