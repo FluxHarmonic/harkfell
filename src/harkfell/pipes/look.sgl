@@ -1,0 +1,201 @@
+;;; Limestone art and local, non-harmonic tells. All coordinates are room
+;;; pixels; tells use actual authored openings and the fixed hazard cells.
+(define-library (harkfell pipes look)
+  (import (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (harkfell content)
+          (harkfell cues)
+          (harkfell palette)
+          (harkfell render)
+          (harkfell atlas))
+
+  (export pipes-backdrop-bytes draw-pipes-panels! draw-pipes-cues!
+          draw-pipes-lights! draw-upward-drips! draw-aurora!)
+
+  (begin
+    (define (pixel x) (exact (floor x)))
+
+    ;; Distant bores: repeated straight lips, uneven natural cross-joints
+    ;; and vertical wet stains. These use the four cave-wall slots only.
+    (define (pipes-backdrop-bytes)
+      (let ((bv (make-bytevector (* 4 VIEW-W VIEW-H) 0)))
+        (let rows ((y 0))
+          (when (< y VIEW-H)
+            (let cols ((x 0))
+              (when (< x VIEW-W)
+                (let* ((bore (modulo (+ x 11) 67))
+                       (lip (modulo (+ y (* 7 (quotient x 67))) 53))
+                       (joint (modulo (+ y (pixel (* 3 (sin (* x 0.08))))) 41))
+                       (s (cond
+                            ((or (< bore 3) (> bore 54)) 0)
+                            ((and (< lip 2) (< bore 51)) 2)
+                            ((or (< bore 8) (< joint 2)) 1)
+                            ((and (= bore 12) (< (modulo y 19) 13)) 0)
+                            (else 1)))
+                       (o (* 4 (+ x (* y VIEW-W)))))
+                  (bytevector-u8-set! bv o s)
+                  (bytevector-u8-set! bv (+ o 3) 255))
+                (cols (+ x 1))))
+            (rows (+ y 1))))
+        bv))
+
+    (define (slot-rect! name x y w h)
+      (paint-slot! (slot-of name))
+      (draw-filled-rect x y w h))
+
+    ;; The incisions have no captions or route instructions. Their tiny
+    ;; points are drawn separately so each keeps its fixed harmonic colour.
+    (define (draw-pipes-panels! rm)
+      (for-each
+        (lambda (thing)
+          (let* ((at (thing-at thing))
+                 (image (thing-kw thing "image"))
+                 (i (and (symbol? image)
+                         (atlas-index
+                           (string-append "pipes/mural-" (symbol->string image)))))
+                 (x (* 16 (car at)))
+                 (y (+ 20 (* 16 (cdr at)))))
+            (when i
+              (set-color 1.0 1.0 1.0 1.0)
+              (atlas-draw! i x y 1)
+              (case image
+                ((bearers)
+                 (let loop ((hs '(h2 h3 h4 h5)) (k 0))
+                   (unless (null? hs)
+                     (slot-rect! (car hs) (+ x 12 (* k 13)) (+ y 5 (* k 3)) 2 2)
+                     (loop (cdr hs) (+ k 1)))))
+                ((empty-hands)
+                 (let loop ((hs '(h2 h3 h4)) (k 0))
+                   (unless (null? hs)
+                     (slot-rect! (car hs) (+ x 13 (* k 14)) (+ y 13) 2 2)
+                     (loop (cdr hs) (+ k 1))))
+                 (slot-rect! 'h5 (+ x 55) (+ y 18) 1 2))
+                ((violet-well)
+                 (slot-rect! 'h7 (+ x 18) (+ y 12) 28 1)
+                 (slot-rect! 'h7 (+ x 18) (+ y 12) 1 9)
+                 (slot-rect! 'h7 (+ x 45) (+ y 12) 1 9))
+                (else #f)))))
+        (room-things-of rm 'mural)))
+
+    ;; Cream edge marks never advertise a closed wall. Their shape points
+    ;; into the real opening; neither they nor static require moth arrival.
+    (define (each-exit rm draw!)
+      (for-each
+        (lambda (exit)
+          (let ((side (car exit))
+                (x (+ 8 (* 16 (cadr exit))))
+                (y (+ 8 (* 16 (caddr exit)))))
+            (draw! side
+                   (case side ((west) 2) ((east) (- VIEW-W 3)) (else x))
+                   (case side ((north) 2) ((south) (- VIEW-H 3)) (else y)))))
+        (room-exits rm)))
+
+    (define (draw-pipes-cues! rm t)
+      (when (eq? (room-region rm) 'pipes)
+        (each-exit rm
+          (lambda (side x y)
+            (slot-rect! 'ground-4 x y 1 1)
+            (case side
+              ((west east)
+               (slot-rect! 'ground-3 x (- y 3) 1 2)
+               (slot-rect! 'ground-3 x (+ y 2) 1 2))
+              (else
+               (slot-rect! 'ground-3 (- x 3) y 2 1)
+               (slot-rect! 'ground-3 (+ x 2) y 2 1)))))
+        (for-each
+          (lambda (cell)
+            (let ((x (* 16 (car cell)))
+                  (y (* 16 (cdr cell))))
+              ;; The faint rectangular afterglow encloses the entire
+              ;; collision cell, throughout every animation phase.
+              (paint-slot! (slot-of 'ground-2))
+              (draw-rect x y 16 16)
+              (paint-slot! (slot-of 'ground-4))
+              (let hairs ((k 0))
+                (when (< k 4)
+                  (let* ((phase (modulo (+ (quotient t 3) (* k 11) (* x 3)) 19))
+                         (hx (+ x 2 (* k 3)))
+                         (hy (+ y 2 (modulo phase 4)))
+                         (len (+ 4 (modulo phase 7))))
+                    (draw-filled-rect hx hy 1 len)
+                    (draw-filled-rect (+ hx 1) (+ hy 2) 1 1))
+                  (hairs (+ k 1))))))
+          (room-static-cells rm))))
+
+    (define (disc! cx cy radius amount)
+      (paint-light! amount)
+      (let loop ((dy (- radius)))
+        (when (<= dy radius)
+          (let ((half (pixel (sqrt (- (* radius radius) (* dy dy))))))
+            (draw-filled-rect (- cx half) (+ cy dy) (+ 1 (* 2 half)) 1))
+          (loop (+ dy 1)))))
+
+    (define (draw-pipes-lights! rm t)
+      (when (eq? (room-region rm) 'pipes)
+        (each-exit rm
+          (lambda (side x y)
+            (disc! x y 4 0.48)))
+        (for-each
+          (lambda (cell)
+            (let ((x (* 16 (car cell)))
+                  (y (* 16 (cdr cell))))
+              ;; Tiny neutral stone pool; it never illuminates a room.
+              (disc! (+ x 8) (+ y 8) 13 0.14)
+              (paint-light! 0.44)
+              (draw-filled-rect x y 16 16)))
+          (room-static-cells rm))
+        ;; A travelling strip only on the wet edge of a carved lip.
+        (let rows ((r 1))
+          (when (< r ROOM-ROWS)
+            (let cols ((c 1))
+              (when (< c (- ROOM-COLS 1))
+                (when (and (char=? (room-char rm c r) #\#)
+                           (char=? (room-char rm c (+ r 1)) #\~))
+                  (let ((u (modulo (+ (quotient t 8) (* c 5)) 16)))
+                    (paint-light! (+ 0.12 (* 0.06 (sin (* t 0.012)))))
+                    (draw-filled-rect (+ (* 16 c) u) (+ (* 16 r) 15) 2 1)))
+                (cols (+ c 1))))
+            (rows (+ r 1))))))
+
+    ;; Water beading upward is a local wrong thing, never a collectible.
+    ;; The small H7 line belongs to the hint; ordinary seep remains neutral.
+    (define (draw-upward-drips! rm t)
+      (for-each
+        (lambda (cell)
+          (let* ((x (+ 8 (* 16 (car cell))))
+                 (base (+ 14 (* 16 (cdr cell))))
+                 (u (modulo t 180))
+                 (y (- base (quotient u 6))))
+            (slot-rect! 'water x y 1 2)
+            (slot-rect! 'ground-4 x y 1 1)
+            (slot-rect! 'h7 (- x 2) (- base 29) 5 1)
+            (with-additive-blend
+              (disc! x y 3 0.5)
+              (disc! x (- base 29) 4 0.4))))
+        (room-upward-drops rm)))
+
+    ;; A brief third-homecoming: three broad drifting curtains, drawn
+    ;; with whole indexed pixels and a sparse fade instead of blended RGB.
+    (define (draw-aurora! rm age)
+      (when (and (number? age) (<= 0 age) (< age 720)
+                 (eq? (room-region rm) 'hollow)
+                 (= (room-x rm) 4) (= (room-y rm) 3))
+        (let ((fade (min 1.0 (/ age 120.0) (/ (- 720 age) 240.0))))
+          (let bands ((hs '(h2 h3 h4)) (k 0))
+            (unless (null? hs)
+              (paint-slot! (slot-of (car hs)))
+              (let cols ((x 28))
+                (when (< x 372)
+                  (let ((crest (+ 24 (* k 10)
+                                  (pixel (* 8 (sin (+ (* x 0.017) (* age 0.002) k))))
+                                  (pixel (* 3 (sin (+ (* x 0.051) (* age -0.003))))))))
+                    (let rows ((d 0))
+                      (when (< d 12)
+                        (when (< (/ (modulo (+ (* x 5) (* d 3) (* k 7)) 16) 16.0)
+                                 (* fade (- 0.7 (/ d 18.0))))
+                          (draw-filled-rect x (+ crest d) 1 1))
+                        (rows (+ d 1)))))
+                  (cols (+ x 1))))
+              (bands (cdr hs) (+ k 1)))))))))

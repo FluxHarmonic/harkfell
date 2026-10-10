@@ -186,7 +186,7 @@
                         (loop (+ m 1))))
                     (vloop (+ v 1)))))))
           MATERIALS))
-      (list "reedfen" "hollow" "glasswood")))
+      (list "reedfen" "hollow" "glasswood" "pipes")))
   (test "reeds have as many top, mid and base cells, so a stalk runs on"
     (for-each
       (lambda (sheet)
@@ -194,7 +194,7 @@
           (assert-true (> (n "top") 0))
           (assert-equal (n "top") (n "mid"))
           (assert-equal (n "top") (n "base"))))
-      (list "reedfen" "hollow" "glasswood")))
+      (list "reedfen" "hollow" "glasswood" "pipes")))
   (test "climbable rock has holds that smooth rock has not (not colour alone)"
     (for-each
       (lambda (sheet)
@@ -206,7 +206,7 @@
                              (* 256.0 (length fills)))))))
           (assert-true (> (joints "rough") 0.15))
           (assert-true (< (joints "rock") 0.03))))
-      (list "reedfen" "hollow" "glasswood"))))
+      (list "reedfen" "hollow" "glasswood" "pipes"))))
 
 (test-group "art: the player"
   (test "every frame player-frame can name exists, and faces the same way"
