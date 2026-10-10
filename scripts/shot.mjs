@@ -2,7 +2,7 @@
 // the game draws (one texel per view pixel, times --scale).
 //
 //   node scripts/shot.mjs BUILD OUT.png --query "room=reedfen:9,3&still"
-//                         [--scale N] [--port N] [--cdp N] [--world DIR | --baked] [--wait MS]
+//                         [--scale N] [--port N] [--cdp N] [--world DIR | --baked] [--wait MS] [--live] [--carry N,N] [--at C,R]
 //
 // The rooms drawn are the working tree's world/ (or --world DIR), handed to
 // the page before it loads, so an edited room shows without rebuilding the
@@ -30,11 +30,16 @@ import { spawn, spawnSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
-const VALUED = ["--query", "--scale", "--port", "--cdp", "--world", "--wait"];
+const VALUED = ["--query", "--scale", "--port", "--cdp", "--world", "--wait", "--carry", "--at"];
 const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && VALUED.includes(args[i - 1])));
 const ROOT = path.resolve(positional[0] || "build/web");
 const OUT = positional[1] || "/tmp/harkfell-shot.png";
-const QUERY = opt("--query", "");
+let QUERY = opt("--query", "");
+if (args.includes("--live")) QUERY = QUERY.split("&").filter((p) => p !== "still").join("&");
+for (const name of ["carry", "at"]) {
+  const value = opt("--" + name);
+  if (value !== undefined) QUERY += "&" + name + "=" + encodeURIComponent(value);
+}
 const SCALE = parseInt(opt("--scale", "2"), 10);
 const PORT = parseInt(opt("--port", "8391"), 10);
 const CDP = parseInt(opt("--cdp", "9391"), 10);

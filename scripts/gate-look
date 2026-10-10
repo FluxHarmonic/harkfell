@@ -5,6 +5,9 @@
 #   scripts/gate-look --sabotage   each plant must turn its leg red, and the
 #                                  tree is restored to its pre-plant hash
 #
+#   --palette | --firefly | --pools | --daylight runs a single visual leg.
+#   GATE_FIREFLY_WORLD may name a scratch world for a negative control.
+#
 # Legs:
 #   art       test/test-art.sgl (the key, the palettes, the lookups, the
 #             autotile shapes, the player, the type, the mark)
@@ -19,13 +22,14 @@
 #             and Glasswood: its probe rooms, the look fixture's birches and
 #             blue hour, and Root Ice (light 0.25), which must be mostly shadow,
 #             and lit round the body when its moths come to H3
-# Needs: build/dev (scripts/dev sigil build) for the palette leg.
+# Needs: build/dev for native palette frames; build/web for exact daylight frames.
 #
 # Exit 0 green, 1 red, 2 SETUP-FAILED.
 set -u
 cd "$(dirname "$0")/.." || exit 2
 HERE="$(pwd)"
 S="${GATE_TMP:-$(mktemp -d)}"
+mkdir -p "$S" || exit 2
 MODE="${1:-}"
 DISPLAYN="${GATE_DISPLAY:-75}"
 
@@ -76,18 +80,35 @@ shoot() {
   printf "x3" > "$S/xdg/harkfell/scale.sgl"
   env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET DISPLAY=":$DISPLAYN" PULSE_SINK=worker-null XDG_DATA_HOME="$S/xdg" \
     setsid scripts/dev ./build/dev/bin/harkfell "$@" > "$S/game.log" 2>&1 &
+  launcher=$!
   pid=""; n=0
   while [ -z "$pid" ] && [ $n -lt 60 ]; do
-    for p in /proc/[0-9]*; do
-      [ "${p#/proc/}" = "$$" ] && continue
+    # Guix waits for its application child. Inspect only this launcher's
+    # lineage, so another game on the shared desktop cannot be captured/killed.
+    for child in "$launcher" $(cat "/proc/$launcher/task/$launcher/children" 2>/dev/null); do
+      p="/proc/$child"
       e="$(readlink "$p/exe" 2>/dev/null || true)"; c="$(readlink "$p/cwd" 2>/dev/null || true)"
       case "$e" in */build/dev/bin/harkfell|*/bin/sigil)
-        [ "$c" = "$HERE" ] && tr '\0' ' ' < "$p/cmdline" 2>/dev/null | grep -q 'build/dev/bin/harkfell' && pid="${p#/proc/}" ;;
+        if [ "$c" = "$HERE" ] && tr '\0' ' ' < "$p/cmdline" 2>/dev/null | grep -q 'build/dev/bin/harkfell'; then
+          pid="$child"
+          break
+        fi ;;
       esac
     done
     [ -n "$pid" ] || { sleep 0.25; n=$((n+1)); }
   done
   [ -n "$pid" ] || { say "SETUP-FAILED: the game did not start ($*)"; cat "$S/game.log"; return 2; }
+  # The dev bundle may take longer than its window to initialize. Wait for
+  # actual painted pixels before timing moth/firefly settling.
+  ready=0; n=0
+  while [ "$n" -lt 30 ]; do
+    DISPLAY=":$DISPLAYN" guix shell imagemagick -- import -window root "$out" 2>/dev/null
+    colours=$(convert "$out" -format '%k' info: 2>/dev/null || echo 0)
+    if [ "$colours" -gt 3 ]; then ready=1; break; fi
+    [ -d "/proc/$pid" ] || break
+    sleep 1; n=$((n + 1))
+  done
+  [ "$ready" -eq 1 ] || { kill "$pid" 2>/dev/null; say "SETUP-FAILED: no painted game frame ($*)"; return 2; }
   sleep "${SHOOT_WAIT:-5}"
   if [ ! -d "/proc/$pid" ]; then say "SETUP-FAILED: the game died ($*)"; tail -3 "$S/game.log"; return 2; fi
   DISPLAY=":$DISPLAYN" guix shell imagemagick -- import -window root "$out" 2>/dev/null
@@ -149,7 +170,12 @@ leg_palette() {
   # (fen-sky-1) and the bottom-left is peat (fen-peat-2, the banks' body)
   sky="$(awk '$0 ~ /^ *\(fen-sky-1 "#/ { l = $0; sub(/^[^"]*"#/, "", l); print toupper(substr(l, 1, 6)); exit }' world/world.sgl)"
   peat="$(awk '$0 ~ /^ *\(fen-peat-2 "#/ { l = $0; sub(/^[^"]*"#/, "", l); print toupper(substr(l, 1, 6)); exit }' world/world.sgl)"
-  at() { convert "$S/shot-9,3.png" -crop "1x1+$1+$2" +repage -format '%[hex:u.p{0,0}]' info:- 2>/dev/null | cut -c1-6 | tr a-z A-Z; }
+  cp -R world "$S/daylight-world"
+  # Keep things well formed: remove the added first item, not the whole list.
+  sed '/^  light:/d; /^  sun:/d; s/(firefly at: ([0-9 ]*) count: [0-9]* drawn: 2)//' world/rooms/reedfen/x9y3.room > "$S/daylight-world/rooms/reedfen/x9y3.room"
+  shoot "$S/shot-daylight.png" --world "$S/daylight-world" --room reedfen:9,3 || return 2
+  frames=$((frames + 1))
+  at() { convert "$S/shot-daylight.png" -crop "1x1+$1+$2" +repage -format '%[hex:u.p{0,0}]' info:- 2>/dev/null | cut -c1-6 | tr a-z A-Z; }
   top="$(at 16 16)"; bottom="$(at 16 518)"
   if [ "$top" = "$sky" ] && [ "$bottom" = "$peat" ]; then :; else
     say "palette: RED placement: reedfen:9,3 top-left #$top (want #$sky), bottom-left #$bottom (want #$peat)"; bad=1
@@ -189,14 +215,186 @@ leg_palette() {
   if [ "$lit_on" -gt 6000 ] && [ "$lit_on" -gt $((3 * lit_off)) ]; then :; else
     say "palette: RED moth light: $lit_on of 14400 px lit round the body carrying H3, $lit_off without (want over 6000 and over three times)"; bad=1
   fi
-  [ "$bad" -eq 0 ] && { say "palette: GREEN ($frames frames, every colour a palette colour, sky and peat where they belong, Root Ice dark and lit by its moths)"; return 0; }
+  leg_firefly; fly_rc=$?
+  [ "$fly_rc" -eq 2 ] && return 2
+  [ "$fly_rc" -eq 1 ] && bad=1
+  frames=$((frames + 10))
+  [ "$bad" -eq 0 ] && { say "palette: GREEN ($frames frames, every colour a palette colour, sky and peat where they belong, Root Ice dark and lit by its moths, H2 sprites/halo and broad covered daylight pools, ordinary pickup light)"; return 0; }
   return 1
+}
+
+# The fen probe can run alone while tuning; the full palette leg includes it.
+leg_firefly() {
+  command -v convert > /dev/null 2>&1 && command -v import > /dev/null 2>&1 || { say "palette: SETUP-FAILED (no ImageMagick)"; return 2; }
+  [ -x build/dev/bin/harkfell ] || { say "palette: SETUP-FAILED (no build/dev)"; return 2; }
+  pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null > /dev/null 2>&1
+  xvfb_up || return 2
+  region_hexes world reedfen > "$S/allowed-reedfen"
+  fly_bad=0
+  # Count exact H2 sprite/halo pixels near the body, away from idle homes.
+  # Subtract an identical world without fireflies to exclude carried-H2 marks.
+  fly_world="${GATE_FIREFLY_WORLD:-world}"
+  fly_control=$(mktemp -d "$S/firefly-control.XXXXXX")
+  cp -R "$fly_world/." "$fly_control"
+  for fly_room in x11y3 x14y4; do
+    sed -E 's/\(firefly at: \([0-9 ]+\) count: [0-9]+ drawn: 2\)//g' "$fly_world/rooms/reedfen/$fly_room.room" > "$fly_control/rooms/reedfen/$fly_room.room"
+  done
+  SHOOT_WAIT=8 shoot "$S/shot-firefly-off.png" --world "$fly_world" --room reedfen:11,3 --at 14,8 || return 2
+  SHOOT_WAIT=8 shoot "$S/shot-firefly-on.png" --world "$fly_world" --room reedfen:11,3 --at 14,8 --carry 2 || return 2
+  SHOOT_WAIT=8 shoot "$S/shot-firefly-negative-off.png" --world "$fly_control" --room reedfen:11,3 --at 14,8 || return 2
+  SHOOT_WAIT=8 shoot "$S/shot-firefly-negative-on.png" --world "$fly_control" --room reedfen:11,3 --at 14,8 --carry 2 || return 2
+  for f in off on negative-off negative-on; do
+    if check_colours "$S/shot-firefly-$f.png" "$S/allowed-reedfen" 1200x528+0+0; then :; else
+      say "palette: RED firefly $f colours"; fly_bad=1
+    fi
+  done
+  box=168x156+612+324
+  amber="$(role_hex h2)"
+  fly_off=$(count_hex "$S/shot-firefly-off.png" "$amber" "$box")
+  fly_on=$(count_hex "$S/shot-firefly-on.png" "$amber" "$box")
+  fly_negative_off=$(count_hex "$S/shot-firefly-negative-off.png" "$amber" "$box")
+  fly_negative_on=$(count_hex "$S/shot-firefly-negative-on.png" "$amber" "$box")
+  fly_excess=$(( (fly_on - fly_off) - (fly_negative_on - fly_negative_off) ))
+  # Five bare one-pixel cores can contribute at most 45 pixels at 3x.
+  # Requiring 90 proves the faint halos contribute too.
+  if [ "$fly_on" -ge $((fly_negative_on + 90)) ] && [ "$fly_excess" -ge 90 ]; then
+    say "palette: firefly sprites/halo $fly_on H2 pixels with H2, $fly_off without; negative $fly_negative_on/$fly_negative_off; excess $fly_excess"
+  else
+    say "palette: RED firefly sprites/halo: $fly_on/$fly_off; negative $fly_negative_on/$fly_negative_off; excess $fly_excess (want >=90 above control)"; fly_bad=1
+  fi
+  # Root Hall's one-step-dark reeds regain daylight around the fireflies.
+  # Amber sprites cannot produce these green pixels.
+  SHOOT_WAIT=8 shoot "$S/shot-covered-off.png" --world "$fly_world" --room reedfen:14,4 --at 19,8 || return 2
+  SHOOT_WAIT=8 shoot "$S/shot-covered-on.png" --world "$fly_world" --room reedfen:14,4 --at 19,8 --carry 2 || return 2
+  SHOOT_WAIT=8 shoot "$S/shot-covered-negative-off.png" --world "$fly_control" --room reedfen:14,4 --at 19,8 || return 2
+  SHOOT_WAIT=8 shoot "$S/shot-covered-negative-on.png" --world "$fly_control" --room reedfen:14,4 --at 19,8 --carry 2 || return 2
+  for f in off on negative-off negative-on; do
+    if check_colours "$S/shot-covered-$f.png" "$S/allowed-reedfen" 1200x528+0+0; then :; else
+      say "palette: RED covered firefly $f colours"; fly_bad=1
+    fi
+  done
+  box=144x66+864+366
+  reed1="$(role_hex fen-reed-1)"
+  reed2="$(role_hex fen-reed-2)"
+  reed3="$(role_hex fen-reed-3)"
+  count_reeds() {
+    echo $(( $(count_hex "$1" "$reed1" "$box") + $(count_hex "$1" "$reed2" "$box") + $(count_hex "$1" "$reed3" "$box") ))
+  }
+  covered_off=$(count_reeds "$S/shot-covered-off.png")
+  covered_on=$(count_reeds "$S/shot-covered-on.png")
+  covered_negative_off=$(count_reeds "$S/shot-covered-negative-off.png")
+  covered_negative_on=$(count_reeds "$S/shot-covered-negative-on.png")
+  covered_excess=$(( (covered_on - covered_off) - (covered_negative_on - covered_negative_off) ))
+  if [ "$covered_on" -ge $((covered_negative_on + 90)) ] && [ "$covered_excess" -ge 90 ]; then
+    say "palette: covered firefly daylight pool $covered_on daylight reed pixels with H2, $covered_off without; negative $covered_negative_on/$covered_negative_off; excess $covered_excess"
+  else
+    say "palette: RED covered firefly light: $covered_on/$covered_off; negative $covered_negative_on/$covered_negative_off; excess $covered_excess (want >=90 above control)"; fly_bad=1
+  fi
+  # Reeds at least 25 view pixels west of the player's orbit exceed the
+  # former 18-pixel patch. Require daylight here, with matched controls.
+  box=42x66+831+366
+  outer_off=$(count_reeds "$S/shot-covered-off.png")
+  outer_on=$(count_reeds "$S/shot-covered-on.png")
+  outer_negative_off=$(count_reeds "$S/shot-covered-negative-off.png")
+  outer_negative_on=$(count_reeds "$S/shot-covered-negative-on.png")
+  outer_excess=$((outer_on - outer_off - outer_negative_on + outer_negative_off))
+  if [ "$outer_excess" -ge 90 ]; then
+    say "palette: broad pool restores $outer_excess daylight reed pixels beyond the former 18px patch"
+  else
+    say "palette: RED broad pool: $outer_excess outer reed pixels (want >=90)"; fly_bad=1
+  fi
+  # An ordinary harmonic must restore daylight without any fireflies.
+  # Move the existing H2 pickup in a scratch world, avoiding duplicates.
+  pickup_control=$(mktemp -d "$S/pool-pickup.XXXXXX")
+  cp -R "$fly_control/." "$pickup_control"
+  sed 's/(harmonic at: (22 3) overtone: 2)//' "$fly_control/rooms/reedfen/x17y3.room" > "$pickup_control/rooms/reedfen/x17y3.room"
+  sed 's/things: (/things: ((harmonic at: (19 8) overtone: 2) /' "$fly_control/rooms/reedfen/x14y4.room" > "$pickup_control/rooms/reedfen/x14y4.room"
+  shoot "$S/shot-pickup-negative.png" --world "$fly_control" --room reedfen:14,4 --at 14,8 || return 2
+  shoot "$S/shot-pickup-light.png" --world "$pickup_control" --room reedfen:14,4 --at 14,8 || return 2
+  for f in negative light; do
+    if check_colours "$S/shot-pickup-$f.png" "$S/allowed-reedfen" 1200x528+0+0; then :; else
+      say "palette: RED ordinary pickup $f colours"; fly_bad=1
+    fi
+  done
+  # Broad reed flanks outside the pickup's small bright core measure restored
+  # daylight rather than the pickup sprite or its three drifting specks.
+  pickup_excess=0
+  for box in 66x66+834+366 66x66+966+366; do
+    pickup_off=$(count_reeds "$S/shot-pickup-negative.png")
+    pickup_on=$(count_reeds "$S/shot-pickup-light.png")
+    pickup_excess=$((pickup_excess + pickup_on - pickup_off))
+  done
+  if [ "$pickup_excess" -ge 90 ]; then
+    say "palette: ordinary pickup restores $pickup_excess daylight reed pixels beside its sprite; no fireflies or carried H2"
+  else
+    say "palette: RED ordinary pickup pool: $pickup_excess daylight reed pixels (want >=90)"; fly_bad=1
+  fi
+  return "$fly_bad"
+}
+
+# Every covered water pool stays blue; the former overlay is the red control.
+# Optional paired captures test the live H2 states as well as the overview.
+leg_pools() {
+  pool_sheet="${GATE_POOL_SHEET:-$S/pools-sheet.png}"
+  if [ -z "${GATE_POOL_SHEET:-}" ]; then
+    scripts/region-sheet reedfen "$pool_sheet" --port 8498 --cdp 9498 > "$S/pools-shot.log" 2>&1 || return 2
+  fi
+  node scripts/gate-covered-water.mjs "$pool_sheet" ${GATE_POOL_PAIRS:+"$GATE_POOL_PAIRS"}; pool_rc=$?
+  [ "$pool_rc" -eq 0 ] || return "$pool_rc"
+  # A dim palette step preserves the full drawing. No room-wide black veil
+  # may remain, including in the six covered rooms without authored water.
+  for room in 8y4 9y4 10y4 11y4 12y4 13y4 14y4 15y4 16y4 17y4 13y5 14y5; do
+    rx=${room%y*}; ry=${room#*y}
+    ox=$((4 + (rx - 8) * 404)); oy=$((14 + (ry - 3) * 180))
+    hidden=$(count_hex "$pool_sheet" 000000 "400x166+$ox+$oy")
+    if [ "$hidden" -le 300 ]; then
+      say "pools: $room readable shade, $hidden black pixels in 66400"
+    else
+      say "pools: RED $room retains $hidden black veil pixels"; return 1
+    fi
+  done
+  pool_red="${GATE_POOL_RED:-/home/daviwil/Ops/artifacts/harkfell-0-3-light/reedfen-overlay-map.png}"
+  if [ -f "$pool_red" ]; then
+    node scripts/gate-covered-water.mjs "$pool_red" > "$S/pools-red.log" 2>&1; pool_rc=$?
+    if [ "$pool_rc" -eq 1 ] && grep -q '0/2048 blue pixels' "$S/pools-red.log"; then
+      say "water: rejected overlay correctly RED; Root Hall loses all blue"
+    else
+      say "water: RED rejected-overlay control did not fail on Root Hall's blue water"; return 1
+    fi
+  else
+    say "water: SETUP-FAILED missing rejected-overlay control $pool_red"; return 2
+  fi
+  say "water: GREEN covered pools retain blue; rejected overlay RED"
+}
+
+# Exact daylight regression: still web frames omit light or explicitly use 1.
+# Cover water/foliage in the Hollow and sunny birches/moth glow in Glasswood.
+leg_daylight() {
+  command -v compare > /dev/null 2>&1 || { say "daylight: SETUP-FAILED (no ImageMagick compare)"; return 2; }
+  [ -f build/web/index.html ] || { say "daylight: SETUP-FAILED (no build/web)"; return 2; }
+  cp -R test/fixtures/worlds/look "$S/daylight-fixture"
+  for key in hollow:0,0 glasswood:3,0; do
+    case "$key" in
+      hollow:*) room_path=rooms/hollow/x0y0.room ;;
+      glasswood:*) room_path=rooms/glasswood/x3y0.room ;;
+    esac
+    sed '/^  bed:/a\
+  light: 1.0' "test/fixtures/worlds/look/$room_path" > "$S/daylight-fixture/$room_path"
+    # Ears rise after 1s and flick for 0.36s. The default 1.2s capture can
+    # catch different flick frames; 2s is safely between the initial flick
+    # and its four-second recurrence. Compare every pixel without masking.
+    scripts/room-shot "$key" "$S/daylight-absent.png" --world test/fixtures/worlds/look --scale 1 --wait 2000 --port 8497 --cdp 9497 > "$S/daylight-shot.log" 2>&1 || { say "daylight: SETUP-FAILED"; cat "$S/daylight-shot.log"; return 2; }
+    scripts/room-shot "$key" "$S/daylight-explicit.png" --world "$S/daylight-fixture" --scale 1 --wait 2000 --port 8497 --cdp 9497 >> "$S/daylight-shot.log" 2>&1 || { say "daylight: SETUP-FAILED"; cat "$S/daylight-shot.log"; return 2; }
+    ae="$(compare -metric AE "$S/daylight-absent.png" "$S/daylight-explicit.png" null: 2>&1)"
+    [ "$ae" = "0" ] || { say "daylight: RED $key has $ae changed pixels"; return 1; }
+  done
+  say "daylight: GREEN (Hollow and Glasswood, 0 changed pixels)"
 }
 
 run_green() {
   GR_RC=0
-  leg_art; GR_A=$?; leg_cells; GR_C=$?; leg_palette; GR_P=$?
-  for GR_X in $GR_A $GR_C $GR_P; do [ "$GR_X" -eq 2 ] && return 2; [ "$GR_X" -ne 0 ] && GR_RC=1; done
+  leg_art; GR_A=$?; leg_cells; GR_C=$?; leg_palette; GR_P=$?; leg_pools; GR_O=$?; leg_daylight; GR_D=$?
+  for GR_X in $GR_A $GR_C $GR_P $GR_O $GR_D; do [ "$GR_X" -eq 2 ] && return 2; [ "$GR_X" -ne 0 ] && GR_RC=1; done
   return $GR_RC
 }
 
@@ -245,7 +443,9 @@ run_sabotage() {
   # probes can see them)
   plant green-role world/world.sgl '{ sub(/\(glw-ice-3 "#8ba3c2"/, "(glw-ice-3 \"#6fb86a\""); print }' leg_art "no Glasswood role has a green hue" || fail=1
   plant no-dark src/harkfell/render.sgl '{ sub(/\(if \(and \(number\? light\) \(< light 1\.0\)\)/, "(if #f"); print }' leg_palette_rebuilt "RED dark" || fail=1
-  plant no-moth-light src/harkfell/draw.sgl '{ sub(/\(a \(\* \(\/ unit 3\.0\) g\)\)\)/, "(a 0.0))"); print }' leg_palette_rebuilt "RED moth light" || fail=1
+  plant no-moth-light src/harkfell/draw.sgl '{ sub(/\(a \(\* \(\/ unit 3\.0\) arr\)\)\)/, "(a 0.0))"); print }' leg_palette_rebuilt "RED moth light" || fail=1
+  # Same missing-firefly control as the scratch-world negative probe.
+  plant no-fireflies world/rooms/reedfen/x11y3.room '{ sub(/\(firefly at: \(14 5\) count: 5 drawn: 2\)/, ""); print }' leg_firefly "RED firefly sprites/halo" || fail=1
   # David's ruling on stones (2026-09-27): no effect shifts a harmonic's colour
   plant dark-shifts-h4 src/harkfell/palette.sgl "{ sub(/\\(cons 'fur-1 'fur-2\\) \\(cons 'fur-2 'ground-2\\)\\)\\)/, \"(cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2) (cons 'h4 'ground-2)))\"); print }" leg_art "every lookup leaves the harmonics' colours as they are" || fail=1
   return $fail
@@ -270,6 +470,12 @@ if [ "$MODE" = "--sabotage" ]; then
   [ "$rc" -eq 0 ] && say "SABOTAGE: every plant RED, every file restored" || say "SABOTAGE: a plant stayed green"
   exit $rc
 fi
-run_green; rc=$?
+case "$MODE" in
+  --palette) leg_palette; rc=$? ;;
+  --firefly) leg_firefly; rc=$? ;;
+  --pools) leg_pools; rc=$? ;;
+  --daylight) leg_daylight; rc=$? ;;
+  *) run_green; rc=$? ;;
+esac
 case $rc in 0) say "GREEN" ;; 1) say "RED" ;; *) say "SETUP-FAILED" ;; esac
 exit $rc
