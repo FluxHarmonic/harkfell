@@ -218,12 +218,18 @@
     ;; --- one tick -------------------------------------------------------------------
 
     (define (body-step b in tm f)
-      (let* ((b (body b
+      (let* ((wet-before (body-in-water? b tm f))
+             (b (body b
                       buffer: (if (intent-press in) (feel-buffer f) (body-buffer b))
                       events: '()))
              (b (cond ((body-in-water? b tm f) (swim-step b in tm f))
                       ((eq? (body-mode b) 'cling) (cling-step b in tm f))
                       (else (platform-step b in tm f))))
+             ;; One event for each real crossing, in either direction and
+             ;; from any movement mode. Surface clamping keeps treading wet.
+             (b (if (eq? wet-before (body-in-water? b tm f))
+                    b
+                    (add-event b 'splash)))
              (b (hazard-check b tm f))
              (b (brittle-check b tm f)))
         (body b
@@ -339,7 +345,7 @@
                ;; time) must not carry a live ground jump onto the wall
                (add-event (body b mode: 'cling side: grab facing: grab vx: 0.0 vy: 0.0 jumping: #f cut: #f coyote: 0) 'grab))
               ((body-in-water? b tm f)
-               (add-event (body b mode: 'swim vy: (* (body-vy b) (feel-water-damp f))) 'splash))
+               (body b mode: 'swim vy: (* (body-vy b) (feel-water-damp f))))
               (grounded-now (body b mode: 'ground))
               (else (body b mode: 'air)))))
 

@@ -615,7 +615,7 @@
     (display "  jump gain alone ") (display JUMP-ALONE) (display ", in a moment ") (display JUMP-IN-MOMENT) (newline)
     (assert-true (< JUMP-IN-MOMENT (* 0.6 JUMP-ALONE)))))
 
-;; one splash per SPLASH-GAP-S (playtest 1, #6: bobbing at the surface)
+;; Body events are real crossings; even a quick entry/exit must both sound.
 (mixer-open-headless! RATE #f)
 (sound-reset!)
 (define (splashes-at ts)
@@ -627,9 +627,9 @@
           (loop (cdr ts) (+ n (length (filter (lambda (m) (eq? (car m) 'splash)) (sound-moved)))))))))
 (define SPLASHES (splashes-at '(0.0 0.2 0.4 0.6 1.2)))
 
-(test-group "a4 sound: 10, the splash's limit"
-  (test "entering the water at 0, 0.2, 0.4, 0.6 and 1.2 s splashes at 0, 0.6 and 1.2 only"
-    (assert-equal 3 SPLASHES)))
+(test-group "a4 sound: 10, water crossings"
+  (test "every real crossing sounds, including those less than half a second apart"
+    (assert-equal 5 SPLASHES)))
 
 ;; --- 11. the pause (D40): the game loses focus, the sound holds ----------------------
 ;; A hold at 5 s, then 10 s held with the mixer's clock RUNNING (the director

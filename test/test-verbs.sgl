@@ -266,6 +266,35 @@
       (assert-true (memq 'jump (body-events (car hist))))
       (assert-true (< (min-y hist) 60.0)))))
 
+;; Regression: the surface clamp must silence treading without silencing
+;; a real entry or exit. Count events, rather than accepting any splash.
+(define (splash-count hist)
+  (list-fold (lambda (b n)
+               (+ n (length (filter (lambda (e) (eq? e 'splash)) (body-events b)))))
+             0 hist))
+
+(test-group "water crossing splashes"
+  (let* ((tm (tiles POOL))
+         (entry (history (body (body-at 90.0 72.75) mode: 'air vy: 0.6) tm
+                         (lambda (tick b) (intent)) 20)))
+    (test "entering the pool emits exactly one splash"
+      (assert-equal 1 (splash-count entry))
+      (assert-true (body-in-water? (last entry) tm F))))
+  (let* ((tm (tiles POOL))
+         (exit (history (body (body-at 90.0 73.0) mode: 'swim) tm
+                        (lambda (tick b)
+                          (intent v: -1 jump: #t press: (= tick 0)))
+                        8)))
+    (test "leaping out emits exactly one splash"
+      (assert-equal 1 (splash-count exit))
+      (assert-false (body-in-water? (last exit) tm F))))
+  (let* ((tm (tiles POOL))
+         (bob (history (body (body-at 90.0 73.0) mode: 'swim) tm
+                       (lambda (tick b) (intent v: -1)) 300)))
+    (test "holding up at the surface emits no splashes"
+      (assert-equal 0 (splash-count bob))
+      (assert-true (every (lambda (b) (body-in-water? b tm F)) bob)))))
+
 ;; Treading water (playtest #6): up held from the pool's floor rises to the
 ;; surface and stays there, swimming with the head out (the center on the
 ;; surface, y 80, so the box's top at 73), with no splash once it arrives.
