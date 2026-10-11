@@ -1,11 +1,15 @@
 // The worker owns update availability; the game owns the start-screen state.
 (() => {
+  // clients.claim can give a first visit its controller during this page's
+  // lifetime. Only a page that was already controlled when loaded may
+  // announce an update; first installs and their follow-up checks stay quiet.
+  const controlledAtLoad = !!navigator.serviceWorker?.controller;
   const state = { state: "none", registration: null };
   window.harkfellUpdate = state;
   let applying = false;
   let app = null;
   function waiting(registration) {
-    if (!registration.waiting || !navigator.serviceWorker.controller) return;
+    if (!controlledAtLoad || !registration.waiting || state.state === "waiting" || applying) return;
     state.state = "waiting";
     app?.dispatch("update", "waiting");
     window.dispatchEvent(new Event("harkfell-update-waiting"));

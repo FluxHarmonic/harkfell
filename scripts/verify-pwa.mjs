@@ -42,7 +42,21 @@ const server = http.createServer((req, res) => {
     res.end(bytes);
   });
 });
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+// Keep local previews away from the leader's playtest ports.
+for (let port = 8860; ; port++) {
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => {
+        server.removeListener("error", reject);
+        resolve();
+      });
+    });
+    break;
+  } catch (error) {
+    if (error.code !== "EADDRINUSE") throw error;
+  }
+}
 const origin = `http://127.0.0.1:${server.address().port}`;
 spawnSync("sh", ["-c", "pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null >/dev/null 2>&1 || true"]);
 const chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
@@ -104,6 +118,11 @@ try {
   await send("Runtime.enable");
   await send("Network.enable");
   await send("Network.setCacheDisabled", { cacheDisabled: true });
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `
+    window.pwaControlledAtLoad = !!navigator.serviceWorker.controller;
+    window.pwaWaitingEvents = 0;
+    window.addEventListener('harkfell-update-waiting', () => window.pwaWaitingEvents++);
+  ` });
   async function boot(query = "trace&frame=off&test-room") {
     lines.length = 0;
     await send("Page.navigate", { url: `${origin}/play/?${query}` });
@@ -111,7 +130,41 @@ try {
     await wait(() => evaluate("!!navigator.serviceWorker.controller"), "worker controlling first load");
     await wait(() => lines.some((line) => line.startsWith("harkfell: sound cues-moving")), "movement cues ready");
   }
-  await boot();
+  await boot(updates ? "trace&frame=on&new" : undefined);
+  assert.equal(await evaluate("pwaControlledAtLoad"), false, "fresh profile has no previous controller");
+  assert.equal(await evaluate("pwaWaitingEvents"), 0, "first installation never announces an update");
+  assert.notEqual(await evaluate("harkfellUpdate.state"), "waiting", "first visit has no reload message");
+  if (updates) {
+    await wait(() => evaluate("localStorage.getItem('update-seen') === '\"0.2.0\"'"), "fresh launch baseline");
+    const first = lines.length;
+    await evaluate("SigilWebApp.dispatch('update-lines', '')");
+    assert(!lines.slice(first).some(line => line.startsWith("harkfell: update-line")),
+      "first visit shows neither reload nor what's-new lines");
+  }
+  console.log("PASS fresh profile: no prior controller, no waiting event, no update-ready or what's-new message");
+  if (updates) {
+    // The first worker may claim this document before a newer build is
+    // installed. It is still the player's first visit: only a subsequent
+    // document that was already controlled may announce that update.
+    revision = 1;
+    await evaluate("harkfellUpdate.check()");
+    await wait(() => evaluate("!!harkfellUpdate.registration?.waiting"), "update installed during first visit");
+    assert.notEqual(await evaluate("harkfellUpdate.state"), "waiting",
+      "a document first loaded without a controller stays quiet after its first worker claims it");
+    assert.equal(await evaluate("pwaWaitingEvents"), 0);
+    const first = lines.length;
+    await evaluate("SigilWebApp.dispatch('update-lines', '')");
+    assert(!lines.slice(first).some(line => line.startsWith("harkfell: update-line")),
+      "first visit still shows neither reload nor what's-new lines");
+    console.log("PASS first-visit race: real newer worker waits after first control, without announcing");
+    // Start the offline and returning-player legs from a fresh installation.
+    await send("Page.navigate", { url: "about:blank" });
+    await send("Storage.clearDataForOrigin", { origin, storageTypes: "all" });
+    revision = 0;
+    await boot("trace&frame=on&new");
+    assert.equal(await evaluate("pwaControlledAtLoad"), false);
+    await wait(() => evaluate("localStorage.getItem('update-seen') === '\"0.2.0\"'"), "reset launch baseline");
+  }
   assert.equal(await evaluate("(await navigator.serviceWorker.ready).scope"), origin + "/play/");
   const wasm = fs.readFileSync(path.join(root, "play/index.html"), "utf8").match(/data-wasm="([^"]+)"/)[1] + ".wasm";
   assert.match(wasm, /^w\/[a-f0-9]{16}\/harkfell.wasm$/);
@@ -183,6 +236,11 @@ try {
     revision = 1;
     await evaluate("harkfellUpdate.check()");
     await wait(() => evaluate("harkfellUpdate.state === 'waiting'"), "new worker waiting");
+    assert.equal(await evaluate("pwaControlledAtLoad"), true, "update begins on a controlled page");
+    assert.equal(await evaluate("pwaWaitingEvents"), 1, "a real update announces once");
+    await evaluate("harkfellUpdate.check()");
+    await sleep(500);
+    assert.equal(await evaluate("pwaWaitingEvents"), 1, "rechecking the same waiting worker never repeats the announcement");
     first = lines.length;
     await evaluate("SigilWebApp.dispatch('update-lines', '')");
     assert(lines.slice(first).some((line) => line.includes("A new version is ready. Reload to step into it.")));
@@ -205,6 +263,7 @@ try {
     const info = JSON.parse(fs.readFileSync(path.join(root, "version.json")));
     assert.equal(info.version, "0.3.0");
     assert(lines.slice(first).some((line) => line.includes(`New in 0.3.0: ${info.summary}`)));
+    assert.equal(await evaluate("pwaWaitingEvents"), 0, "applied update no longer waits");
     assert(!lines.some((line) => line.includes("frame start-out")), "reload tap does not step into the opening");
     const names = await evaluate("(await caches.keys()).filter(n => n.startsWith('harkfell-play-'))");
     assert.equal(names.length, 1);
