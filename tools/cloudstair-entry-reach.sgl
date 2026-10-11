@@ -9,17 +9,28 @@
         (harkfell cloudstair probes))
 
 (define CT (load-content (read-world-source "world")))
-(for-each
-  (lambda (carry down)
+(define (entry-search carry down start approach)
     (let* ((tm (probe-entry-map CT carry))
-           (start (cons 29 14))
            (graph (reach-search-down tm HARKFELL-FEEL (list start) witness-lands? down))
            (reached (reach-forward graph (list start)))
            (above (filter (lambda (cell)
                             (and (< (cdr cell) 11)
                                  (vector-ref reached (cell-index tm (car cell) (cdr cell)))))
                           (graph-cells graph))))
-      (write (list 'carry carry 'down down 'upper-rests above 'stats (graph-stats graph)))
+      (write (list 'approach approach 'carry carry 'down down
+                   'upper-rests above 'stats (graph-stats graph)))
       (newline)))
+
+(for-each
+  (lambda (carry down)
+    (entry-search carry down (cons 29 14) 'western-door))
   '((2) (2 4) (2 4))
   '(#t #f #t))
+
+;; Start below the sealed throat, in the actual Rim column. These controls
+;; test the lower approach independently of the door-side search above.
+(for-each
+  (lambda (carry down)
+    (entry-search carry down (cons 33 27) 'rim))
+  '((2) (2 4))
+  '(#t #f))
