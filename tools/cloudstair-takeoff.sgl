@@ -29,7 +29,9 @@
 (define RMAX 120)
 
 ;; (window coyote-only) at press tau: (harkfell cloudstair takeoff)
-(define (window tm start h tau target?) (takeoff-window tm F start h tau target? RMAX))
+;; CS_NODOWN=1: measure without the cattail down (a negative control)
+(define DOWN (not (equal? (getenv "CS_NODOWN") "1")))
+(define (window tm start h tau target?) (takeoff-window tm F start h tau target? RMAX DOWN))
 
 (define (on-x-range x0 x1)       ; at rest with the body's centre in [x0, x1) px
   (lambda (b) (let ((cx (car (body-center b F)))) (and (>= cx x0) (< cx x1)))))

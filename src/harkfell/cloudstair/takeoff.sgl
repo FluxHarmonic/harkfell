@@ -14,8 +14,9 @@
 ;;; and come to rest on the far side. Each R starts at the tau that puts its
 ;;; press at TAU, so a window measures one phase of the gust.
 ;;;
-;;;   (takeoff-attempt tm f start h tau r lands?) -> #f | (grounded? . landed?)
-;;;   (takeoff-window tm f start h tau lands? [rmax]) -> (window coyote-only first-r)
+;;;   (takeoff-attempt tm f start h tau r lands? [down]) -> #f | (grounded? . landed?)
+;;;   (takeoff-window tm f start h tau lands? [rmax [down]]) -> (window coyote-only first-r)
+;;;     down: #f measures a body without the cattail down (default: with it)
 ;;;     start: (col . row), a standable global cell; h: 1 east, -1 west;
 ;;;     lands?: body -> whether a body at rest is on the far side
 (define-library (harkfell cloudstair takeoff)
@@ -28,8 +29,8 @@
   (begin
     (define TAKEOFF-RMAX 120)
 
-    (define (takeoff-attempt tm f start h tau r lands?)
-      (let loop ((b (body (stand-body tm f (car start) (cdr start)) down: #t
+    (define (takeoff-attempt tm f start h tau r lands? . opt)
+      (let loop ((b (body (stand-body tm f (car start) (cdr start)) down: (or (null? opt) (car opt))
                           tau: (modulo (- tau r) AIR-PERIOD)))
                  (k 0))
         (cond
@@ -52,12 +53,13 @@
                           (else (settle (body-step b NO-INTENT tm f) (+ n 1)))))))))))))
 
     (define (takeoff-window tm f start h tau lands? . opt)
-      (let ((rmax (if (pair? opt) (car opt) TAKEOFF-RMAX)))
+      (let ((rmax (if (pair? opt) (car opt) TAKEOFF-RMAX))
+            (down (or (not (pair? opt)) (null? (cdr opt)) (cadr opt))))
         ;; the longest run of counting R: its length and first R
         (let loop ((r 0) (run 0) (from 0) (best 0) (best-from #f) (coyote 0))
           (if (> r rmax)
               (if (> run best) (list run coyote from) (list best coyote best-from))
-              (let* ((a (takeoff-attempt tm f start h tau r lands?))
+              (let* ((a (takeoff-attempt tm f start h tau r lands? down))
                      (ok (and a (car a) (cdr a)))
                      (cy (and a (not (car a)) (cdr a))))
                 (if ok
