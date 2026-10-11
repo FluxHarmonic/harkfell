@@ -1467,9 +1467,10 @@
                                  (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
                             (when (and (stone-visible? rm st) (in-room? x y))
                               (if (eq? (room-region rm) 'pipes)
-                                  (draw-stone st x y t (world-carry w) (stone-slot rm) "pipes")
+                                  (draw-stone st x y t (world-carry w) (stone-slot rm) "pipes" #t)
+                                  ;; the bowl's rose stone keeps its glyph after its reveal
                                   (if (and (bowl? rm) (= (stone-overtone st) 5))
-                                      (draw-stone st x y t (world-carry w) (stone-slot rm) "hollow")
+                                      (draw-stone st x y t (world-carry w) (stone-slot rm) #f #t)
                                       (draw-stone st x y t (world-carry w) (stone-slot rm)))))))
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)

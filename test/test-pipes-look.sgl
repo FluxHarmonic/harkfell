@@ -1,6 +1,8 @@
 ;;; Visual policy at real region/gate interfaces, without a graphics device.
 (import (sigil test)
         (sigil list)
+        (sigil fs)
+        (sigil string)
         (harkfell source)
         (harkfell content)
         (harkfell draw)
@@ -62,6 +64,27 @@
         "pipes/mural-bearers" "pipes/mural-sealed-bowl"
         "pipes/mural-empty-hands" "pipes/mural-violet-well"
         "pipes/stone-body")))
+  (test "every sheet a ring-stone is drawn from has its stone-body cell"
+    ;; draw-stone's SHEET argument names a local sheet, and a name with no
+    ;; SHEET/stone-body cell silently draws the usual body, so read every
+    ;; (draw-stone ...) call in the sources and check each string literal
+    (let* ((files (filter (lambda (f) (string-ends-with? f ".sgl")) (find-files "src/harkfell")))
+           (literal (lambda (call)
+                      (let* ((end (or (string-index call #\newline) (string-length call)))
+                             (line (substring call 0 end))
+                             (q (string-index line #\")))
+                        (and q
+                             (let ((rest (substring line (+ q 1) end)))
+                               (substring rest 0 (string-index rest #\")))))))
+           (sheets (filter string?
+                           (apply append
+                                  (map (lambda (f)
+                                         (map literal (cdr (string-split (read-file-string f) "(draw-stone "))))
+                                       files)))))
+      (assert-true (member "pipes" sheets))
+      (assert-equal '()
+                    (filter (lambda (sheet) (not (assoc (string-append sheet "/stone-body") CELLS)))
+                            sheets))))
   (test "distant limestone walls never brighten under either darkness step"
     (let* ((region (find (lambda (r) (eq? (region-name r) 'pipes))
                          (content-regions LOOK-CONTENT)))

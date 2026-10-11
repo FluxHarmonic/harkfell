@@ -16,7 +16,10 @@
 ;;;   (draw-critter c ox oy t slot)       one creature, in room pixels (ox oy:
 ;;;                                       the room's origin in map pixels)
 ;;;   (draw-critter-glow c ox oy t slot)  a moth's light
-;;;   (draw-stone st x y t carry slot)    a ring-stone in its cell's top-left
+;;;   (draw-stone st x y t carry slot [sheet [lit]])
+;;;                                       a ring-stone in its cell's top-left;
+;;;                                       sheet: its local body art (#f: none),
+;;;                                       lit: a shut glyph stays coloured
 ;;;   (draw-stone-light st x y t slot)    its light while it rings
 ;;;   (draw-pickup n x y t slot)          an unfound harmonic at a cell's centre
 ;;;   (draw-pickup-light n x y t)         its light
@@ -203,10 +206,14 @@
       (draw-filled-rect (+ x 3) (+ y 1) 8 1)
       (draw-filled-rect (+ x 2) (+ y 2) 1 5))
 
-    ;; A local sheet optionally supplies the body and keeps a shut key
-    ;; coloured; missing body art falls back to the usual ring-stone.
-    (define (draw-stone st x y t carry slot . sheet)
-      (let* ((n (stone-overtone st))
+    ;; Two optional arguments: SHEET, a local sheet whose SHEET/stone-body
+    ;; cell replaces the usual ring-stone body (#f, or no such cell: the
+    ;; usual body), and LIT, true to keep a shut stone's glyph in its key
+    ;; colour instead of breathing dark.
+    (define (draw-stone st x y t carry slot . opts)
+      (let* ((sheet (and (pair? opts) (car opts)))
+             (lit (and (pair? opts) (pair? (cdr opts)) (cadr opts)))
+             (n (stone-overtone st))
              (key (slot (harmonic-role n)))
              (state (stone-state st))
              (sink (stone-sink st)))
@@ -225,8 +232,7 @@
                   (jx (if (and ringing (< (stone-t st) 30) (eq? state 'ringing)) (if (odd? (quotient* t 2)) 1 0) jx))
                   (sy (+ y (floor-int (* 16.0 sink))))
                   (sx (+ x jx)))
-             (let ((i (and (pair? sheet)
-                           (atlas-index (string-append (car sheet) "/stone-body")))))
+             (let ((i (and sheet (atlas-index (string-append sheet "/stone-body")))))
                (if i
                    (begin
                      (set-color 1.0 1.0 1.0 1.0)
@@ -241,7 +247,7 @@
                (else
                 ;; mute: the glyph cut dark in the stone, its colour a rim
                 ;; that shows only now and then, breathing very slowly
-                (glyph! sx sy n (if (or (pair? sheet) (> (sin (* 0.02 t)) 0.6))
+                (glyph! sx sy n (if (or lit (> (sin (* 0.02 t)) 0.6))
                                    key
                                    (slot 'ground-1))))))))))
 
