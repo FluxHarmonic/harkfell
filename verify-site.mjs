@@ -41,8 +41,10 @@
 //             staged game's stamp and package.sgl's version, points at that
 //             version's post and carries its summary, which is printable
 //             ASCII (what the game can draw until the runtime glyph atlas)
-//             with long summaries fitted by the start screen; served no-store
-//             as JSON (D38)
+//             with long summaries fitted by the start screen; or, for a
+//             release with no post (a quiet patch), carries an empty summary
+//             and points at /news/; served no-store as JSON (D38;
+//             scripts/version-json.mjs)
 //   missing   a missing page, a missing file under /play/ and a wasm hash
 //             nobody published all answer 404 (with the site's 404 page), never a 200 index.html
 //   preview   og:image and twitter:image are the 1200x528 Standing Stones
@@ -91,6 +93,7 @@ import crypto from "node:crypto";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { createHandler } from "./scripts/serve-site.mjs";
 import { auditTree, plausibleStub, isPlausibleFailure, PRIVACY } from "./scripts/plausible-check.mjs";
+import { versionJsonProblems, versionJsonSummary } from "./scripts/version-json.mjs";
 
 const PLAUSIBLE_ID = "pa-N4Ba55rWhDJmIzpZceg0x";
 const PLAUSIBLE_HOST = "harkfell.com";
@@ -568,42 +571,23 @@ const newsPosts = [];
 
 // ---- version ---------------------------------------------------------------------
 // /version.json (D38): generated into this tree by stage-web; the game's update
-// line reads it, so it must name this build, this version, that version's post,
-// and a summary the game can draw.
-//
-// DRAWABLE is the characters the start screen can draw at run time. Printable
-// ASCII until the runtime glyph atlas lands in sigil-graphics (the leader,
-// 2026-09-25, with LOOK); then this becomes that atlas's set.
-const DRAWABLE = /^[\x20-\x7e]*$/;
-// draw-start-updates! measures each summary and shrinks its font to fit the
-// line. Character count is not its display limit; require drawable text below.
+// line reads it. The rules (this build, this version, that version's post and
+// summary, or for a release with no post an empty summary and the news index;
+// a summary the game can draw) are scripts/version-json.mjs's.
 {
   const detail = [];
   let vj = null;
   try { vj = JSON.parse(text("version.json")); } catch (e) { detail.push(`version.json does not parse: ${e.message}`); }
   if (vj) {
-    const keys = Object.keys(vj).sort().join(",");
-    if (keys !== "build,date,news,summary,version") detail.push(`version.json has the fields ${keys} (want build, date, news, summary, version)`);
-    if (vj.build !== header["web-stamp"]) detail.push(`build "${vj.build}" is not the staged game's stamp ${header["web-stamp"]}`);
     const pkg = (fs.readFileSync("package.sgl", "utf8").match(/^  version: "([0-9.]+)"/m) || [])[1];
-    if (vj.version !== pkg) detail.push(`version "${vj.version}" is not package.sgl's ${pkg}`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(vj.date || "")) detail.push(`date "${vj.date}" is not YYYY-MM-DD`);
-    const post = newsPosts.find((p) => p.version === vj.version);
-    if (!post) detail.push(`no news post for version ${vj.version} (posts: ${newsPosts.map((p) => p.version).join(", ") || "none"}); the game would announce it with nothing to say`);
-    else {
-      if (vj.news !== `https://harkfell.com${post.href}`) detail.push(`news "${vj.news}" is not the post's URL https://harkfell.com${post.href}`);
-      const listed = post.summary.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/<[^>]+>/g, "");
-      if (vj.summary !== listed) detail.push(`summary differs from the post's: "${vj.summary}" against "${listed}"`);
-    }
-    if (!vj.summary) detail.push("the summary is empty");
-    if (!DRAWABLE.test(vj.summary || "")) detail.push(`the summary has characters the game cannot draw: ${[...(vj.summary || "")].filter((c) => !DRAWABLE.test(c)).map((c) => `"${c}" U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`).join(", ")}`);
+    detail.push(...versionJsonProblems(vj, { stamp: header["web-stamp"], pkg, posts: newsPosts }));
   }
   const r = await fetch(`${origin}/version.json`);
   await r.arrayBuffer();
   if (!/no-store/.test(r.headers.get("cache-control") || "")) detail.push(`/version.json is served with cache-control "${r.headers.get("cache-control")}", not no-store`);
   if (!/^application\/json/.test(r.headers.get("content-type") || "")) detail.push(`/version.json is served as ${r.headers.get("content-type")}`);
   if (detail.length) fail("version", detail.join("; "));
-  else pass("version", `version.json ${vj.version} ${vj.date} build ${vj.build} -> ${vj.news}; summary ${vj.summary.length} chars, printable ASCII; served no-store as application/json`);
+  else pass("version", `${versionJsonSummary(vj, newsPosts)}; served no-store as application/json`);
 }
 
 // ---- missing --------------------------------------------------------------------

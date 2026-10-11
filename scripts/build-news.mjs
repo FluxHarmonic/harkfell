@@ -23,8 +23,10 @@
 //     { "version", "date", "build", "summary", "news" }
 // with the summary and news URL of the post whose version equals --version.
 // When no post has that version, version.json says so ("summary": "",
-// "news": the index) and this prints a warning: verify-site.mjs then refuses
-// the tree, since the game would announce a version with nothing to say.
+// "news": the index) and this prints a note: a release with no post (a quiet
+// patch, as 0.3.1), which the start screen offers to reload into and says
+// nothing new about, and which verify-site.mjs accepts only in this shape
+// (scripts/version-json.mjs).
 //
 // Refuses (exit 1) on a post missing a field, a malformed date or version, an
 // em dash anywhere, or two posts for one version.
@@ -112,7 +114,7 @@ if (dup) die(`two posts for version ${dup}`);
 posts.sort((a, b) => (b.date + b.version).localeCompare(a.date + a.version));
 
 const mine = posts.find((p) => p.version === VERSION);
-if (!mine) console.error(`build-news: WARNING: no post for version ${VERSION} (posts: ${versions.join(", ")}); version.json carries no summary and verify-site.mjs will refuse the tree`);
+if (!mine) console.error(`build-news: no post for version ${VERSION} (posts: ${versions.join(", ")}): a release with no post; version.json carries an empty summary and the news index, and the game announces nothing new`);
 const vj = { version: VERSION, date: TODAY, build: STAMP, summary: mine ? mine.summary : "", news: mine ? `${SITE}/news/${mine.slug}/` : `${SITE}/news/` };
 fs.mkdirSync(TREE, { recursive: true });
 fs.writeFileSync(path.join(TREE, "version.json"), JSON.stringify(vj, null, 2) + "\n");

@@ -51,7 +51,23 @@
   (test "the first public release stays quiet even with a save"
     (settings-update-reset!)
     (settings-update-info! "{\"version\":\"0.1.0\",\"summary\":\"The first release.\"}")
-    (assert-equal (list #f #f) (settings-update-lines))))
+    (assert-equal (list #f #f) (settings-update-lines)))
+  (test "a release with no post (0.3.1) offers the reload but says nothing new, and is marked seen"
+    ;; version.json as scripts/build-news.mjs writes it when no post has the
+    ;; version: an empty summary, the news index
+    (store-write-datum! "update-seen" "0.3.0")
+    (settings-update-reset!)
+    (assert-true (settings-update-info!
+                   "{\"version\":\"0.3.1\",\"date\":\"2026-10-11\",\"build\":\"b\",\"summary\":\"\",\"news\":\"https://harkfell.com/news/\"}"))
+    (assert-equal (list #f #f) (settings-update-lines))
+    (settings-update-waiting! #t)
+    (assert-equal (list "A new version is ready. Reload to step into it." #f) (settings-update-lines))
+    (settings-update-shown!)
+    (assert-equal "0.3.1" (store-read-datum "update-seen"))
+    ;; and the next posted release is announced as usual
+    (settings-update-reset!)
+    (settings-update-info! "{\"version\":\"0.3.2\",\"summary\":\"Small fixes.\"}")
+    (assert-equal "New in 0.3.2: Small fixes." (cadr (settings-update-lines)))))
 
 (store-remove! "save")
 (store-remove! "update-seen")

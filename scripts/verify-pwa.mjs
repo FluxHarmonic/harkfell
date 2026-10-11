@@ -280,12 +280,16 @@ try {
     await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
     await wait(() => lines.some((line) => line.startsWith("harkfell: boot")), "reload on chosen update");
-    await wait(() => evaluate("localStorage.getItem('update-seen') === '\"0.3.0\"'"), "updated launch marked seen");
+    // the staged release: with a post it announces "New in X: summary" once;
+    // with none (a quiet patch, an empty summary) it announces nothing new
+    const info = JSON.parse(fs.readFileSync(path.join(root, "version.json")));
+    const pkg = fs.readFileSync("package.sgl", "utf8").match(/^  version: "([0-9.]+)"/m)[1];
+    assert.equal(info.version, pkg);
+    await wait(() => evaluate(`localStorage.getItem('update-seen') === ${JSON.stringify(JSON.stringify(info.version))}`), "updated launch marked seen");
     first = lines.length;
     await evaluate("SigilWebApp.dispatch('update-lines', '')");
-    const info = JSON.parse(fs.readFileSync(path.join(root, "version.json")));
-    assert.equal(info.version, "0.3.0");
-    assert(lines.slice(first).some((line) => line.includes(`New in 0.3.0: ${info.summary}`)));
+    if (info.summary) assert(lines.slice(first).some((line) => line.includes(`New in ${info.version}: ${info.summary}`)));
+    else assert(!lines.slice(first).some((line) => line.includes("New in")), "a release with no post announces nothing new");
     assert.equal(await evaluate("pwaWaitingEvents"), 0, "applied update no longer waits");
     assert(!lines.some((line) => line.includes("frame start-out")), "reload tap does not step into the opening");
     const names = await evaluate("(await caches.keys()).filter(n => n.startsWith('harkfell-play-'))");
@@ -300,7 +304,7 @@ try {
     await evaluate("SigilWebApp.dispatch('update-lines', '')");
     assert(!lines.slice(first).some((line) => line.includes("New in")), "announcement is once per version");
     assert.deepEqual(errors, []);
-    console.log("PASS updates: waiting line; tap applies worker and reloads without stepping in; New in 0.3.0 uses version.json, persists once, and old cache is removed");
+    console.log(`PASS updates: waiting line; tap applies worker and reloads without stepping in; ${info.summary ? `New in ${info.version} uses version.json, persists once` : `${info.version} (no post) is marked seen and announces nothing new`}, and old cache is removed`);
   }
 } catch (error) {
   console.error(error.stack);
