@@ -2,7 +2,7 @@
   "name": "Harkfell",
   "short_name": "Harkfell",
   "description": "A quiet exploration platformer about carrying lost harmonics home.",
-  "id": "../",
+  "id": "/play/",
   "start_url": "../",
   "scope": "../",
   "display": "fullscreen",

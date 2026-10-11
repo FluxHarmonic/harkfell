@@ -31,6 +31,8 @@
 //             wasm, the game says "harkfell: world N files, 0 problems", the
 //             canvas holds drawn pixels, and every request the page made was
 //             2xx (a file the stage left out shows up here)
+//   pwa-id    Chrome's Page.getAppId parses the staged /play/ manifest with
+//             appId equal to this origin's /play/ and the manifest's scope
 //   news      /news/ lists every post newest first; each post page answers
 //             with its title, date and version; no em dash (D38)
 //   feeds     /news/feed.xml (RSS 2.0, parsed by the browser) and feed.json
@@ -462,6 +464,29 @@ const retried = (list) => { const good = new Set(list.filter(ok).map((r) => r.ur
   else pass("itch", `/play/ at ${origin}, not ${PLAUSIBLE_HOST} (as on itch.io): no request to plausible.io, no script`);
   if (detail.length) fail("play", detail.join("; "));
   else pass("play", `a click on Play loads /play/, isolated; "${world}"; the wasm from /play/w/${SHA16}/harkfell.wasm (200 application/wasm); canvas ${bins[1]}x${bins[2]} with ${bins[0]} colour bins; ${list.length} requests (${served} under /play/), every URL answered 2xx${retried(list) ? ` (${retried(list)} aborted by the page and fetched again)` : ""}`);
+}
+
+// ---- pwa-id ---------------------------------------------------------------------
+// Chrome resolves id against the start URL's origin, while scope is relative
+// to the manifest URL. A relative "../" id silently identifies the root app.
+{
+  const detail = [];
+  const manifest = await send("Page.getAppManifest");
+  const { appId } = await send("Page.getAppId");
+  const want = `${origin}/play/`;
+  let scope;
+  if (manifest.errors.length) detail.push(`manifest errors: ${JSON.stringify(manifest.errors)}`);
+  try {
+    const data = JSON.parse(manifest.data);
+    scope = new URL(data.scope, manifest.url).href;
+  } catch (error) {
+    detail.push(`cannot read manifest scope: ${error.message}`);
+  }
+  if (appId !== want) detail.push(`Chrome appId ${appId} is not ${want}`);
+  if (scope !== want) detail.push(`manifest scope ${scope} is not ${want}`);
+  if (appId !== scope) detail.push(`Chrome appId ${appId} differs from manifest scope ${scope}`);
+  if (detail.length) fail("pwa-id", detail.join("; "));
+  else pass("pwa-id", `Chrome Page.getAppId appId ${appId} equals /play/ and manifest scope ${scope}`);
 }
 
 // ---- news -----------------------------------------------------------------------
