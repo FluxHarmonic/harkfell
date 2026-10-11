@@ -12,8 +12,11 @@
 ;;;     (moments KEY ...)             the fixed moments heard (the hush's spent
 ;;;                                   rooms), so none plays twice (D20)
 ;;;     (played SECONDS)              seconds of play (the play note's clock)
-;;;     (revealed #t|#f)
-;;;     (aurora #t|#f))              added in 0.3; absent in older v1 saves means #f             the wordmark has had its one showing (D35)
+;;;     (revealed #t|#f)              the wordmark has had its one showing (D35)
+;;;     (aurora #t|#f)                added in 0.3; absent in older v1 saves means #f
+;;;     (announced REGION ...))       D47: the regions whose names have shown,
+;;;                                   in the order they showed; added in 0.3,
+;;;                                   absent in older v1 saves means none
 ;;;
 ;;; Plain symbols and lists, no keywords: a keyword does not write out as text
 ;;; and read back (measured: it prints as #<object>).
@@ -49,7 +52,8 @@
   (export SAVE-KEY SAVE-VERSION
           save-datum save-restore
           restored restored? restored-cell restored-carry restored-stones
-          restored-moments restored-played restored-revealed restored-aurora restored-notes
+          restored-moments restored-played restored-revealed restored-aurora restored-announced
+          restored-notes
           body-room-cell)
 
   (begin
@@ -67,6 +71,7 @@
       (played default: 0.0)
       (revealed default: #f)
       (aurora default: #f)
+      (announced default: '())
       (notes default: '()))
 
     ;; A save's field: (NAME . rest) -> rest, or #f.
@@ -97,8 +102,9 @@
 
     ;; The save of a world: entry the soft return's entry body; carry the
     ;; harmonics; stones the world's stones ((harkfell gates)); moments the
-    ;; hush's spent keys; played seconds. #f when the entry is outside the
-    ;; written world (A0's room).
+    ;; hush's spent keys; played seconds; then, optional in order: revealed
+    ;; and aurora (#t or #f), announced (region symbols). #f when the entry
+    ;; is outside the written world (A0's room).
     (define (save-datum ct entry carry stones moments played . revealed)
       (let ((rc (and ct entry (body-room-cell ct entry))))
         (and rc
@@ -119,7 +125,10 @@
                      (cons 'moments moments)
                      (list 'played played)
                      (list 'revealed (and (pair? revealed) (car revealed) #t))
-                     (list 'aurora (and (pair? revealed) (pair? (cdr revealed)) (cadr revealed) #t)))))))
+                     (list 'aurora (and (pair? revealed) (pair? (cdr revealed)) (cadr revealed) #t))
+                     (cons 'announced (let ((a (and (pair? revealed) (pair? (cdr revealed))
+                                                    (pair? (cddr revealed)) (caddr revealed))))
+                                        (if (list? a) (filter symbol? a) '()))))))))
 
     ;; A moment heard, as the save keeps it, in this content's terms (Glasswood:
     ;; spent per moment). 0.1 kept a fixed moment's ROOM ("hollow:4,3"), one
@@ -203,4 +212,7 @@
                            played: (if (number? played) played 0.0)
                            revealed: (let ((v (field fields 'revealed))) (and (pair? v) (eq? (car v) #t)))
                            aurora: (let ((v (field fields 'aurora))) (and (pair? v) (eq? (car v) #t)))
+                           ;; D47: absent (an older save) reads as none announced
+                           announced: (let ((v (field fields 'announced)))
+                                        (if (list? v) (filter symbol? v) '()))
                            notes: (reverse notes))))))))

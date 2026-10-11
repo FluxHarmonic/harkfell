@@ -17,6 +17,11 @@
 ;;;   With no moment playing (the fallback): REVEAL-DELAY-S, then 2 s in, 4 s
 ;;;   held, 2 s out.
 ;;;
+;;; A region's name (D47) runs on the same kind of schedule: the first time
+;;; you enter a region its name shows, small and faint, as Hollow Knight does
+;;; it, once per save. (name-schedule), in seconds from the entry:
+;;; NAME-DELAY-S, then NAME-IN-S in, NAME-HOLD-S full, NAME-OUT-S out.
+;;;
 ;;; Pure.
 
 (define-library (harkfell reveal)
@@ -24,7 +29,8 @@
 
   (export REVEAL-DELAY-S REVEAL-IN-S REVEAL-HOLD-S REVEAL-OUT-S
           TUNE-FADE-AT TUNE-FULL-AT TUNE-HOLD-TO TUNE-OUT-S
-          reveal-schedule reveal-alpha reveal-done? reveal-shown-t)
+          reveal-schedule reveal-alpha reveal-done? reveal-shown-t
+          NAME-DELAY-S NAME-IN-S NAME-HOLD-S NAME-OUT-S name-schedule)
 
   (begin
     (define REVEAL-DELAY-S 0.0)
@@ -56,4 +62,14 @@
               ((< t (+ h out)) (/ (- (+ h out) t) out))
               (else 0.0))))
 
-    (define (reveal-done? sch t) (>= t (+ (vector-ref sch 2) (vector-ref sch 3))))))
+    (define (reveal-done? sch t) (>= t (+ (vector-ref sch 2) (vector-ref sch 3))))
+
+    ;; D47: a region's name. A breath after the entry, a second in, two and a
+    ;; half held, a second and a half out: gone about five and a half seconds
+    ;; after you crossed.
+    (define NAME-DELAY-S 0.5)
+    (define NAME-IN-S 1.0)
+    (define NAME-HOLD-S 2.5)
+    (define NAME-OUT-S 1.5)
+    (define (name-schedule)
+      (vector NAME-DELAY-S NAME-IN-S (+ NAME-DELAY-S NAME-IN-S NAME-HOLD-S) NAME-OUT-S))))

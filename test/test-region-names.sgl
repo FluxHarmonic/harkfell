@@ -1,0 +1,193 @@
+;;; D47: a region's name shows the first time you enter the region, once per
+;;; save, through the shell as a game plays it.
+;;;
+;;;   a new game    the opening shows no name; once it plays, the Hollow's
+;;;                 shows once, fades in to full and out, and the save keeps it
+;;;   an older save one made before D47 (no announced field), continued in
+;;;                 Reedfen: no name for the region you stand in
+;;;   crossing      west over the seam into the Hollow: its name, once; back
+;;;                 into Reedfen and into the Hollow again: nothing; the save
+;;;                 written as you play keeps both
+;;;   the save      announced round-trips, keeps only region symbols, and an
+;;;                 older save reads as none announced
+;;;   the names     every region has one to show, in the drawable glyphs
+;;;
+;;; The store is pointed at a scratch directory, so no real save is touched.
+
+(import (sigil test)
+        (sigil list)
+        (sigil math)
+        (sigil fs)
+        (sigil time)
+        (engine body)
+        (substratic store kv)
+        (engine worldmap)
+        (harkfell world)
+        (harkfell source)
+        (harkfell content)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates)
+        (harkfell save)
+        (harkfell shell))
+
+(define SRC (read-world-source "world"))
+(define DIR (string-append "/tmp/harkfell-test-region-names-" (number->string (current-jiffy))))
+(shell-boot!)
+(set-store-root! DIR)
+(store-remove! SAVE-KEY)
+(shell-load-content! SRC)
+(define CT (shell-content))
+
+;; Frames, noting each name as it begins to show (newest first) and the
+;; strongest it has been.
+(define SHOWN '())
+(define PEAK 0.0)
+(define WAS #f)
+(define (watch n)
+  (let loop ((k 0))
+    (when (< k n)
+      (shell-frame! (/ 1 60.0))
+      (let ((t (shell-name-text)))
+        (when (and t (not WAS)) (set! SHOWN (cons t SHOWN)))
+        (set! WAS t))
+      (set! PEAK (max PEAK (shell-name-alpha)))
+      (loop (+ k 1)))))
+(define (watch-afresh!) (set! SHOWN '()) (set! PEAK 0.0) (set! WAS #f))
+
+(define (global x y c r) (local->global CT (content-room CT x y) c r))
+(define (body-at x y c r)
+  (let ((g (global x y c r)))
+    (cell-body (worldmap-tiles (content-map CT)) HARKFELL-FEEL (car g) (cdr g))))
+
+;; --- a new game ---------------------------------------------------------------------
+(define NOTES (shell-begin! #f #f))
+(watch 300)                                    ; 5 s: the start screen and the card
+(define OPENING-PHASE (shell-frame-phase))
+(define OPENING-SHOWN SHOWN)
+(define OPENING-ANNOUNCED (shell-announced))
+(watch 1500)                                   ; 25 s more: the dawn, play, the name come and gone
+(define NEW-PHASE (shell-frame-phase))
+(define NEW-SHOWN SHOWN)
+(define NEW-PEAK PEAK)
+(define NEW-NOW (shell-name-text))
+(define NEW-ANNOUNCED (shell-announced))
+(define NEW-SAVE (store-read-datum SAVE-KEY))
+
+(test-group "region names: a new game"
+  (test "no save: a new game (the premise)"
+    (assert-false NOTES))
+  (test "the opening shows no name, and nothing is announced yet"
+    (assert-true (memq OPENING-PHASE (list 'start 'start-out 'card)))
+    (assert-equal '() OPENING-SHOWN)
+    (assert-equal '() OPENING-ANNOUNCED))
+  (test "once it plays, The Hollow shows once, fades in to full, and is gone"
+    (assert-equal 'play NEW-PHASE)
+    (assert-equal '("The Hollow") NEW-SHOWN)
+    (assert-true (> NEW-PEAK 0.99))
+    (assert-false NEW-NOW)
+    (assert-equal '(hollow) NEW-ANNOUNCED))
+  (test "the save written as you play keeps it"
+    (assert-equal '(hollow) (restored-announced (save-restore CT NEW-SAVE)))))
+
+;; --- an older save, continued in Reedfen, then over the seam ------------------------
+;; The Fen Edge (reedfen 8,3) at (2,4), three cells east of the Hollow's last
+;; room: a save from before D47, without the announced field.
+(define (without-announced d)
+  (filter (lambda (f) (not (and (pair? f) (eq? (car f) 'announced)))) d))
+(define OLD (without-announced
+              (save-datum CT (body-at 8 3 2 4) (list 2) (content-stones CT) '() 10.0)))
+(watch-afresh!)
+(define NOTES2 (shell-begin! #f OLD))
+(watch 1500)                                   ; through the opening into play, standing still
+(define OLD-PHASE (shell-frame-phase))
+(define OLD-SHOWN SHOWN)
+(define OLD-ANNOUNCED (shell-announced))
+
+;; Hold DIR until the body is in the room LABEL (at most CAP frames), a third
+;; of a second more, let go, and wait for any name to come and go.
+(define (walk! dir label cap)
+  (shell-key-down! dir)
+  (let loop ((k 0))
+    (when (and (< k cap) (not (string=? (shell-room-label) label)))
+      (watch 1)
+      (loop (+ k 1))))
+  (watch 20)
+  (shell-key-up! dir)
+  (watch 420))
+
+(walk! 'left "hollow:7,3" 600)
+(define WEST-ROOM (shell-room-label))
+(define WEST-SHOWN SHOWN)
+(define WEST-ANNOUNCED (shell-announced))
+(walk! 'right "reedfen:8,3" 600)
+(define BACK-ROOM (shell-room-label))
+(define BACK-SHOWN SHOWN)
+(walk! 'left "hollow:7,3" 600)
+(define AGAIN-ROOM (shell-room-label))
+(define AGAIN-SHOWN SHOWN)
+(define FINAL-ANNOUNCED (shell-announced))
+(define CROSS-SAVE (store-read-datum SAVE-KEY))
+
+(test-group "region names: an older save"
+  (test "it has no announced field, and loads with nothing forgiven (the premise)"
+    (assert-false (find (lambda (f) (and (pair? f) (eq? (car f) 'announced))) OLD))
+    (assert-equal '() NOTES2))
+  (test "continuing shows no name for the region you stand in"
+    (assert-equal 'play OLD-PHASE)
+    (assert-equal '() OLD-SHOWN)
+    (assert-equal '(reedfen) OLD-ANNOUNCED)))
+
+(test-group "region names: crossing"
+  (test "west into the Hollow for the first time: its name, once"
+    (assert-equal "hollow:7,3" WEST-ROOM)
+    (assert-equal '("The Hollow") WEST-SHOWN)
+    (assert-equal '(reedfen hollow) WEST-ANNOUNCED))
+  (test "back into Reedfen, and into the Hollow again: no name"
+    (assert-equal "reedfen:8,3" BACK-ROOM)
+    (assert-equal "hollow:7,3" AGAIN-ROOM)
+    (assert-equal '("The Hollow") BACK-SHOWN)
+    (assert-equal '("The Hollow") AGAIN-SHOWN)
+    (assert-equal '(reedfen hollow) FINAL-ANNOUNCED))
+  (test "the save written as you play keeps both, in order"
+    (assert-equal '(reedfen hollow) (restored-announced (save-restore CT CROSS-SAVE)))))
+
+;; --- the save ------------------------------------------------------------------------
+(define AT (body-at 8 3 2 4))
+(define (announced-of . a)
+  (restored-announced
+    (save-restore CT (apply save-datum CT AT (list 2) (content-stones CT) '() 0.0 #f #f a))))
+
+(test-group "region names: the save"
+  (test "announced round-trips, in order"
+    (assert-equal '(pipes hollow glasswood reedfen)
+                  (announced-of '(pipes hollow glasswood reedfen))))
+  (test "only region symbols are written, and only they are read back"
+    ;; written: the datum's own field
+    (assert-equal '(announced hollow)
+                  (assq 'announced (save-datum CT AT (list 2) (content-stones CT) '() 0.0
+                                               #f #f '(hollow "reedfen" 3))))
+    ;; read: a datum carrying something else there (hand-edited, or damaged)
+    (assert-equal '(hollow)
+                  (restored-announced
+                    (save-restore CT (append (without-announced
+                                               (save-datum CT AT (list 2) (content-stones CT) '() 0.0))
+                                             (list '(announced hollow "reedfen" 3)))))))
+  (test "a save written without it, and an older one, read as none announced"
+    (assert-equal '() (restored-announced
+                        (save-restore CT (save-datum CT AT (list 2) (content-stones CT) '() 0.0))))
+    (assert-equal '() (restored-announced (save-restore CT OLD)))))
+
+;; --- the names -----------------------------------------------------------------------
+(define (region-name-of r)
+  (let ((v (region-field r 'name))) (if (pair? v) (car v) v)))
+
+(test-group "region names: the names"
+  (test "every region has a name, as its definition and bible give it"
+    (assert-equal '("Glasswood" "Reedfen" "The Hollow" "The Pipes")
+                  (list-sort string<? (map region-name-of (content-regions CT)))))
+  (test "each is printable ASCII (the drawable glyphs)"
+    (for-each (lambda (r)
+                (for-each (lambda (c) (assert-true (<= 32 (char->integer c) 126)))
+                          (string->list (region-name-of r))))
+              (content-regions CT))))

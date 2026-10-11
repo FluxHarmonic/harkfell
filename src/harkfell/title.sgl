@@ -36,6 +36,10 @@
 ;;;   (card-fade s)               D33's envelope at s seconds (in over 1.2 s,
 ;;;                               held, out by CARD-SECONDS), for a caller
 ;;;                               that wants it
+;;;   (draw-region-name! w h text alpha)
+;;;                               D47: a region's name over the live world,
+;;;                               the first time you enter it, at alpha 0..1;
+;;;                               always at the top centre
 ;;;   (title-set-content! ct)     the world, for its palette (the Hollow's)
 ;;;   (start-reset!)              the moths anew
 ;;;   (start-words-landed?)       every line of the start screen has landed
@@ -61,7 +65,7 @@
   (cond-expand
     (wasm (import (sigil browser gles3))))
 
-  (export title-set-content! start-reset! draw-start! draw-card! draw-reveal!
+  (export title-set-content! start-reset! draw-start! draw-card! draw-reveal! draw-region-name!
           card-fade CARD-SECONDS start-moths TEXT-LAYOUT type-scale
           start-over-hit? start-update-hit? over-id WORDS-FADE-S WORDS-STAGGER-S start-words-landed?)
 
@@ -286,42 +290,62 @@
         (draw-start-words! f alpha secs kind over)
         (draw-start-updates! f alpha secs)))
 
-    ;; D38: IM Fell italic at the window's own resolution. The font is
-    ;; loaded once, after the start words land and the boot's long frames
-    ;; have finished. Native keeps these states empty in this release.
-    (define *update-face* #f)
-    (define *update-fetch* #f)
-    (define *update-fonts* '())
+    ;; Fonts at the window's own resolution: D38's update lines in IM Fell
+    ;; italic, D47's region names in IM Fell small caps. A face is loaded
+    ;; the first time it is asked for (on the web, fetched: #f until it has
+    ;; landed), after the start words land and the boot's long frames have
+    ;; finished; a font is made once per size.
+    (define UPDATE-FONT "assets/fonts/IMFeENit28P.ttf")
+    (define NAME-FONT "assets/fonts/IMFeENsc28P.ttf")
+    (define *faces* '())                 ; (path . face), loaded
+    (define *fetches* '())               ; (path . fetch), the web's
+    (define *fonts* '())                 ; ((path . size) . font)
     (define *update-rect* #f)
 
     (cond-expand
       (wasm
-       (define (update-face!)
-         (unless *update-fetch*
-           (set! *update-fetch* (gles3-fetch-image "assets/fonts/IMFeENit28P.ttf")))
-         (when (and (not *update-face*) (gles3-image-ready? *update-fetch*))
-           (set! *update-face*
-                 (load-typeface-from-memory (gles3-image-ptr *update-fetch*)
-                                            (gles3-image-size *update-fetch*))))
-         *update-face*))
+       (define (face! path)
+         (let ((have (assoc path *faces*)))
+           (if have
+               (cdr have)
+               (let ((fetch (let ((f (assoc path *fetches*)))
+                              (if f
+                                  (cdr f)
+                                  (let ((n (gles3-fetch-image path)))
+                                    (set! *fetches* (cons (cons path n) *fetches*))
+                                    n)))))
+                 (and (gles3-image-ready? fetch)
+                      (let ((face (load-typeface-from-memory (gles3-image-ptr fetch)
+                                                             (gles3-image-size fetch))))
+                        (and face
+                             (begin (set! *faces* (cons (cons path face) *faces*))
+                                    face)))))))))
       (else
-       (define (update-face!)
-         (unless *update-face*
-           (set! *update-face* (load-typeface "assets/fonts/IMFeENit28P.ttf")))
-         *update-face*)))
+       (define (face! path)
+         (let ((have (assoc path *faces*)))
+           (if have
+               (cdr have)
+               (let ((face (load-typeface path)))
+                 (and face
+                      (begin (set! *faces* (cons (cons path face) *faces*))
+                             face))))))))
 
-    (define (update-font! size)
-      (let ((entry (assv size *update-fonts*)))
+    (define (font! path size)
+      (let ((entry (assoc (cons path size) *fonts*)))
         (if entry
             (cdr entry)
-            (let ((face (update-face!)))
+            (let ((face (face! path)))
               (and face
                    (let ((font (make-font face size)))
-                     (set! *update-fonts* (cons (cons size font) *update-fonts*))
+                     (set! *fonts* (cons (cons (cons path size) font) *fonts*))
                      font))))))
+
+    (define (update-font! size) (font! UPDATE-FONT size))
 
     (define (draw-start-updates! f alpha secs)
       (set! *update-rect* #f)
+      ;; D47: fetch the region names' face now, so it has landed by the dawn
+      (when *words-since* (face! NAME-FONT))
       (when *words-since*
         (let* ((s (/ (fit-w f) (* 1.0 VIEW-W)))
                (a (* 0.55 alpha
@@ -472,4 +496,73 @@
         ;; with it), then the name: ink on the sky, dissolving together
         (draw-image! (fit-of w h) "assets/type/wordmark-halo" 200 REVEAL-Y (list 1.0 1.0 1.0) alpha #t)
         (draw-image! (fit-of w h) "assets/type/wordmark" 200 REVEAL-Y
-                     (vector-ref (rgb) (slot-of (quote fur-1))) alpha #t)))))
+                     (vector-ref (rgb) (slot-of (quote fur-1))) alpha #t)))
+
+    ;; D47: a region's name over the live world, the first time you enter it,
+    ;; as Hollow Knight does it: quiet, IM Fell small caps spaced a little
+    ;; apart, in the creature's cream on a soft shadow of the palette's black,
+    ;; with a short rule under it that fades out at both ends. Always at the
+    ;; top centre, its baseline at NAME-Y, wherever the creature is (David,
+    ;; 2026-10-11: a name that moves "might be confusing"; a faint name for a
+    ;; few seconds may cross it). The spacing, the shadow and the rule are in
+    ;; ems of NAME-SIZE, so they keep their proportion if the size changes.
+    ;; w h: the window; alpha 0..1: the schedule's ((harkfell reveal)'s
+    ;; name-schedule). Nothing while the font is still loading.
+    (define NAME-SIZE 14.0)        ; view pixels (11 at first; David asked for a bit bigger)
+    (define NAME-Y 42)             ; the baseline, view pixels from the top
+    (define NAME-ALPHA 0.85)       ; at its strongest
+    (define NAME-TRACK 0.14)       ; extra space between the letters, in ems
+    (define NAME-SHADOW-EM 0.027)  ; the shadow's spread round each letter (at least a device pixel)
+    (define NAME-RULE-GAP-EM 0.36) ; the rule below the baseline
+    (define NAME-RULE-EM 0.045)    ; the rule's thickness (at least a device pixel)
+    (define NAME-SHADOW (list (cons -1 0) (cons 1 0) (cons 0 -1) (cons 0 1)
+                              (cons -1 -1) (cons 1 -1) (cons -1 1) (cons 1 1)))
+
+    (define (draw-region-name! w h text alpha)
+      (let* ((f (fit-of w h))
+             (s (/ (fit-w f) (* 1.0 VIEW-W)))
+             (em (* NAME-SIZE s))          ; device pixels
+             (font (and (string? text) (> alpha 0.0) (font! NAME-FONT em))))
+        (when font
+          (let* ((chars (map string (string->list text)))
+                 (widths (map (lambda (c) (text-width font c)) chars))
+                 (track (* NAME-TRACK em))
+                 (width (- (apply + (map (lambda (cw) (+ cw track)) widths)) track))
+                 (cx (+ (fit-x f) (* 200 s)))
+                 (x0 (- cx (/ width 2)))
+                 (base (+ (fit-y f) (* NAME-Y s)))
+                 (a (* NAME-ALPHA alpha))
+                 (ink (vector-ref (rgb) (slot-of 'fur-1)))
+                 (dark (vector-ref (rgb) (slot-of 'black)))
+                 (name! (lambda (dx dy)
+                          (let loop ((cs chars) (ws widths) (x x0))
+                            (when (pair? cs)
+                              (draw-text font (car cs) (+ x dx) (+ base dy))
+                              (loop (cdr cs) (cdr ws) (+ x (car ws) track))))))
+                 ;; the rule: 0.6 of the name's width, under it, brightest
+                 ;; at the middle, in whole device pixels so no seam doubles
+                 (rw (* 0.6 width))
+                 (rx (- cx (/ rw 2)))
+                 (ry (floor-int (+ base (* NAME-RULE-GAP-EM em))))
+                 (th (max 1 (floor-int (* NAME-RULE-EM em))))
+                 (rule! (lambda (dy k)
+                          (let loop ((i 0))
+                            (when (< i 24)
+                              (let* ((xa (floor-int (+ rx (* rw (/ i 24.0)))))
+                                     (xb (floor-int (+ rx (* rw (/ (+ i 1) 24.0)))))
+                                     (u (/ (+ i 0.5) 24.0))
+                                     (mid (- 1.0 (abs (- (* 2.0 u) 1.0)))))
+                                (set-color (car k) (cadr k) (caddr k) (* (cadddr k) mid))
+                                (draw-filled-rect xa (+ ry dy) (- xb xa) th))
+                              (loop (+ i 1)))))))
+            (set-blend-mode 'normal)
+            ;; the rule first, its shadow a line under it (rectangles before
+            ;; any text in the frame: after draw-text they come out black)
+            (rule! th (list (car dark) (cadr dark) (caddr dark) (* 0.3 a)))
+            (rule! 0 (list (car ink) (cadr ink) (caddr ink) (* 0.7 a)))
+            ;; the name's shadow, a soft edge just round the letters, then the name
+            (let ((d (max 1.0 (floor (* NAME-SHADOW-EM em)))))
+              (set-color (car dark) (cadr dark) (caddr dark) (* 0.25 a))
+              (for-each (lambda (o) (name! (* d (car o)) (* d (cdr o)))) NAME-SHADOW))
+            (set-color (car ink) (cadr ink) (caddr ink) a)
+            (name! 0 0)))))))

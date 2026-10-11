@@ -73,7 +73,8 @@
   (export shell-playtest-setup! shell-playtest shell-playtest-busy? shell-playtest-after-frame!
           shell-begin! shell-gesture! shell-pointer! shell-frame-phase shell-waking?
           shell-add-frame-listener! shell-set-save-extras! shell-set-input-kind!
-          shell-save-now! shell-saving? shell-reveal-alpha shell-revealed? shell-set-moment-clock! shell-set-look! shell-set-look-alpha! shell-set-look-over!
+          shell-save-now! shell-saving? shell-reveal-alpha shell-revealed?
+          shell-announced shell-name-text shell-name-alpha shell-set-moment-clock! shell-set-look! shell-set-look-alpha! shell-set-look-over!
           shell-boot! shell-frame! shell-present! shell-reset-world!
           shell-key-down! shell-key-up! shell-keys-clear!
           shell-stick! shell-jump! shell-sector
@@ -154,6 +155,11 @@
     (define *revealed* #f)           ; it has had its showing (this save)
     (define *reveal-t* #f)           ; seconds since the home stone rang, while it shows
     (define *reveal-sch* #f)         ; its schedule ((harkfell reveal))
+    ;; D47: a region's name, the first time you enter the region (once per save)
+    (define *announced* '())         ; the regions whose names have shown (this save)
+    (define *name-t* #f)             ; seconds since the entry, while a name shows
+    (define *name-sch* #f)           ; its schedule ((harkfell reveal)'s name-schedule)
+    (define *name-text* #f)          ; the name showing
     ;; The playing moment's time as heard, for D35's timing: a procedure giving
     ;; (name . seconds) or #f ((harkfell audio) wires the sound's).
     (define *moment-clock* (lambda () #f))
@@ -197,6 +203,8 @@
       (set! *over-touch* #f)
       (set! *revealed* #f)
       (set! *reveal-t* #f)
+      (set! *announced* '())
+      (set! *name-t* #f)
       (set! *save-sig* #f)
       (set! *waking* #t)
       (*save-set* '() 0.0)
@@ -246,6 +254,26 @@
     (define (shell-revealed?) *revealed*)
     ;; How much of the wordmark shows now, 0..1 (0 when it is not showing).
     (define (shell-reveal-alpha) (if *reveal-t* (reveal-alpha *reveal-sch* *reveal-t*) 0.0))
+
+    ;; D47: the regions whose names have shown (this save), in order; the
+    ;; name showing now and how much of it, 0..1 (#f and 0 when none is).
+    (define (shell-announced) *announced*)
+    (define (shell-name-text) (and *name-t* *name-text*))
+    (define (shell-name-alpha) (if *name-t* (reveal-alpha *name-sch* *name-t*) 0.0))
+
+    ;; The region of the room the body is in (a symbol), or #f.
+    (define (world-region w)
+      (let* ((p (and w (world-room w)))
+             (rm (and p (placed-data p))))
+        (and rm (room-region rm))))
+
+    ;; A region's name as its definition gives it ("The Hollow"), or #f.
+    (define (region-title ct name)
+      (let ((r (and ct name (find (lambda (r) (eq? (region-name r) name)) (content-regions ct)))))
+        (and r (let ((v (region-field r 'name)))
+                 (cond ((string? v) v)
+                       ((and (pair? v) (string? (car v))) (car v))
+                       (else #f))))))
 
     ;; The start room's stone keyed to H2 (the bowl's), as the ring news
     ;; names it: (2 x y), x y its centre in the world map's pixels; #f if the
@@ -380,6 +408,7 @@
     (define (end-game!)
       (set! *frame* #f)
       (set! *saving* #f)
+      (set! *name-t* #f)
       (set! *waking* #f))
 
     ;; Into the world's start; #f without one.
@@ -405,6 +434,8 @@
       (set! *save-sig* #f)
       (set! *waking* #t)
       (set! *reveal-t* #f)
+      (set! *name-t* #f)
+      (set! *announced* '())
       (set! *home-stone* (and *content* (home-stone *content*)))
       (let ((r (and d *content* (save-restore *content* d))))
         (set! *revealed* (and r (restored-revealed r)))
@@ -418,6 +449,11 @@
                       (w (world-at (content-map *content*) (body-in-cell (restored-cell r)))))
                  (set! *world* (world (world-populate w stones (content-pickups *content*) (restored-carry r))
                                       aurora: (restored-aurora r)))
+                 ;; D47: the region you continue in counts as announced, its
+                 ;; name unshown (an older save, read as none announced, too)
+                 (set! *announced*
+                       (let ((a (restored-announced r)) (here (world-region *world*)))
+                         (if (and here (not (memq here a))) (append a (list here)) a)))
                  (set! *mode* 'play)
                  (*save-set* (restored-moments r) (restored-played r))
                  ;; D40: a save to continue, so the start screen offers starting over
@@ -430,7 +466,7 @@
       (and *content* *world* (world-gates *world*)
            (let ((x (*save-get*)))
              (save-datum *content* (world-entry *world*) (world-carry *world*) (world-stones *world*)
-                         (car x) (cadr x) *revealed* (world-aurora *world*)))))
+                         (car x) (cadr x) *revealed* (world-aurora *world*) *announced*))))
 
     ;; Write the save when what it holds has changed: the entry (a room
     ;; entered), the carry, the stones opened, the moments heard. Not the
@@ -440,7 +476,7 @@
              (sig (list (body-x e) (body-y e) (world-carry *world*)
                         (length (filter stone-open? (world-stones *world*)))
                         (car (*save-get*))
-                        *revealed* (world-aurora *world*))))
+                        *revealed* (world-aurora *world*) *announced*)))
         (unless (equal? sig *save-sig*)
           (let ((d (current-save)))
             (when d
@@ -663,6 +699,9 @@
     ;; or the Flux Harmonic card (D33) alone, to look at, drawn by (harkfell
     ;; title) as the frame draws them; the card comes round every 5.5 s. A
     ;; look begins no game: the frame and the save stay the plain boot's.
+    ;; ?look=reveal and ?look=region (with ?room=) play the room with D35's
+    ;; wordmark or D47's region name over it once (a key or a tap: again);
+    ;; &hold, or --look-alpha A, pins its strength.
     (define *look* #f)            ; #f, start or card
     (define *look-s* 0.0)         ; seconds since the look began
     (define *look-alpha* #f)      ; a pinned alpha for the card or the reveal (review shots)
@@ -698,7 +737,7 @@
       (set! *launched* #f)
       (when *look* (set! *look-s* (+ *look-s* dt)))
       ;; ?look=reveal plays the reveal once; a key or a tap plays it again
-      (when (and (eq? *look* (quote reveal)) (or *key-edge* *gesture*)) (set! *look-s* 0.0))
+      (when (and (memq *look* (list (quote reveal) (quote region))) (or *key-edge* *gesture*)) (set! *look-s* 0.0))
       ;; A4: the frame steps in wall time until it plays; each phase entered
       ;; goes to the listeners (the sound, the page's trace)
       (when *frame*
@@ -757,6 +796,22 @@
       (when *reveal-t*
         (set! *reveal-t* (+ *reveal-t* dt))
         (when (reveal-done? *reveal-sch* *reveal-t*) (set! *reveal-t* #f)))
+      ;; D47: the first entry into a region shows its name, once per save. A
+      ;; new game's start region shows once the opening has played (the frame
+      ;; at play); a continue's region was counted at the load; a door
+      ;; (no save written) shows none.
+      (when (and *saving* *world* (or (not *frame*) (frame-playing? *frame*)))
+        (let ((here (world-region *world*)))
+          (when (and here (not (memq here *announced*)))
+            (set! *announced* (append *announced* (list here)))
+            (let ((text (region-title *content* here)))
+              (when text
+                (set! *name-text* text)
+                (set! *name-t* 0.0)
+                (set! *name-sch* (name-schedule)))))))
+      (when *name-t*
+        (set! *name-t* (+ *name-t* dt))
+        (when (reveal-done? *name-sch* *name-t*) (set! *name-t* #f)))
       (when (and *saving* (or (not *frame*) (frame-world-steps? *frame*)) (world-gates *world*))
         (save-if-changed!))
       (set! *step-ms* (- (now-ms) *frame-start*))
@@ -932,6 +987,15 @@
             (draw-reveal! win-w win-h
                           (cond (*look-alpha* *look-alpha*) ((< s 2.0) (/ s 2.0)) ((< s 6.0) 1.0) ((< s 8.0) (- 1.0 (/ (- s 6.0) 2.0))) (else 0.0))
                           s)))
+        ;; D47: a region's name, the first time you enter the region
+        ;; ((harkfell title)'s draw-region-name!, on name-schedule)
+        (when (> (shell-name-alpha) 0.0)
+          (draw-region-name! win-w win-h *name-text* (shell-name-alpha)))
+        ;; ?look=region: the room's region name on D47's schedule, once, as the
+        ;; game shows it (a key or a tap: again); &hold keeps it at full
+        (when (eq? *look* (quote region))
+          (draw-region-name! win-w win-h (region-title *content* (world-region *world*))
+                             (or *look-alpha* (reveal-alpha (name-schedule) *look-s*))))
         (when *ms*
           (draw-readout (append (list (string-append "frame " (tenths *frame-ms*)
                                                      " step " (tenths *step-ms*)

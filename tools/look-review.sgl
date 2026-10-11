@@ -9,21 +9,27 @@
 ;;;   atlas               every room of the world at 1/4, as the ?atlas door
 ;;;   room:REGION:X:Y:C:R:CARRY:TICKS
 ;;;                       one room in play: body at cell (C R), carrying
-;;;                       CARRY (e.g. 2-3), after TICKS world ticks
+;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks
+;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
+;;;                       the same room on a W x H window (fitted as the web
+;;;                       fits it), with D47's region name over it at ALPHA
+;;;                       (0..1), at the top centre where the game shows it
 ;;; Anything after the documented fields is ignored, so appending ":2" makes
 ;;; a fresh case of the same view. Art and code changes need a restart.
 ;;; It opens no save and no audio device.
 (import (sigil test) (sigil process) (sigil fs) (sigil string) (sigil io)
         (sigil desktop) (sigil graphics) (sigil list)
         (engine body) (engine worldmap)
+        (substratic view present)
         (harkfell content) (harkfell source) (harkfell draw) (harkfell render)
+        (harkfell view) (harkfell title)
         (harkfell world) (harkfell gates) (harkfell check) (harkfell feel))
 
 (define CONTROL (getenv "PIPES_LOOK_CONTROL"))
 (define (load-review) (load-content (read-world-source "world")))
 (define (parse-case s) (string-split s ":"))
 (define (num s) (string->number s))
-(define (carry-of s) (map string->number (string-split s "-")))
+(define (carry-of s) (if (string=? s "none") '() (map string->number (string-split s "-"))))
 
 (define (review-world ct parts)
   (let* ((rm (content-room ct (num (list-ref parts 2)) (num (list-ref parts 3))))
@@ -36,6 +42,12 @@
       (if (= n 0) w (loop (cdr (world-take-news (world-tick w (intent)))) (- n 1))))))
 
 (define (selected) (string-trim (read-file-string CONTROL)))
+
+;; name: the region's name as its definition gives it.
+(define (region-title ct name)
+  (let ((r (find (lambda (r) (eq? (region-name r) name)) (content-regions ct))))
+    (and r (let ((v (region-field r 'name))) (if (pair? v) (car v) v)))))
+(define *presenter* #f)
 
 (test "review"
   (run-game "Opus review" 1200 528
@@ -50,6 +62,7 @@
                (parts (parse-case sel))
                (kind (car parts))
                (atlas? (string=? kind "atlas"))
+               (name? (string=? kind "name"))
                (sheet? (or atlas? (string=? kind "sheet") (string=? kind "sheet-lit")))
                (k (if atlas? 0.25 1)) (gap (if atlas? 2 8))
                (rooms (if changed?
@@ -62,17 +75,25 @@
           (when changed?
             (unless (null? (content-problems ct))
               (display "PROBLEMS: ") (display (content-problems ct)) (newline))
-            (let ((size (if sheet? (overview-size rooms k gap) '(1200 528))))
+            (let ((size (cond (sheet? (overview-size rooms k gap))
+                              (name? (list (num (list-ref parts 9)) (num (list-ref parts 10))))
+                              (else '(1200 528)))))
               (window-set-size! (car size) (cadr size))
               (display "SIZE ") (display (car size)) (display " ") (display (cadr size)) (newline)))
           (let ((ready? (or (not sheet?) (prepare-overview! rooms)))
                 (announced? (and (not changed?) announced?)))
             (unless sheet? (present-play! w (lambda () #f)))
             (begin-frame)
-            (if sheet?
-                (draw-overview rooms k gap #t)
-                (begin (set-color 1.0 1.0 1.0 1.0)
-                       (draw-render-target (room-color-rt) 0 0 1200 528)))
+            (cond
+              (sheet? (draw-overview rooms k gap #t))
+              (name?
+               (let* ((ww (num (list-ref parts 9))) (wh (num (list-ref parts 10))))
+                 (unless *presenter* (set! *presenter* (make-presenter VIEW-W VIEW-H)))
+                 (view-present! *presenter* (room-color-rt) (view-fit ww wh VIEW-W VIEW-H))
+                 (draw-region-name! ww wh (region-title ct (string->symbol (cadr parts)))
+                                    (num (list-ref parts 8)))))
+              (else (set-color 1.0 1.0 1.0 1.0)
+                    (draw-render-target (room-color-rt) 0 0 1200 528)))
             (end-frame)
             (when (and ready? (not announced?))
               (display "LOOK frame ready: ") (display sel) (newline)

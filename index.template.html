@@ -476,9 +476,13 @@
       // the room once, as the game will (a key or a tap plays it again; &hold
       // keeps it at full strength to study it); the controls stay, play goes on
       if (look === "reveal") send("look", "reveal both" + (params.has("hold") ? " hold" : ""));
+      // ?look=region (with ?room=): the same for D47, the room's region name
+      // over it once as the first entry shows it; &hold keeps it at full
+      if (look === "region") send("look", "region both" + (params.has("hold") ? " hold" : ""));
       var door = room || params.has("atlas") || params.get("sheet") || params.has("test-room") ||
                  params.has("replay") || params.has("envelope") || params.has("bench") || params.get("carry") ||
-                 params.get("frame") === "off" || look === "start" || look === "card" || look === "reveal";
+                 params.get("frame") === "off" || look === "start" || look === "card" || look === "reveal" ||
+                 look === "region";
       if (files.length && !door) {
         var touchy = (navigator.maxTouchPoints || 0) > 0;
         var kind = coarse ? "touch" : (touchy ? "both" : "keys");
