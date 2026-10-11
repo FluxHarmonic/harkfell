@@ -151,8 +151,12 @@
     (run K 2 0)
     (run (place K gliding: #t) 1 0)
     (assert-true (assq 'glide-open (sound-moved)))
-    (run (place K gliding: #t) 1 0)
-    (assert-false (assq 'glide-open (sound-moved))))
+    ;; held for a second and a half: still the one opening
+    (let loop ((i 0) (n 0))
+      (if (< i 45)
+          (begin (run (place K gliding: #t) 1 0)
+                 (loop (+ i 1) (if (assq 'glide-open (sound-moved)) (+ n 1) n)))
+          (assert-equal 0 n))))
   (test "a glide let go and taken again within 0.4 s does not open it again"
     (run (place K gliding: #f) 2 0)
     (run (place K gliding: #t) 1 0)
