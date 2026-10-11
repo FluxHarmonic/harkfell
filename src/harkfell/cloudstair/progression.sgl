@@ -1,0 +1,172 @@
+;;; Final constructive world coverage and return from the genuine bare start.
+;;; Acquisitions happen only in the actual per-tick adapter. Guides are
+;;; rebuilt for actual abilities/carry and supply scripts, never states.
+(define-library (harkfell cloudstair progression)
+  (import (sigil list)
+          (engine body) (engine air) (engine tilemap)
+          (engine reach) (engine reach timed) (engine reach routes)
+          (harkfell content) (harkfell check) (harkfell feel)
+          (harkfell cloudstair reach))
+
+  (export cloudstair-world-check)
+
+  (begin
+    (define (still? node)
+      (and node
+           (let ((b (timed-node-body node)))
+             (and (eq? (body-mode b) 'ground)
+                  (= (body-vx b) 0) (= (body-vy b) 0)))))
+
+    (define (cloudstair-world-check ct bound log)
+      (let* ((tiles-for (cloudstair-tile-provider ct))
+             (advance (cloudstair-stepper ct))
+             (shelter? (cloudstair-shelter-checker ct advance))
+             (wait (cloudstair-waiter ct advance))
+             (home (start-cell ct))
+             (initial-body (and home (real-stand-body (tiles-for '()) HARKFELL-FEEL
+                                                     (car home) (cdr home))))
+             (initial (and initial-body (timed-node body: initial-body)))
+             (guides '()) (landings #{}) (covered #{}) (history '())
+             (complete #t) (failures 0) (traps '()) (unreached '())
+             (landing-count 0) (bowl-proof #f))
+        (define (cell-of node)
+          (and (still? node)
+               (rest-cell (tiles-for (timed-node-data node)) HARKFELL-FEEL
+                          (timed-node-body node))))
+        (define (record! node)
+          (let* ((proof (wait node 0)) (rest (if proof (car proof) node))
+                 (key (timed-key rest)) (cell (cell-of rest)))
+            (when cell (set! covered (dict-set covered cell #t)))
+            (unless (dict-contains? landings key)
+              (set! landings (dict-set landings key rest))
+              (set! landing-count (+ landing-count 1))
+              (when (>= landing-count bound) (set! complete #f)))))
+        (define (guide-for node)
+          (let* ((carry (timed-node-data node))
+                 (down (body-down (timed-node-body node)))
+                 (key (cons carry down)) (prior (assoc key guides)))
+            (if prior (cdr prior)
+                (let* ((tm (tiles-for carry))
+                       ;; Geometry suggestions may pretend lift is steady;
+                       ;; every accepted edge replays the actual pulsed field.
+                       (tm (tilemap tm air:
+                             (filter-map
+                               (lambda (field)
+                                 (and (> (air-field-lift field) 0)
+                                      (air-field field pulsed: #f)))
+                               (tilemap-air tm))))
+                       (base (find (lambda (entry) (eq? (cdar entry) down)) guides))
+                       (cell (cell-of node))
+                       (starts (if (and cell (not (equal? cell home)))
+                                   (list home cell) (list home))))
+                  (log (list 'world-candidates 'carry carry 'down down 'starting))
+                  (let ((graph
+                          (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down
+                            (and base (graph-memo (cdr base)))
+                            (if base (tilemap-changes (graph-tm (cdr base)) tm) '())
+                            (lambda (anchors steps kind cell)
+                              (when (= (modulo anchors 100) 0)
+                                (log (list 'world-candidates 'carry carry 'down down
+                                           'anchors anchors 'steps steps)))))))
+                    (set! guides (cons (cons key graph) guides))
+                    (log (list 'world-candidates 'carry carry 'down down
+                               'complete 'stats (graph-stats graph)))
+                    graph)))))
+        (define route
+          (timed-route-finder advance tiles-for HARKFELL-FEEL guide-for shelter? wait
+                              bound record! (lambda () (set! complete #f))))
+        (define (from-history target)
+          (let try ((starts history))
+            (and complete (pair? starts)
+                 (or (route (car starts) target) (try (cdr starts))))))
+        (define (target-cells)
+          (let ((opened (tiles-for '(2 3 4 5))))
+            (apply append
+              (map (lambda (p)
+                     (let* ((rm (placed-data p))
+                            (base (room-standable-cells ct rm))
+                            (cells (append base
+                                     (filter (lambda (c) (not (member c base)))
+                                             (room-standable-cells ct rm opened)))))
+                       (filter (lambda (cell)
+                                 (not (member (global->local ct rm cell) (room-unreached rm))))
+                               cells)))
+                   (content-rooms ct)))))
+        (if (not initial)
+            (begin (log '(RED world-start unsupported)) 1)
+            (let ((current initial) (goals '()) (target-count 0))
+              (log (list 'world-start 'actual (timed-key initial)))
+              (set! history (list initial))
+              (record! initial)
+              ;; A recorded route obtains H2, then the gift, then H4; H3
+              ;; stays optional for Cloudstair but is needed for the bowl.
+              (set! goals
+                (append
+                  (list (cons 2 (cdr (assv 2 (content-pickup-cells ct))))
+                        (cons 'down (local->global ct (content-room ct 15 3) 8 7)))
+                  (map (lambda (h) (cons h (cdr (assv h (content-pickup-cells ct)))))
+                       '(4 3 5))))
+              (for-each
+                (lambda (goal)
+                  (when complete
+                    (let ((next (route current (cdr goal))))
+                      (if (and next
+                               (if (eq? (car goal) 'down)
+                                   (body-down (timed-node-body next))
+                                   (memv (car goal) (timed-node-data next))))
+                          (begin
+                            (set! current next)
+                            (set! history (cons next history))
+                            (record! next)
+                            (log (list 'world-acquisition (car goal) 'actual (timed-key next))))
+                          (begin
+                            (set! failures (+ failures 1))
+                            (set! complete #f)
+                            (log (list 'RED 'world-acquisition (car goal) 'target (cdr goal))))))))
+                goals)
+              (when complete
+                (for-each
+                  (lambda (target)
+                    (set! target-count (+ target-count 1))
+                    (when (= (modulo target-count 20) 0)
+                      (log (list 'world-coverage 'targets target-count 'landings landing-count
+                                 'unreached (length unreached))))
+                    (when (and complete (not (dict-contains? covered target)))
+                      (unless (from-history target)
+                        (set! unreached (cons target unreached)))))
+                  (target-cells))
+                (let* ((bowl (local->global ct (content-room ct 4 3) 20 6))
+                       (arrival (from-history bowl)))
+                  (when arrival
+                    (let ((back (route arrival home)))
+                      (set! bowl-proof (and back (memv 3 (timed-node-data arrival))
+                                            (memv 5 (timed-node-data arrival)) #t))))
+                  (unless bowl-proof (set! failures (+ failures 1)))
+                  (log (list 'world-bowl 'rose-pocket-return bowl-proof))))
+              ;; All genuine catches, acquisition arrivals and aerial/swim
+              ;; endpoints have independent future-phase physical returns.
+              (let ((checked #{}))
+                (let drain ()
+                  (let ((pending
+                          (filter (lambda (e) (not (dict-contains? checked (car e))))
+                                  (dict-entries landings))))
+                    (when (and complete (pair? pending))
+                      (for-each
+                        (lambda (entry)
+                          (when complete
+                            (set! checked (dict-set checked (car entry) #t))
+                            (unless (route (cdr entry) home)
+                              (set! traps (cons (timed-key (cdr entry)) traps)))))
+                        pending)
+                      (log (list 'world-return 'checked (length (dict-entries checked))
+                                 'landings landing-count 'traps (length traps)))
+                      (drain)))))
+              (set! failures (+ failures (length unreached) (length traps)
+                                (if complete 0 1)))
+              (log (list 'world-replay 'rooms (length (content-rooms ct))
+                         'entry-phases 1 'initial-carry '() 'initial-down #f
+                         'required-cells (length (target-cells))
+                         'unreached (reverse unreached) 'traps (length traps)
+                         'actual-landings landing-count 'bowl-proof bowl-proof
+                         'complete complete 'failures failures))
+              failures))))))

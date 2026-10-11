@@ -1,0 +1,173 @@
+;;; Actual authored timing families and directed physical returns.
+(define-library (harkfell cloudstair timing)
+  (import (sigil list)
+          (engine body) (engine air) (engine tilemap) (engine worldmap)
+          (engine reach) (engine reach timed)
+          (harkfell content) (harkfell check)
+          (harkfell feel) (harkfell cloudstair reach)
+          (harkfell cloudstair probes))
+
+  (export cloudstair-authored-timing)
+
+  (begin
+    (define (cloudstair-authored-timing CT profiles log . selected)
+      (define WM (content-map CT))
+      (define F HARKFELL-FEEL)
+      (define STEP (cloudstair-stepper CT))
+      (define wait (cloudstair-waiter CT STEP))
+      (define shelter? (cloudstair-shelter-checker CT STEP))
+      (define (gcol x c) (+ c (* 25 (- x (worldmap-x0 WM)))))
+      (define (grow y r) (+ r (* 11 (- y (worldmap-y0 WM)))))
+      (define (last-node trace) (and (pair? trace) (car (reverse trace))))
+      (define (still? node)
+        (and node
+             (let ((b (timed-node-body node)))
+               (and (eq? (body-mode b) 'ground)
+                    (= (body-vx b) 0) (= (body-vy b) 0)))))
+      (define (rests-in x y lo hi)
+        (lambda (node)
+          (and (still? node)
+               (let* ((b (timed-node-body node)) (center (body-center b F)))
+                 (and (<= (* 16 (gcol x lo)) (car center))
+                      (< (car center) (* 16 (+ 1 (gcol x hi))))
+                      (<= (* 16 (grow y 0)) (cdr center))
+                      (< (cdr center) (* 16 (grow y 11))))))))
+      (define (gap-script h)
+        (lambda (node)
+          (append (make-list 32 (intent h: h))
+                  (list (intent h: h jump: #t press: #t))
+                  (make-list 46 (intent h: h jump: #t))
+                  (make-list 41 NO-INTENT))))
+
+      ;; name, lower/start room, start cell, family, arrival, timing windows,
+      ;; kind, gap's left column, direction. All coordinates are authored cells.
+      (define LEGS
+        (list
+          (list 'F-L 8 0 10 7 probe-lift-script (rests-in 8 -1 14 24)
+                '((360 479)) 'lift 11 1)
+          (list 'M-S 9 -1 10 7 probe-lift-script (rests-in 9 -2 14 24)
+                '((360 479)) 'lift 11 1)
+          (list 'I-east 11 0 8 7 (gap-script 1) (rests-in 11 0 14 24)
+                '((0 239) (360 479)) 'gap 10 1)
+          (list 'I-west 11 0 15 7 (gap-script -1) (rests-in 11 0 0 9)
+                '((0 239)) 'gap 10 -1)
+          (list 'P-west-gap-east 12 -1 1 7 (gap-script 1) (rests-in 12 -1 7 11)
+                '((0 239) (360 479)) 'gap 3 1)
+          (list 'P-west-gap-west 12 -1 8 7 (gap-script -1)
+                (lambda (n) (or ((rests-in 12 -1 0 2) n) ((rests-in 11 -1 0 24) n)))
+                '((0 239)) 'gap 3 -1)
+          (list 'P-east-gap-east 12 -1 10 7 (gap-script 1) (rests-in 12 -1 16 20)
+                '((0 239) (360 479)) 'gap 12 1)
+          (list 'P-east-gap-west 12 -1 17 7 (gap-script -1) (rests-in 12 -1 7 11)
+                '((0 239)) 'gap 12 -1)))
+
+      ;; Feedback generates actual inputs, then callers replay the entire script.
+      ;; Stop at a threshold, retaining the genuine offset and velocity.
+      (define (walk-to node target h limit)
+        (let loop ((node node) (rev '()) (n 0))
+          (cond ((not node) #f)
+                ((if (> h 0) (>= (body-x (timed-node-body node)) target)
+                             (<= (body-x (timed-node-body node)) target))
+                 (reverse rev))
+                ((>= n limit) #f)
+                (else
+                 (let ((in (intent h: h)))
+                   (loop (STEP node in) (cons in rev) (+ n 1)))))))
+
+      (define (return-to-bank leg node)
+        (let* ((x (list-ref leg 1)) (y (list-ref leg 2))
+               (kind (list-ref leg 8)) (left (* 16 (gcol x (list-ref leg 9))))
+               (b (timed-node-body node)))
+          (if (eq? kind 'lift)
+              ;; Jump released: the shaft is air and falls to its genuine lower
+              ;; floor. Continue west out of the field before checking a shelter.
+              (let ((walk (walk-to node (- left 20) -1 220)))
+                (and walk (last-node (timed-run STEP node
+                                      (append walk (make-list 120 NO-INTENT))))))
+              (let* ((h (if (< (body-x b) left) 1 -1))
+                     ;; Join only an identical full state in the already
+                     ;; replayed directed shelter cycle; no phase assignment.
+                     (proof (wait node 0))
+                     (rest (and proof (car proof)))
+                     (run (and rest (walk-to rest (if (> h 0) (+ left 5) (+ left 51)) h 180))))
+                (and run
+                     (last-node (timed-run STEP rest
+                       (append run (list (intent h: h jump: #t press: #t))
+                               (make-list 46 (intent h: h jump: #t))
+                               (make-list 40 NO-INTENT)))))))))
+
+      (define failures 0)
+      ;; Isolate each real authored leg, closing alternatives. Translation
+      ;; changes only the map origin; the grids, fields and clock are intact.
+      (if (null? selected)
+          (for-each
+            (lambda (leg)
+              (let* ((name (car leg))
+                     (places (case name
+                               ((F-L) '((8 . 0) (8 . -1)))
+                               ((M-S) '((9 . -1) (9 . -2)))
+                               ((I-east I-west) '((11 . 0)))
+                               (else '((12 . -1) (11 . -1) (12 . 0)))))
+                     (rooms (filter (lambda (p)
+                                      (member (cons (placed-x p) (placed-y p)) places))
+                                    (content-rooms CT)))
+                     (probe (content CT rooms: rooms
+                                        wmap: (make-worldmap rooms 25 11 16))))
+                (set! failures
+                  (+ failures (cloudstair-authored-timing probe profiles log name)))))
+            LEGS)
+          (begin
+            (for-each
+              (lambda (profile)
+                (let ((carry (car profile)) (down (cdr profile)))
+                  (for-each
+                    (lambda (leg)
+                      (let* ((cell (cons (gcol (list-ref leg 1) (list-ref leg 3))
+                                         (grow (list-ref leg 2) (list-ref leg 4))))
+                             (starts (cloudstair-entry-phases CT cell carry down))
+                             (family (list-ref leg 5)) (arrives? (list-ref leg 6))
+                             (window-reds 0) (survived 0) (stranded '())
+                             (negative-crossings 0))
+                        (when down
+                          (for-each
+                            (lambda (window)
+                              (let ((bad (timed-window STEP (car starts) family arrives?
+                                                       (car window) (cadr window) 120)))
+                                (set! window-reds (+ window-reds (length bad)))))
+                            (list-ref leg 7)))
+                        (unless (shelter? (car starts))
+                          (set! failures (+ failures 1)))
+                        (for-each
+                          (lambda (start)
+                            (let* ((trace (timed-run STEP start (family start)))
+                                   (end (last-node trace)))
+                              (when end
+                                ;; Settle a late aerial endpoint by actual release. The
+                                ;; original flight and this suffix keep their phases.
+                                (unless (still? end)
+                                  (set! end (last-node (timed-run STEP end (make-list 180 NO-INTENT)))))
+                                (when end
+                                  (set! survived (+ survived 1))
+                                  (when (and (not down) (arrives? end))
+                                    (set! negative-crossings (+ negative-crossings 1)))
+                                  (let* ((home (if (eq? (list-ref leg 8) 'lift)
+                                                   (rests-in (list-ref leg 1) (list-ref leg 2) 0 10)
+                                                   (if (> (list-ref leg 10) 0)
+                                                       (rests-in (list-ref leg 1) (list-ref leg 2) 0 (- (list-ref leg 9) 1))
+                                                       (rests-in (list-ref leg 1) (list-ref leg 2) (+ (list-ref leg 9) 4) 24))))
+                                         (back (if (home end) end
+                                                   (and (or (eq? (list-ref leg 8) 'lift)
+                                                            (shelter? end))
+                                                        (return-to-bank leg end)))))
+                                    (unless (and back (home back))
+                                      (set! stranded (cons (body-tau (timed-node-body start)) stranded))))))))
+                          starts)
+                        (set! failures (+ failures window-reds negative-crossings (length stranded)))
+                        (log (list (car leg) 'carry carry 'down down 'phases 600
+                                     'window-failures window-reds 'survivors survived
+                                     'no-down-crossings negative-crossings 'stranded (reverse stranded)))))
+                    (if (pair? selected)
+                        (filter (lambda (leg) (eq? (car leg) (car selected))) LEGS)
+                        LEGS))))
+              profiles)))
+      failures)))

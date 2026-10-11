@@ -46,6 +46,10 @@
           (harkfell feel)
           (harkfell content)
           (harkfell check)
+          (harkfell cloudstair reach)
+          (harkfell cloudstair region)
+          (harkfell cloudstair timing)
+          (harkfell cloudstair progression)
           (harkfell source))
 
   (export room-check-main arg-value)
@@ -131,9 +135,34 @@
                   (say "PASS room-check --parse-only: " (number->string (length (content-rooms ct)))
                        " rooms, parse seams map green (reach NOT run)")
                   0)
+                ((member "--cloudstair-timing" args)
+                  (let ((failures
+                          (cloudstair-authored-timing ct
+                            (if (member "--quick" args) (list (cons '(2 4) #t))
+                                (cloudstair-diagnostic-profiles))
+                            (lambda (record) (write record) (newline)))))
+                    (say (if (= failures 0) "PASS" "FAIL")
+                         " Cloudstair authored timing: " (number->string failures)
+                         " failures (regional/world reach NOT established)")
+                    (if (= failures 0) 0 1)))
+                ((member "--cloudstair-region" args)
+                  (let ((failures
+                          (cloudstair-region-check ct
+                            (if (member "--quick" args) (list (cons '(2 4) #t))
+                                (cloudstair-diagnostic-profiles))
+                            10000 (lambda (record) (write record) (newline)))))
+                    (say (if (= failures 0) "PASS" "FAIL")
+                         " Cloudstair regional replay: " (number->string failures)
+                         " failures (final full-world progression NOT established)")
+                    (if (= failures 0) 0 1)))
                 ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct))))
-                  (say "SETUP-FAILED room-check: timed fields require the exact-phase world gate; spatial reach is insufficient")
-                  2)
+                  (let ((failures
+                          (cloudstair-world-check ct 50000
+                            (lambda (record) (write record) (newline)))))
+                    (say (if (= failures 0) "PASS" "FAIL")
+                         " room-check: " (number->string failures)
+                         " exact world replay failures (timing/profile/sabotage gates also required)")
+                    (if (= failures 0) 0 1)))
                 (else
                   (let* ((g (if (member "--verbose" args)
                                 (content-reach ct (lambda (n steps kind cell)

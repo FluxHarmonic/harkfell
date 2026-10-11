@@ -112,6 +112,38 @@
 (define LIFT-START (probe-lift-start LIFT 360 #t))
 (define LIFT-STEP (probe-step LIFT))
 
+(define AUTHORED-F-START
+  (list-ref (cloudstair-entry-phases CT
+              (local->global CT (content-room CT 8 0) 10 7) '(2 4) #t) 360))
+(define AUTHORED-OFF
+  (let ((tm (tiles-carrying CT '(2 4))))
+    (tilemap tm air: (map (lambda (field)
+                           (air-field field lift: 0 east: 0 pulsed: #f))
+                         (tilemap-air tm)))))
+(define (authored-lift-arrives? node)
+  (let* ((b (timed-node-body node)) (c (body-center b F))
+         (bank (local->global CT (content-room CT 8 -1) 14 9)))
+    (and (eq? (body-mode b) 'ground) (= (body-vx b) 0)
+         (>= (car c) (* 16 (car bank)))
+         (= (+ (body-y b) (feel-box-h F)) (* 16 (+ 1 (cdr bank)))))))
+
+(test-group "timed reach: authored F/L control"
+  (test "the actual authored lower wait reaches L at all 120 gust starts"
+    (assert-equal '() (timed-window ADVANCE AUTHORED-F-START probe-lift-script
+                                   authored-lift-arrives? 360 479 120)))
+  (test "cutting the actual force after 427 leaves one lucky start and 119 reds"
+    (let* ((short (lambda (node in)
+                    (if (<= (body-tau (timed-node-body node)) 427)
+                        (ADVANCE node in)
+                        (let ((b (body-step (timed-node-body node) in AUTHORED-OFF F)))
+                          (and (not (memq 'hazard (body-events b)))
+                               (timed-node node body: b))))))
+           (failed (timed-window short AUTHORED-F-START probe-lift-script
+                                 authored-lift-arrives? 360 479 120)))
+      (assert-equal 119 (length failed))
+      (assert-false (memv 360 failed))
+      (assert-true (memv 361 failed)))))
+
 (test-group "timed reach: measured pulsed lift"
   (test "144 px ascent settles at all 120 required gust departures"
     (assert-equal '() (timed-window LIFT-STEP LIFT-START probe-lift-script

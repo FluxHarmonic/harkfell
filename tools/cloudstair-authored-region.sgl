@@ -1,0 +1,14 @@
+;;; Constructive regional coverage and physical return, on actual phases.
+;;; The final all-region progression gate is still a separate obligation.
+(import (sigil process)
+        (harkfell content) (harkfell source)
+        (harkfell cloudstair reach) (harkfell cloudstair region))
+(define profiles
+  (if (getenv "CS_QUICK") (list (cons '(2 4) #t))
+      (cloudstair-diagnostic-profiles)))
+(define failures
+  (cloudstair-region-check (load-content (read-world-source "world")) profiles 10000
+                          (lambda (record) (write record) (newline))))
+(write (list 'RESULT 'regional-replay 'profiles (length profiles) 'failures failures))
+(newline)
+(exit (if (= failures 0) 0 1))

@@ -1,0 +1,12 @@
+;;; Timing component of the authored-world gate; region coverage is separate.
+(import (sigil process) (harkfell content) (harkfell source)
+        (harkfell cloudstair reach) (harkfell cloudstair timing))
+(define profiles
+  (if (getenv "CS_QUICK") (list (cons '(2 4) #t))
+      (cloudstair-diagnostic-profiles)))
+(define failures
+  (cloudstair-authored-timing (load-content (read-world-source "world")) profiles
+                            (lambda (record) (write record) (newline))))
+(write (list 'RESULT 'authored-timing 'profiles (length profiles) 'failures failures))
+(newline)
+(exit (if (= failures 0) 0 1))

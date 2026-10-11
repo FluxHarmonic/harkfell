@@ -1,0 +1,172 @@
+;;; Constructive regional reach: frozen geometry supplies candidate scripts
+;;; only. Every accepted route starts at an actual body, retains acquisitions
+;;; and phase, and has an independently replayed physical route back out.
+(define-library (harkfell cloudstair region)
+  (import (sigil list)
+          (engine body) (engine air) (engine tilemap) (engine worldmap)
+          (engine reach) (engine reach timed) (engine reach routes)
+          (harkfell content) (harkfell check) (harkfell feel)
+          (harkfell cloudstair reach))
+
+  (export cloudstair-region-content cloudstair-region-check)
+
+  (begin
+    (define (cloudstair-region-content ct)
+      (let ((rooms (filter (lambda (p)
+                             (or (eq? (room-region (placed-data p)) 'cloudstair)
+                                 (member (cons (placed-x p) (placed-y p))
+                                         '((6 . 2) (7 . 2) (7 . 3)))))
+                           (content-rooms ct))))
+        (content ct rooms: rooms wmap: (make-worldmap rooms 25 11 16)
+                    start: '(hollow (7 2) (4 3)))))
+
+    (define (still? node)
+      (and node
+           (let ((b (timed-node-body node)))
+             (and (eq? (body-mode b) 'ground)
+                  (= (body-vx b) 0) (= (body-vy b) 0)))))
+
+    (define (last-node trace) (and (pair? trace) (car (reverse trace))))
+
+    (define (cloudstair-region-check source profiles bound log)
+      (log '(candidate-geometry starting actual-replay-required))
+      (let* ((ct (cloudstair-region-content source))
+             (home (start-cell ct))
+             (tm (tiles-carrying ct '(2 3 4 5)))
+             (candidate-tm
+               (tilemap tm air:
+                 (filter-map (lambda (field)
+                               (and (> (air-field-lift field) 0)
+                                    (air-field field pulsed: #f)))
+                             (tilemap-air tm))))
+             (candidate
+               (reach-search-down candidate-tm HARKFELL-FEEL
+                 (list home) witness-lands? #t
+                 (lambda (anchors steps kind cell)
+                   (when (= (modulo anchors 100) 0)
+                     (log (list 'candidate-geometry 'anchors anchors 'steps steps))))))
+             (advance (cloudstair-stepper ct))
+             (tiles-for (cloudstair-tile-provider ct))
+             (wait (cloudstair-waiter ct advance))
+             (shelter? (cloudstair-shelter-checker ct advance))
+             (targets (apply append
+                        (map (lambda (p)
+                               (room-standable-cells ct (placed-data p) tm))
+                             (filter (lambda (p)
+                                       (eq? (room-region (placed-data p)) 'cloudstair))
+                                     (content-rooms ct)))))
+             (route-cache '()) (negative-cache #{}) (failures 0)
+             (search-incomplete #f))
+        (log (list 'candidate-geometry 'complete 'stats (graph-stats candidate)))
+        (define (cell-of node)
+          (and (still? node) (rest-cell (tiles-for (timed-node-data node))
+                                     HARKFELL-FEEL (timed-node-body node))))
+        (define (entry-bypassed? carry down)
+          (let ((key (list down (and (memv 4 carry) #t))))
+            (if (dict-contains? negative-cache key)
+                (dict-ref negative-cache key)
+                (let* ((rooms (filter (lambda (p)
+                                        (or (not (eq? (room-region (placed-data p)) 'cloudstair))
+                                            (and (= (placed-x p) 7) (= (placed-y p) 1))))
+                                      (content-rooms ct)))
+                       (probe (content ct rooms: rooms wmap: (make-worldmap rooms 25 11 16)))
+                       (tiles (tiles-carrying probe carry))
+                       (start (start-cell probe))
+                       (a (local->global probe (content-room probe 7 1) 4 7))
+                       (graph (reach-search-down tiles HARKFELL-FEEL
+                                                 (list start) witness-lands? down))
+                       (forward (reach-forward graph (list start)))
+                       (bypass (vector-ref forward (cell-index tiles (car a) (cdr a)))))
+                  ;; No phase-dependent field lies before A in this isolate.
+                  ;; The identical negative searched policies therefore hold
+                  ;; for all actual clock rotations, without a frozen pulse.
+                  (set! negative-cache (dict-set negative-cache key bypass))
+                  bypass))))
+        ;; Normalize TIME only by real no-input ticks from a certified rest.
+        ;; The arrival's position, momentum, ability and carry are never set.
+        (define (align node tau)
+          (let ((proof (wait node tau)))
+            (and proof (car proof))))
+        (define (seek start target record!)
+          (let ((prior (find (lambda (entry) (eq? (car entry) record!)) route-cache)))
+            (let ((route
+                    (if prior (cdr prior)
+                        (timed-route-finder advance tiles-for HARKFELL-FEEL
+                          (lambda (node) candidate) shelter? wait bound record!
+                          (lambda () (set! search-incomplete #t))))))
+              (unless prior (set! route-cache (cons (cons record! route) route-cache)))
+              (route start target))))
+        (for-each
+          (lambda (profile)
+            (let* ((carry (car profile)) (down (cdr profile))
+                   (entries (cloudstair-entry-phases ct home carry down))
+                   (root (align (car entries) 0))
+                   (entry-fails 0) (unreached '()) (traps '())
+                   (landings #{}) (rotations #{}) (landing-count 0) (complete (and root #t))
+                   (covered #{})
+                   (target-count 0))
+              (define (record! node)
+                (let ((cell (cell-of node)))
+                  (when cell (set! covered (dict-set covered cell #t))))
+                (let ((rotation (and (shelter? node)
+                                     (timed-key (timed-node node body:
+                                                  (body (timed-node-body node) tau: 0))))))
+                  (unless (and rotation (dict-contains? rotations rotation))
+                    (let* ((rest (or (align node 0) node)) (key (timed-key rest)))
+                      (when rotation (set! rotations (dict-set rotations rotation #t)))
+                      (unless (dict-contains? landings key)
+                        (set! landings (dict-set landings key rest))
+                        (set! landing-count (+ landing-count 1)))))))
+              (set! search-incomplete #f)
+              (for-each
+                (lambda (entry)
+                  (let ((rest (align entry 0)))
+                    (unless (and rest root (equal? (timed-key rest) (timed-key root)))
+                      (set! entry-fails (+ entry-fails 1)))))
+                entries)
+              (if (and down (memv 4 carry))
+                  (begin
+                    (for-each
+                      (lambda (target)
+                        (set! target-count (+ target-count 1))
+                        (when (= (modulo target-count 20) 0)
+                          (log (list 'coverage 'carry carry 'targets target-count
+                                     'landings landing-count 'unreached (length unreached))))
+                        (if (or (>= landing-count bound) (not complete))
+                            (set! complete #f)
+                            (unless (or (dict-contains? covered target)
+                                        (seek root target record!))
+                              (set! unreached (cons target unreached)))))
+                      targets)
+                    ;; Directed return from each genuine retained landing.
+                    ;; New landings from return trials also create obligations.
+                    (let ((checked #{}))
+                      (let drain ()
+                        (let ((pending (filter (lambda (entry)
+                                                 (not (dict-contains? checked (car entry))))
+                                               (dict-entries landings))))
+                          (cond ((>= landing-count bound) (set! complete #f))
+                                ((null? pending) #t)
+                                (else
+                                 (for-each
+                                   (lambda (entry)
+                                     (set! checked (dict-set checked (car entry) #t))
+                                     (unless (seek (cdr entry) home record!)
+                                       (set! traps (cons (timed-key (cdr entry)) traps))))
+                                   pending)
+                                 (drain)))))))
+                  ;; Artificial negative profiles must fail at the legal
+                  ;; entrance, rather than being spawned past its seal.
+                  (begin
+                    (when (entry-bypassed? carry down)
+                      (set! failures (+ failures 1))
+                      (log (list 'RED 'entry-bypass 'carry carry 'down down)))))
+              (when search-incomplete (set! complete #f))
+              (set! failures (+ failures entry-fails (length unreached) (length traps)
+                                (if complete 0 1)))
+              (log (list 'region 'carry carry 'down down 'entry-phases 600
+                         'entry-failures entry-fails 'required-cells (length targets)
+                         'unreached (reverse unreached) 'traps (length traps)
+                         'actual-landings landing-count 'complete complete))))
+          profiles)
+        failures))))
