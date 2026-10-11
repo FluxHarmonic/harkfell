@@ -5,6 +5,7 @@
         (engine tilemap)
         (engine reach)
         (engine reach timed)
+        (engine reach waits)
         (harkfell feel)
         (harkfell content)
         (harkfell source)
@@ -25,6 +26,31 @@
     (let ((b (body-step (timed-node-body node) in tm F)))
       (and (not (memq 'hazard (body-events b))) (timed-node node body: b)))))
 (define STEP (stepper FLOOR))
+
+(test-group "timed reach: exact directed shelter cycles"
+  (test "cycle joins agree with fresh physical replay across warning and wrap"
+    (let ((wait (timed-waiter FLOOR F STEP)))
+      (for-each
+        (lambda (tau)
+          (let* ((node (timed-node NODE body: (body (timed-node-body NODE) tau: tau)))
+                 (proof (wait node 0))
+                 (trace (timed-run STEP node (make-list (cdr proof) NO-INTENT))))
+            (assert-true (> (cdr proof) 0))
+            (assert-equal (timed-key (car (reverse trace))) (timed-key (car proof)))))
+        '(359 599 0 300 479))))
+  (test "exposed waits and frozen clocks cannot create cycle edges"
+    (let* ((tm (tilemap FLOOR air: (list (air-field x: 64 y: 144 w: 32 h: 32 east: 0.66 pulsed: #t))))
+           (exposed (timed-waiter tm F (stepper tm)))
+           (frozen (timed-waiter FLOOR F (lambda (n in) n))))
+      (assert-false (exposed NODE 0))
+      (assert-false (frozen NODE 0))))
+  (test "changed carry and ability require their own actual wait proof"
+    (let ((wait (timed-waiter FLOOR F STEP)))
+      (assert-true (wait NODE 0))
+      (let* ((other (timed-node NODE data: '(2 3 4) body: (body (timed-node-body NODE) down: #f)))
+             (proof (wait other 0)))
+        (assert-equal '(2 3 4) (timed-node-data (car proof)))
+        (assert-false (body-down (timed-node-body (car proof))))))))
 
 (test-group "timed reach: physical waiting and state"
   (test "a full cycle of genuine still ground is a shelter"
@@ -135,6 +161,32 @@
   (test "no H2 means no down, even at the gift"
     (let ((n (ADVANCE (timed-node (car SEEDS) data: '()) NO-INTENT)))
       (assert-false (body-down (timed-node-body n))))))
+
+(test-group "timed reach: authored H5 and shelter certificates"
+  (test "H5 contact retains the physical body and wrapped arrival phase"
+    (let* ((rm (content-room CT 12 -2))
+           (cell (local->global CT rm 16 5))
+           (entry (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 599))
+           (next (ADVANCE entry NO-INTENT)))
+      (assert-equal '(2 4 5) (timed-node-data next))
+      (assert-equal 0 (body-tau (timed-node-body next)))
+      (assert-equal (body-x (timed-node-body entry)) (body-x (timed-node-body next)))
+      (assert-true (body-down (timed-node-body next)))))
+  (test "a bypassed H5 stays absent"
+    (let* ((cell (local->global CT (content-room CT 12 -2) 14 5))
+           (entry (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 479))
+           (next (ADVANCE entry NO-INTENT)))
+      (assert-equal '(2 4) (timed-node-data next))
+      (assert-equal 480 (body-tau (timed-node-body next)))))
+  (test "a full-cycle certificate agrees with fresh rotated validation"
+    (let* ((cell (local->global CT (content-room CT 8 0) 10 7))
+           (entries (cloudstair-entry-phases CT cell '(2 4) #t))
+           (certified? (cloudstair-shelter-checker CT ADVANCE)))
+      (for-each (lambda (tau)
+                  (let ((node (list-ref entries tau)))
+                    (assert-true (certified? node))
+                    (assert-equal (cloudstair-shelter? CT ADVANCE node) (certified? node))))
+                '(0 299 300 359 360 479 599)))))
 
 (define CACHE-START (timed-node NODE body: (body (timed-node-body NODE) tau: 0)))
 (define (cache-policies node)

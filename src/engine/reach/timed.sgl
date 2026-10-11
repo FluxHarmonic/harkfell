@@ -10,7 +10,7 @@
           (engine tilemap))
 
   (export timed-node timed-node? timed-node-body timed-node-data timed-key
-          timed-run timed-wait? timed-shelter? timed-window
+          timed-run timed-prefix timed-wait? timed-shelter? timed-window
           timed-graph timed-graph? timed-graph-nodes timed-graph-edges
           timed-graph-complete timed-graph-traps timed-search
           timed-memo-key timed-graph-memo timed-graph-reused)
@@ -118,15 +118,15 @@
     ;; Only input families are cached. Every reused family replays again;
     ;; bodies, edges, safe waits and return proofs are always rebuilt.
     (define (timed-search starts advance policies shelter? home? node-limit . reuse)
-      (let ((known '()) (nodes '()) (edges '()) (front '()) (back '())
+      (let ((known #{}) (nodes '()) (edges '()) (front '()) (back '())
             (count 0) (complete #t)
             (prior (if (pair? reuse) (car reuse) '()))
             (key-of (and (pair? reuse) (pair? (cdr reuse)) (cadr reuse)))
             (memo '()) (reused 0))
         (define (add! node)
           (let ((key (timed-key node)))
-            (unless (member key known)
-              (set! known (cons key known))
+            (unless (dict-contains? known key)
+              (set! known (dict-set known key #t))
               (set! nodes (cons node nodes))
               (set! back (cons node back))
               (set! count (+ count 1)))))
@@ -172,17 +172,24 @@
                    (drain)))))
         ;; Directed return proof at actual future phases. No hazard/reset
         ;; edge is present, and waiting can only follow a physical wait edge.
-        (let ((returns (map timed-key (filter home? nodes))))
-          (let close ()
-            (let ((before (length returns)))
-              (for-each
-                (lambda (edge)
-                  (when (and (member (cadr edge) returns)
-                             (not (member (car edge) returns)))
-                    (set! returns (cons (car edge) returns))))
-                edges)
-              (unless (= before (length returns)) (close))))
+        (let ((returns #{}) (incoming #{}))
+          (for-each
+            (lambda (edge)
+              (let* ((key (cadr edge))
+                     (old (if (dict-contains? incoming key) (dict-ref incoming key) '())))
+                (set! incoming (dict-set incoming key (cons (car edge) old)))))
+            edges)
+          (let close ((front (map timed-key (filter home? nodes))) (back '()))
+            (cond ((and (null? front) (null? back)) #t)
+                  ((null? front) (close (reverse back) '()))
+                  ((dict-contains? returns (car front)) (close (cdr front) back))
+                  (else
+                   (let ((key (car front)))
+                     (set! returns (dict-set returns key #t))
+                     (close (cdr front)
+                            (append (if (dict-contains? incoming key)
+                                        (dict-ref incoming key) '()) back))))))
           (timed-graph nodes: (reverse nodes) edges: (reverse edges)
                        complete: complete
                        memo: memo reused: reused
-                       traps: (filter (lambda (node) (not (member (timed-key node) returns))) nodes)))))))
+                       traps: (filter (lambda (node) (not (dict-contains? returns (timed-key node)))) nodes)))))))

@@ -10,13 +10,16 @@
           (engine worldmap)
           (engine reach)
           (engine reach timed)
+          (engine reach waits)
           (harkfell content)
           (harkfell feel)
           (harkfell check)
           (harkfell down))
 
   (export cloudstair-stepper cloudstair-entry-phases
-          cloudstair-shelter? cloudstair-window cloudstair-diagnostic-profiles
+          cloudstair-shelter? cloudstair-shelter-checker
+          cloudstair-waiter
+          cloudstair-window cloudstair-diagnostic-profiles
           cloudstair-search cloudstair-progress)
 
   (begin
@@ -108,6 +111,30 @@
     (define (cloudstair-shelter? ct advance node)
       (timed-shelter? (tiles-carrying ct (timed-node-data node))
                       HARKFELL-FEEL advance node))
+
+    (define (cloudstair-waiter ct advance)
+      (let ((tiles-for (cloudstair-tiles ct)) (waiters '()))
+        (lambda (node target)
+          (let* ((carry (timed-node-data node)) (prior (assoc carry waiters))
+                 (waiter (if prior (cdr prior)
+                             (timed-waiter (tiles-for carry) HARKFELL-FEEL advance))))
+            (unless prior (set! waiters (cons (cons carry waiter) waiters)))
+            (waiter node target)))))
+
+    ;; A full-cycle stillness certificate covers every cyclic rotation of
+    ;; that same actual rest. Remove tau only from this certificate's key;
+    ;; movement, arrivals and route memo keys retain the actual phase.
+    (define (cloudstair-shelter-checker ct advance)
+      (let ((tiles-for (cloudstair-tiles ct)) (certificates #{}))
+        (lambda (node)
+          (let ((key (timed-key
+                       (timed-node node body: (body (timed-node-body node) tau: 0)))))
+            (if (dict-contains? certificates key)
+                (dict-ref certificates key)
+                (let ((safe (timed-shelter? (tiles-for (timed-node-data node))
+                                           HARKFELL-FEEL advance node)))
+                  (set! certificates (dict-set certificates key safe))
+                  safe))))))
 
     (define (cloudstair-window ct advance start family arrives? phase)
       (and (cloudstair-shelter? ct advance start)
