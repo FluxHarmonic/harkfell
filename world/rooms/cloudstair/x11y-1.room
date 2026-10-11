@@ -1,0 +1,22 @@
+;; U's drop (columns 12-13) lands on this shelf, eight tiles under the roof.
+(room
+  region: cloudstair
+  at: (11 -1)
+  title: "Under the Crown"
+  intent: "a broad shelf below the seed crown catches a returning drift"
+  bed: (wind 0.5 water 0 air 0 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("############  ###########"
+   "#########        ########"
+   "######              #####"
+   "###                   ###"
+   "#                       #"
+   "                         "
+   "                         "
+   "  | |  |   |  ||   |  |  "
+   "#########################"
+   "#########################"
+   "#########################")
+  decor: auto)

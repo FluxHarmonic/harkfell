@@ -79,6 +79,22 @@
   (pip-curtain-3 "#b4a58a" "hanging pipe lips")
   (pip-seep "#777974" "ordinary clear seep, without harmonic blue")
   (pip-ochre "#b17d45" "the Pipes' one warm accent: ochre stains")
+  ;; Cloudstair: pale cliffs in a large sky, dry grass and cream seeds; the
+  ;; slow cloud below the crags takes the water slot. The warm accent is
+  ;; sunlight on the grass; rose stays H5's alone.
+  (cld-sky-1 "#6f88a6" "high sky, clear grey-blue")
+  (cld-sky-2 "#98aec4" "middle sky; the far cliffs")
+  (cld-sky-3 "#c4d0da" "low sky, cloud in shadow")
+  (cld-sky-4 "#eceee6" "cloud tops in sun")
+  (cld-stone-1 "#2c3036" "shadow under the shelves")
+  (cld-stone-2 "#575c64" "cliff stone in shade")
+  (cld-stone-3 "#8f938f" "pale cliff stone")
+  (cld-stone-4 "#cfcdc2" "lit stone edges")
+  (cld-grass-1 "#565a43" "dry grass in shade")
+  (cld-grass-2 "#8a875b" "dry grass")
+  (cld-grass-3 "#c6bb8b" "lit grass heads, the seeds' cream")
+  (cld-cloud "#b0bfce" "the slow cloud below the crags")
+  (cld-sun "#dcae5c" "Cloudstair's one warm accent: sunlight on the grass")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")
@@ -183,3 +199,26 @@
   moments: (wind-in-stone three-echoes the-pipes-breathe)
   wander: (air-below seep-song)
   gives: ((overtone 4)))
+;; Cloudstair (0.4, topics/harkfell-cloudstair-bible and -map): pale cliffs
+;; and shelves above the Hollow's Updraft Edge, reached on the launch lift
+;; behind its blue stone with the cattail down; H5 on the still crag at V.
+;; The bed, its moments and wandering pieces are SOUND's; until they land
+;; the region has no bed (the director plays none) and no moments.
+(region cloudstair
+  name: "Cloudstair"
+  bounds: ((7 -2) (12 1))
+  overtone: 5
+  bed-channels: (wind water air drone)
+  mode: mixolydian
+  palette: (cld-sky-1 cld-sky-2 cld-sky-3 cld-sky-4
+            cld-stone-1 cld-stone-2 cld-stone-3 cld-stone-4
+            cld-grass-1 cld-grass-2 cld-grass-3 cld-cloud cld-sun fur-1 fur-2 ink)
+  hazard: gap
+  tiles: cloudstair
+  roster: (seed reedling)
+  moments: ()
+  wander: ()
+  gives: ((overtone 5)))
+;; Seeds: small tufted seeds that drift in the lifts, rise with the gust and
+;; settle in shelter. Never a platform, never harmful.
+(creature seed behaviour: drift)

@@ -1,0 +1,24 @@
+;; The first regional lift: a steady column (12-14) from the floor up into
+;; H, open on both sides. Release jump to come back down onto this floor.
+(room
+  region: cloudstair
+  at: (10 1)
+  title: "First Lift"
+  intent: "a steady thread of rising seeds carries the down upward beside a safe landing"
+  bed: (wind 0.5 water 0.15 air 0.7 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("############^^^##########"
+   "######      ^^^     #####"
+   "###         ^^^       ###"
+   "#           ^^^         #"
+   "#           ^^^         #"
+   "#           ^^^         #"
+   "            ^^^         #"
+   "            ^^^         #"
+   "   |  |  |  ^^^  | ||   #"
+   "#########################"
+   "#########################")
+  things: ((seed at: (13 5) count: 4))
+  decor: auto)

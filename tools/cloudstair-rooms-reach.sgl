@@ -1,0 +1,94 @@
+;;; Cloudstair rooms: steady-field geometry diagnostic for ROOMS+LOOK.
+;;; NOT a timed reach PASS: pulsed lifts are read as steady (as if always
+;;; gusting) and the I/P eastward gusts are removed (calm), so the spatial
+;;; search can say whether the rooms' shapes connect, and where a stranded
+;;; standing cell would be. The exact-phase gate is SYSTEMS's.
+;;;
+;;; Run in the source harness (procedures/harkfell-look-review-harness):
+;;;   CS_WORLD=DIR CS_MODE=lifts|nolifts CS_DOWN=1|0 CS_CARRY=2-4
+;;;   scripts/dev build/look-harness/bin/harkfell-test --no-strict \
+;;;     tools/cloudstair-rooms-reach.sgl
+;;; DIR is a probe world (the region's rooms, its start inside, borders
+;;; closed). nolifts also turns every ^ into plain air, the negative control:
+;;; with it, nothing above the start's own floor of rooms may be reached.
+(import (sigil list) (sigil string) (sigil process)
+        (engine body) (engine tilemap) (engine air) (engine worldmap) (engine reach)
+        (harkfell feel) (harkfell content) (harkfell source) (harkfell check))
+
+(define WORLD (or (getenv "CS_WORLD") "world"))
+(define MODE (string->symbol (or (getenv "CS_MODE") "lifts")))
+(define DOWN (not (equal? (getenv "CS_DOWN") "0")))
+(define CARRY
+  (let ((s (getenv "CS_CARRY")))
+    (if (or (not s) (string=? s "none") (string=? s ""))
+        '()
+        (map string->number (string-split s "-")))))
+
+(define CT (load-content (read-world-source WORLD)))
+(define WM (content-map CT))
+
+(define (diagnostic-tiles tm)
+  (case MODE
+    ((nolifts)
+     (let ((cells (vector-copy (tilemap-cells tm))))
+       (let loop ((i 0))
+         (when (< i (vector-length cells))
+           (when (eq? (vector-ref cells i) 'updraft) (vector-set! cells i 'air))
+           (loop (+ i 1))))
+       (tilemap tm cells: cells air: '())))
+    (else
+     (tilemap tm air: (filter-map (lambda (field)
+                                    (and (> (air-field-lift field) 0)
+                                         (air-field field pulsed: #f)))
+                                  (tilemap-air tm))))))
+
+(define TM (diagnostic-tiles (tiles-carrying CT CARRY)))
+;; CS_START=X,Y:C,R overrides the world's start (a room, a cell in it).
+(define START
+  (let ((s (getenv "CS_START")))
+    (if s
+        (let* ((parts (string-split s ":"))
+               (xy (map string->number (string-split (car parts) ",")))
+               (cr (map string->number (string-split (cadr parts) ","))))
+          (cons (+ (car cr) (* 25 (- (car xy) (worldmap-x0 WM))))
+                (+ (cadr cr) (* 11 (- (cadr xy) (worldmap-y0 WM))))))
+        (start-cell CT))))
+
+(define (room-of cell)
+  (cons (+ (worldmap-x0 WM) (quotient (car cell) 25))
+        (+ (worldmap-y0 WM) (quotient (cdr cell) 11))))
+(define (local cell) (cons (modulo (car cell) 25) (modulo (cdr cell) 11)))
+(define (cell-name cell)
+  (let ((r (room-of cell)) (l (local cell)))
+    (string-append (number->string (car r)) "," (number->string (cdr r)) ":"
+                   (number->string (car l)) "," (number->string (cdr l)))))
+
+(display (string-append "cloudstair-rooms-reach: world " WORLD ", mode "
+                        (symbol->string MODE) ", down " (if DOWN "yes" "no")
+                        ", " (carry-label CARRY) ", start " (cell-name START) "\n"))
+(define G (reach-search-down TM HARKFELL-FEEL (list START) witness-lands? DOWN))
+(define FWD (reach-forward G (list START)))
+(define BACK (reach-backward G (list START)))
+(define CELLS (standable-cells TM))
+(define (seen? v cell) (vector-ref v (cell-index TM (car cell) (cdr cell))))
+(define UNREACHED (filter (lambda (c) (not (seen? FWD c))) CELLS))
+(define TRAPS (filter (lambda (c) (and (seen? FWD c) (not (seen? BACK c)))) CELLS))
+
+;; per room: standable, reached, trapped
+(for-each
+  (lambda (p)
+    (let* ((key (cons (placed-x p) (placed-y p)))
+           (mine (filter (lambda (c) (equal? (room-of c) key)) CELLS))
+           (got (filter (lambda (c) (seen? FWD c)) mine))
+           (trap (filter (lambda (c) (member c TRAPS)) mine)))
+      (display (string-append "  room " (number->string (car key)) "," (number->string (cdr key))
+                              ": " (number->string (length got)) "/" (number->string (length mine))
+                              " reached" (if (null? trap) "" (string-append ", " (number->string (length trap)) " TRAPPED"))
+                              "\n"))))
+  (worldmap-rooms WM))
+(display (string-append "unreached: " (string-join (map cell-name UNREACHED) " ") "\n"))
+(display (string-append "trapped: " (string-join (map cell-name TRAPS) " ") "\n"))
+(display "stats: ") (write (graph-stats G)) (newline)
+(display (string-append "RESULT " (symbol->string MODE) " down=" (if DOWN "1" "0")
+                        " unreached=" (number->string (length UNREACHED))
+                        " trapped=" (number->string (length TRAPS)) "\n"))

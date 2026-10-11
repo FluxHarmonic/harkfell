@@ -1,0 +1,23 @@
+;; G's drop (columns 20-21) lands on the turf here, nine tiles under the
+;; roof: a catch, never a way back up.
+(room
+  region: cloudstair
+  at: (9 1)
+  title: "Fallen Seeds"
+  intent: "fallen seeds gather on soft turf beneath a broken stair: a breath"
+  bed: (wind 0.4 water 0.15 air 0 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("####################  ###"
+   "######        ###     ###"
+   "####           #       ##"
+   "##                     ##"
+   "#                       #"
+   "#                       #"
+   "                         "
+   "                         "
+   "   |    ##   |  ||    |  "
+   "#########################"
+   "#########################")
+  decor: auto)

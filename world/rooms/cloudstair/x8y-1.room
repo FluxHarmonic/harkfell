@@ -1,0 +1,25 @@
+;; F's pulse comes up through the floor (columns 11-13) onto the sill east
+;; of it. Release jump over the gap to go back down to F.
+(room
+  region: cloudstair
+  at: (8 -1)
+  title: "The Rising Thread"
+  intent: "a pulsed lift emerges onto a sheltered sill where the next gust can be watched safely"
+  bed: (wind 0.4 water 0 air 0.7 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("#########################"
+   "########         ########"
+   "#####               #####"
+   "###                   ###"
+   "#          ^^^         ##"
+   "#          ^^^          #"
+   "#          ^^^          #"
+   "           ^^^           "
+   "           ^^^           "
+   "  |  |  |  ^^^  |  || |  "
+   "###########^^^###########")
+  things: ((air-field at: (11 4) size: (3 7) kind: pulsed-lift)
+           (seed at: (12 7) count: 3))
+  decor: auto)

@@ -1,0 +1,23 @@
+;; K's steady lift comes up in columns 4-6. Open sky above.
+(room
+  region: cloudstair
+  at: (7 -2)
+  title: "The Last Grass"
+  intent: "the last grass faces a sky larger than the fell beneath it: a breath"
+  bed: (wind 0.8 water 0 air 0.5 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#                        "
+   "#   ^^^                  "
+   "#   ^^^                  "
+   "#   ^^^       | |        "
+   "#   ^^^      ####        "
+   "# | ^^^ |  ########  | | "
+   "####^^^##################")
+  things: ((reedling flock: 5 zone: reeds))
+  decor: auto)

@@ -1,0 +1,23 @@
+;; Old stair cuts climb to a lip (row 3) that stops in the air over the
+;; drop to C (columns 20-21). The main path steps over that drop.
+(room
+  region: cloudstair
+  at: (9 0)
+  title: "Broken Stair"
+  intent: "old stair cuts stop in empty air, while one surviving lip offers a harder way upward"
+  bed: (wind 0.6 water 0.15 air 0 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("#########################"
+   "######             ######"
+   "###                  ####"
+   "#             ####    ###"
+   "#                      ##"
+   "          ###            "
+   "                         "
+   "   |  ##  |   |  |       "
+   "####################  ###"
+   "####################  ###"
+   "####################  ###")
+  decor: auto)

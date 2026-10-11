@@ -66,6 +66,22 @@
   (pip-curtain-3 "#b4a58a" "hanging pipe lips")
   (pip-seep "#777974" "ordinary clear seep, without harmonic blue")
   (pip-ochre "#b17d45" "the Pipes' one warm accent: ochre stains")
+  ;; Cloudstair: pale cliffs in a large sky, dry grass and cream seeds; the
+  ;; slow cloud below the crags takes the water slot. The warm accent is
+  ;; sunlight on the grass; rose stays H5's alone.
+  (cld-sky-1 "#6f88a6" "high sky, clear grey-blue")
+  (cld-sky-2 "#98aec4" "middle sky; the far cliffs")
+  (cld-sky-3 "#c4d0da" "low sky, cloud in shadow")
+  (cld-sky-4 "#eceee6" "cloud tops in sun")
+  (cld-stone-1 "#2c3036" "shadow under the shelves")
+  (cld-stone-2 "#575c64" "cliff stone in shade")
+  (cld-stone-3 "#8f938f" "pale cliff stone")
+  (cld-stone-4 "#cfcdc2" "lit stone edges")
+  (cld-grass-1 "#565a43" "dry grass in shade")
+  (cld-grass-2 "#8a875b" "dry grass")
+  (cld-grass-3 "#c6bb8b" "lit grass heads, the seeds' cream")
+  (cld-cloud "#b0bfce" "the slow cloud below the crags")
+  (cld-sun "#dcae5c" "Cloudstair's one warm accent: sunlight on the grass")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")

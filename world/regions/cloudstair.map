@@ -1,0 +1,59 @@
+;;; world/regions/cloudstair.map - Cloudstair (H5), the approved 22-room
+;;; layout of topics/harkfell-cloudstair-map, above and east of the Hollow's
+;;; Updraft Edge. Global y falls as you climb.
+;;;
+;;;   x7   x8   x9   x10  x11  x12
+;;;   Q -  R -  S -  T -  U -  V      y-2  open sky; H5 at V
+;;;   |         |         v
+;;;   K -  L -  M -  N -  O -  P      y-1
+;;;        |                   |
+;;;   E -  F -  G -  H -  I -  J      y0
+;;;   v         v    |
+;;;   A -> B -  C -  D                y1   A over Updraft Edge (7,2)
+;;;
+;;; The map's bars are open seams; direction is the terrain's. Lifts:
+;;; D-H, J-P, K-Q steady; F-L, M-S pulsed with the shared gust (calm 0-359,
+;;; warning 300-359, gust 360-599). One way: A->B (a seven-tile drop),
+;;; E->A, G->C, U->O (drops onto broad shelves). The optional G-M glide and
+;;; single wall kick is omitted: with the measured glide (fall 3 px/tick at
+;;; 1.32 px/tick across) a four-tile glide loses as much height as the jump
+;;; gains, so one kick cannot reach M's floor from any lip under G's roof;
+;;; the map allows omitting it. The only border is A south over Updraft
+;;; Edge, through the launch throat (columns 8-10).
+;;;
+;;; Breaths: B, C, E, H, J, K, N, Q (eight of twenty-two).
+(map
+  region: cloudstair
+  origin: (7 -2)
+  layout:
+  ("Q-R-S-T-U-V"
+   "|   |   |  "
+   "K-L-M-N-O-P"
+   "  |       |"
+   "E-F-G-H-I-J"
+   "|   | |    "
+   "A-B-C-D    ")
+  rooms:
+  ((A "The Lip Above Home" "above the familiar fell, a low ledge spills one way onto a sheltered terrace")
+   (B "Downwind Shelf" "the cliff shelters a wide shelf where loose down settles before rising again: a breath")
+   (C "Fallen Seeds" "fallen seeds gather on soft turf beneath a broken stair: a breath")
+   (D "First Lift" "a steady thread of rising seeds carries the down upward beside a safe landing")
+   (E "Homeward Ledge" "the Hollow lies below a broad ledge and a smooth chute leads home: a breath")
+   (F "Between Cliffs" "two cliffs shelter a waiting shelf beneath a stream of down that rises with each gust")
+   (G "Broken Stair" "old stair cuts stop in empty air, while one surviving lip offers a harder way upward")
+   (H "The Wind Window" "through a notch the high note is heard above a smooth cliff, while seeds lead west to the lift: a breath")
+   (I "Cloud Gap" "a clear break in the ledge asks for a held drift as eastward gusts pass over slow cloud")
+   (J "The Far Shelf" "past the open gap a sheltered shelf holds small seed creatures out of the wind: a breath")
+   (K "Sheltered Seeds" "seed creatures rest in a sheltered hollow below the last grass: a breath")
+   (L "The Rising Thread" "a pulsed lift emerges onto a sheltered sill where the next gust can be watched safely")
+   (M "The Split Crag" "a divided crag shelters a waiting shelf beneath gusts rising toward the sky above the cloud")
+   (N "Low Cloud" "a slow cloud crosses a sheltered hollow and briefly softens its sun: a breath")
+   (O "Under the Crown" "a broad shelf below the seed crown catches a returning drift")
+   (P "The Open Crossing" "eastward gusts cross two exposed breaks, with a sheltered rest between their drifts")
+   (Q "The Last Grass" "the last grass faces a sky larger than the fell beneath it: a breath")
+   (R "Windworn Arch" "an empty arch opens onto sky where an old stair once continued")
+   (S "Above the Cloud" "a gust lifts you above the cloud onto a sheltered landing, leaving the high note ahead")
+   (T "The High Saddle" "a low saddle crosses the ridge between the lift and the seed crown")
+   (U "Seed Crown" "drifting creatures gather around a crag and part as you walk toward the note")
+   (V "The Still Crag" "a rose note rests on a quiet crag while the whole sky moves slowly around it"))
+  borders: ((A south)))

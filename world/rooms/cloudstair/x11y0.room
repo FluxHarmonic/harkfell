@@ -1,0 +1,25 @@
+;; A four-tile gap (columns 10-13) with the deep drop two rows down, and
+;; the gust's eastward push over it only. Both banks are wider than three
+;; tiles and out of the wind.
+(room
+  region: cloudstair
+  at: (11 0)
+  title: "Cloud Gap"
+  intent: "a clear break in the ledge asks for a held drift as eastward gusts pass over slow cloud"
+  bed: (wind 0.9 water 0.15 air 0.5 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("#########################"
+   "#####              ######"
+   "##                    ###"
+   "#                       #"
+   "#                       #"
+   "                         "
+   "                         "
+   "   |  | |           |  | "
+   "##########    ###########"
+   "##########    ###########"
+   "##########xxxx###########")
+  things: ((air-field at: (10 1) size: (4 8) kind: east-gust))
+  decor: auto)

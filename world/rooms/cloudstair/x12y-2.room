@@ -1,0 +1,23 @@
+;; H5 rests on the crag's top, reached by plain steps.
+(room
+  region: cloudstair
+  at: (12 -2)
+  title: "The Still Crag"
+  intent: "a rose note rests on a quiet crag while the whole sky moves slowly around it"
+  bed: (wind 0.6 water 0 air 0 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "                        #"
+   "              #####     #"
+   "             #######    #"
+   "            #########   #"
+   "  |        ###########  #"
+   "#########################")
+  things: ((harmonic at: (16 5) overtone: 5))
+  decor: auto)

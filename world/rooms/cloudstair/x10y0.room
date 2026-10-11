@@ -1,0 +1,23 @@
+;; D's lift comes up in columns 12-14 between the west shelf and the low
+;; sill. The roof is whole but for its notch: no way up to N.
+(room
+  region: cloudstair
+  at: (10 0)
+  title: "The Wind Window"
+  intent: "through a notch the high note is heard above a smooth cliff, while seeds lead west to the lift: a breath"
+  bed: (wind 0.6 water 0.15 air 0.5 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("#########################"
+   "##########  #############"
+   "#########    ############"
+   "#######        ##########"
+   "#####            ########"
+   "            ^^^          "
+   "            ^^^          "
+   "  |   | |   ^^^     | |  "
+   "############^^^     #####"
+   "############^^^ | | #####"
+   "############^^^##########")
+  decor: auto)

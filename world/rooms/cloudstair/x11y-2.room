@@ -1,0 +1,24 @@
+;; The crown: a crag in steps. A drop-through stone (columns 12-13) on its
+;; top opens the shaft down to O.
+(room
+  region: cloudstair
+  at: (11 -2)
+  title: "Seed Crown"
+  intent: "drifting creatures gather around a crag and part as you walk toward the note"
+  bed: (wind 0.8 water 0 air 0 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("                         "
+   "                         "
+   "                         "
+   "                         "
+   "                         "
+   "         |      |        "
+   "         ###==###        "
+   "        ####  ####       "
+   "       #####  #####      "
+   "  |   ######  ######  |  "
+   "############  ###########")
+  things: ((seed at: (12 4) count: 5))
+  decor: auto)

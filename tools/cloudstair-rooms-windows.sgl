@@ -1,0 +1,90 @@
+;;; Cloudstair rooms: the human timing margins (the map's "Human timing
+;;; margin", the bible's "Broad windows, not exact frames") replayed on the
+;;; AUTHORED rooms, pulsed lifts and eastward gusts as they are, on the
+;;; shared clock. For each timed leg: its start is a full-cycle shelter, and
+;;; ONE input family, the same at every departure tick, reaches the leg's
+;;; rest within 120 ticks from every tick of its window:
+;;;   F->L, M->S        gust 360-479 (the lift only blows then)
+;;;   I, P each leg     calm 0-239 both ways; gust 360-479 eastward too
+;;; The families are SYSTEMS's measured ones ((harkfell cloudstair probes)
+;;; probe-lift-script; tools/cloudstair-gap.sgl's run-up 32): the rooms
+;;; copy those instruments' geometry. Prints each leg's failed departures
+;;; (none is the pass) and RESULT. Evidence for ROOMS+LOOK; the exact-phase
+;;; world gate remains SYSTEMS's.
+;;;
+;;;   CS_WORLD=DIR scripts/dev build/look-harness/bin/harkfell-test \
+;;;     --no-strict tools/cloudstair-rooms-windows.sgl
+(import (sigil list) (sigil string) (sigil process)
+        (engine body) (engine air) (engine tilemap) (engine worldmap)
+        (engine reach) (engine reach timed)
+        (harkfell feel) (harkfell content) (harkfell source) (harkfell check)
+        (harkfell cloudstair probes))
+
+(define F HARKFELL-FEEL)
+(define CT (load-content (read-world-source (or (getenv "CS_WORLD") "world"))))
+(define WM (content-map CT))
+(define TM (tiles-carrying CT '(2 4)))
+(define STEP (probe-step TM))
+
+;; global cell / pixel of a room-local cell
+(define (gcol rx c) (+ c (* 25 (- rx (worldmap-x0 WM)))))
+(define (grow ry r) (+ r (* 11 (- ry (worldmap-y0 WM)))))
+
+(define (start-node rx ry c r tau)
+  (timed-node body: (body (stand-body TM F (gcol rx c) (grow ry r)) down: #t tau: tau)
+              data: '(2 4)))
+
+;; at rest, its centre in room (rx, ry), between local columns c0 and c1
+(define (rests-in rx ry c0 c1)
+  (lambda (node)
+    (let* ((b (timed-node-body node)) (c (body-center b F))
+           (x (car c)) (y (cdr c)))
+      (and (eq? (body-mode b) 'ground) (= (body-vx b) 0) (= (body-vy b) 0)
+           (>= x (* 16 (gcol rx c0))) (< x (* 16 (+ 1 (gcol rx c1))))
+           (>= y (* 16 (grow ry 0))) (< y (* 16 (grow ry 11)))))))
+
+(define (gap-script h)
+  (lambda (node)
+    (append (make-list 32 (intent h: h))
+            (list (intent h: h jump: #t press: #t))
+            (make-list 46 (intent h: h jump: #t))
+            (make-list 41 NO-INTENT))))
+
+(define (lift-script node) (probe-lift-script node))
+
+;; (name room-x room-y start-c start-r family arrives? windows)
+(define LEGS
+  (list
+    (list "F->L lift" 8 0 10 7 lift-script (rests-in 8 -1 14 24) '((360 479)))
+    (list "M->S lift" 9 -1 10 7 lift-script (rests-in 9 -2 14 24) '((360 479)))
+    (list "I east" 11 0 8 7 (gap-script 1) (rests-in 11 0 14 24) '((0 239) (360 479)))
+    (list "I west" 11 0 15 7 (gap-script -1) (rests-in 11 0 0 9) '((0 239)))
+    (list "P first east" 12 -1 1 7 (gap-script 1) (rests-in 12 -1 7 11) '((0 239) (360 479)))
+    (list "P first west" 12 -1 8 7 (gap-script -1)
+          (lambda (n) (or ((rests-in 12 -1 0 2) n) ((rests-in 11 -1 0 24) n))) '((0 239)))
+    (list "P second east" 12 -1 10 7 (gap-script 1) (rests-in 12 -1 16 20) '((0 239) (360 479)))
+    (list "P second west" 12 -1 17 7 (gap-script -1) (rests-in 12 -1 7 11) '((0 239)))))
+
+(define failures 0)
+(for-each
+  (lambda (leg)
+    (let* ((name (list-ref leg 0)) (rx (list-ref leg 1)) (ry (list-ref leg 2))
+           (c (list-ref leg 3)) (r (list-ref leg 4))
+           (family (list-ref leg 5)) (arrives? (list-ref leg 6))
+           (start (start-node rx ry c r 0))
+           (shelter (timed-shelter? TM F STEP start)))
+      (unless shelter (set! failures (+ failures 1)))
+      (display (string-append name ": start (" (number->string c) "," (number->string r) ") "
+                              (if shelter "is a full-cycle shelter" "is NOT a shelter") "\n"))
+      (for-each
+        (lambda (w)
+          (let ((failed (timed-window STEP start family arrives? (car w) (cadr w) 120)))
+            (set! failures (+ failures (length failed)))
+            (display (string-append "  window " (number->string (car w)) "-" (number->string (cadr w))
+                                    ": " (number->string (length failed)) " failed"
+                                    (if (null? failed) "" (string-append " "
+                                        (string-join (map number->string failed) " ")))
+                                    "\n"))))
+        (list-ref leg 7))))
+  LEGS)
+(display (string-append "RESULT windows failures=" (number->string failures) "\n"))

@@ -1,0 +1,25 @@
+;; The principal timed lift (columns 11-13) rises between two hanging crags
+;; to S. Wait on the shelf west of it (column 10); a late rise falls back.
+(room
+  region: cloudstair
+  at: (9 -1)
+  title: "The Split Crag"
+  intent: "a divided crag shelters a waiting shelf beneath gusts rising toward the sky above the cloud"
+  bed: (wind 0.5 water 0 air 0.7 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("###########^^^###########"
+   "########   ^^^   ########"
+   "######     ^^^     ######"
+   "####       ^^^       ####"
+   "##         ^^^         ##"
+   "#          ^^^           "
+   "#          ^^^     ###   "
+   "           ^^^     ###   "
+   "      ###################"
+   "  |   ###################"
+   "#########################")
+  things: ((air-field at: (11 0) size: (3 8) kind: pulsed-lift)
+           (seed at: (12 5) count: 4))
+  decor: auto)

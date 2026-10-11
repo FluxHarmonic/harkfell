@@ -1,0 +1,26 @@
+;; The launch lift from Updraft Edge (columns 8-10) tops out under the roof.
+;; Steer east onto the lip (row 3) and on through the low gap into B, or
+;; west onto the landing where E's chute (columns 2-3) comes down. The lip
+;; is seven tiles above B's floor: the drop is one way. Releasing jump in
+;; the column falls back down the throat to the Hollow.
+(room
+  region: cloudstair
+  at: (7 1)
+  title: "The Lip Above Home"
+  intent: "above the familiar fell, a low ledge spills one way onto a sheltered terrace"
+  bed: (wind 0.6 water 0.15 air 0.6 drone 0.3)
+  light: 1
+  sun: 1
+  grid:
+  ("##  #####################"
+   "#       ^^^              "
+   "#       ^^^              "
+   "#       ^^^##############"
+   "#       ^^^##############"
+   "#       ^^^         #####"
+   "#       ^^^         #####"
+   "# || |  ^^^ |  ||   #####"
+   "########^^^##############"
+   "########^^^##############"
+   "########^^^##############")
+  decor: auto)

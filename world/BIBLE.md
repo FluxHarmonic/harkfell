@@ -130,6 +130,52 @@ SOUND owns cue/tune assets and their playback. The bed groups are
 `(wind water pipes drone)`, with a `pipes` level in every room. The pipe
 breaths never sustain D4, leaving that note to H4.
 
+## Cloudstair (0.4)
+
+The approved bible and map are `topics/harkfell-cloudstair-bible` and
+`topics/harkfell-cloudstair-map` (David's rulings of 2026-10-11, timed
+gusts included). The 22 rooms occupy x7..12/y-2..1; the slots (11,1) and
+(12,1) are empty and every edge toward them is shut. The only border is A
+(7,1) south over Updraft Edge (7,2), through the launch throat, columns
+8-10, behind the Hollow's blue stone. Cloudstair needs H4 and the cattail
+down; it adds no H2 or H3 gate.
+
+Vertical routes are earned. Every pair of rooms not joined by the map is
+shut by rock, so the only ways up are the lifts (D-H, J-P, K-Q steady `^`;
+F-L and M-S pulsed with the gust) and the only ways down are those and the
+one-way drops A->B, E->A, G->C, U->O. Each drop lands at least seven tiles
+under its opening, which a jump and a wall kick cannot reach. The map's
+optional G-M glide and single kick is omitted: with the measured glide a
+four-tile glide loses as much height as the jump gains.
+
+The gust: one shared 600-tick clock, calm 0-359 (warning 300-359), gust
+360-599 ((engine air)). Authored as `(air-field at: (C R) size: (W H)
+kind: pulsed-lift|east-gust)` over `^` cells or gap air. The timed lifts
+copy SYSTEMS's measured lift fixture: wait on the bank one cell west of
+the column, rise 144 px, land on the sill east of it, the field's top 96 px
+above the sill. The gaps (I; P's two) copy its four-tile gap instrument:
+banks of three tiles or more, `x` two rows under the bank tops, the
+eastward field over the gap air only. Waits and catches lie outside every
+field. `x` appears only in I and P.
+
+New room things:
+
+- `(seed at: (C R) count: N)`: small tufted seeds. Near a `^` they ride it
+  (resting low in calm, stirring through the warning, streaming up in the
+  gust); on a standable cell they rest, and lift away from a moving body;
+  in open air they circle, and part as the body comes near. Drawn from
+  time and phase ((harkfell cloudstair look) `cloudstair-seeds`), never a
+  platform, never harmful.
+- `(down at: (C R))`, the Cattails' gift (Reedfen 15,3 only): touched
+  after H2 it gives the down; drawn until it is yours.
+
+The look ((harkfell cloudstair look)): every Cloudstair room is outdoors
+(its closed top is the shelf above, the sky behind). The cliffs are
+painted from global pixels; tops grow dry grass; the backdrop's cloud sea
+sinks lower in the higher rooms; a cloud's shadow crosses the stone about
+every 40 s. The bed groups are `(wind water air drone)`, with an `air`
+level in every room; the bed, moments and wandering pieces are SOUND's.
+
 ## Rulings
 
 None yet. They arrive with D-numbers from `topics/harkfell-phase-plan` in the notes.
