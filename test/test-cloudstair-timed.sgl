@@ -90,6 +90,16 @@
   (test "144 px ascent settles at all 120 required gust departures"
     (assert-equal '() (timed-window LIFT-STEP LIFT-START probe-lift-script
                                    probe-lift-arrives? 360 479 120)))
+  (test "sabotage: a shortened real pulse has one lucky launch and fails the margin"
+    (let* ((off (probe-step (tilemap LIFT air: '())))
+           (short (lambda (node in)
+                    ((if (<= (body-tau (timed-node-body node)) 427) LIFT-STEP off)
+                     node in)))
+           (failed (timed-window short LIFT-START probe-lift-script
+                                 probe-lift-arrives? 360 479 120)))
+      (assert-equal 119 (length failed))
+      (assert-false (memv 360 failed))
+      (assert-true (memv 361 failed))))
   (test "no down and calm physics cannot substitute for the lift"
     (let* ((bare (probe-lift-start LIFT 360 #f))
            (calm (probe-lift-start LIFT 0 #t))

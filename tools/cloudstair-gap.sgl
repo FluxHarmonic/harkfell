@@ -1,0 +1,96 @@
+;; Numerical gap instrument, not I/P's authored terrain. The same family
+;; covers each broad launch window; the run-up sweep measures input margin.
+(import (sigil list)
+        (engine body)
+        (engine air)
+        (engine tilemap)
+        (engine reach)
+        (engine reach timed)
+        (harkfell feel)
+        (harkfell cloudstair probes))
+(define F HARKFELL-FEEL)
+(define TM
+  (let floor ((c 0) (tm (make-tilemap 25 12 16)))
+    (if (= c 25)
+        (tilemap tm air: (list (air-field x: 160 y: 0 w: 64 h: 160 east: 0.66 pulsed: #t)))
+        (floor (+ c 1) (if (and (>= c 10) (< c 14))
+                          (tilemap-set tm c 11 'hazard)
+                          (tilemap-set tm c 9 'solid))))))
+(define STEP (probe-step TM))
+(define (start tau down h)
+  (timed-node body: (body (stand-body TM F (if (> h 0) 8 15) 8) tau: tau down: down)))
+(define (script h run)
+  (append (make-list run (intent h: h))
+          (list (intent h: h jump: #t press: #t))
+          (make-list 46 (intent h: h jump: #t))
+          (make-list (- 73 run) NO-INTENT)))
+(define (arrives? h n)
+  (let ((b (timed-node-body n)))
+    (and (eq? (body-mode b) 'ground) (= (body-vx b) 0)
+         (if (> h 0) (>= (body-x b) 216) (< (body-x b) 160)))))
+(for-each
+  (lambda (run)
+    (for-each
+      (lambda (h)
+        (for-each
+          (lambda (down)
+            (let* ((trace (timed-run STEP (start 0 down h) (script h run)))
+                   (end (and trace (car (reverse trace)))))
+              (write (list 'run run 'h h 'down down
+                           'success (and end (arrives? h end))))
+              (newline)))
+          '(#f #t)))
+      '(-1 1)))
+  '(28 29 30 31 32 33 34 35))
+(for-each
+  (lambda (h)
+    (write (list 'h h 'calm-failures
+             (timed-window STEP (start 0 #t h) (lambda (n) (script h 32))
+                           (lambda (n) (arrives? h n)) 0 239 120)))
+    (newline))
+  '(-1 1))
+(write (list 'east-gust-failures
+         (timed-window STEP (start 360 #t 1) (lambda (n) (script 1 32))
+                       (lambda (n) (arrives? 1 n)) 360 479 120)))
+(newline)
+
+;; Recover from the ACTUAL reached bank and phase. Only physical safe waits
+;; are used before a feedback run-up; no endpoint is centered or rephased.
+(define (recovery-script node h)
+  (let run ((node node) (script '()) (ticks 0))
+    (let ((x (body-x (timed-node-body node))))
+      (cond
+        ((or (>= ticks 60) (if (> h 0) (>= x 165) (<= x 211)))
+          (append (reverse script)
+                  (list (intent h: h jump: #t press: #t))
+                  (make-list 46 (intent h: h jump: #t))
+                  (make-list 40 NO-INTENT)))
+        (else
+          (let ((in (intent h: h)))
+            (run (STEP node in) (cons in script) (+ ticks 1))))))))
+
+(for-each
+  (lambda (h)
+    (let ((survived 0) (failed '()))
+      (for-each
+        (lambda (tau)
+          (let* ((trace (timed-run STEP (start tau #t h) (script h 32)))
+                 (end (and trace (car (reverse trace)))))
+            (when end
+              (set! survived (+ survived 1))
+              (let* ((b (timed-node-body end))
+                     (same-bank (if (> h 0) (< (body-x b) 160) (>= (body-x b) 216)))
+                     (waits (modulo (- (body-tau b)) AIR-PERIOD))
+                     (waited (and (timed-shelter? TM F STEP end)
+                                  (timed-run STEP end (make-list waits NO-INTENT))))
+                     (rest (and waited (car (reverse waited))))
+                     (back (and rest
+                                (if same-bank
+                                    (list rest)
+                                    (timed-run STEP rest (recovery-script rest (- h)))))))
+                (unless (and back (arrives? (- h) (car (reverse back))))
+                  (set! failed (cons tau failed)))))))
+        (iota AIR-PERIOD))
+      (write (list 'h h 'surviving-launches survived 'stranded (reverse failed)))
+      (newline)))
+  '(-1 1))
