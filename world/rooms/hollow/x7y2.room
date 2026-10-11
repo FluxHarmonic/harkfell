@@ -8,18 +8,20 @@
   light: 1
   sun: 1
   grid:
-  ("        ^^^             #"
-   "        ^^^             #"
-   "        ^^^             #"
-   "        ^^^             #"
-   "######  ^^^             #"
-   "######  ^^^             #"
-   "######  ^^^             #"
-   "######  ^^^             #"
-   "######  ^^^             #"
-   "######  ^^^             #"
-   "######  ^^^             #")
+  ("########^^^##############"
+   "      # ^^^             #"
+   "      ##^^^             #"
+   "      o ^^^             #"
+   "####### ^^^             #"
+   "####### ^^^             #"
+   "####### ^^^             #"
+   "#######=======          #"
+   "#########################"
+   "####### ^^^             #"
+   "####### ^^^             #")
+  things: ((ring-stone at: (6 3) overtone: 4)
+           (air-field at: (8 0) size: (3 8) kind: steady-lift))
   decor: auto)
-;; The fell's east edge (columns 0-5) and an updraft (columns 8-10) no jump
-;; can ride: the glide is not in the slice. Step off the edge and you fall
-;; to the Rim.
+;; Blue seals the only approach. Its roof and the pocket floor separate
+;; this lift from the Rim. The return shelf is seven tiles below the north
+;; seam: a normal jump plus one smooth-wall kick cannot cross it.

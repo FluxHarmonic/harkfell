@@ -1,0 +1,45 @@
+(import (sigil test)
+        (sigil list)
+        (engine body)
+        (engine air)
+        (engine tilemap)
+        (engine reach timed)
+        (harkfell content)
+        (harkfell source)
+        (harkfell cloudstair probes))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (probe-entry-map CT '(2 4)))
+(define START (probe-entry-start TM #t))
+(define STEP (probe-step TM))
+(define SCRIPT (probe-entry-script START))
+(define ARRIVED (car (reverse (timed-run STEP START SCRIPT))))
+(define RETURN-SCRIPT
+  (append (make-list 70 (intent h: -1))
+          (list (intent h: -1 jump: #t press: #t))
+          (make-list 40 (intent h: -1 jump: #t))
+          (make-list 30 NO-INTENT)))
+(define RETURNED (car (reverse (timed-run STEP ARRIVED RETURN-SCRIPT))))
+
+(test-group "Cloudstair entrance: real Hollow geometry, isolated upper landing"
+  (test "the existing world parses with its sealed launch and matching seams"
+    (assert-equal '() (content-problems CT)))
+  (test "H4 plus down reaches the isolated upper landing"
+    (assert-true (probe-entry-arrives? ARRIVED)))
+  (test "no H4 plus down stops safely at blue"
+    (let* ((tm (probe-entry-map CT '(2)))
+           (start (probe-entry-start tm #t))
+           (end (car (reverse (timed-run (probe-step tm) start SCRIPT)))))
+      (assert-false (probe-entry-arrives? end))
+      (assert-equal 'ground (body-mode (timed-node-body end)))))
+  (test "H4 without down cannot ride the same launch"
+    (let ((end (car (reverse (timed-run STEP (probe-entry-start TM #f) SCRIPT)))))
+      (assert-false (probe-entry-arrives? end))
+      (assert-equal 'ground (body-mode (timed-node-body end)))))
+  (test "released descent and the return shelf reach the western approach before H5"
+    (let ((b (timed-node-body RETURNED)))
+      (assert-equal 'ground (body-mode b))
+      (assert-true (< (body-x b) 496))
+      (assert-equal '(2 4) (timed-node-data RETURNED))
+      (assert-true (body-down b))
+      (assert-equal (modulo (+ (length SCRIPT) (length RETURN-SCRIPT)) AIR-PERIOD) (body-tau b)))))
