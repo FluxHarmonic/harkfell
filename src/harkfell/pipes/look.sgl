@@ -546,10 +546,25 @@
                    (list (* 16 c) (+ (* 16 c) 16) (* 16 r)))))
            (map (lambda (i) (+ i (cadr span))) (iota (+ 1 (- (caddr span) (cadr span)))))))
 
+    ;; A side opening's spill: ((ROW . LEN) ...) per cell row of the span,
+    ;; LEN the pixels in from the edge the light and motes may go: SPILL, or
+    ;; less where a closed cell stops it (it never shines inside the rock).
+    ;; At least one cell: the edge cell of an opening is open.
+    (define SPILL 64)
+    (define (spill-rows rm span)
+      (let ((west? (eq? (car span) 'west)))
+        (map (lambda (i)
+               (let ((r (+ i (cadr span))))
+                 (let in ((n 0))
+                   (if (and (< n (quotient SPILL 16))
+                            (room-open? rm (if west? n (- ROOM-COLS 1 n)) r))
+                       (in (+ n 1))
+                       (cons r (* 16 (max 1 n)))))))
+             (iota (+ 1 (- (caddr span) (cadr span)))))))
+
     ;; Motes drifting in a way-out light: ((x . y) ...) at tick t, the same
     ;; for the slot pass and the light pass. Down a shaft they sink slowly;
     ;; through a side opening they drift in from the edge.
-    (define SPILL 64)
     (define (way-motes rm span t)
       (let ((side (car span)) (a (cadr span)) (b (caddr span)))
         (case side
@@ -569,14 +584,16 @@
                                '(0 1)))))
                   (way-light-columns rm span))))
           ((west east)
-           (map (lambda (k)
-                  (let* ((h (hash3 a k 43))
-                         (drift (+ 8 (modulo h 7)))
-                         (d (modulo (+ (quotient t drift) (* k 29) h) SPILL))
-                         (y (+ (* 16 a) 2 (modulo (quotient h 5) (max 1 (- (* 16 (+ 1 (- b a))) 4)))
-                               (pixel (* 1.5 (sin (+ (* t 0.017) k)))))))
-                    (cons (if (eq? side 'west) d (- VIEW-W 1 d)) y)))
-                (iota (+ 2 (- b a)))))
+           (let ((rows (spill-rows rm span)))
+             (map (lambda (k)
+                    (let* ((h (hash3 a k 43))
+                           (drift (+ 8 (modulo h 7)))
+                           (y (+ (* 16 a) 2 (modulo (quotient h 5) (max 1 (- (* 16 (+ 1 (- b a))) 4)))
+                                 (pixel (* 1.5 (sin (+ (* t 0.017) k))))))
+                           (row (assv (max a (min b (quotient y 16))) rows))
+                           (d (modulo (+ (quotient t drift) (* k 29) h) (cdr row))))
+                      (cons (if (eq? side 'west) d (- VIEW-W 1 d)) y)))
+                  (iota (+ 2 (- b a))))))
           (else '()))))
 
     ;; The spark across a static cell at tick t: ((x . y) ...), one pixel
@@ -680,13 +697,17 @@
                      (draw-filled-rect (+ x0 2) bottom (- x1 x0 4) 2))))
                (way-light-columns rm span))))
           ((west east)
-           (let ((y0 (* 16 (cadr span))) (h (* 16 (+ 1 (- (caddr span) (cadr span))))))
-             (let band ((d 0))
-               (when (< d SPILL)
-                 (soft-rect! (if (eq? (car span) 'west) d (- VIEW-W d 4)) y0 4 h
-                             (* WAY-LIGHT breathe 0.8 (- 1.0 (/ d SPILL)))
-                             #t #t #t)
-                 (band (+ d 4))))))
+           ;; row by row, each stopped where its rock begins
+           (for-each
+             (lambda (row)
+               (let ((r (car row)) (len (cdr row)))
+                 (let band ((d 0))
+                   (when (< d len)
+                     (soft-rect! (if (eq? (car span) 'west) d (- VIEW-W d 4)) (* 16 r) 4 16
+                                 (* WAY-LIGHT breathe 0.8 (- 1.0 (/ d SPILL)))
+                                 #t (= r (cadr span)) (= r (caddr span)))
+                     (band (+ d 4))))))
+             (spill-rows rm span)))
           (else #f))
         (for-each (lambda (p) (disc! (car p) (cdr p) 1 0.4))
                   (way-motes rm span t))))
@@ -710,7 +731,7 @@
                   (y (* 16 (cdr cell))))
               ;; Tiny neutral stone pool; it never illuminates a room.
               (disc! (+ x 8) (+ y 8) 13 0.14)
-              (paint-light! 0.22)
+              (paint-light! 0.32)
               (draw-filled-rect x y 16 16)
               ;; the spark itself, bright
               (paint-light! 0.4)

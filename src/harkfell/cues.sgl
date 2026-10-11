@@ -76,7 +76,7 @@
         (if (not in)
             '()
             (let ((start (content-room ct (cadr in) (caddr in))))
-              (if (not start)
+              (if (not (and start (eq? (room-region start) region)))
                   '()
                   (let loop ((frontier (list start)) (d 0) (seen (list (cons start 0))))
                     (if (null? frontier)

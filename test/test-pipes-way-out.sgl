@@ -2,17 +2,31 @@
 ;;; back up. Every Pipes room has a lit way out (a ceiling shaft or a side
 ;;; spill) on an opening that leads toward the way in, Wind Throat's north
 ;;; edge under the Old Cut. The distances here are worked out by this file
-;;; from the room edges alone, not by the code under test; that each edge
-;;; can be crossed both ways is the reach check's to prove (scripts/room-check).
+;;; from the room grids' edge cells (open-edge? below), not by the cues
+;;; module under test; that each edge can be crossed both ways is the reach
+;;; check's to prove (scripts/room-check).
 (import (sigil test)
         (sigil list)
+        (engine worldmap)
         (harkfell source)
         (harkfell content)
+        (harkfell legend)
         (harkfell cues)
         (harkfell pipes look))
 
 (define CT (load-content (read-world-source "world")))
 (define PIPES (region-rooms CT 'pipes))
+
+;; The cells along one edge of a room, read from its grid.
+(define (edge-cells side)
+  (case side
+    ((west) (map (lambda (r) (cons 0 r)) (iota ROOM-ROWS)))
+    ((east) (map (lambda (r) (cons (- ROOM-COLS 1) r)) (iota ROOM-ROWS)))
+    ((north) (map (lambda (c) (cons c 0)) (iota ROOM-COLS)))
+    (else (map (lambda (c) (cons c (- ROOM-ROWS 1))) (iota ROOM-COLS)))))
+(define (open-cell? rm c r) (kind-open? (char-kind (room-char rm c r))))
+(define (open-edge? rm side)
+  (and (find (lambda (p) (open-cell? rm (car p) (cdr p))) (edge-cells side)) #t))
 
 (define (key rm) (cons (room-x rm) (room-y rm)))
 (define (across rm side)
@@ -31,13 +45,13 @@
           (for-each
             (lambda (rm)
               (for-each
-                (lambda (e)
-                  (let ((n (across rm (car e))))
+                (lambda (side)
+                  (let ((n (across rm side)))
                     (when (and n (eq? (room-region n) 'pipes)
                                (not (assoc (key n) seen))
                                (not (assoc (key n) (map (lambda (r) (cons (key r) #t)) new))))
                       (set! new (cons n new)))))
-                (room-exits rm)))
+                (filter (lambda (s) (open-edge? rm s)) (list (quote west) (quote east) (quote north) (quote south)))))
             frontier)
           (loop new (+ d 1)
                 (append seen (map (lambda (n) (cons (key n) (+ d 1))) new)))))))
@@ -61,6 +75,27 @@
     (assert-equal 1 (dist (content-room CT 2 5)))
     (assert-equal 7 (dist (content-room CT 1 8)))
     (assert-equal 8 (dist (content-room CT 6 8))))
+  (test "the openings cues reports are exactly the grid's open edge runs"
+    (for-each
+      (lambda (rm)
+        (for-each
+          (lambda (side)
+            (let* ((cells (edge-cells side))
+                   (n (length cells))
+                   (open? (lambda (i) (and (< -1 i n)
+                                           (let ((p (list-ref cells i))) (open-cell? rm (car p) (cdr p))))))
+                   (spans (filter (lambda (s) (eq? (car s) side)) (room-exit-spans rm))))
+              ;; each span: open throughout, closed (or the room's end) either side
+              (for-each (lambda (s)
+                          (assert-true (every open? (map (lambda (i) (+ i (cadr s))) (iota (+ 1 (- (caddr s) (cadr s)))))))
+                          (assert-false (open? (- (cadr s) 1)))
+                          (assert-false (open? (+ (caddr s) 1))))
+                        spans)
+              ;; and together they cover every open edge cell
+              (assert-equal (length (filter open? (iota n)))
+                            (apply + (map (lambda (s) (+ 1 (- (caddr s) (cadr s)))) spans)))))
+          '(west east north south)))
+      PIPES))
   (test "every Pipes room has a lit way out on an opening toward the way in"
     (let ((ds (region-distances CT 'pipes)))
       (for-each
