@@ -68,7 +68,7 @@
           (assert-true (pair? fs))
           (for-each (lambda (c) (assert-true (bed-kind? t c)) (assert-true (near? -13.686 (cents-of t c)))) fs)
           (for-each (lambda (c) (assert-true (bed-kind? t c)) (assert-true (near? -11.731 (cents-of t c)))) cs)))
-      '("hollow-third" "pickup-h5" "seed-answer-a" "seed-answer-b")))
+      '("hollow-third" "pickup-h5" "seed-answer-a" "seed-answer-b" "ring-h5" "miss-h5")))
   (test "the homecoming sounds no A: a player may carry H5 without H3, and hears no H3 reward"
     (assert-equal '() (filter (lambda (c) (= PC-A (pitch-class c))) (sounding (tune-parsed "hollow-third")))))
   (test "pickup-h5 rises through H5's own partials, 5 10 15 20 25 30 times D2"
@@ -124,4 +124,6 @@
     (for-each (lambda (n) (assert-true (memq n (sound-cue-names))))
               '(pickup-h5 down-settles seed-click seed-chirr seed-answer-a seed-answer-b glide-open))
     (assert-true (memq 'glide-open MOVING-CUES))
-    (assert-equal '(gust-lift gust-east) (map car GUST-LOOPS))))
+    ;; and the loops the director renders are the loops checked above
+    (for-each (lambda (n) (assert-true (member n '("gust-lift" "gust-east")))) (map cadr GUST-LOOPS))
+    (assert-equal 2 (length GUST-LOOPS))))

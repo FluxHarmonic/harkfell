@@ -72,7 +72,7 @@
           place-carry place-tones place-stones place-news
           place-wander place-moment-carrying place-moment-still place-moment-key place-hums place-exits place-static UPWARD-ID
           place-tau place-gusts place-gaps place-seeds place-gliding
-          sound-gust sound-gust-source sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-MOMENT-DIP GAP-GAIN GAP-R
+          sound-gust sound-gust-source sound-gust-nudge! sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-FREEZE-S GUST-MOMENT-DIP GAP-GAIN GAP-R
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
@@ -1181,20 +1181,22 @@
     ;; the warning (a narrow breath drawn in, rising) from 300, the gust
     ;; 360..599 (a broad rush), released at 0. In a room with a timed field
     ;; (F, L, M, S: pulsed lifts; I, P: the eastward gust) one source plays a
-    ;; 10 s loop of that cycle, its read position set from TAU, never from
-    ;; the bed's playback or an audio callback, so what you hear is the phase
-    ;; the physics is in: entering mid-gust you hear the rush, not a fresh
+    ;; 10 s loop of that cycle, its read position kept on TAU, never on the
+    ;; bed's playback or an audio callback, so what you hear is the phase the
+    ;; physics is in: entering mid-gust you hear the rush, not a fresh
     ;; warning. The loops (gust-lift, gust-east, the same warning in both) are
     ;; rendered once by the cue bank, after the moments are opened ahead, or
-    ;; at once on entering a gust room. The source is placed toward the
-    ;; nearest field, never ducked by a moment, never in the hush, never a
-    ;; finding target.
-    ;; Keeping it on the clock: the source plays at the wall clock's rate, as
-    ;; the simulation does, except while tau is frozen (a soft return's fade).
-    ;; Each frame the two clocks' difference since the last is added up; while
-    ;; tau stands still the source fades out, and when it moves again the read
-    ;; position is moved by what was added up (any time it exceeds
-    ;; GUST-SNAP-S) and the source fades back in. Pause (D40) stops both.
+    ;; at once on entering a gust room, even while a moment plays. The source
+    ;; is placed toward the nearest field, never ducked by a moment, never in
+    ;; the hush, never a finding target.
+    ;; Keeping it on the clock: every frame the frame being heard (the read
+    ;; position less the source's lead, (engine mixer) source-lead: the
+    ;; stream's depth, 0 headless) is compared with tau's; past GUST-SNAP-S
+    ;; apart the read position moves there, crossfading over GUST-XFADE
+    ;; frames. That catches a pause's played-out sink, an underrun and clock
+    ;; skew alike. While tau stands still for longer than GUST-FREEZE-S (a
+    ;; soft return's fade; a frame with no tick is not a freeze) the source
+    ;; fades out, and back in when tau moves.
     ;; While a moment plays the warning's second and the rush's first second
     ;; dip the moment GUST-MOMENT-DIP, so the warning is not lost under S's.
     (define GUST-ID "gust")
@@ -1203,44 +1205,74 @@
     (define GUST-CYCLE-S 10.0)
     (define GUST-GAIN 0.85)
     (define GUST-SNAP-S 0.08)
+    (define GUST-FREEZE-S 0.05)
+    (define GUST-XFADE 256)
     (define GUST-MOMENT-DIP 0.7)   ; -3 dB
     (define GUST-DIP-FROM 290)
     (define GUST-DIP-TO 420)
     (define *loops* '())           ; ((name . mono f32 bytevector, GUST-CYCLE-S long) ...)
-    ;; #(source-id loop-name buf head gl gr prev-tau prev-now drift frozen?)
+    (define *loops-wanted* '())    ; loops a gust room asked for
+    (define *loops-failed* '())    ; loops whose text never came: not asked for again
+    ;; #(source-id loop-name buf head gl gr last-tau last-tau-at pending-head frozen?)
     (define *gust* #f)
     (define *gust-n* 0)
-    (define *gust-dip* #f)
+    (define *gust-dip* #f)         ; the moment source dipped, or #f
 
     (define (sound-loop name) (let ((e (assq name *loops*))) (and e (cdr e))))
     (define (sound-gust-source) (and *gust* (mixer-find (vector-ref *gust* 0))))
-    ;; For the gates: #f, or (loop-name head-seconds frozen?).
+    ;; For the gates: #f, or (loop-name heard-seconds frozen?): heard-seconds is
+    ;; the frame being heard (the read position less the lead).
     (define (sound-gust)
-      (and *gust* (mixer-find (vector-ref *gust* 0))
-           (list (vector-ref *gust* 1)
-                 (/ (vector-ref *gust* 3) (* 1.0 (mixer-rate)))
-                 (vector-ref *gust* 9))))
+      (let ((s (sound-gust-source)))
+        (and s
+             (list (vector-ref *gust* 1)
+                   (/ (modulo (- (vector-ref *gust* 3) (source-lead s)) (buf-frames (vector-ref *gust* 2)))
+                      (* 1.0 (mixer-rate)))
+                   (vector-ref *gust* 9)))))
+    ;; A test's door: move the read position by SECS, as a stall or a pause would.
+    (define (sound-gust-nudge! secs)
+      (when *gust*
+        (vector-set! *gust* 3 (modulo (+ (vector-ref *gust* 3) (exact (round (* secs (mixer-rate)))))
+                                      (buf-frames (vector-ref *gust* 2))))))
 
     (define (loop-frames) (exact (round (* GUST-CYCLE-S (mixer-rate)))))
-    (define (tau->frame tau) (modulo (exact (round (* (/ tau 60.0) (mixer-rate)))) (loop-frames)))
+    (define (buf-frames buf) (quotient (bytevector-length buf) 4))
+    (define (tau->frame tau buf) (modulo (exact (round (* (/ tau 60.0) (mixer-rate)))) (buf-frames buf)))
 
+    ;; The pull: the loop from the read position; a pending move crossfades
+    ;; from where it was to where it goes over GUST-XFADE frames.
     (define (gust-pull st)
       (lambda (out off n)
-        (let ((buf (vector-ref st 2)) (len (loop-frames)) (gl (vector-ref st 4)) (gr (vector-ref st 5)))
-          (let loop ((i 0) (h (vector-ref st 3)))
+        (let* ((buf (vector-ref st 2)) (len (buf-frames buf)) (gl (vector-ref st 4)) (gr (vector-ref st 5))
+               (at (lambda (h) (bytevector-ieee-single-ref buf (* 4 (modulo h len)) 'little))))
+          (let loop ((i 0) (h (vector-ref st 3)) (to (vector-ref st 8)) (k (if (vector-ref st 8) (vector-ref st 10) 0)))
             (if (< i n)
-                (let ((s (bytevector-ieee-single-ref buf (* 4 h) 'little)) (o (+ off (* 8 i))))
+                (let* ((s (if to
+                              (let ((w (/ k (* 1.0 GUST-XFADE))))
+                                (+ (* (- 1.0 w) (at h)) (* w (at to))))
+                              (at h)))
+                       (o (+ off (* 8 i))))
                   (bytevector-ieee-single-set! out o (* gl s) 'little)
                   (bytevector-ieee-single-set! out (+ o 4) (* gr s) 'little)
-                  (loop (+ i 1) (if (>= (+ h 1) len) 0 (+ h 1))))
-                (vector-set! st 3 h)))
+                  (cond ((not to) (loop (+ i 1) (+ h 1) #f 0))
+                        ((>= (+ k 1) GUST-XFADE) (loop (+ i 1) (+ to 1) #f 0))
+                        (else (loop (+ i 1) (+ h 1) (+ to 1) (+ k 1)))))
+                (begin
+                  (vector-set! st 3 (modulo h len))
+                  (vector-set! st 8 (and to (modulo to len)))
+                  (when to (vector-set! st 10 k)))))
           #t)))
 
-    ;; A loop not rendered yet jumps the bank's queue (as a gate cue does).
+    ;; A loop not rendered yet jumps the bank's queue (as a gate cue does),
+    ;; and renders even while a moment plays (sound-work!).
     (define (want-loop! name)
-      (unless (or (assq name *loops*) (and *cue-job* (eq? (vector-ref *cue-job* 0) name)))
+      (unless (or (assq name *loops*) (memq name *loops-failed*)
+                  (and *cue-job* (eq? (vector-ref *cue-job* 0) name)))
+        (unless (memq name *loops-wanted*) (set! *loops-wanted* (cons name *loops-wanted*)))
         (set! *late-cues* (filter (lambda (n) (not (eq? n name))) *late-cues*))
         (set! *cue-queue* (cons name (filter (lambda (n) (not (eq? n name))) *cue-queue*)))))
+    (define (loop-wanted?)
+      (any (lambda (n) (not (or (assq n *loops*) (memq n *loops-failed*)))) *loops-wanted*))
 
     (define (gust-off! now)
       (let ((g *gust*))
@@ -1252,11 +1284,15 @@
               (mixer-at! (+ now 0.6) (lambda () (when (eq? (mixer-find (vector-ref g 0)) s) (mixer-remove! (vector-ref g 0))))))))
         (gust-dip! #f now)))
 
+    ;; The dip follows the moment source playing now: a moment that replaces
+    ;; another inside the window is dipped too.
     (define (gust-dip! on now)
-      (unless (eq? on *gust-dip*)
-        (set! *gust-dip* on)
-        (let ((m (mixer-find MOMENT-ID)))
-          (when m (source-factor! m 'gust (if on GUST-MOMENT-DIP 1.0) (if on 0.3 0.6) now)))))
+      (let ((m (and on (mixer-find MOMENT-ID))))
+        (unless (eq? m *gust-dip*)
+          (when (and *gust-dip* (memq *gust-dip* (mixer-sources)))
+            (source-factor! *gust-dip* 'gust 1.0 0.6 now))
+          (when m (source-factor! m 'gust GUST-MOMENT-DIP 0.3 now))
+          (set! *gust-dip* m))))
 
     (define (gust-frame! pl now)
       (let ((gs (place-gusts pl)) (tau (place-tau pl)))
@@ -1270,7 +1306,7 @@
                    (pan (clamp -0.5 0.5 (/ (- (gust-centre-x near) (place-px pl)) 300.0)))
                    (a (* 0.25 3.14159265 (+ pan 1.0))))
               (if (not buf)
-                  (want-loop! name)
+                  (begin (gust-off! now) (want-loop! name))
                   (begin
                     (if (and *gust* (mixer-find (vector-ref *gust* 0)))
                         (gust-follow! *gust* name buf tau now)
@@ -1288,7 +1324,7 @@
     (define (gust-open! name buf tau now)
       (set! *gust-n* (+ *gust-n* 1))
       (let* ((sid (string-append GUST-ID "#" (number->string *gust-n*)))
-             (st (vector sid name buf (tau->frame tau) 1.0 1.0 tau now 0.0 #f))
+             (st (vector sid name buf (tau->frame tau buf) 1.0 1.0 tau now #f #f 0))
              (s (mixer-add! sid (gust-pull st) #t)))
         (source-factor! s 'dist 0.0 0.0 now)
         (set! *gust* st)
@@ -1297,27 +1333,31 @@
     (define (gust-follow! st name buf tau now)
       (unless (eq? name (vector-ref st 1))
         (vector-set! st 1 name)
-        (vector-set! st 2 buf))
-      (let* ((dtau (/ (modulo (- tau (vector-ref st 6)) GUST-PERIOD) 60.0))
-             (dwall (- now (vector-ref st 7)))
-             (drift (+ (vector-ref st 8) (- dtau dwall)))
-             (frozen (and (= dtau 0.0) (> dwall 0.0)))
-             (s (mixer-find (vector-ref st 0))))
+        (vector-set! st 2 buf)
+        (vector-set! st 3 (modulo (vector-ref st 3) (buf-frames buf)))
+        (vector-set! st 8 #f))
+      (unless (eqv? tau (vector-ref st 6))
         (vector-set! st 6 tau)
-        (vector-set! st 7 now)
+        (vector-set! st 7 now))
+      (let* ((s (mixer-find (vector-ref st 0)))
+             (frozen (> (- now (vector-ref st 7)) GUST-FREEZE-S)))
         (cond (frozen
                (unless (vector-ref st 9)
                  (vector-set! st 9 #t)
-                 (source-factor! s 'freeze 0.0 0.1 now))
-               (vector-set! st 8 drift))
+                 (source-factor! s 'freeze 0.0 0.1 now)))
               (else
-               (when (> (abs drift) GUST-SNAP-S)
-                 (vector-set! st 3 (modulo (+ (vector-ref st 3) (exact (round (* drift (mixer-rate))))) (loop-frames)))
-                 (set! drift 0.0))
                (when (vector-ref st 9)
                  (vector-set! st 9 #f)
                  (source-factor! s 'freeze 1.0 0.25 now))
-               (vector-set! st 8 drift)))))
+               (unless (vector-ref st 8)
+                 (let* ((len (buf-frames buf))
+                        (lead (source-lead s))
+                        (want (modulo (+ (tau->frame tau buf) lead) len))
+                        (err (let ((e (modulo (- (vector-ref st 3) want) len)))
+                               (if (> e (quotient len 2)) (- e len) e))))
+                   (when (> (abs err) (* GUST-SNAP-S (mixer-rate)))
+                     (vector-set! st 8 want)
+                     (vector-set! st 10 0))))))))
 
     (define (still-frame! pl dt now)
       (set! *still-for* (if (place-still pl) (+ *still-for* dt) 0.0))
@@ -1730,7 +1770,7 @@
     (define SEED-ANSWER-P 0.45)
     (define SEED-ANSWER-GAP 9.0)
     (define *seed-answer-at* -100.0)
-    (define *seed-calls* (quote ()))  ; the last calls, oldest first (the gates)
+    (define *seed-calls* (quote ()))  ; the last calls, oldest first: ((name . t) ...) (the gates)
     (define (sound-seed-calls) *seed-calls*)
     (define (seeds-frame! pl now)
       (let ((seeds (place-seeds pl)))
@@ -1742,7 +1782,7 @@
                                       (if (< (rand!) 0.5) 'seed-answer-a 'seed-answer-b))
                              ((< (rand!) 0.6) 'seed-click)
                              (else 'seed-chirr))))
-            (set! *seed-calls* (let ((l (append *seed-calls* (list name)))) (if (> (length l) 50) (cdr l) l)))
+            (set! *seed-calls* (let ((l (append *seed-calls* (list (cons name now))))) (if (> (length l) 50) (cdr l) l)))
             (cue-at! name (spot-gain name) (car s) pl)))))
 
     ;; --- A4: the creature's movement ----------------------------------------------------
@@ -1859,6 +1899,7 @@
       ;; from nothing: the late-cue gate relies on it)
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
       (set! *cue-job* #f) (set! *cues* (quote ())) (set! *loops* (quote ())) (set! *pending-cues* (quote ()))
+      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ()))
       (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
       (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
@@ -1899,6 +1940,7 @@
              'block)
             ((and (pair? *cue-queue*) (waited-out? *cue-wait* (car *cue-queue*)))
              (*say* "sound" "error" "no-text" (cue-tune-of (car *cue-queue*)))
+             (when (loop-ref (car *cue-queue*)) (set! *loops-failed* (cons (car *cue-queue*) *loops-failed*)))
              (set! *cue-queue* (cdr *cue-queue*))
              (set! *cue-wait* #f)
              (bank-news!)
@@ -1929,8 +1971,19 @@
     (define (in-frame-more?)
       (let ((n 1)) (lambda () (set! n (+ n 1)) (<= n CUE-BLOCKS-PER-FRAME))))
     ;; more?: a thunk, #t while there is time for another step.
+    ;; While a moment plays only a gust loop a gust room is waiting for
+    ;; renders (and the cue ahead of it, finished first): the warning must
+    ;; not wait for a moment to end.
     (define (sound-work! more?)
-      (unless (moment-busy?) (boot-work! more?)))
+      (if (moment-busy?)
+          (when (loop-wanted?) (loop-work! more?))
+          (boot-work! more?)))
+    (define (loop-work! more?)
+      (let loop ()
+        (when (or *cue-job*
+                  (and (pair? *cue-queue*) (loop-ref (car *cue-queue*)) (tune-text (cue-tune-of (car *cue-queue*)))))
+          (render-next-cue!)
+          (when (and (loop-wanted?) (more?)) (loop)))))
     ;; Is the bank still rendering (the game gives it more time while it is)?
     (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*) (pair? *late-cues*)))
     ;; A rendered cue by name ((engine mixer) make-cue), or #f: for the tests.

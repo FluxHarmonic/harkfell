@@ -25,12 +25,22 @@
 (define F (room "cloudstair:8,0" 'cloudstair "cloudstair-bed" px: (+ FX 120.0) py: 120.0 rx: 8 ry: 0 gusts: LIFT))
 (define S (room "cloudstair:9,-2" 'cloudstair "cloudstair-bed" px: (+ (* 400.0 9) 100.0) py: -200.0 rx: 9 ry: -2
                 moment: "above-the-cloud" gusts: (list (list 'lift (+ (* 400.0 9) 176.0) -288.0 48.0 112.0))))
+;; the gap 150 px east: were it a target the ears would point right
 (define I (room "cloudstair:11,0" 'cloudstair "cloudstair-bed" px: (+ (* 400.0 11) 120.0) py: 120.0 rx: 11 ry: 0
-                still: #t gaps: (list (list (+ (* 400.0 11) 168.0) 168.0))))
+                still: #t gaps: (list (list (+ (* 400.0 11) 270.0) 120.0))))
 (define K (room "cloudstair:7,-1" 'cloudstair #f px: (+ (* 400.0 7) 100.0) py: -100.0 rx: 7 ry: -1
                 seeds: (list (list (+ (* 400.0 7) 200.0) -30.0) (list (+ (* 400.0 7) 88.0) -90.0))))
 (define T 0.0)
 ;; frames at 30 fps; tau advances two ticks a frame unless frozen
+;; frames at 120 Hz: tau moves one tick every other frame (a frame with no tick is not a freeze)
+(define (run120 pl frames tau0)
+  (let loop ((i 0) (tau tau0))
+    (when (< i frames)
+      (set! T (+ T (/ 1.0 120.0)))
+      (sound-frame! T (/ 1.0 120.0) (place pl tau: tau))
+      (mixer-pump! T)
+      (loop (+ i 1) (if (odd? i) (modulo (+ tau 1) 600) tau))))
+  (modulo (+ tau0 (quotient (- frames 1) 2)) 600))
 (define (run pl frames tau0 . freeze)
   (let loop ((i 0) (tau tau0))
     (when (< i frames)
@@ -70,8 +80,10 @@
           (assert-true (< (db (rms bv 1.5 4.95)) -80.0))
           (assert-true (> (db (rms bv 5.3 6.0)) -45.0))
           (assert-true (> (db (rms bv 6.05 9.9)) -40.0))
-          ;; the rush is broader and louder than the warning's start
-          (assert-true (> (rms bv 6.0 6.6) (* 2.0 (rms bv 5.0 5.5))))))
+          ;; the rush marks its start: at least 1.5 dB over the warning's last
+          ;; half second and 4 dB over its first
+          (assert-true (> (rms bv 6.0 6.6) (* 1.19 (rms bv 5.5 6.0))))
+          (assert-true (> (rms bv 6.0 6.6) (* 1.58 (rms bv 5.0 5.5))))))
       '(gust-lift gust-east)))
   (test "the rush's release is folded onto the cycle's start, then fades"
     (let ((bv (sound-loop 'gust-lift)))
@@ -94,7 +106,19 @@
       (assert-true (< (source-factor (gust-src) 'freeze T) 0.01))
       (let ((tau2 (run F 6 (+ tau 2))))
         (assert-false (caddr (sound-gust)))
-        (assert-true (< (abs (cycle-diff (head) (/ tau2 60.0))) 0.1)))))
+        (assert-true (< (abs (cycle-diff (head) (/ tau2 60.0))) 0.1))
+        (run F 15 (+ tau2 2))
+        (assert-true (> (source-factor (gust-src) 'freeze T) 0.99)))))
+  (test "at 120 frames a second (half the frames have no tick) it neither mutes nor drifts"
+    (let ((tau (run120 F 240 300)))
+      (assert-false (caddr (sound-gust)))
+      (assert-true (> (source-factor (gust-src) 'freeze T) 0.99))
+      (assert-true (< (abs (cycle-diff (head) (/ tau 60.0))) 0.06))))
+  (test "knocked off the clock (a stall, a paused sink played out) it comes back to tau"
+    (let ((tau (run F 2 100)))
+      (sound-gust-nudge! 0.4)
+      (let ((tau2 (run F 4 (+ tau 2))))
+        (assert-true (< (abs (cycle-diff (head) (/ tau2 60.0))) 0.06)))))
   (test "an eastward gap gives the east loop, a room with no timed field none"
     (run (place F gusts: (list (list 'east (+ FX 160.0) 16.0 64.0 128.0))) 2 200)
     (assert-equal 'gust-east (car (sound-gust)))
@@ -130,15 +154,20 @@
   (test "before H5 the seeds click and chirr, and never answer"
     (sound-reset!)
     (run K (* 30 120) 0)
-    (let ((calls (sound-seed-calls)))
+    (let ((calls (map car (sound-seed-calls))))
       (assert-true (> (length calls) 8))
       (assert-true (every (lambda (n) (memq n '(seed-click seed-chirr))) calls))))
   (test "carrying H5 they answer now and then, F#5/A5, no more than one every 9 s"
     (sound-reset!)
     (run (place K carry: '(2 4 5)) (* 30 120) 0)
-    (let ((answers (filter (lambda (n) (memq n '(seed-answer-a seed-answer-b))) (sound-seed-calls))))
+    (let* ((answers (filter (lambda (c) (memq (car c) '(seed-answer-a seed-answer-b))) (sound-seed-calls)))
+           (ts (map cdr answers)))
       (assert-true (> (length answers) 1))
-      (assert-true (<= (length answers) 14))))
+      ;; never two within SEED-ANSWER-GAP (9 s)
+      (let loop ((ts ts))
+        (when (and (pair? ts) (pair? (cdr ts)))
+          (assert-true (>= (- (cadr ts) (car ts)) 9.0))
+          (loop (cdr ts))))))
   (test "the down's arrival and H5's pickup find their cues"
     (set! SAID '())
     (run (place K news: '((down 100.0 100.0) (pickup 5 120.0 100.0))) 1 0)
@@ -167,3 +196,19 @@
     (run (place K gliding: #f) 12 0)
     (run (place K gliding: #t) 1 0)
     (assert-true (assq 'glide-open (sound-moved)))))
+
+(test-group "cloudstair: the warning does not wait for a moment"
+  (test "after a fresh boot, entering S plays its moment and the lifts' loop still renders under it"
+    (sound-boot! '("above-the-cloud") (lambda parts (set! SAID (cons parts SAID))))
+    (sound-reset!)
+    (assert-false (sound-loop 'gust-lift))
+    (run S 1 100)
+    (assert-equal "above-the-cloud" (sound-moment-playing))
+    (let loop ((k 0) (tau 102))
+      (when (and (< k 900) (not (sound-loop 'gust-lift)))
+        (run S 1 tau)
+        (loop (+ k 1) (modulo (+ tau 2) 600))))
+    (assert-true (sound-loop 'gust-lift))
+    (assert-equal "above-the-cloud" (sound-moment-playing))
+    (run S 2 300)
+    (assert-true (sound-gust))))
