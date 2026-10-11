@@ -41,7 +41,8 @@
 //             staged game's stamp and package.sgl's version, points at that
 //             version's post and carries its summary, which is printable
 //             ASCII (what the game can draw until the runtime glyph atlas)
-//             and at most 120 characters; served no-store as JSON (D38)
+//             with long summaries fitted by the start screen; served no-store
+//             as JSON (D38)
 //   missing   a missing page, a missing file under /play/ and a wasm hash
 //             nobody published all answer 404 (with the site's 404 page), never a 200 index.html
 //   preview   og:image and twitter:image are the 1200x528 Standing Stones
@@ -574,7 +575,8 @@ const newsPosts = [];
 // ASCII until the runtime glyph atlas lands in sigil-graphics (the leader,
 // 2026-09-25, with LOOK); then this becomes that atlas's set.
 const DRAWABLE = /^[\x20-\x7e]*$/;
-const SUMMARY_MAX = 120;   // one line under "Press any key to step in."; LOOK owns the real width
+// draw-start-updates! measures each summary and shrinks its font to fit the
+// line. Character count is not its display limit; require drawable text below.
 {
   const detail = [];
   let vj = null;
@@ -595,7 +597,6 @@ const SUMMARY_MAX = 120;   // one line under "Press any key to step in."; LOOK o
     }
     if (!vj.summary) detail.push("the summary is empty");
     if (!DRAWABLE.test(vj.summary || "")) detail.push(`the summary has characters the game cannot draw: ${[...(vj.summary || "")].filter((c) => !DRAWABLE.test(c)).map((c) => `"${c}" U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`).join(", ")}`);
-    if ((vj.summary || "").length > SUMMARY_MAX) detail.push(`the summary is ${vj.summary.length} characters (at most ${SUMMARY_MAX})`);
   }
   const r = await fetch(`${origin}/version.json`);
   await r.arrayBuffer();
