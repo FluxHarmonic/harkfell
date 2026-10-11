@@ -1591,13 +1591,16 @@
                 ((and (= (room-x (car rs)) rx) (= (room-y (car rs)) ry)) (car rs))
                 (else (find (cdr rs)))))))
 
-    ;; Each room of an overview is drawn and resolved once into a colour
-    ;; target of its own (a pass clears its target, so the overview cannot
-    ;; be built up across passes); the overview's pass then places them.
-    (define *room-colors* '())     ; ((room . rt) ...)
+    ;; Cache rooms in pages of up to eight full-size images. Individual
+    ;; room targets would also exhaust sokol's sampler pool at 82 rooms.
+    ;; Each page is composed in one pass, then kept until content changes.
+    (define *room-colors* '())     ; ((room . (page-texture . index)) ...)
+    (define *overview-pages* '())  ; render targets owning those textures
+    (define OVERVIEW-BATCH 8)
 
     (define (drop-overview!)
-      (for-each (lambda (e) (render-target-free! (cdr e))) *room-colors*)
+      (for-each render-target-free! *overview-pages*)
+      (set! *overview-pages* '())
       (set! *room-colors* '()))
 
     ;; A room as it stands in the overview: backdrop, foliage (still),
@@ -1617,28 +1620,55 @@
         (draw-pipes-lights! rm 0))
       (draw-water! rm))
 
-    ;; Outside any pass: every room of the overview resolved, once.
+    ;; Outside any pass: resolve one bounded batch per frame. Every
+    ;; render pass appends to sokol_gp's same per-frame vertex buffer; all
+    ;; 82 rooms in one frame overflow it even though each pass is small.
+    ;; Call once each frame until this returns #t (all rooms are cached).
     (define (prepare-overview! rooms)
       (ensure-render!)
-      (for-each
-        (lambda (rm)
-          (unless (assq rm *room-colors*)
-            (prepare-layers! rm)
-            (use-region! (room-region rm))
-            (with-render-target (room-index-rt)
-              (set-blend-mode 'normal)
-              (draw-room-still rm)
-              (draw-strips! *strips*))
-            (resolve! 0 0.0 (slot-of (if (eq? (room-region rm) 'pipes) 'sky-4 'h2))
-                      (room-render-light rm) 0.0
-                      (room-daylight-pools? rm))
-            (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
-              (with-render-target rt
-                (with-blend-mode 'none
-                  (set-color 1.0 1.0 1.0 1.0)
-                  (draw-render-target (room-color-rt) 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))))
-              (set! *room-colors* (cons (cons rm rt) *room-colors*)))))
-        rooms))
+      (let ((batch
+              (let next ((pending rooms) (n 0) (acc '()))
+                (cond
+                  ((or (null? pending) (= n OVERVIEW-BATCH)) (reverse acc))
+                  ((assq (car pending) *room-colors*) (next (cdr pending) n acc))
+                  (else (next (cdr pending) (+ n 1) (cons (car pending) acc)))))))
+        (unless (null? batch)
+          (let* ((targets (map bake-overview-room! batch))
+                 (page (make-render-target (* VIEW-W (length batch)) VIEW-H 'nearest)))
+            (with-render-target page
+              (with-blend-mode 'none
+                (set-color 1.0 1.0 1.0 1.0)
+                (let copy ((ts targets) (i 0))
+                  (unless (null? ts)
+                    (draw-render-target (car ts) (inexact (* i VIEW-W)) 0.0
+                                        (inexact VIEW-W) (inexact VIEW-H))
+                    (copy (cdr ts) (+ i 1))))))
+            ;; The page pass has consumed the temporary room targets.
+            (for-each render-target-free! targets)
+            (set! *overview-pages* (cons page *overview-pages*))
+            (let ((texture (render-target->texture page)))
+              (let cache ((rs batch) (i 0))
+                (unless (null? rs)
+                  (set! *room-colors*
+                        (cons (cons (car rs) (cons texture i)) *room-colors*))
+                  (cache (cdr rs) (+ i 1)))))))
+        (every (lambda (rm) (assq rm *room-colors*)) rooms)))
+
+    (define (bake-overview-room! rm)
+      (prepare-layers! rm)
+      (use-region! (room-region rm))
+      (with-render-target (room-index-rt)
+        (set-blend-mode 'normal)
+        (draw-room-still rm)
+        (draw-strips! *strips*))
+      (resolve! 0 0.0 (slot-of (if (eq? (room-region rm) 'pipes) 'sky-4 'h2))
+                (room-render-light rm) 0.0 (room-daylight-pools? rm))
+      (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
+        (with-render-target rt
+          (with-blend-mode 'none
+            (set-color 1.0 1.0 1.0 1.0)
+            (draw-render-target (room-color-rt) 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))))
+        rt))
 
     ;; A music note (section 8's atlas mark for a room with a fixed moment),
     ;; 5x7 with its top-left at (x, y).
@@ -1670,7 +1700,9 @@
               (when e
                 (with-blend-mode 'none
                   (set-color 1.0 1.0 1.0 1.0)
-                  (draw-render-target (cdr e) (inexact ox) (inexact oy) (* k VIEW-W) (* k VIEW-H))))
+                  (draw-texture-region (cadr e) (inexact ox) (inexact oy)
+                                       (* k VIEW-W) (* k VIEW-H)
+                                       (* (cddr e) VIEW-W) VIEW-H VIEW-W (- VIEW-H))))
               (when labels?
                 (let ((label (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm)))))
                   (set-color 0.0 0.0 0.0 0.6)
