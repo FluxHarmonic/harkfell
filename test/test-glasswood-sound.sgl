@@ -9,7 +9,8 @@
 ;;;             harmonic's pickup, each stone's ring and near miss, each drawn
 ;;;             moth's call; plus the creature and ice cues the code emits.
 ;;;             Behaviourally too: news of an H3 pickup must not be cue-missing,
-;;;             and news of an H5 pickup (no tune yet) must be (the control).
+;;;             and news of an H6 pickup (no tune: future content) must be (the
+;;;             control; it was H5's until Cloudstair gave H5 its pickup-h5).
 ;;;   steps     Glasswood's surfaces: snow under the sky, blue ice in the dark
 ;;;             and on the glazed branches, thin ice its own; the other
 ;;;             regions unchanged; every surface has both step cues.
@@ -85,7 +86,7 @@
 (define (body-place . news)
   (place key: "t" region: 'glasswood bed-tune: #f groups: '() levels: '()
          carry: '(2) tones: '() stones: '() news: news px: 100.0 py: 100.0 rx: 0 ry: 0))
-(sound-frame! 0.0 0.0 (body-place (list 'pickup 3 120.0 100.0) (list 'pickup 5 120.0 100.0)))
+(sound-frame! 0.0 0.0 (body-place (list 'pickup 3 120.0 100.0) (list 'pickup 6 120.0 100.0)))
 (define (said? kind name) (member (list "sound" kind name) SAID))
 
 (test-group "glasswood sound: every cue the world can name is rendered"
@@ -100,8 +101,8 @@
   (test "news of the H3 pickup finds its cue (waiting or ready, not missing)"
     (assert-true (or (said? "cue" "pickup-h3") (said? "cue-waiting" "pickup-h3")))
     (assert-false (said? "cue-missing" "pickup-h3")))
-  (test "control: an H5 pickup, which has no cue yet, is reported missing"
-    (assert-true (said? "cue-missing" "pickup-h5"))))
+  (test "control: an H6 pickup, which has no cue, is reported missing"
+    (assert-true (said? "cue-missing" "pickup-h6"))))
 
 (define (foot region kind light)
   (sound-surface (place key: "t" region: region foot: kind light: light)))

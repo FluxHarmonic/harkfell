@@ -1,0 +1,129 @@
+;;; Cloudstair sound contract: what the tunes may and may not play, and how
+;;; the world names them. Source-level; the routing through the real mixer is
+;;; test/test-cloudstair-audio.sgl.
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (motif tune)
+        (engine worldmap)
+        (harkfell source)
+        (harkfell content)
+        (harkfell sound)
+        (harkfell tunes))
+
+(define CT (load-content (read-world-source "world")))
+(define (rooms-of region)
+  (filter (lambda (p) (eq? (room-region (placed-data p)) region)) (content-rooms CT)))
+(define CLOUD (map placed-data (rooms-of 'cloudstair)))
+(define (room-at x y) (find (lambda (rm) (and (= (room-x rm) x) (= (room-y rm) y))) (map placed-data (content-rooms CT))))
+(define (cells t) (apply append (map tune-pattern-cells (tune-patterns t))))
+(define (sounding t) (filter (lambda (c) (number? (cell-note c))) (cells t)))
+(define (pitch-class c) (modulo (cell-note c) 12))
+(define (instrument t id) (find (lambda (i) (= (tune-instrument-id i) id)) (tune-instruments t)))
+(define (param i key) (let ((e (assq key (tune-instrument-params i)))) (and e (cdr e))))
+(define (cents-of t c) (let ((v (param (instrument t (cell-inst c)) 'cents))) (if v (inexact v) 0.0)))
+(define BED-KINDS '(drone-fm drone-saw finding-tone pipe-breath noise-bed drip))
+(define (bed-kind? t c) (memq (tune-instrument-kind (instrument t (cell-inst c))) BED-KINDS))
+(define PC-F-SHARP 6) (define PC-C-SHARP 1) (define PC-A 9)
+(define (near? a b) (< (abs (- a b)) 0.001))
+(define (uniq l) (let loop ((l l) (acc (quote ()))) (cond ((null? l) (reverse acc)) ((memv (car l) acc) (loop (cdr l) acc)) (else (loop (cdr l) (cons (car l) acc))))))
+
+(define NEW-TUNES
+  '("cloudstair-bed" "the-last-grass" "low-cloud" "above-the-cloud" "thermals" "hollow-third"
+    "gust-lift" "gust-east" "gap-depth" "seed-click" "seed-chirr" "seed-answer-a" "seed-answer-b"
+    "pickup-h5" "down-settles" "glide-open"))
+;; heard before H5 can be carried: no F# at all, in any octave (H5's note is
+;; the one being looked for; the bed's channel 7 is the carried drone)
+(define BEFORE-H5 '("the-last-grass" "low-cloud" "above-the-cloud" "thermals" "gust-lift" "gust-east"
+                    "gap-depth" "seed-click" "seed-chirr" "down-settles" "glide-open"))
+
+(test-group "cloudstair: the assets"
+  (test "every new asset reads and validates"
+    (for-each (lambda (n)
+                (assert-true (tune-exists? n))
+                (assert-equal '() (tune-errors (tune-parsed n))))
+              NEW-TUNES))
+  (test "nothing heard before H5 plays an F#, and the bed's own channels never do"
+    (for-each (lambda (n)
+                (assert-equal (list n '()) (list n (filter (lambda (c) (= PC-F-SHARP (pitch-class c))) (sounding (tune-parsed n))))))
+              BEFORE-H5)
+    (assert-equal '() (filter (lambda (c) (and (<= (cell-channel c) 3) (= PC-F-SHARP (pitch-class c))))
+                              (sounding (tune-parsed "cloudstair-bed")))))
+  (test "the bed's air sounds only E G B D, never an A (H3's finding note) or an F#"
+    (let ((pcs (uniq (map pitch-class (filter (lambda (c) (= 3 (cell-channel c))) (sounding (tune-parsed "cloudstair-bed")))))))
+      (assert-true (pair? pcs))
+      (for-each (lambda (pc) (assert-true (memv pc '(4 7 11 2)))) pcs)))
+  (test "the bed carries the same five drone voices as every region's (H5 on channel 7, F#4 at -13.686)"
+    (let* ((t (tune-parsed "cloudstair-bed"))
+           (h5 (filter (lambda (c) (= 7 (cell-channel c))) (sounding t))))
+      (assert-equal 1 (length h5))
+      (assert-equal "F#4" (midi->note-name (cell-note (car h5))))
+      (assert-true (near? -13.686 (cents-of t (car h5))))))
+  (test "every F# meant as H5 is a bed-kind voice at -13.686 cents (motif's synth kinds ignore cents:), every C# at -11.731"
+    (for-each
+      (lambda (n)
+        (let* ((t (tune-parsed n))
+               (fs (filter (lambda (c) (= PC-F-SHARP (pitch-class c))) (sounding t)))
+               (cs (filter (lambda (c) (= PC-C-SHARP (pitch-class c))) (sounding t))))
+          (assert-true (pair? fs))
+          (for-each (lambda (c) (assert-true (bed-kind? t c)) (assert-true (near? -13.686 (cents-of t c)))) fs)
+          (for-each (lambda (c) (assert-true (bed-kind? t c)) (assert-true (near? -11.731 (cents-of t c)))) cs)))
+      '("hollow-third" "pickup-h5" "seed-answer-a" "seed-answer-b" "ring-h5" "miss-h5")))
+  (test "the homecoming sounds no A: a player may carry H5 without H3, and hears no H3 reward"
+    (assert-equal '() (filter (lambda (c) (= PC-A (pitch-class c))) (sounding (tune-parsed "hollow-third")))))
+  (test "pickup-h5 rises through H5's own partials, 5 10 15 20 25 30 times D2"
+    (assert-equal '("F#4" "F#5" "C#6" "F#6" "A#6" "C#7")
+                  (map (lambda (c) (midi->note-name (cell-note c))) (sounding (tune-parsed "pickup-h5")))))
+  (test "the gust loops keep the bible's clock: a row is 6 ticks, warning at tau 300, rush at tau 360, both off by tau 599"
+    (for-each
+      (lambda (n)
+        (let* ((t (tune-parsed n))
+               (on (lambda (ch) (map (lambda (c) (* 6 (cell-row c))) (filter (lambda (c) (= ch (cell-channel c))) (sounding t)))))
+               (offs (filter (lambda (c) (and (eq? (cell-note c) 'off) (memv (cell-channel c) '(2 3)))) (cells t))))
+          (assert-equal 150 (tune-tempo t))
+          (assert-equal 6 (tune-speed t))
+          (assert-equal '(300) (on 1))
+          (assert-equal '(360) (on 2))
+          (assert-true (every (lambda (c) (< (* 6 (cell-row c)) 600)) offs))))
+      '("gust-lift" "gust-east")))
+  (test "both gust loops give the same warning"
+    (let ((w (lambda (n) (let ((t (tune-parsed n)))
+                           (list (tune-instrument-params (instrument t 1))
+                                 (map (lambda (c) (list (cell-row c) (cell-note c) (cell-fx c)))
+                                      (filter (lambda (c) (= 1 (cell-channel c))) (cells t))))))))
+      (assert-equal (w "gust-lift") (w "gust-east")))))
+
+(test-group "cloudstair: the world names them"
+  (let ((reg (find (lambda (r) (eq? (region-name r) 'cloudstair)) (content-regions CT))))
+    (test "the region plays cloudstair-bed and wanders thermals, an open-sky piece"
+      (assert-equal "cloudstair-bed" (region-field reg 'bed))
+      (assert-equal '(thermals) (region-field reg 'wander))
+      (assert-equal 'open-sky (cdr (assoc "thermals" WANDER-TAGS)))))
+  (test "Q, N and S hold the three fixed moments, N after eight seconds still"
+    (let ((m (lambda (x y) (room-moment (room-at x y)))))
+      (assert-equal 'the-last-grass (moment-kw (m 7 -2) "tune"))
+      (assert-equal 'low-cloud (moment-kw (m 10 -1) "tune"))
+      (assert-equal 8 (moment-kw (m 10 -1) "still"))
+      (assert-equal 'above-the-cloud (moment-kw (m 9 -2) "tune"))))
+  (test "no other Cloudstair room has a fixed moment (none in A, D, I, P or V), and no two share an edge"
+    (let ((with (filter room-moment CLOUD)))
+      (assert-equal 3 (length with))
+      (for-each (lambda (a)
+                  (for-each (lambda (b)
+                              (unless (eq? a b)
+                                (assert-false (= 1 (+ (abs (- (room-x a) (room-x b))) (abs (- (room-y a) (room-y b))))))))
+                            with))
+                with)))
+  (test "every Cloudstair room names its air level"
+    (for-each (lambda (rm) (assert-true (memq 'air (room-bed rm)))) CLOUD))
+  (test "the bowl's H5 homecoming comes after hollow-octave, carrying 5"
+    (let ((ms (room-moments (room-at 4 3))))
+      (assert-equal '(hollow-answers hollow-fifth hollow-octave hollow-third) (map (lambda (m) (moment-kw m "tune")) ms))
+      (assert-equal 5 (moment-kw (list-ref ms 3) "carrying"))))
+  (test "the director renders every new cue, and the down's opening is a movement sound"
+    (for-each (lambda (n) (assert-true (memq n (sound-cue-names))))
+              '(pickup-h5 down-settles seed-click seed-chirr seed-answer-a seed-answer-b glide-open))
+    (assert-true (memq 'glide-open MOVING-CUES))
+    ;; and the loops the director renders are the loops checked above
+    (for-each (lambda (n) (assert-true (member n '("gust-lift" "gust-east")))) (map cadr GUST-LOOPS))
+    (assert-equal 2 (length GUST-LOOPS))))

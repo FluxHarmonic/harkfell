@@ -1,0 +1,33 @@
+(tune version: 1 name: "cloudstair-bed" tempo: 60 speed: 15 channels: 8
+  (bus reverb: zitarev size: 0.75 damp: 0.4 mix: 0.2)
+  (instruments
+    (instrument id: 1 name: "wind over the cliffs" patch: (noise-bed color: pink level: 1.0 centre: 1000 width: 1.5 wander: 0.5 rate: 0.09 gust: 0.7 gust-rate: 0.13 hp: 300 lp: 6500 excite: 0.15 excite-freq: 2400 attack: 3 release: 4 seed: 3) volume: 36 gain: 2 send: 0.2)
+    (instrument id: 2 name: "falls far below the cloud" patch: (noise-bed color: pink level: 1.0 centre: 1300 width: 1.3 wander: 0.15 rate: 0.3 gust: 0.3 gust-rate: 0.5 hp: 500 lp: 3500 attack: 3 release: 4 seed: 51) volume: 14 gain: 2 send: 0.35)
+    (instrument id: 3 name: "air rising in the columns" patch: (pipe-breath level: 0.5 width: 0.16 octave: 0.25 tone: 0.03 swell: 0.6 swell-rate: 0.07 attack: 3 release: 4 seed: 52) volume: 26 gain: 1.0 send: 0.4)
+    (instrument id: 4 name: "H2 D3" patch: (drone-saw level: 0.3 fm-index: 2.4 fm-level: 0.1 bright: 14 excite: 0.5 excite-freq: 500 breath-rate: 0.0213 breath-lo: 0.15 seed: 2) volume: 24 gain: 2 send: 0.35)
+    (instrument id: 5 name: "H3 A3" patch: (drone-saw level: 0.12 fm-index: 1.4 fm-level: 0.12 bright: 12 excite: 0.4 excite-freq: 600 cents: 1.955 breath-rate: 0.0323 breath-lo: 0.15 seed: 3) volume: 22 gain: 2 send: 0.35)
+    (instrument id: 6 name: "H4 D4" patch: (drone-saw level: 0.3 fm-index: 1.8 fm-level: 0.45 bright: 8 excite: 0.3 excite-freq: 900 breath-rate: 0.0189 breath-lo: 0.15 seed: 4) volume: 21 gain: 2 send: 0.35)
+    (instrument id: 7 name: "H5 F#4" patch: (drone-saw level: 0.3 fm-index: 1.1 fm-level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 cents: -13.686 breath-rate: 0.027 breath-lo: 0.15 seed: 5) volume: 19 gain: 2 send: 0.35)
+    (instrument id: 8 name: "H7 C5" patch: (drone-saw level: 0.3 fm-index: 1.0 fm-level: 0.2 bright: 8 excite: 0.3 excite-freq: 900 cents: -31.174 breath-rate: 0.0244 breath-lo: 0.3 seed: 7) volume: 18 gain: 2 send: 0.4))
+  (patterns
+    (pattern id: 0 rows: 16
+      (row 0 (1 "D-4" 1 36 "000") (2 "D-4" 2 14 "000") (4 "D-3" 4 24 "000") (5 "A-3" 5 22 "000") (6 "D-4" 6 21 "000") (7 "F#4" 7 19 "000") (8 "C-5" 8 18 "000"))
+      (row 4 (3 "E-5" 3 24 "000")))
+    (pattern id: 1 rows: 128
+      (row 2 (3 "===" 0 0 "000"))
+      (row 9 (3 "G-5" 3 22 "000"))
+      (row 24 (3 "===" 0 0 "000"))
+      (row 31 (3 "B-5" 3 20 "000"))
+      (row 44 (3 "===" 0 0 "000"))
+      (row 52 (3 "D-6" 3 18 "000"))
+      (row 63 (3 "===" 0 0 "000"))
+      (row 69 (3 "E-5" 3 24 "000"))
+      (row 84 (3 "===" 0 0 "000"))
+      (row 90 (3 "B-5" 3 20 "000"))
+      (row 101 (3 "===" 0 0 "000"))
+      (row 107 (3 "G-5" 3 22 "000"))
+      (row 117 (3 "E-6" 3 16 "000"))
+      (row 124 (3 "E-5" 3 24 "000"))
+      (row 127 (1 "..." 0 0 "B01"))))
+  (order 0 1)
+  (history ("claude" "2026-09-23" "S0 region bed: Cloudstair") ("claude" "2026-10-11" "Cloudstair SOUND (Opus take): the region's bed in the game, from S0's sketch. Channel 1 the wind over the cliffs, 2 falls far below the cloud (barely there), 3 the air rising in the lift columns: a breath resonating on a slowly changing note, E5 G5 B5 D6 E6, never an F# (H5's note, the one you are looking for) and never an A, so nothing in the bed passes for a finding tone. One loop is 90 s. 4 to 8 are the drone, the same voices and levels as every other region's bed. The gust's warning and rush are not in the bed: they follow the simulation's clock, not the bed's playback.")))

@@ -71,6 +71,8 @@
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
           place-wander place-moment-carrying place-moment-still place-moment-key place-hums place-exits place-static UPWARD-ID
+          place-tau place-gusts place-gaps place-seeds place-gliding
+          sound-gust sound-gust-source sound-gust-nudge! sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-FREEZE-S GUST-MOMENT-DIP GAP-GAIN GAP-R
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
           sound-wander-due WANDER-TAGS wander-fits? sound-moments-ahead BORDER-ATTACK-S sound-moment-time
@@ -146,7 +148,13 @@
       (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f)
       (hums default: '()) (light default: 1.0)
       ;; Local unpitched sources: ((high|low x y) ...) and ((x y) ...).
-      (exits default: '()) (static default: '()))
+      (exits default: '()) (static default: '())
+      ;; Cloudstair: tau, the shared gust clock (0..599 simulation ticks,
+      ;; (engine air)), or #f; the room's timed air fields ((lift|east x y w
+      ;; h) ...) and its deep-gap cells ((x y) ...) and seed creatures ((x y)
+      ;; ...), absolute world pixels; gliding: the down is open this frame.
+      (tau default: #f) (gusts default: '()) (gaps default: '()) (seeds default: '())
+      (gliding default: #f))
 
     ;; --- state ---------------------------------------------------------------------
     (define *say* (lambda parts #f))
@@ -238,7 +246,9 @@
       (set! *wander-due* #f) (set! *still-wait* #f) (set! *opening-want* #f) (set! *opening-handoff* #f)
       (set! *bed-carried* '()) (set! *bed-start-at* 0.0) (set! *cue-wait* #f) (set! *open-wait* #f)
       (set! *step-idx* #f) (set! *step-alt* #f) (set! *moved* '())
-      (set! *moment-quiet* #f) (set! *opening-quiet* #f))
+      (set! *moment-quiet* #f) (set! *opening-quiet* #f)
+      (set! *gust* #f) (set! *gust-dip* #f) (set! *gliding* #f) (set! *glide-at* -100.0) (set! *seed-answer-at* -100.0)
+      (set! *seed-calls* (quote ())))
 
     ;; --- A4: the border, and what a save keeps ---------------------------------------
     ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
@@ -680,7 +690,8 @@
     ;; David, 2026-09-24: the slice's two wandering moments
     (define WANDER-TAGS '(("stones-remember" . open-sky) ("seed-wind" . water)
                           ("glaze-wind" . open-sky) ("under-ice" . water)
-                          ("air-below" . pipes) ("seep-song" . water)))
+                          ("air-below" . pipes) ("seep-song" . water)
+                          ("thermals" . open-sky)))
     (define WANDER-DELAY-LO 3.0)
     (define WANDER-DELAY-HI 8.0)
     (define *wander-due* #f)      ; (name key t)
@@ -1076,7 +1087,7 @@
     ;; UPWARD-R. It is NOT a finding tone: H7 is in no pickup, so nothing here
     ;; enters tone-spots, and the ears never point at it. With no tone-h7 tune
     ;; written yet, the voice does not open (voice-open! needs the tune).
-    (define LOCAL-TUNES '("exit-low" "exit-high" "static-crackle"))
+    (define LOCAL-TUNES '("exit-low" "exit-high" "static-crackle" "gap-depth"))
     (define UPWARD-ID "upward-hum")
     (define UPWARD-R 112.0)        ; px: 7 tiles, the hollow behind the fall
     (define UPWARD-GAIN 0.2)
@@ -1151,7 +1162,202 @@
         (if (pair? patches)
             (local-voice! "local-static" "static-crackle"
                           (caar patches) (cadar patches) 176.0 0.45 pl now)
-            (voice-fade! "local-static" now))))
+            (voice-fade! "local-static" now)))
+      ;; Cloudstair's deep gaps: a low draught breathing up out of the
+      ;; nearest x cell, in both gust phases. Not a finding target, and it
+      ;; bypasses the moment duck like the Pipes' warnings.
+      (let ((gaps (list-sort (lambda (a b) (< (local-distance pl (car a) (cadr a))
+                                              (local-distance pl (car b) (cadr b))))
+                             (place-gaps pl))))
+        (if (pair? gaps)
+            (local-voice! "local-gap" "gap-depth" (caar gaps) (cadar gaps) GAP-R GAP-GAIN pl now)
+            (voice-fade! "local-gap" now))))
+
+    (define GAP-R 200.0)           ; px: half a room
+    (define GAP-GAIN 0.7)
+
+    ;; --- Cloudstair: the gust's warning and rush, on the simulation's clock ----------------
+    ;; One shared cycle, 600 ticks at 60 Hz ((engine air)): calm 0..359 with
+    ;; the warning (a narrow breath drawn in, rising) from 300, the gust
+    ;; 360..599 (a broad rush), released at 0. In a room with a timed field
+    ;; (F, L, M, S: pulsed lifts; I, P: the eastward gust) one source plays a
+    ;; 10 s loop of that cycle, its read position kept on TAU, never on the
+    ;; bed's playback or an audio callback, so what you hear is the phase the
+    ;; physics is in: entering mid-gust you hear the rush, not a fresh
+    ;; warning. The loops (gust-lift, gust-east, the same warning in both) are
+    ;; rendered once by the cue bank, after the moments are opened ahead, or
+    ;; at once on entering a gust room, even while a moment plays. The source
+    ;; is placed toward the nearest field, never ducked by a moment, never in
+    ;; the hush, never a finding target.
+    ;; Keeping it on the clock: every frame the frame being heard (the read
+    ;; position less the source's lead, (engine mixer) source-lead: the
+    ;; stream's depth, 0 headless) is compared with tau's; past GUST-SNAP-S
+    ;; apart the read position moves there, crossfading over GUST-XFADE
+    ;; frames. That catches a pause's played-out sink, an underrun and clock
+    ;; skew alike. While tau stands still for longer than GUST-FREEZE-S (a
+    ;; soft return's fade; a frame with no tick is not a freeze) the source
+    ;; fades out, and back in when tau moves.
+    ;; While a moment plays the warning's second and the rush's first second
+    ;; dip the moment GUST-MOMENT-DIP, so the warning is not lost under S's.
+    (define GUST-ID "gust")
+    (define GUST-LOOPS '((gust-lift "gust-lift") (gust-east "gust-east")))
+    (define GUST-PERIOD 600)
+    (define GUST-CYCLE-S 10.0)
+    (define GUST-GAIN 0.85)
+    (define GUST-SNAP-S 0.08)
+    (define GUST-FREEZE-S 0.05)
+    (define GUST-XFADE 256)
+    (define GUST-MOMENT-DIP 0.7)   ; -3 dB
+    (define GUST-DIP-FROM 290)
+    (define GUST-DIP-TO 420)
+    (define *loops* '())           ; ((name . mono f32 bytevector, GUST-CYCLE-S long) ...)
+    (define *loops-wanted* '())    ; loops a gust room asked for
+    (define *loops-failed* '())    ; loops whose text never came: not asked for again
+    ;; #(source-id loop-name buf head gl gr last-tau last-tau-at pending-head frozen?)
+    (define *gust* #f)
+    (define *gust-n* 0)
+    (define *gust-dip* #f)         ; the moment source dipped, or #f
+
+    (define (sound-loop name) (let ((e (assq name *loops*))) (and e (cdr e))))
+    (define (sound-gust-source) (and *gust* (mixer-find (vector-ref *gust* 0))))
+    ;; For the gates: #f, or (loop-name heard-seconds frozen?): heard-seconds is
+    ;; the frame being heard (the read position less the lead).
+    (define (sound-gust)
+      (let ((s (sound-gust-source)))
+        (and s
+             (list (vector-ref *gust* 1)
+                   (/ (modulo (- (vector-ref *gust* 3) (source-lead s)) (buf-frames (vector-ref *gust* 2)))
+                      (* 1.0 (mixer-rate)))
+                   (vector-ref *gust* 9)))))
+    ;; A test's door: move the read position by SECS, as a stall or a pause would.
+    (define (sound-gust-nudge! secs)
+      (when *gust*
+        (vector-set! *gust* 3 (modulo (+ (vector-ref *gust* 3) (exact (round (* secs (mixer-rate)))))
+                                      (buf-frames (vector-ref *gust* 2))))))
+
+    (define (loop-frames) (exact (round (* GUST-CYCLE-S (mixer-rate)))))
+    (define (buf-frames buf) (quotient (bytevector-length buf) 4))
+    (define (tau->frame tau buf) (modulo (exact (round (* (/ tau 60.0) (mixer-rate)))) (buf-frames buf)))
+
+    ;; The pull: the loop from the read position; a pending move crossfades
+    ;; from where it was to where it goes over GUST-XFADE frames.
+    (define (gust-pull st)
+      (lambda (out off n)
+        (let* ((buf (vector-ref st 2)) (len (buf-frames buf)) (gl (vector-ref st 4)) (gr (vector-ref st 5))
+               (at (lambda (h) (bytevector-ieee-single-ref buf (* 4 (modulo h len)) 'little))))
+          (let loop ((i 0) (h (vector-ref st 3)) (to (vector-ref st 8)) (k (if (vector-ref st 8) (vector-ref st 10) 0)))
+            (if (< i n)
+                (let* ((s (if to
+                              (let ((w (/ k (* 1.0 GUST-XFADE))))
+                                (+ (* (- 1.0 w) (at h)) (* w (at to))))
+                              (at h)))
+                       (o (+ off (* 8 i))))
+                  (bytevector-ieee-single-set! out o (* gl s) 'little)
+                  (bytevector-ieee-single-set! out (+ o 4) (* gr s) 'little)
+                  (cond ((not to) (loop (+ i 1) (+ h 1) #f 0))
+                        ((>= (+ k 1) GUST-XFADE) (loop (+ i 1) (+ to 1) #f 0))
+                        (else (loop (+ i 1) (+ h 1) (+ to 1) (+ k 1)))))
+                (begin
+                  (vector-set! st 3 (modulo h len))
+                  (vector-set! st 8 (and to (modulo to len)))
+                  (when to (vector-set! st 10 k)))))
+          #t)))
+
+    ;; A loop not rendered yet jumps the bank's queue (as a gate cue does),
+    ;; and renders even while a moment plays (sound-work!).
+    (define (want-loop! name)
+      (unless (or (assq name *loops*) (memq name *loops-failed*)
+                  (and *cue-job* (eq? (vector-ref *cue-job* 0) name)))
+        (unless (memq name *loops-wanted*) (set! *loops-wanted* (cons name *loops-wanted*)))
+        (set! *late-cues* (filter (lambda (n) (not (eq? n name))) *late-cues*))
+        (set! *cue-queue* (cons name (filter (lambda (n) (not (eq? n name))) *cue-queue*)))))
+    (define (loop-wanted?)
+      (any (lambda (n) (not (or (assq n *loops*) (memq n *loops-failed*)))) *loops-wanted*))
+
+    (define (gust-off! now)
+      (let ((g *gust*))
+        (when g
+          (set! *gust* #f)
+          (let ((s (mixer-find (vector-ref g 0))))
+            (when s
+              (source-factor! s 'dist 0.0 0.5 now)
+              (mixer-at! (+ now 0.6) (lambda () (when (eq? (mixer-find (vector-ref g 0)) s) (mixer-remove! (vector-ref g 0))))))))
+        (gust-dip! #f now)))
+
+    ;; The dip follows the moment source playing now: a moment that replaces
+    ;; another inside the window is dipped too.
+    (define (gust-dip! on now)
+      (let ((m (and on (mixer-find MOMENT-ID))))
+        (unless (eq? m *gust-dip*)
+          (when (and *gust-dip* (memq *gust-dip* (mixer-sources)))
+            (source-factor! *gust-dip* 'gust 1.0 0.6 now))
+          (when m (source-factor! m 'gust GUST-MOMENT-DIP 0.3 now))
+          (set! *gust-dip* m))))
+
+    (define (gust-frame! pl now)
+      (let ((gs (place-gusts pl)) (tau (place-tau pl)))
+        (if (or (null? gs) (not (number? tau)))
+            (gust-off! now)
+            (let* ((near (car (list-sort (lambda (a b) (< (gust-distance pl a) (gust-distance pl b))) gs)))
+                   (name (if (eq? (car near) 'east) 'gust-east 'gust-lift))
+                   (buf (sound-loop name))
+                   (d (gust-distance pl near))
+                   (gain (* GUST-GAIN (- 1.0 (* 0.35 (min 1.0 (/ d ROOM-W))))))
+                   (pan (clamp -0.5 0.5 (/ (- (gust-centre-x near) (place-px pl)) 300.0)))
+                   (a (* 0.25 3.14159265 (+ pan 1.0))))
+              (if (not buf)
+                  (begin (gust-off! now) (want-loop! name))
+                  (begin
+                    (if (and *gust* (mixer-find (vector-ref *gust* 0)))
+                        (gust-follow! *gust* name buf tau now)
+                        (gust-open! name buf tau now))
+                    (let ((st *gust*) (s (mixer-find (vector-ref *gust* 0))))
+                      (vector-set! st 4 (min 1.0 (* 1.41421356 (cos a))))
+                      (vector-set! st 5 (min 1.0 (* 1.41421356 (sin a))))
+                      (source-factor! s 'dist gain 0.25 now))
+                    (gust-dip! (and *moment* (>= tau GUST-DIP-FROM) (< tau GUST-DIP-TO)) now)))))))
+
+    (define (gust-centre-x g) (+ (list-ref g 1) (/ (list-ref g 3) 2.0)))
+    (define (gust-centre-y g) (+ (list-ref g 2) (/ (list-ref g 4) 2.0)))
+    (define (gust-distance pl g) (local-distance pl (gust-centre-x g) (gust-centre-y g)))
+
+    (define (gust-open! name buf tau now)
+      (set! *gust-n* (+ *gust-n* 1))
+      (let* ((sid (string-append GUST-ID "#" (number->string *gust-n*)))
+             (st (vector sid name buf (tau->frame tau buf) 1.0 1.0 tau now #f #f 0))
+             (s (mixer-add! sid (gust-pull st) #t)))
+        (source-factor! s 'dist 0.0 0.0 now)
+        (set! *gust* st)
+        (*say* "sound" "gust" (symbol->string name) "open" (number->string tau))))
+
+    (define (gust-follow! st name buf tau now)
+      (unless (eq? name (vector-ref st 1))
+        (vector-set! st 1 name)
+        (vector-set! st 2 buf)
+        (vector-set! st 3 (modulo (vector-ref st 3) (buf-frames buf)))
+        (vector-set! st 8 #f))
+      (unless (eqv? tau (vector-ref st 6))
+        (vector-set! st 6 tau)
+        (vector-set! st 7 now))
+      (let* ((s (mixer-find (vector-ref st 0)))
+             (frozen (> (- now (vector-ref st 7)) GUST-FREEZE-S)))
+        (cond (frozen
+               (unless (vector-ref st 9)
+                 (vector-set! st 9 #t)
+                 (source-factor! s 'freeze 0.0 0.1 now)))
+              (else
+               (when (vector-ref st 9)
+                 (vector-set! st 9 #f)
+                 (source-factor! s 'freeze 1.0 0.25 now))
+               (unless (vector-ref st 8)
+                 (let* ((len (buf-frames buf))
+                        (lead (source-lead s))
+                        (want (modulo (+ (tau->frame tau buf) lead) len))
+                        (err (let ((e (modulo (- (vector-ref st 3) want) len)))
+                               (if (> e (quotient len 2)) (- e len) e))))
+                   (when (> (abs err) (* GUST-SNAP-S (mixer-rate)))
+                     (vector-set! st 8 want)
+                     (vector-set! st 10 0))))))))
 
     (define (still-frame! pl dt now)
       (set! *still-for* (if (place-still pl) (+ *still-for* dt) 0.0))
@@ -1259,6 +1465,16 @@
             (list 'croak-h2 "croak-h2" 0.0 0.0 0.55)
             (list 'song-h2 "song-h2" 0.0 0.0 0.5)
             (list 'moth-h2 "moth-h2" 0.0 0.0 0.14)
+            ;; Cloudstair: the down opening (a movement sound), H5 taken, the
+            ;; down settling at the Cattails, and the seed creatures' calls
+            ;; (clicks and chirrs before H5, F#5/A5 answers after)
+            (list 'glide-open "glide-open" 0.0 0.0 0.2)
+            (list 'pickup-h5 "pickup-h5" 0.0 0.0 0.63)
+            (list 'down-settles "down-settles" 0.0 0.0 0.9)
+            (list 'seed-click "seed-click" 0.0 0.0 0.32)
+            (list 'seed-chirr "seed-chirr" 0.0 0.0 0.55)
+            (list 'seed-answer-a "seed-answer-a" 0.0 0.0 0.4)
+            (list 'seed-answer-b "seed-answer-b" 0.0 0.0 0.4)
             ;; A2's spot sounds
             (list 'bird "spot-bird" 14.0 32.0 0.35)
             (list 'plop "spot-plop" 7.0 18.0 0.4)))
@@ -1329,6 +1545,8 @@
                      (gate-cue! c (* 0.3 (spot-gain c)) (caddr item) pl))))
                (cadr item)))
             ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
+            ;; the cattail down settles on you ((harkfell world) down-tick: (down x y))
+            ((down) (gate-cue! 'down-settles (spot-gain 'down-settles) (cadr item) pl))
             ((call) (unless *moment* (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
             ;; Glasswood's ice ((harkfell ice), and thin ice in (harkfell world)):
             ;; the icicle's tell and thin ice's creak are warnings, so they sound
@@ -1364,7 +1582,7 @@
     (define MOVING-CUES
       (list 'jump 'land-soft 'land-hard 'step-fen-a 'step-fen-b 'step-grass-a 'step-grass-b
             'splash 'wall-jump 'step-stone-a 'step-stone-b 'step-wood-a 'step-wood-b
-            'step-snow-a 'step-snow-b 'step-ice-a 'step-ice-b 'step-thin-a 'step-thin-b))
+            'step-snow-a 'step-snow-b 'step-ice-a 'step-ice-b 'step-thin-a 'step-thin-b 'glide-open))
     ;; Glasswood's cues other than its steps and its two warnings (the tell and
     ;; thin ice's creak, which must sound even under a moment opened on demand)
     ;; are heard only minutes in, so they render after the moments are opened
@@ -1372,11 +1590,14 @@
     ;; past its 60 s at 15 frames a second).
     (define LATE-CUES
       (list 'ice-crack 'ice-fall 'ice-shatter
-            'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4))
+            'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4
+            'pickup-h5 'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
+            'gust-lift 'gust-east))
     (define *late-cues* '())
     (define (bank-order)
       (append (filter spot-ref MOVING-CUES)
-              (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))))
+              (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))
+              (map car GUST-LOOPS)))
     (define *cue-job* #f)         ; #(name player chunks frames silent heard?) being rendered
     (define *cue-buf* (make-bytevector (* 8 CUE-BLOCK) 0))
     (define *moving-said* #f)
@@ -1387,12 +1608,12 @@
     (define (render-next-cue!)
       (when (and (not *cue-job*) (pair? *cue-queue*))
         (let* ((name (car *cue-queue*))
-               (spec (spot-ref name))
-               (p (and spec (open (cadr spec) #f))))
+               (tune (cue-tune-of name))
+               (p (and tune (open tune #f))))
           (set! *cue-queue* (cdr *cue-queue*))
           (when p (set! *cue-job* (vector name p '() 0 0 #f)))))
       (when *cue-job*
-        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (exact (round (* CUE-LIMIT-S (mixer-rate)))))
+        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (exact (round (* (if (loop-ref (vector-ref j 0)) (+ GUST-CYCLE-S 1.0) CUE-LIMIT-S) (mixer-rate)))))
                (more (and (< (vector-ref j 3) limit) (player-pull! p *cue-buf* 0 CUE-BLOCK))))
           (if more
               (let* ((mp (mono-of *cue-buf* CUE-BLOCK))
@@ -1403,7 +1624,7 @@
                 (vector-set! j 3 (+ (vector-ref j 3) CUE-BLOCK))
                 (vector-set! j 4 silent)
                 (vector-set! j 5 heard)
-                (when (>= silent SILENT-BLOCKS) (finish-cue! j)))
+                (when (and (>= silent SILENT-BLOCKS) (not (loop-ref (vector-ref j 0)))) (finish-cue! j)))
               ;; the player ended (motif 0.8.1 ends a player only once it is quiet,
               ;; or after its own capped fade) or the bank's own LIMIT: only a cue
               ;; cut at LIMIT while still sounding needs the bank's fade (the backstop)
@@ -1420,7 +1641,39 @@
     ;; the longest a cue renders: 4 s keeps the rings as David approved them
     ;; (3.3 s with the fade) at +29% of 0.8.0's boot render; 6 s was +62%
     (define CUE-LIMIT-S 4.0)
+    (define (loop-ref name) (assq name GUST-LOOPS))
+    (define (cue-tune-of name)
+      (let ((s (spot-ref name)))
+        (if s (cadr s) (let ((l (loop-ref name))) (and l (cadr l))))))
+
+    ;; A gust loop: its render (GUST-CYCLE-S and its release, untrimmed) folded
+    ;; into exactly one cycle, the release added onto the start, which is
+    ;; where it falls in play (the rush releases as calm returns at tau 0).
+    (define (finish-loop! j)
+      (let* ((n (loop-frames))
+             (out (make-bytevector (* 4 n) 0)))
+        (player-close! (vector-ref j 1))
+        (let fill ((cs (reverse (vector-ref j 2))) (at 0))
+          (when (pair? cs)
+            (let* ((c (car cs)) (len (quotient (bytevector-length c) 4))
+                   (inside (max 0 (min len (- n at)))))
+              (when (> inside 0) (bytevector-copy! out (* 4 at) c 0 (* 4 inside)))
+              (let over ((i inside))
+                (when (< i len)
+                  (let ((k (* 4 (modulo (+ at i) n))))
+                    (bytevector-ieee-single-set! out k (+ (bytevector-ieee-single-ref out k 'little)
+                                                          (bytevector-ieee-single-ref c (* 4 i) 'little))
+                                                 'little))
+                  (over (+ i 1))))
+              (fill (cdr cs) (+ at len)))))
+        (set! *loops* (cons (cons (vector-ref j 0) out) (filter (lambda (e) (not (eq? (car e) (vector-ref j 0)))) *loops*)))
+        (set! *cue-job* #f)
+        (bank-news!)))
+
     (define (finish-cue! j . fade?)
+      (if (loop-ref (vector-ref j 0)) (finish-loop! j) (apply finish-cue-buffer! j fade?)))
+
+    (define (finish-cue-buffer! j . fade?)
       (let* ((chunks (list-tail* (vector-ref j 2) (vector-ref j 4)))
              (frames (* CUE-BLOCK (length chunks)))
              (out (make-bytevector (* 4 frames) 0)))
@@ -1501,10 +1754,36 @@
             (reeds (room-level (place-levels pl) 'reeds))
             (water (room-level (place-levels pl) 'water))
             (bx (- (place-px pl) (* ROOM-W (place-rx pl)))))
-        (when (and (not (eq? (place-region pl) 'pipes)) (> reeds 0.2) (due? 'bird now 14.0 32.0))
+        (when (and (not (memq (place-region pl) '(pipes cloudstair))) (> reeds 0.2) (due? 'bird now 14.0 32.0))
           (cue! 'bird (* 0.35 reeds 1.5) (rand-in (- MAX-PAN) MAX-PAN)))
-        (when (and (not (eq? (place-region pl) 'pipes)) (> water 0.3) (due? 'plop now 7.0 18.0))
-          (cue! 'plop (* 0.4 water) (rand-in (- MAX-PAN) MAX-PAN)))))
+        (when (and (not (memq (place-region pl) '(pipes cloudstair))) (> water 0.3) (due? 'plop now 7.0 18.0))
+          (cue! 'plop (* 0.4 water) (rand-in (- MAX-PAN) MAX-PAN)))
+        (seeds-frame! pl now)))
+
+    ;; Cloudstair's seed creatures call from where they rest, sparsely: dry
+    ;; clicks and airy chirrs; once you carry H5, now and then a brief
+    ;; F#5/A5 answer (at most one every SEED-ANSWER-GAP s), a local event,
+    ;; never a finding target. Like every call, never during a moment
+    ;; (spots-frame! does not get here then).
+    (define SEED-LO 4.0)
+    (define SEED-HI 11.0)
+    (define SEED-ANSWER-P 0.45)
+    (define SEED-ANSWER-GAP 9.0)
+    (define *seed-answer-at* -100.0)
+    (define *seed-calls* (quote ()))  ; the last calls, oldest first: ((name . t) ...) (the gates)
+    (define (sound-seed-calls) *seed-calls*)
+    (define (seeds-frame! pl now)
+      (let ((seeds (place-seeds pl)))
+        (when (and (pair? seeds) (due? 'seed now SEED-LO SEED-HI))
+          (let* ((s (list-ref seeds (min (- (length seeds) 1) (exact (floor (* (rand!) (length seeds)))))))
+                 (answer? (and (memv 5 *carry*) (< (rand!) SEED-ANSWER-P)
+                               (>= (- now *seed-answer-at*) SEED-ANSWER-GAP)))
+                 (name (cond (answer? (set! *seed-answer-at* now)
+                                      (if (< (rand!) 0.5) 'seed-answer-a 'seed-answer-b))
+                             ((< (rand!) 0.6) 'seed-click)
+                             (else 'seed-chirr))))
+            (set! *seed-calls* (let ((l (append *seed-calls* (list (cons name now))))) (if (> (length l) 50) (cdr l) l)))
+            (cue-at! name (spot-gain name) (car s) pl)))))
 
     ;; --- A4: the creature's movement ----------------------------------------------------
     ;; David, 2026-09-24: "something minimal but there", under the world. Each
@@ -1540,6 +1819,9 @@
     (define *step-idx* #f)
     (define *step-alt* #f)
     (define *moved* '())          ; ((name . gain) ...) this frame, newest first (the gates)
+    (define GLIDE-GAP-S 0.4)
+    (define *gliding* #f)
+    (define *glide-at* -100.0)
     (define (sound-moved) *moved*)
 
     ;; Glasswood (D36): smooth ground is snow under the sky and blue ice in
@@ -1559,7 +1841,7 @@
             (case k
               ((ledge) (if (eq? r 'reedfen) 'wood 'stone))
               ((climbable) 'stone)
-              ((solid brittle) (case r ((reedfen) 'fen) ((hollow) 'grass) (else 'stone)))
+              ((solid brittle) (case r ((reedfen) 'fen) ((hollow cloudstair) 'grass) (else 'stone)))
               (else #f)))))
 
     (define (sound-surface pl) (surface pl))
@@ -1592,6 +1874,12 @@
                     ((splash) (move-cue! 'splash 1.0 0.0))
                     (else #f)))
                 (place-moves pl))
+      ;; Cloudstair: the down opens as a glide starts (at most once every GLIDE-GAP-S)
+      (let ((g (and (place-gliding pl) #t)))
+        (when (and g (not *gliding*) (>= (- *now* *glide-at*) GLIDE-GAP-S))
+          (set! *glide-at* *now*)
+          (move-cue! 'glide-open 1.0 0.0))
+        (set! *gliding* g))
       (if (and (eq? (place-mode pl) 'ground) (> (abs (place-vx pl)) STEP-VX))
           (let ((i (modulo (exact (floor (/ (place-bx pl) STEP-PX))) STEP-FRAMES)))
             (when (and *step-idx* (not (= i *step-idx*)) (memv i STEP-FEET))
@@ -1610,11 +1898,12 @@
       ;; a boot renders every cue afresh (a second boot, a world reloaded, starts
       ;; from nothing: the late-cue gate relies on it)
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
-      (set! *cue-job* #f) (set! *cues* (quote ())) (set! *pending-cues* (quote ()))
+      (set! *cue-job* #f) (set! *cues* (quote ())) (set! *loops* (quote ())) (set! *pending-cues* (quote ()))
+      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ()))
       (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
       (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
-      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) LOCAL-TUNES (map cadr SPOTS))))
+      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) LOCAL-TUNES (map cadr SPOTS) (map cadr GUST-LOOPS))))
 
     ;; One piece of deferred work a frame: a cue render or a moment open,
     ;; whichever has its text; never while a moment plays.
@@ -1642,15 +1931,16 @@
             ;; the moments are open (or dropped): now the late cues, less any a
             ;; gate cue pulled forward and rendered already
             ((and (null? *cue-queue*) (null? *to-open*) (pair? *late-cues*))
-             (set! *cue-queue* (filter (lambda (n) (not (assq n *cues*))) *late-cues*))
+             (set! *cue-queue* (filter (lambda (n) (not (or (assq n *cues*) (assq n *loops*)))) *late-cues*))
              (set! *late-cues* '())
              'block)
-            ((and (pair? *cue-queue*) (tune-text (cadr (spot-ref (car *cue-queue*)))))
+            ((and (pair? *cue-queue*) (tune-text (cue-tune-of (car *cue-queue*))))
              (set! *cue-wait* #f)
              (render-next-cue!)
              'block)
             ((and (pair? *cue-queue*) (waited-out? *cue-wait* (car *cue-queue*)))
-             (*say* "sound" "error" "no-text" (cadr (spot-ref (car *cue-queue*))))
+             (*say* "sound" "error" "no-text" (cue-tune-of (car *cue-queue*)))
+             (when (loop-ref (car *cue-queue*)) (set! *loops-failed* (cons (car *cue-queue*) *loops-failed*)))
              (set! *cue-queue* (cdr *cue-queue*))
              (set! *cue-wait* #f)
              (bank-news!)
@@ -1681,8 +1971,19 @@
     (define (in-frame-more?)
       (let ((n 1)) (lambda () (set! n (+ n 1)) (<= n CUE-BLOCKS-PER-FRAME))))
     ;; more?: a thunk, #t while there is time for another step.
+    ;; While a moment plays only a gust loop a gust room is waiting for
+    ;; renders (and the cue ahead of it, finished first): the warning must
+    ;; not wait for a moment to end.
     (define (sound-work! more?)
-      (unless (moment-busy?) (boot-work! more?)))
+      (if (moment-busy?)
+          (when (loop-wanted?) (loop-work! more?))
+          (boot-work! more?)))
+    (define (loop-work! more?)
+      (let loop ()
+        (when (or *cue-job*
+                  (and (pair? *cue-queue*) (loop-ref (car *cue-queue*)) (tune-text (cue-tune-of (car *cue-queue*)))))
+          (render-next-cue!)
+          (when (and (loop-wanted?) (more?)) (loop)))))
     ;; Is the bank still rendering (the game gives it more time while it is)?
     (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*) (pair? *late-cues*)))
     ;; A rendered cue by name ((engine mixer) make-cue), or #f: for the tests.
@@ -1737,6 +2038,7 @@
         (hum-frame! pl now)
         (upward-frame! pl now)
         (local-frame! pl now)
+        (gust-frame! pl now)
         (news-frame! pl)
         (movement-frame! pl)
         (pending-cues-frame!)

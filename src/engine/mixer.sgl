@@ -74,7 +74,7 @@
           mixer-add! mixer-find mixer-remove! mixer-rename! mixer-sources
           mixer-hold! mixer-release! mixer-held? HOLD-FADE-S RELEASE-FADE-S source-rendered
           source? source-id source-live? source-ended? source-started?
-          source-start! source-factor! source-factor source-gain source-on-end!
+          source-start! source-factor! source-factor source-gain source-on-end! source-lead
           mixer-at! mixer-pump! mixer-now
           make-cue cue? cue-frames cue-ref mixer-cue! mixer-cue-count
           cue-gains cue-balance cue-bridge-ok? mixer-set-cue-path! mixer-cue-path
@@ -138,6 +138,12 @@
 
     (define (source-live? s) (and (source-started s) (not (source-ended s))))
     (define (source-ended? s) (source-ended s))
+    ;; Frames pulled from the source and not yet heard: its stream's depth, or
+    ;; 0 headless (sources are pulled to the clock) and before its stream opens.
+    ;; A source that must stay on another clock reads where it is heard as its
+    ;; next frame less this.
+    (define (source-lead s)
+      (let ((st (source-stream s))) (if st (guard (e (#t 0)) (audio-stream-depth st)) 0)))
     (define (source-started? s) (source-started s))
     (define (source-start! s) (set-source-started! s #t))
     (define (source-on-end! s proc) (set-source-on-end! s proc))

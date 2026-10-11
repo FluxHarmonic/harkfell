@@ -40,7 +40,7 @@
             (else (loop (+ k 1)))))))
 
 ;; the start room's moment: lines as the room file has them
-(define AUTHORED "moment: ((tune: hollow-answers when: first-visit carrying: 2)\n           (tune: hollow-fifth when: first-visit carrying: 3)\n           (tune: hollow-octave when: first-visit carrying: 4))")
+(define AUTHORED "moment: ((tune: hollow-answers when: first-visit carrying: 2)\n           (tune: hollow-fifth when: first-visit carrying: 3)\n           (tune: hollow-octave when: first-visit carrying: 4)\n           (tune: hollow-third when: first-visit carrying: 5))")
 (define (with-start-moment text)
   (map (lambda (e)
          (if (string-contains? (car e) "hollow/x4y3.room")
@@ -59,8 +59,8 @@
   (test "two moments listed in the start room load clean"
     (assert-equal '() (content-problems CT2))
     (assert-equal '("hollow-answers" "high-fell") (room-moment-names START)))
-  (test "the real start room lists hollow-answers, hollow-fifth, then hollow-octave"
-    (assert-equal '("hollow-answers" "hollow-fifth" "hollow-octave")
+  (test "the real start room lists hollow-answers, hollow-fifth, hollow-octave, then hollow-third"
+    (assert-equal '("hollow-answers" "hollow-fifth" "hollow-octave" "hollow-third")
                   (room-moment-names (content-room CT 4 3))))
   (test "one moment, as before, is still a list of one"
     (assert-equal (quote ("hollow-answers"))
