@@ -75,13 +75,31 @@
                  (if (and (timed-wait? node next) (not (shelter? node)))
                      (reverse (cons node rev))
                      (run next (cdr script) (cons node rev))))))))
-        (define (observe trace)
+        (define (observe trace target)
           (for-each (lambda (node) (when (still? node) (record! node))) trace)
           (let ((end (last-node trace)))
             (when (and end (not (still? end))) (record! end))
-            end))
+            ;; A suggestion can overshoot a real standing goal or fail after
+            ;; reaching it. That safe prefix is a physical arrival in its own
+            ;; right; requiring the whole suggested suffix would hide it.
+            ;; Preserve the terminal arrival when it already meets the goal.
+            (if (and end (equal? (cell-of end) target))
+                end
+                (or (find (lambda (node)
+                            (and node (equal? (cell-of node) target)))
+                          trace)
+                    end))))
         (lambda (start target)
-          (let ((seen #{}) (count 0) (halted #f))
+          (let ((seen #{}) (count 0) (halted #f)
+                (threshold 0) (next-threshold #f))
+            (define (score node depth)
+              (let ((cell (cell-of node)))
+                (if cell
+                    (let* ((graph (guides node)) (tm (graph-tm graph))
+                           (dist (distance-for graph target)))
+                      (+ depth (or (vector-ref dist
+                                    (cell-index tm (car cell) (cdr cell))) 0)))
+                    depth)))
             (define (walk node depth)
               (let ((cell (cell-of node)))
                 (cond
@@ -91,9 +109,16 @@
                      (set! halted #t)
                      (incomplete!))
                    #f)
-                  ((dict-contains? seen (timed-key node)) #f)
+                  ((> (score node depth) threshold)
+                   (let ((cut (score node depth)))
+                     (set! next-threshold
+                           (if next-threshold (min next-threshold cut) cut)))
+                   #f)
+                  ((and (dict-contains? seen (timed-key node))
+                        (<= (dict-ref seen (timed-key node)) depth))
+                   #f)
                   (else
-                   (set! seen (dict-set seen (timed-key node) #t))
+                   (set! seen (dict-set seen (timed-key node) depth))
                    (set! count (+ count 1))
                    (if (not cell)
                        (let recover
@@ -112,7 +137,7 @@
                                       (append (make-list 120 (intent v: v))
                                               (make-list 180 NO-INTENT))) '(-1 1))))))
                          (and (not halted) (pair? scripts)
-                              (let ((end (observe (replay node (car scripts)))))
+                              (let ((end (observe (replay node (car scripts)) target)))
                                 (or (and (still? end) (walk end (+ depth 1)))
                                     (recover (cdr scripts))))))
                        (let* ((graph (guides node)) (tm (graph-tm graph))
@@ -137,7 +162,7 @@
                                                              (and proof (car proof)))))
                                              (and stage
                                                   (let* ((end (observe
-                                                                (replay stage (witness-script (cdar edges)))))
+                                                                (replay stage (witness-script (cdar edges))) target))
                                                          (next (and end (cell-of end)))
                                                          (d (and next (vector-ref dist
                                                                        (cell-index tm (car next) (cdr next)))))
@@ -165,4 +190,18 @@
                                                          (walk end (+ depth 1))))))
                                            (depart (cdr phases)))))
                                   (try (cdr edges)))))))))))
-            (walk start 0)))))))
+            ;; Progressively widen the suggestion budget before following a
+            ;; cheaper cyclic branch indefinitely. Frozen hop costs affect
+            ;; ordering only: a cut branch is retried at the next threshold.
+            ;; Every attempt retains actual states; the shared hard bound
+            ;; still reports incomplete rather than treating a cut as a trap.
+            (set! threshold (score start 0))
+            (let deepen ()
+              (let ((arrival (walk start 0)))
+                (or arrival
+                    (and (not halted) next-threshold
+                         (begin
+                           (set! threshold next-threshold)
+                           (set! next-threshold #f)
+                           (set! seen #{})
+                           (deepen))))))))))))
