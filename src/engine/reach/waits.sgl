@@ -1,0 +1,59 @@
+;;; Directed shelter cycles, proved once in an immutable simulation context.
+;;; Joining a cycle requires the complete actual state, including tau. This
+;;; is graph closure over already replayed edges, never a free phase change.
+(define-library (engine reach waits)
+  (import (sigil list)
+          (engine body) (engine air) (engine tilemap) (engine reach timed))
+
+  (export timed-waiter)
+
+  (begin
+    ;; tm, feel and advance must remain immutable for this waiter's lifetime.
+    ;; The result is (actual-node . elapsed-ticks), or #f. Every elapsed tick
+    ;; follows a real NO-INTENT edge. A same-phase request traverses a cycle.
+    (define (timed-waiter tm f advance)
+      (let ((members #{}))
+        (define (outside? node)
+          (let* ((b (timed-node-body node)) (c (body-center b f)))
+            (and (eq? (body-mode b) 'ground)
+                 (= (body-vx b) 0) (= (body-vy b) 0)
+                 (not (air-sample (tilemap-air tm) (car c) (cdr c) (body-tau b)))
+                 (not (eq? (tile-at tm (car c) (cdr c)) 'updraft)))))
+        (define (prove! node)
+          (let ((cycle (make-vector AIR-PERIOD #f)))
+            (let loop ((node node) (n 0) (start #f))
+              (if (= n (* 2 AIR-PERIOD))
+                  (and (equal? (timed-key start) (timed-key node))
+                       (begin
+                         (for-each
+                           (lambda (member)
+                             (set! members (dict-set members (timed-key member) cycle)))
+                           (vector->list cycle))
+                         #t))
+                  (let ((next (advance node NO-INTENT)))
+                    (and (timed-wait? node next)
+                         (begin
+                           (when (>= n AIR-PERIOD)
+                             (vector-set! cycle (body-tau (timed-node-body node)) node))
+                           (loop next (+ n 1) (if (= n AIR-PERIOD) node start)))))))))
+        (lambda (node target)
+          (and (<= 0 target) (< target AIR-PERIOD) (outside? node)
+               (let ((key (timed-key node)))
+                 (and (or (dict-contains? members key)
+                          (let ((next (advance node NO-INTENT)))
+                            (and (timed-wait? node next)
+                                 (dict-contains? members (timed-key next))))
+                          (prove! node))
+                      (let join ((node node) (prefix 0))
+                        (let ((key (timed-key node)))
+                          (cond
+                            ((dict-contains? members key)
+                             (let* ((cycle (dict-ref members key))
+                                    (delta (modulo (- target (body-tau (timed-node-body node))) AIR-PERIOD))
+                                    (ticks (+ prefix (if (and (= prefix 0) (= delta 0)) AIR-PERIOD delta))))
+                               (cons (vector-ref cycle target) ticks)))
+                            ((>= prefix AIR-PERIOD) #f)
+                            (else
+                             (let ((next (advance node NO-INTENT)))
+                               (and (timed-wait? node next)
+                                    (join next (+ prefix 1))))))))))))))))
