@@ -5,7 +5,7 @@
 #   scripts/gate-look --sabotage   each plant must turn its leg red, and the
 #                                  tree is restored to its pre-plant hash
 #
-#   --palette | --firefly | --pools | --daylight runs a single visual leg.
+#   --palette | --firefly | --pools | --daylight | --sky runs a single visual leg.
 #   GATE_FIREFLY_WORLD may name a scratch world for a negative control.
 #
 # Legs:
@@ -16,12 +16,15 @@
 #             Hollow rooms, each shot on the worker's
 #             own Xvfb; every colour in each frame must be one of its
 #             region's palette colours (the palette pass's promise: water,
-#             light, the focus pull and fades never leave the palette), and
+#             light and fades never leave the palette), and
 #             in Reed Bridge the sky and the peat sit where they belong (a
 #             flipped or shifted resolve stays in the palette but not there);
 #             and Glasswood: its probe rooms, the look fixture's birches and
 #             blue hour, and Root Ice (light 0.25), which must be mostly shadow,
 #             and lit round the body when its moths come to H3
+#   sky       Hollow x3y2 with its first-visit moment playing and without:
+#             the sky round a band seam must be the same pixels (the focus
+#             pull scattered it into zigzag teeth, D50 playtest)
 # Needs: build/dev for native palette frames; build/web for exact daylight frames.
 #
 # Exit 0 green, 1 red, 2 SETUP-FAILED.
@@ -391,10 +394,46 @@ leg_daylight() {
   say "daylight: GREEN (Hollow and Glasswood, 0 changed pixels)"
 }
 
+# The sky holds still while a moment plays (D50 playtest: the Hollow's sky
+# "would start out looking right and as I walked through the screen, it
+# would glitch out"). Walking into a room starts its first-visit moment;
+# the focus pull then scattered the backdrop by a Bayer jitter of up to
+# 2.2 px, which cut regular teeth into every band seam. Hollow x3y2 is
+# shot twice, 8 s in: in the world, where its first-visit tune (high-fell)
+# plays, and in a copy of the world with that moment taken out. A crop of
+# open sky round the seam at row 80 (view x 176-335, y 56-90; under the
+# clouds, which drift, and clear of the body and the grass) must be the
+# same pixels in both. The sky has no parallax, so nothing else may move.
+leg_sky() {
+  command -v convert > /dev/null 2>&1 && command -v compare > /dev/null 2>&1 || { say "sky: SETUP-FAILED (no ImageMagick)"; return 2; }
+  [ -x build/dev/bin/harkfell ] || { say "sky: SETUP-FAILED (no build/dev)"; return 2; }
+  pactl list short sinks 2>/dev/null | grep -q worker-null || pactl load-module module-null-sink sink_name=worker-null > /dev/null 2>&1
+  xvfb_up || return 2
+  sky_room=world/rooms/hollow/x3y2.room
+  grep -q 'moment: (tune: high-fell when: first-visit)' "$sky_room" || { say "sky: SETUP-FAILED ($sky_room has no first-visit high-fell moment)"; return 2; }
+  sky_still=$(mktemp -d "$S/sky-still.XXXXXX")
+  cp -R world/. "$sky_still"
+  grep -v 'moment: (tune: high-fell when: first-visit)' "$sky_room" > "$sky_still/rooms/hollow/x3y2.room"
+  SHOOT_WAIT=8 shoot "$S/shot-sky-moment.png" --room hollow:3,2 --at 22,5 || return 2
+  cp "$S/game.log" "$S/sky-moment.log"
+  grep -q 'sound moment high-fell start' "$S/sky-moment.log" || { say "sky: SETUP-FAILED (the moment did not play, so nothing was tested)"; return 2; }
+  SHOOT_WAIT=8 shoot "$S/shot-sky-still.png" --world "$sky_still" --room hollow:3,2 --at 22,5 || return 2
+  if grep -q 'sound moment high-fell start' "$S/game.log"; then say "sky: SETUP-FAILED (the moment played in the world without it)"; return 2; fi
+  crop=480x105+528+168
+  convert "$S/shot-sky-moment.png" -crop "$crop" +repage "$S/sky-moment-crop.png"
+  convert "$S/shot-sky-still.png" -crop "$crop" +repage "$S/sky-still-crop.png"
+  n=$(convert "$S/sky-still-crop.png" -format '%k' info: 2>/dev/null || echo 0)
+  [ "$n" -ge 2 ] || { say "sky: SETUP-FAILED (the crop has $n colours: no seam in it)"; return 2; }
+  d=$(compare -metric AE "$S/sky-moment-crop.png" "$S/sky-still-crop.png" null: 2>&1)
+  if [ "$d" = "0" ]; then say "sky: GREEN (Hollow x3y2, the sky the same with its moment playing: 0 of 50400 pixels differ)"; return 0; fi
+  say "sky: RED (Hollow x3y2, $d of 50400 sky pixels differ while its moment plays)"
+  return 1
+}
+
 run_green() {
   GR_RC=0
-  leg_art; GR_A=$?; leg_cells; GR_C=$?; leg_palette; GR_P=$?; leg_pools; GR_O=$?; leg_daylight; GR_D=$?
-  for GR_X in $GR_A $GR_C $GR_P $GR_O $GR_D; do [ "$GR_X" -eq 2 ] && return 2; [ "$GR_X" -ne 0 ] && GR_RC=1; done
+  leg_art; GR_A=$?; leg_cells; GR_C=$?; leg_palette; GR_P=$?; leg_pools; GR_O=$?; leg_daylight; GR_D=$?; leg_sky; GR_S=$?
+  for GR_X in $GR_A $GR_C $GR_P $GR_O $GR_D $GR_S; do [ "$GR_X" -eq 2 ] && return 2; [ "$GR_X" -ne 0 ] && GR_RC=1; done
   return $GR_RC
 }
 
@@ -475,6 +514,7 @@ case "$MODE" in
   --firefly) leg_firefly; rc=$? ;;
   --pools) leg_pools; rc=$? ;;
   --daylight) leg_daylight; rc=$? ;;
+  --sky) leg_sky; rc=$? ;;
   *) run_green; rc=$? ;;
 esac
 case $rc in 0) say "GREEN" ;; 1) say "RED" ;; *) say "SETUP-FAILED" ;; esac

@@ -463,26 +463,20 @@
     (define (under? rm) (and (not (cloudstair? rm)) (room-under? rm)))
     (define (cloudstair? rm) (eq? (room-region rm) 'cloudstair))
 
-    ;; The focus pull (D16, section 7's depth): while a music moment plays the
-    ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
-    ;; easing in over about a second and out again after; the room itself
-    ;; stays sharp. *focus* is 0..1, stepped once a drawn frame.
-    (define FOCUS-R 2.2)
-    (define *focus* 0.0)
-    (define *moment* #f)
+    ;; No focus pull. D16 had a music moment scatter the backdrop by up to
+    ;; 2.2 px (a Bayer jitter, palette-true); at the game's whole scale it
+    ;; cut regular zigzag teeth into every band seam, and David took it for
+    ;; corrupted textures (D50 playtest). The sky now holds still while a
+    ;; moment plays; gate-look's sky leg keeps it so.
     (define *bed-wind* 0.5)
 
-    ;; From the shell, each frame: whether a moment plays, and the bed's wind
-    ;; level now (0..1; the reeds bend with what you hear).
+    ;; From the shell, each frame: whether a moment plays (no longer drawn),
+    ;; and the bed's wind level now (0..1; the reeds bend with what you hear).
     (define (set-look-sound! moment wind)
-      (set! *moment* (and moment #t))
       (set! *bed-wind* (if (number? wind) wind 0.5)))
 
-    (define (step-focus!)
-      (set! *focus* (if *moment* (min 1.0 (+ *focus* 0.018)) (max 0.0 (- *focus* 0.012)))))
-
     ;; The room's backdrop: its region's sky, or earth when it lies under
-    ;; another room; scattered by the focus pull.
+    ;; another room.
     (define (draw-backdrop! rm)
       (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
                                  ((cloudstair? rm) (cloudstair-backdrop-key rm))
@@ -492,13 +486,10 @@
                                               (exact (round (* 4 (room-sun rm))))))
                                  ((not (under? rm)) (room-region rm))
                                  ((eq? (room-region rm) (quote glasswood)) (quote glasswood-under))
-                                 (else (quote under)))))
-            (r (* FOCUS-R *focus* *focus*)))
-        (if (> r 0.3)
-            (draw-texture-scattered! tex VIEW-W VIEW-H r)
-            (with-blend-mode (quote none)
-              (set-color 1.0 1.0 1.0 1.0)
-              (draw-texture tex 0 0 VIEW-W VIEW-H)))))
+                                 (else (quote under))))))
+        (with-blend-mode (quote none)
+          (set-color 1.0 1.0 1.0 1.0)
+          (draw-texture tex 0 0 VIEW-W VIEW-H))))
     ;; The sky's slow movers: three clouds over a room open to the sky, a
     ;; pixel every two seconds (section 7), each at its own height, coming
     ;; back round from the west. Placed by the room's coordinate, so two
@@ -1591,7 +1582,6 @@
     (define (present-play! w after . black)
       (ensure-render!)
       (atlas-ensure!)
-      (step-focus!)
       (let* ((p (world-room w))
              (rm (and p (placed-data p)))
              (region (if rm (room-region rm) 'none)))
