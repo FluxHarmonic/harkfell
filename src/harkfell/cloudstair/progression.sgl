@@ -103,7 +103,7 @@
               (set! goals
                 (append
                   (list (cons 2 (cdr (assv 2 (content-pickup-cells ct))))
-                        (cons 'down (local->global ct (content-room ct 15 3) 8 7)))
+                        (cons 'down (local->global ct (content-room ct 11 3) 14 8)))
                   (map (lambda (h) (cons h (cdr (assv h (content-pickup-cells ct)))))
                        '(4 3 5))))
               (for-each

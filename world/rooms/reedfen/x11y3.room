@@ -3,7 +3,7 @@
   region: reedfen
   at: (11 3)
   title: "Behind the Stone"
-  intent: "the first place a harmonic opens: a sheltered hollow where fireflies come to what you carry"
+  intent: "behind the first amber door, a sheltered hollow holds a tuft of down among the fireflies"
   bed: (wind 0.2 reeds 0.3 drone 0.8)
   sun: 0
   grid:
@@ -18,8 +18,9 @@
    "     |    |||||| |||    #"
    "#########################"
    "#########################")
-  things: ((firefly at: (14 5) count: 5 drawn: 2))
+  things: ((down at: (14 8))
+           (firefly at: (14 5) count: 5 drawn: 2))
   decor: auto)
 ;; Reached only through the Old Stone's ring-stone (the passage along row
-;; 8). A breath: nothing to do but stand among the fireflies. The rock leans
+;; 8). A breath: the down waits on the broad safe floor. The rock leans
 ;; over it from the west, and the sky opens above.

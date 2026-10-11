@@ -1466,7 +1466,7 @@
             (list 'song-h2 "song-h2" 0.0 0.0 0.5)
             (list 'moth-h2 "moth-h2" 0.0 0.0 0.14)
             ;; Cloudstair: the down opening (a movement sound), H5 taken, the
-            ;; down settling at the Cattails, and the seed creatures' calls
+            ;; down settling at its authored gift, and the seed creatures' calls
             ;; (clicks and chirrs before H5, F#5/A5 answers after)
             (list 'glide-open "glide-open" 0.0 0.0 0.2)
             (list 'pickup-h5 "pickup-h5" 0.0 0.0 0.63)

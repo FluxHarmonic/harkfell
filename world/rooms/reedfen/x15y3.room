@@ -18,8 +18,7 @@
    "#################%   %###"
    "#################%   %###"
    "#################%   %###")
-  things: ((down at: (8 7))
-           (reedling flock: 7 zone: reeds)
+  things: ((reedling flock: 7 zone: reeds)
            (firefly at: (14 6) count: 3 drawn: 2))
   decor: auto)
 ;; The tallest reeds in the fen. The hole at columns 18-20 drops to the

@@ -102,8 +102,8 @@
       (assert-equal 1 (length (timed-graph-traps g))))))
 
 (define CT (load-content (read-world-source "world")))
-(define RM (content-room CT 15 3))
-(define CELL (local->global CT RM 8 7))
+(define RM (content-room CT 11 3))
+(define CELL (local->global CT RM 14 8))
 (define SEEDS (cloudstair-entry-phases CT CELL '(2) #f))
 (define ADVANCE (cloudstair-stepper CT))
 (define CONTACT (ADVANCE (list-ref SEEDS 359) NO-INTENT))
@@ -186,7 +186,7 @@
       (assert-true (member (cons '() #f) profiles))))
   (test "diagnostics include all 600 entry phases"
     (assert-equal 600 (length SEEDS)))
-  (test "Cattails grant retains the arrival phase and does not alter harmonics"
+  (test "Behind the Stone grant retains the arrival phase and does not alter harmonics"
     (assert-true (body-down (timed-node-body CONTACT)))
     (assert-equal 360 (body-tau (timed-node-body CONTACT)))
     (assert-equal '(2) (timed-node-data CONTACT)))

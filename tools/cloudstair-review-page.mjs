@@ -40,7 +40,7 @@ const sections = [
     ['seeds-before-h5', 'K · seeds before H5', 'Sparse dry husk clicks and an airy chirr.'],
     ['seeds-after-h5', 'K · seeds after H5', 'Now and then a brief answer, F#5 to A5 or back, at H5\'s tuning, above the finding register.'],
     ['cue-pickup-h5', 'H5 taken', 'H5\'s own partials rising, 5 10 15 20 25 30 times D2, at their just tuning.'],
-    ['cue-down-settles', 'The down settles (the Cattails, after H2)', 'A breath lifts the tuft, and a soft flute answers. No harmonic call: the gift has none.'],
+    ['cue-down-settles', 'The down settles (Behind the Stone, after H2)', 'A breath lifts the tuft, and a soft flute answers. No harmonic call: the gift has none.'],
     ['cue-glide-open', 'The down opening as a glide starts', 'A movement sound, under the world like the jump.'],
     ['cue-seed-click', 'A seed click', ''], ['cue-seed-chirr', 'A seed chirr', ''],
     ['cue-seed-answer-a', 'A seed answer, rising', ''], ['cue-seed-answer-b', 'A seed answer, falling', ''],

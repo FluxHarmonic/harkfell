@@ -72,8 +72,8 @@
       (assert-equal 150 (body-x (body-step b HOLD WIND F))))))
 
 (define CT (load-content (read-world-source "world")))
-(define RM (content-room CT 15 3))
-(define GIFT (local->global CT RM 8 7))
+(define RM (content-room CT 11 3))
+(define GIFT (local->global CT RM 14 8))
 (define TM (worldmap-tiles (content-map CT)))
 (define ENTRY (stand-body TM F (car GIFT) (cdr GIFT)))
 (define (at-gift carry)
@@ -85,6 +85,33 @@
                     (carry 2) (stones) (moments) (played 12.5)
                     (revealed #t) (aurora #t)))
 
+(define DOOR-CELL (local->global CT (content-room CT 10 3) 19 8))
+(define DOOR-BODY (stand-body TM F (car DOOR-CELL) (cdr DOOR-CELL)))
+(define (door-world carry)
+  (world-populate (world-at (content-map CT) DOOR-BODY)
+                  (content-stones CT) (content-pickups CT) carry))
+(define (walk-until w h done? limit)
+  (let loop ((w w) (n 0))
+    (if (or (done? w) (= n limit)) w
+        (loop (world-tick w (intent h: h)) (+ n 1)))))
+
+(test-group "D49: actual amber door and relocated down"
+  (test "H2 opens the real door, earns the visible gift, and walks back out"
+    (let* ((earned (walk-until (door-world '(2)) 1 world-down 600))
+           (back (walk-until earned -1
+                   (lambda (w) (<= (body-x (world-body w)) (body-x DOOR-BODY))) 600)))
+      (assert-true (world-down earned))
+      (assert-equal '(2) (world-carry earned))
+      (assert-equal 11 (placed-x (world-room earned)))
+      (assert-true (world-down back))
+      (assert-equal 10 (placed-x (world-room back)))
+      (assert-equal 0 (world-returns earned))
+      (assert-equal 0 (world-returns back))))
+  (test "without H2 the real amber door blocks the gift"
+    (let ((blocked (walk-until (door-world '()) 1 world-down 600)))
+      (assert-false (world-down blocked))
+      (assert-equal 10 (placed-x (world-room blocked))))))
+
 (test-group "Cloudstair: contact, persistence and frozen fades"
   (test "old H2 saves retain progress without silently earning down"
     (let ((r (save-restore CT OLD)))
@@ -93,10 +120,21 @@
       (assert-equal '(2) (restored-carry r))
       (assert-true (restored-revealed r))
       (assert-true (restored-aurora r))))
-  (test "Cattails earns down on contact after H2 only"
+  (test "Behind the Stone earns down on contact after H2 only"
     (assert-false (world-down (world-tick (at-gift '()) NO-INTENT)))
     (assert-true (world-down EARNED))
     (assert-true (find (lambda (n) (eq? (car n) 'down)) (world-news EARNED))))
+  (test "the old Cattails position is atmosphere and no longer grants down"
+    (let* ((cell (local->global CT (content-room CT 15 3) 8 7))
+           (b (stand-body TM F (car cell) (cdr cell)))
+           (w (world-populate (world-at (content-map CT) b)
+                             (content-stones CT) (content-pickups CT) '(2))))
+      (assert-equal '() (room-things-of (content-room CT 15 3) 'down))
+      (assert-false (world-down (world-tick w NO-INTENT)))))
+  (test "an already earned old save keeps its down at the former gift position"
+    (let ((r (save-restore CT (append OLD '((down #t) (tau 479))))))
+      (assert-true (restored-down r))
+      (assert-equal 479 (restored-tau r))))
   (test "reset and both fade phases preserve ability and phase"
     (let* ((w (world EARNED body: (body (world-body EARNED) tau: 479)))
            (dark (world-tick (world w phase: 'dark timer: 1) NO-INTENT))

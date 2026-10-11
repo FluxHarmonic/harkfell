@@ -1,4 +1,5 @@
-;;; Product policy: contact with the Cattails' down after H2 earns glide.
+;;; Product policy: contact with the down behind Reedfen's amber door after
+;;; H2 earns glide. Its authored thing supplies the location (D49).
 ;;; Shared by play and reach; no grant from region metadata or save carry.
 (define-library (harkfell down)
   (import (sigil list)

@@ -1,5 +1,5 @@
 ;;; Cloudstair's exact replay adapter. Engine owns movement/time; Harkfell
-;;; owns harmonic pickup and Cattails acquisition. A larger carry starts at
+;;; owns harmonic pickup and authored down acquisition. A larger carry starts at
 ;;; actual contact and keeps that body's phase, including during a flight.
 (define-library (harkfell cloudstair reach)
   (import (sigil list)
