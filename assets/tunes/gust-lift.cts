@@ -1,12 +1,12 @@
 (tune version: 1 name: "gust-lift" tempo: 150 speed: 6 channels: 3
   (bus reverb: zitarev size: 0.6 damp: 0.5 mix: 0.12)
   (instruments
-    (instrument id: 1 name: "the warning: a narrow breath drawn in, rising" patch: (noise-bed color: pink level: 1.0 track: 1 centre: 1.0 width: 0.7 wander: 0 hp: 300 lp: 8000 attack: 0.9 release: 0.1 seed: 101) volume: 44 gain: 2 send: 0.15)
-    (instrument id: 2 name: "the rush" patch: (noise-bed color: pink level: 1.0 centre: 950 width: 1.7 wander: 0.3 rate: 0.7 gust: 0.3 gust-rate: 1.1 hp: 260 lp: 7000 excite: 0.2 excite-freq: 2400 attack: 0.06 release: 0.7 seed: 102) volume: 50 gain: 2 send: 0.15)
+    (instrument id: 1 name: "the warning: a narrow breath drawn in, rising" patch: (noise-bed color: pink level: 1.0 track: 1 centre: 1.0 width: 0.7 wander: 0 hp: 300 lp: 8000 attack: 0.9 release: 0.1 seed: 101) volume: 52 gain: 4 send: 0.15)
+    (instrument id: 2 name: "the rush" patch: (noise-bed color: pink level: 1.0 centre: 950 width: 1.7 wander: 0.3 rate: 0.7 gust: 0.3 gust-rate: 1.1 hp: 260 lp: 7000 excite: 0.2 excite-freq: 2400 attack: 0.06 release: 0.7 seed: 102) volume: 50 gain: 3 send: 0.15)
     (instrument id: 3 name: "air climbing the column" patch: (noise-bed color: pink level: 1.0 track: 1 centre: 1.0 width: 1.0 wander: 0.1 rate: 0.4 hp: 300 attack: 0.4 release: 0.6 seed: 103) volume: 32 gain: 2 send: 0.2))
   (patterns
     (pattern id: 0 rows: 100
-      (row 50 (1 "C-5" 1 44 "104"))
+      (row 50 (1 "C-5" 1 52 "104"))
       (row 51 (1 "..." 0 0 "104"))
       (row 52 (1 "..." 0 0 "104"))
       (row 53 (1 "..." 0 0 "104"))

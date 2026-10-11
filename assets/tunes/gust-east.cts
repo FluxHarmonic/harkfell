@@ -1,12 +1,12 @@
 (tune version: 1 name: "gust-east" tempo: 150 speed: 6 channels: 3
   (bus reverb: zitarev size: 0.6 damp: 0.5 mix: 0.12)
   (instruments
-    (instrument id: 1 name: "the warning: a narrow breath drawn in, rising" patch: (noise-bed color: pink level: 1.0 track: 1 centre: 1.0 width: 0.7 wander: 0 hp: 300 lp: 8000 attack: 0.9 release: 0.1 seed: 101) volume: 44 gain: 2 send: 0.15)
-    (instrument id: 2 name: "the rush across the gap" patch: (noise-bed color: pink level: 1.0 centre: 700 width: 1.8 wander: 0.4 rate: 0.9 gust: 0.55 gust-rate: 2.3 hp: 220 lp: 6000 excite: 0.2 excite-freq: 2000 attack: 0.06 release: 0.7 seed: 104) volume: 50 gain: 2 send: 0.15)
+    (instrument id: 1 name: "the warning: a narrow breath drawn in, rising" patch: (noise-bed color: pink level: 1.0 track: 1 centre: 1.0 width: 0.7 wander: 0 hp: 300 lp: 8000 attack: 0.9 release: 0.1 seed: 101) volume: 52 gain: 4 send: 0.15)
+    (instrument id: 2 name: "the rush across the gap" patch: (noise-bed color: pink level: 1.0 centre: 700 width: 1.8 wander: 0.4 rate: 0.9 gust: 0.55 gust-rate: 2.3 hp: 220 lp: 6000 excite: 0.2 excite-freq: 2000 attack: 0.06 release: 0.7 seed: 104) volume: 50 gain: 3 send: 0.15)
     (instrument id: 3 name: "grass and down streaming east" patch: (noise-bed color: pink level: 1.0 centre: 3000 width: 1.1 wander: 0.3 rate: 1.2 trem: 0.35 trem-rate: 6 hp: 1200 lp: 9000 attack: 0.3 release: 0.6 seed: 105) volume: 26 gain: 2 send: 0.2))
   (patterns
     (pattern id: 0 rows: 100
-      (row 50 (1 "C-5" 1 44 "104"))
+      (row 50 (1 "C-5" 1 52 "104"))
       (row 51 (1 "..." 0 0 "104"))
       (row 52 (1 "..." 0 0 "104"))
       (row 53 (1 "..." 0 0 "104"))

@@ -1174,7 +1174,7 @@
             (voice-fade! "local-gap" now))))
 
     (define GAP-R 200.0)           ; px: half a room
-    (define GAP-GAIN 0.5)
+    (define GAP-GAIN 0.7)
 
     ;; --- Cloudstair: the gust's warning and rush, on the simulation's clock ----------------
     ;; One shared cycle, 600 ticks at 60 Hz ((engine air)): calm 0..359 with
@@ -1201,7 +1201,7 @@
     (define GUST-LOOPS '((gust-lift "gust-lift") (gust-east "gust-east")))
     (define GUST-PERIOD 600)
     (define GUST-CYCLE-S 10.0)
-    (define GUST-GAIN 0.6)
+    (define GUST-GAIN 0.85)
     (define GUST-SNAP-S 0.08)
     (define GUST-MOMENT-DIP 0.7)   ; -3 dB
     (define GUST-DIP-FROM 290)
@@ -1429,10 +1429,10 @@
             ;; down settling at the Cattails, and the seed creatures' calls
             ;; (clicks and chirrs before H5, F#5/A5 answers after)
             (list 'glide-open "glide-open" 0.0 0.0 0.2)
-            (list 'pickup-h5 "pickup-h5" 0.0 0.0 0.6)
-            (list 'down-settles "down-settles" 0.0 0.0 0.6)
+            (list 'pickup-h5 "pickup-h5" 0.0 0.0 0.63)
+            (list 'down-settles "down-settles" 0.0 0.0 0.9)
             (list 'seed-click "seed-click" 0.0 0.0 0.32)
-            (list 'seed-chirr "seed-chirr" 0.0 0.0 0.5)
+            (list 'seed-chirr "seed-chirr" 0.0 0.0 0.55)
             (list 'seed-answer-a "seed-answer-a" 0.0 0.0 0.4)
             (list 'seed-answer-b "seed-answer-b" 0.0 0.0 0.4)
             ;; A2's spot sounds
