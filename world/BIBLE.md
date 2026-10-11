@@ -56,7 +56,7 @@ And the rules the gates enforce, so nobody has to remember them:
 
 **Harm.** Brackish water (`x`): touch it and you are back where you entered the room.
 
-**Gives.** H2, found at the region's far end: the Far Mound (x17y3), where A4 moved it from A3's Drowned Channel (for David's ruling, topics/harkfell-a4-region-maps). The Old Stone's ring-stone (x10y3), keyed to H2, is the door to Behind the Stone (x11y3). The cattail down (the glide) is shown in the Cattails and is not in the validation slice.
+**Gives.** H2, found at the region's far end: the Far Mound (x17y3), where A4 moved it from A3's Drowned Channel (for David's ruling, topics/harkfell-a4-region-maps). The Old Stone's ring-stone (x10y3), keyed to H2, is the door to Behind the Stone (x11y3). Behind that door, down at local (14,8) grants the glide on contact (D49); the Cattails' drifting down is atmosphere.
 
 ### The first block (A1)
 
@@ -148,19 +148,23 @@ under its opening, which a jump and a wall kick cannot reach. The map's
 optional G-M glide and single kick is omitted: with the measured glide a
 four-tile glide loses as much height as the jump gains.
 
-The gust: one shared 600-tick clock, calm 0-359 (warning 300-359), gust
-360-599 ((engine air)). Authored as `(air-field at: (C R) size: (W H)
+The gust: one shared 480-tick clock, calm 0-239, warning 240-299, gust
+300-479 ((engine air)). Authored as `(air-field at: (C R) size: (W H)
 kind: pulsed-lift|east-gust)` over `^` cells or gap air. The timed lifts
 copy SYSTEMS's measured lift fixture: wait on the bank one cell west of
 the column, rise 144 px, land on the sill east of it, the field's top 96 px
-above the sill. The gaps (I; P's two) follow David's playtest (2026-10-11):
+above the sill. Required lift departures use the first 90 gust ticks,
+300-389; a 120-tick calm return departs at 0-180 and finishes before the
+gust applies. The gaps (I; P's two) follow David's playtest (2026-10-11):
 the challenge is timing the gust, not the footwork. Each is three tiles,
 its east bank a tile higher than its west, `x` two rows under the lower
 bank, the eastward field over the gap air only. So eastward the gust is
-what carries you (a standing take-off window of 13 ticks at the 0.66
-drift, 15 at 0.8; 5 in calm), and westward, the return, drops easily in
-calm (15). Never through coyote time: test/test-cloudstair-takeoff.sgl
-holds every crossing to it, tools/cloudstair-takeoff.sgl measures them.
+what carries you (a standing take-off window of 15 ticks at the approved
+0.8 drift; 5 in calm), and westward, the return, drops easily in calm
+(15). Required take-off gates demand at least 15 ticks eastward in gust
+and 8 westward in calm, without coyote time:
+test/test-cloudstair-takeoff.sgl checks them and rejects a coyote-only
+control; tools/cloudstair-takeoff.sgl measures them.
 P's middle rest is six tiles, a real run-up. Waits and catches lie outside
 every field. `x` appears only in I and P.
 
@@ -172,8 +176,10 @@ New room things:
   in open air they circle, and part as the body comes near. Drawn from
   time and phase ((harkfell cloudstair look) `cloudstair-seeds`), never a
   platform, never harmful.
-- `(down at: (C R))`, the Cattails' gift (Reedfen 15,3 only): touched
-  after H2 it gives the down; drawn until it is yours.
+- `(down at: (C R))`, the gift behind the first amber H2 door (Behind
+  the Stone, Reedfen 11,3, local 14,8): touched after H2 it gives the
+  down; drawn until it is yours. An already-earned save keeps the down;
+  an unearned save must make that contact. Cattails down is atmosphere.
 
 The look ((harkfell cloudstair look)): every Cloudstair room is outdoors
 (its closed top is the shelf above, the sky behind). The cliffs are
