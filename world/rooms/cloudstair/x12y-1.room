@@ -1,6 +1,8 @@
-;; Two four-tile gaps (3-6, 12-15) with the deep drop under each, the gust
-;; over each, and a five-tile rest between. J's steady lift (21-23) lands
-;; on the east bank, out of the wind.
+;; Two three-tile gaps (5-7, 14-16), each with the deep drop two rows under
+;; its lower bank and the eastward gust over it; each eastward leg lands a
+;; tile higher, so the gust is what carries it and the way back west drops
+;; easily in calm. A six-tile rest between them gives a real run-up. J's
+;; steady lift (21-23) lands on the east bank, out of the wind.
 (room
   region: cloudstair
   at: (12 -1)
@@ -15,12 +17,12 @@
    "###                  ####"
    "#                       #"
    "#                    ^^^#"
-   "                     ^^^#"
-   "                     ^^^#"
-   " |      | |      | | ^^^#"
-   "###    #####    #####^^^#"
-   "###    #####    #####^^^#"
-   "###xxxx#####xxxx#####^^^#")
-  things: ((air-field at: (3 1) size: (4 8) kind: east-gust)
-           (air-field at: (12 1) size: (4 8) kind: east-gust))
+   "                  | |^^^#"
+   "         | |     ####^^^#"
+   " |      ######   ####^^^#"
+   "#####   ######   ####^^^#"
+   "#####   ######xxx####^^^#"
+   "#####xxx#############^^^#")
+  things: ((air-field at: (5 1) size: (3 8) kind: east-gust)
+           (air-field at: (14 1) size: (3 7) kind: east-gust))
   decor: auto)

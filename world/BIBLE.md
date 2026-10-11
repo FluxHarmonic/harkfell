@@ -153,10 +153,16 @@ The gust: one shared 600-tick clock, calm 0-359 (warning 300-359), gust
 kind: pulsed-lift|east-gust)` over `^` cells or gap air. The timed lifts
 copy SYSTEMS's measured lift fixture: wait on the bank one cell west of
 the column, rise 144 px, land on the sill east of it, the field's top 96 px
-above the sill. The gaps (I; P's two) copy its four-tile gap instrument:
-banks of three tiles or more, `x` two rows under the bank tops, the
-eastward field over the gap air only. Waits and catches lie outside every
-field. `x` appears only in I and P.
+above the sill. The gaps (I; P's two) follow David's playtest (2026-10-11):
+the challenge is timing the gust, not the footwork. Each is three tiles,
+its east bank a tile higher than its west, `x` two rows under the lower
+bank, the eastward field over the gap air only. So eastward the gust is
+what carries you (a standing take-off window of 13 ticks at the 0.66
+drift, 15 at 0.8; 5 in calm), and westward, the return, drops easily in
+calm (15). Never through coyote time: test/test-cloudstair-takeoff.sgl
+holds every crossing to it, tools/cloudstair-takeoff.sgl measures them.
+P's middle rest is six tiles, a real run-up. Waits and catches lie outside
+every field. `x` appears only in I and P.
 
 New room things:
 

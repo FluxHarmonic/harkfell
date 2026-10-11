@@ -32,34 +32,45 @@
                       (< (car center) (* 16 (+ 1 (gcol x hi))))
                       (<= (* 16 (grow y 0)) (cdr center))
                       (< (cdr center) (* 16 (grow y 11))))))))
+      ;; The gaps since David's playtest (ROOMS+LOOK, test/test-cloudstair-
+      ;; takeoff.sgl): three tiles, each east bank a tile higher. Every start
+      ;; stands four cells from its gap, where the measured standing take-off
+      ;; windows (gust eastward, calm westward) span run-ups 38-52; the family
+      ;; runs 45, the middle, and never leaves in coyote time.
+      (define GAP-WIDTH 3)
+      (define GAP-RUN 45)
       (define (gap-script h)
         (lambda (node)
-          (append (make-list 32 (intent h: h))
+          (append (make-list GAP-RUN (intent h: h))
                   (list (intent h: h jump: #t press: #t))
                   (make-list 46 (intent h: h jump: #t))
-                  (make-list 41 NO-INTENT))))
+                  (make-list (- 73 GAP-RUN) NO-INTENT))))
 
       ;; name, lower/start room, start cell, family, arrival, timing windows,
       ;; kind, gap's left column, direction. All coordinates are authored cells.
+      ;; Eastward legs are timed in the gust, westward ones (the returns) in
+      ;; calm: eastward in calm is the deliberately harder way. A westward
+      ;; family (120 ticks) must finish before the gust: it departs by
+      ;; AIR-GUST - 120 (the 600-tick cycle's 0-239 kept the same rule).
       (define LEGS
         (list
           (list 'F-L 8 0 10 7 probe-lift-script (rests-in 8 -1 14 24)
                 (list (list AIR-GUST (+ AIR-GUST 89))) 'lift 11 1)
           (list 'M-S 9 -1 10 7 probe-lift-script (rests-in 9 -2 14 24)
                 (list (list AIR-GUST (+ AIR-GUST 89))) 'lift 11 1)
-          (list 'I-east 11 0 8 7 (gap-script 1) (rests-in 11 0 14 24)
+          (list 'I-east 11 0 6 7 (gap-script 1) (rests-in 11 0 13 21)
                 (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 10 1)
-          (list 'I-west 11 0 15 7 (gap-script -1) (rests-in 11 0 0 9)
-                (list (list 0 (- AIR-WARNING 1))) 'gap 10 -1)
-          (list 'P-west-gap-east 12 -1 1 7 (gap-script 1) (rests-in 12 -1 7 11)
-                (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 3 1)
-          (list 'P-west-gap-west 12 -1 8 7 (gap-script -1)
-                (lambda (n) (or ((rests-in 12 -1 0 2) n) ((rests-in 11 -1 0 24) n)))
-                (list (list 0 (- AIR-WARNING 1))) 'gap 3 -1)
-          (list 'P-east-gap-east 12 -1 10 7 (gap-script 1) (rests-in 12 -1 16 20)
-                (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 12 1)
-          (list 'P-east-gap-west 12 -1 17 7 (gap-script -1) (rests-in 12 -1 7 11)
-                (list (list 0 (- AIR-WARNING 1))) 'gap 12 -1)))
+          (list 'I-west 11 0 16 6 (gap-script -1) (rests-in 11 0 0 9)
+                (list (list 0 (- AIR-GUST 120))) 'gap 10 -1)
+          (list 'P-west-gap-east 12 -1 1 7 (gap-script 1) (rests-in 12 -1 8 13)
+                (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 5 1)
+          (list 'P-west-gap-west 12 -1 11 6 (gap-script -1)
+                (lambda (n) (or ((rests-in 12 -1 0 4) n) ((rests-in 11 -1 0 24) n)))
+                (list (list 0 (- AIR-GUST 120))) 'gap 5 -1)
+          (list 'P-east-gap-east 12 -1 10 6 (gap-script 1) (rests-in 12 -1 17 20)
+                (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 14 1)
+          (list 'P-east-gap-west 12 -1 20 5 (gap-script -1) (rests-in 12 -1 8 13)
+                (list (list 0 (- AIR-GUST 120))) 'gap 14 -1)))
 
       ;; Feedback generates actual inputs, then callers replay the entire script.
       ;; Stop at a threshold, retaining the genuine offset and velocity.
@@ -84,12 +95,25 @@
               (let ((walk (walk-to node (- left 20) -1 220)))
                 (and walk (last-node (timed-run STEP node
                                       (append walk (make-list 120 NO-INTENT))))))
+              ;; Back over the gap from a standing take-off, never coyote time:
+              ;; settle, walk to a spot two tiles from the edge (out of every
+              ;; field), wait there for the crossing's phase (the gust eastward,
+              ;; calm westward), then run to the take-off point and jump.
               (let* ((h (if (< (body-x b) left) 1 -1))
+                     (right (+ left (* 16 GAP-WIDTH)))
+                     (spot (if (> h 0) (- left 36) (+ right 28)))
                      ;; Join only an identical full state in the already
                      ;; replayed directed shelter cycle; no phase assignment.
-                     (proof (wait node 0))
+                     (settled (wait node 0))
+                     (rest0 (and settled (car settled)))
+                     (to-spot (and rest0
+                                   (let ((x (body-x (timed-node-body rest0))))
+                                     (walk-to rest0 spot (if (< x spot) 1 -1) 300))))
+                     (at-spot (and to-spot
+                                   (last-node (timed-run STEP rest0 (append to-spot (make-list 30 NO-INTENT))))))
+                     (proof (and at-spot (wait at-spot (if (> h 0) (+ AIR-GUST 5) 0))))
                      (rest (and proof (car proof)))
-                     (run (and rest (walk-to rest (if (> h 0) (+ left 5) (+ left 51)) h 180))))
+                     (run (and rest (walk-to rest (if (> h 0) (- left 10) (+ right 2)) h 120))))
                 (and run
                      (last-node (timed-run STEP rest
                        (append run (list (intent h: h jump: #t press: #t))
@@ -159,7 +183,7 @@
                                                    (rests-in (list-ref leg 1) (list-ref leg 2) 0 10)
                                                    (if (> (list-ref leg 10) 0)
                                                        (rests-in (list-ref leg 1) (list-ref leg 2) 0 (- (list-ref leg 9) 1))
-                                                       (rests-in (list-ref leg 1) (list-ref leg 2) (+ (list-ref leg 9) 4) 24))))
+                                                       (rests-in (list-ref leg 1) (list-ref leg 2) (+ (list-ref leg 9) GAP-WIDTH) 24))))
                                          (back (if (home end) end
                                                    (and (or (eq? (list-ref leg 8) 'lift)
                                                             (shelter? end))
