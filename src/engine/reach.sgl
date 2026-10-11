@@ -89,11 +89,13 @@
           (sigil string)
           (engine tilemap)
           (engine collide)
+          (engine air)
           (engine body))
 
   (export make-intent* NOTHING
           standable? standable-cells stand-body real-stand-body rest-cell body-cell
-          witness witness? witness-from witness-script witness-hops
+          witness witness? witness-from witness-script witness-hops witness-origin
+          reach-search-down
           reach-graph reach-graph? reach-search reach-search* graph-memo tilemap-changes graph-stand-scripts
           graph-same-edges?
           graph-tm graph-cells graph-edges graph-starts graph-stats
@@ -204,7 +206,8 @@
     (define-struct witness
       (from default: #f)
       (script default: '())
-      (hops default: 1))
+      (hops default: 1)
+      (origin default: #f))
 
     (define SETTLE-MAX 180)
 
@@ -215,19 +218,27 @@
     ;; only if a tick with no input leaves it where it is, grounded and still
     ;; (a floor under it, nothing pushing it). #f otherwise.
     (define (real-stand-body tm f c r)
-      (let* ((b (stand-body tm f c r))
-             (b2 (body-step b NOTHING tm f)))
+      (checked-rest tm f (stand-body tm f c r)))
+
+    (define (checked-rest tm f b)
+      (let ((b2 (body-step b NOTHING tm f)))
         (and (eq? (body-mode b2) 'ground)
              (= (body-x b2) (body-x b)) (= (body-y b2) (body-y b))
              (= (body-vx b2) 0) (= (body-vy b2) 0)
              (null? (body-events b2))
              b)))
 
+    (define (witness-start tm f w)
+      (let* ((from (witness-from w))
+             (b (or (witness-origin w) (stand-body tm f (car from) (cdr from)))))
+        (and (equal? (rest-cell tm f b) from)
+             (checked-rest tm f b))))
+
     ;; The replay starts from a standing state checked to be at rest
     ;; (real-stand-body); a start that is not refuses the witness.
     (define (replay-witness tm f w)
       (let ((from (witness-from w)))
-        (let loop ((b (real-stand-body tm f (car from) (cdr from)))
+        (let loop ((b (witness-start tm f w))
                    (s (witness-script w)))
           (cond ((not b) #f)
                 ((null? s) (settle-quietly tm f b))
@@ -236,7 +247,7 @@
     ;; Every body along the witness (the replay's trace), start included.
     (define (witness-bodies tm f w)
       (let ((from (witness-from w)))
-        (let loop ((b (stand-body tm f (car from) (cdr from)))
+        (let loop ((b (witness-start tm f w))
                    (s (witness-script w))
                    (acc '()))
           (if (or (not b) (null? s))
@@ -251,7 +262,7 @@
     ;; hazard or left the map.
     (define (witness-trace tm f w)
       (let ((from (witness-from w)))
-        (let loop ((b (real-stand-body tm f (car from) (cdr from)))
+        (let loop ((b (witness-start tm f w))
                    (s (witness-script w))
                    (acc '()))
           (cond ((not b) (reverse acc))
@@ -458,6 +469,16 @@
     ;; REUSE: prior, a memo from a search on a tilemap that differs from tm
     ;; only in the cell indices CHANGED (or #f: nothing to reuse).
     (define (reach-search* tm f starts accept? prior changed . log)
+      (apply reach-search-profile* tm f starts accept? prior changed #f log))
+
+    ;; Steady-field diagnostic only. Timed acceptance uses (engine reach timed),
+    ;; which keeps actual arrivals and acquisition rather than cell anchors.
+    (define (reach-search-down tm f starts accept? down . log)
+      (apply reach-search-profile* tm f starts accept? #f '() down log))
+
+    (define (reach-search-profile* tm f starts accept? prior changed down . log)
+      (when (find air-field-pulsed (tilemap-air tm))
+        (error "Spatial reach cannot prove timed fields; use exact timed reach"))
       (let* ((s (tilemap-size tm))
              (ncells (* (tilemap-cols tm) (tilemap-rows tm)))
              (nk (* NKINDS ncells))
@@ -509,7 +530,11 @@
         ;; What makes two representatives the same state.
         (define (rep-sig b)
           (list (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b) (body-facing b)
-                (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b) (body-cut b) (body-brittle b)))
+                (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b) (body-cut b) (body-brittle b)
+                (body-down b) (body-tau b) (body-gliding b) f (tilemap-air tm)))
+
+        (define (standing c r)
+          (body (stand-body tm f c r) down: down))
 
         (define (key kind c r) (+ kind (* NKINDS (cell-index tm c r))))
         (define (key-kind k) (modulo k NKINDS))
@@ -532,14 +557,14 @@
         ;; (the arrival state stands in then).
         (define (canonical kind c r side)
           (cond ((= kind K-STAND)
-                 (and (standable? tm c r) (stand-body tm f c r)))
+                 (and (standable? tm c r) (standing c r)))
                 ((or (= kind K-CLING-L) (= kind K-CLING-R) (= kind K-WALL-L) (= kind K-WALL-R))
                  (let* ((x (if (> side 0) (- (* s (+ c 1)) (feel-box-w f)) (* 1.0 s c)))
                         (y (- (* 1.0 s r) (- (/ (feel-box-h f) 2.0) 1.0)))
                         (cling? (or (= kind K-CLING-L) (= kind K-CLING-R)))
                         (b (body (body-at x y)
                                  mode: (if cling? 'cling 'air)
-                                 side: side facing: side)))
+                                 side: side facing: side down: down)))
                    ;; a cling's canonical state must still hold the rock; a
                    ;; wall's need only be free: it is the top of the cell the
                    ;; wall was touched in, touching or not (the discretization
@@ -552,7 +577,7 @@
                 ((= kind K-SWIM)
                  (let ((b (body (body-at (+ (* s c) (/ (- s (feel-box-w f)) 2.0))
                                          (- (* 1.0 s r) (- (/ (feel-box-h f) 2.0) 1.0)))
-                                mode: 'swim)))
+                                mode: 'swim down: down)))
                    (and (box-free? b) (body-in-water? b tm f) b)))
                 (else #f)))
 
@@ -625,6 +650,14 @@
                    (fly from b rev k h #f #f air))
                  ;; the air branches
                  (when (eq? air 'default)
+                   ;; Lift exits can be much later than an ordinary jump's
+                   ;; turn. Release/steer from the actual ascent, never snap.
+                   (when (and down held (memv k '(32 64 96 120)))
+                     (fly from b rev k h #f #f 'fixed)
+                     (for-each (lambda (direction)
+                                 (unless (= direction h)
+                                   (fly from b rev k direction #t #f 'fixed)))
+                               '(-1 0 1)))
                    (if (= h 0)
                        (when (= k 6)
                          (fly from b rev k 1 held hold-free 'fixed)
@@ -680,6 +713,8 @@
                  (b1 (step b in)))
             (when (and b1 (memq 'wall-jump (body-events b1)))
               (fly from b1 (cons in rev) 1 (- side) #f #f 'default)
+              (when down
+                (fly from b1 (cons in rev) 1 (- side) #t #f 'default))
               (fly from b1 (cons in rev) 1 (- side) #f #f 'chimney))))
 
         (define (expand-stand from b0)
@@ -942,7 +977,7 @@
         (for-each (lambda (c)
                     (let ((k (key K-STAND (car c) (cdr c))))
                       (when (and (standable? tm (car c) (cdr c)) (not (vector-ref reps k)))
-                        (vector-set! reps k (stand-body tm f (car c) (cdr c)))
+                        (vector-set! reps k (standing (car c) (cdr c)))
                         (set! queue (cons k queue)))))
                   starts)
         (let drain ()
@@ -995,6 +1030,7 @@
                                    (let* ((to-cell (key-cell to))
                                           (hs (reverse path))
                                           (raw (witness from: from-cell
+                                                        origin: (vector-ref reps k)
                                                         script: (reverse (apply append (map cdr path)))
                                                         hops: n))
                                           ;; THE WITNESS REPLAY: the path made real, then
@@ -1004,7 +1040,8 @@
                                           (w (if accept?
                                                  (if (not real)
                                                      (begin (set! nu (+ nu 1)) #f)
-                                                     (let ((w (witness from: from-cell script: (car real) hops: n)))
+                                                     (let ((w (witness from: from-cell origin: (vector-ref reps k)
+                                                                       script: (car real) hops: n)))
                                                        (and (accept? tm f w end-cell) w)))
                                                  raw)))
                                      (set! nc (+ nc 1))

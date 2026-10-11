@@ -1,0 +1,35 @@
+(import (sigil test)
+        (sigil list)
+        (engine body)
+        (engine reach)
+        (engine reach timed)
+        (harkfell feel)
+        (harkfell cloudstair probes))
+
+(define TM (probe-lift-map #f))
+(define START (probe-lift-start TM 359 #t))
+(define SCRIPT (probe-lift-script START))
+(define W (witness from: (cons 7 20)
+                   origin: (timed-node-body START)
+                   script: SCRIPT))
+
+(test-group "steady reach: ability-aware witnesses"
+  (test "an explicit down origin survives witness replay and trace"
+    (let ((end (replay-witness TM HARKFELL-FEEL W))
+          (trace (witness-trace TM HARKFELL-FEEL W)))
+      (assert-true end)
+      (assert-true (body-down end))
+      (assert-equal 479 (body-tau end))
+      (assert-true (witness-lands? TM HARKFELL-FEEL W (cons 12 11)))
+      (assert-true (every body-down trace))))
+  (test "the same script without an ability origin cannot ascend"
+    (assert-false (witness-lands? TM HARKFELL-FEEL
+                    (witness from: (cons 7 20) script: SCRIPT) (cons 12 11))))
+  (test "a fabricated origin outside the declared cell is rejected"
+    (assert-false (replay-witness TM HARKFELL-FEEL
+                    (witness W origin: (body (timed-node-body START) x: 10)))))
+  (test "a pulsed footprint cannot be accepted by spatial reach"
+    (assert-true (guard (error (#t #t))
+                   (reach-search-down (probe-lift-map #t) HARKFELL-FEEL
+                                      (list (cons 7 20)) witness-lands? #t)
+                   #f))))
