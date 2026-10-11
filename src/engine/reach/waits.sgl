@@ -12,7 +12,15 @@
     ;; The result is (actual-node . elapsed-ticks), or #f. Every elapsed tick
     ;; follows a real NO-INTENT edge. A same-phase request traverses a cycle.
     (define (timed-waiter tm f advance)
-      (let ((members #{}))
+      (let ((members #{}) (rests #{}))
+        ;; This projection is a certificate key only, never a simulated node.
+        ;; A constant rest has every full phase-key proved during its cycle.
+        (define (rest-key node)
+          (timed-key (timed-node node body: (body (timed-node-body node) tau: 0))))
+        (define (known-rest? node)
+          (dict-contains? rests (rest-key node)))
+        (define (known? node)
+          (or (known-rest? node) (dict-contains? members (timed-key node))))
         (define (outside? node)
           (let* ((b (timed-node-body node)) (c (body-center b f)))
             (and (eq? (body-mode b) 'ground)
@@ -25,10 +33,19 @@
               (if (= n (* 2 AIR-PERIOD))
                   (and (equal? (timed-key start) (timed-key node))
                        (begin
-                         (for-each
-                           (lambda (member)
-                             (set! members (dict-set members (timed-key member) cycle)))
-                           (vector->list cycle))
+                         (let ((key (rest-key start)))
+                           (if (every (lambda (member) (equal? key (rest-key member)))
+                                      (vector->list cycle))
+                               ;; Keep one invariant body/data certificate,
+                               ;; instead of retaining 480 nodes and 480 keys
+                               ;; for every waiting pose in a large replay.
+                               (set! rests (dict-set rests key #t))
+                               ;; Preserve exact general cycles whose hidden
+                               ;; fields genuinely vary within the period.
+                               (for-each
+                                 (lambda (member)
+                                   (set! members (dict-set members (timed-key member) cycle)))
+                                 (vector->list cycle))))
                          #t))
                   (let ((next (advance node NO-INTENT)))
                     (and (timed-wait? node next)
@@ -37,16 +54,33 @@
                              (vector-set! cycle (body-tau (timed-node-body node)) node))
                            (loop next (+ n 1) (if (= n AIR-PERIOD) node start)))))))))
         (lambda (node target)
-          (and (<= 0 target) (< target AIR-PERIOD) (outside? node)
+          (and (<= 0 target) (< target AIR-PERIOD)
+               (<= 0 (body-tau (timed-node-body node)))
+               (< (body-tau (timed-node-body node)) AIR-PERIOD)
+               (outside? node)
                (let ((key (timed-key node)))
-                 (and (or (dict-contains? members key)
+                 (and (or (known? node)
                           (let ((next (advance node NO-INTENT)))
                             (and (timed-wait? node next)
-                                 (dict-contains? members (timed-key next))))
+                                 (known? next)))
                           (prove! node))
                       (let join ((node node) (prefix 0))
                         (let ((key (timed-key node)))
                           (cond
+                            ((known-rest? node)
+                             (let* ((delta (modulo (- target (body-tau (timed-node-body node))) AIR-PERIOD))
+                                    (n (if (and (= prefix 0) (= delta 0)) AIR-PERIOD delta))
+                                    (invariant (rest-key node)))
+                               ;; Even a cached invariant returns the output
+                               ;; of genuine NO-INTENT ticks from this arrival.
+                               ;; No body is constructed with a requested tau.
+                               (let replay ((node node) (left n))
+                                 (if (= left 0)
+                                     (cons node (+ prefix n))
+                                     (let ((next (advance node NO-INTENT)))
+                                       (and (timed-wait? node next)
+                                            (equal? invariant (rest-key next))
+                                            (replay next (- left 1))))))))
                             ((dict-contains? members key)
                              (let* ((cycle (dict-ref members key))
                                     (delta (modulo (- target (body-tau (timed-node-body node))) AIR-PERIOD))

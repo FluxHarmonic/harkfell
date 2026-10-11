@@ -50,7 +50,48 @@
       (let* ((other (timed-node NODE data: '(2 3 4) body: (body (timed-node-body NODE) down: #f)))
              (proof (wait other 0)))
         (assert-equal '(2 3 4) (timed-node-data (car proof)))
-        (assert-false (body-down (timed-node-body (car proof))))))))
+        (assert-false (body-down (timed-node-body (car proof)))))))
+  (test "a compact rest still executes every requested tick and a same-phase full cycle"
+    (let* ((calls 0)
+           (counted (lambda (node in)
+                      (set! calls (+ calls 1))
+                      (STEP node in)))
+           (wait (timed-waiter FLOOR F counted))
+           (rest (car (wait NODE 0))))
+      (set! calls 0)
+      (let ((proof (wait rest 3)))
+        (assert-equal 3 (cdr proof))
+        (assert-equal 3 calls)
+        (assert-equal (timed-key (car (reverse (timed-run STEP rest (make-list 3 NO-INTENT)))))
+                      (timed-key (car proof))))
+      (set! calls 0)
+      (let ((proof (wait rest 0)))
+        (assert-equal AIR-PERIOD (cdr proof))
+        (assert-equal AIR-PERIOD calls)
+        (assert-equal (timed-key rest) (timed-key (car proof))))))
+  (test "phase-varying hidden fields keep exact cycle members and reject a free join"
+    (let* ((phase-step (lambda (node in)
+                         (let ((next (STEP node in)))
+                           (timed-node next body:
+                             (body (timed-node-body next)
+                                   lock: (modulo (body-tau (timed-node-body next)) 3))))))
+           (wait (timed-waiter FLOOR F phase-step)))
+      (for-each
+        (lambda (tau)
+          (let* ((node (timed-node NODE body:
+                         (body (timed-node-body NODE) tau: tau lock: 999)))
+                 (proof (wait node 1))
+                 (fresh (timed-run phase-step node (make-list (cdr proof) NO-INTENT))))
+            (assert-true (> (cdr proof) 0))
+            (assert-equal 1 (body-lock (timed-node-body (car proof))))
+            (assert-equal (timed-key (car (reverse fresh))) (timed-key (car proof)))))
+        '(299 479 0 240 389))))
+  (test "an invariant certificate preserves a different arrival's facing"
+    (let* ((wait (timed-waiter FLOOR F STEP))
+           (rest (car (wait NODE 0)))
+           (other (timed-node rest body: (body (timed-node-body rest) facing: -1)))
+           (proof (wait other 3)))
+      (assert-equal -1 (body-facing (timed-node-body (car proof)))))))
 
 (test-group "timed reach: physical waiting and state"
   (test "a full cycle of genuine still ground is a shelter"
