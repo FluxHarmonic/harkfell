@@ -47,7 +47,7 @@
     ;; incomplete! is called at a hard bound; callers must never report PASS.
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete!)
-      (let ((distance-cache '()))
+      (let ((distance-cache '()) (invariant-rests #{}))
         (define (cell-of node)
           (and (still? node)
                (rest-cell (tiles-for (timed-node-data node)) f (timed-node-body node))))
@@ -75,20 +75,67 @@
                  (if (and (timed-wait? node next) (not (shelter? node)))
                      (reverse (cons node rev))
                      (run next (cdr script) (cons node rev))))))))
+        ;; Rotation keys identify certificates, never simulated arrivals.
+        ;; Hidden fields and product state must remain identical on every
+        ;; real no-input tick before a waiting rest can share a continuation.
+        (define (rotation-key node)
+          (timed-key (timed-node node body: (body (timed-node-body node) tau: 0))))
+        (define (invariant-rest? node)
+          (and (still? node)
+               (let ((key (rotation-key node)))
+                 (if (dict-contains? invariant-rests key)
+                     (dict-ref invariant-rests key)
+                     (let ((proved
+                             (and (shelter? node)
+                                  (let loop ((node node) (left (* 2 AIR-PERIOD)))
+                                    (if (= left 0)
+                                        #t
+                                        (let ((next (advance node NO-INTENT)))
+                                          (and (timed-wait? node next)
+                                               (equal? key (rotation-key next))
+                                               (loop next (- left 1)))))))))
+                       (set! invariant-rests (dict-set invariant-rests key proved))
+                       proved)))))
+        (define (remaining node target)
+          (let ((cell (cell-of node)))
+            (if cell
+                (let* ((graph (guides node)) (tm (graph-tm graph))
+                       (dist (distance-for graph target)))
+                  (or (vector-ref dist (cell-index tm (car cell) (cdr cell))) 100000))
+                100000)))
         (define (observe trace target)
           (for-each (lambda (node) (when (still? node) (record! node))) trace)
-          (let ((end (last-node trace)))
+          (let* ((end (last-node trace))
+                 (goal (if (and end (equal? (cell-of end) target))
+                           end
+                           (find (lambda (node)
+                                   (and node (equal? (cell-of node) target)))
+                                 trace))))
             (when (and end (not (still? end))) (record! end))
             ;; A suggestion can overshoot a real standing goal or fail after
             ;; reaching it. That safe prefix is a physical arrival in its own
             ;; right; requiring the whole suggested suffix would hide it.
             ;; Preserve the terminal arrival when it already meets the goal.
-            (if (and end (equal? (cell-of end) target))
-                end
-                (or (find (lambda (node)
-                            (and node (equal? (cell-of node) target)))
-                          trace)
-                    end))))
+            (if goal
+                (list goal)
+                (let ((seen #{}) (choices '()))
+                  ;; A composite can fail only after reaching a real place
+                  ;; to wait. Resume from those prefixes, retaining their
+                  ;; actual phase, body and acquisitions. Prefer the latest
+                  ;; equivalent rest; replayed invariant cycles alone allow
+                  ;; coalescing its earlier waiting poses.
+                  (for-each
+                    (lambda (node)
+                      (when (and node (or (still? node) (eq? node end)))
+                        (let ((key (if (invariant-rest? node)
+                                       (cons 'cycle (rotation-key node))
+                                       (cons 'actual (timed-key node)))))
+                          (unless (dict-contains? seen key)
+                            (set! seen (dict-set seen key #t))
+                            (set! choices (cons node choices))))))
+                    (reverse trace))
+                  (list-sort (lambda (a b) (< (remaining a target) (remaining b target)))
+                             (reverse choices))))))
         (lambda (start target)
           (let ((seen #{}) (count 0) (halted #f)
                 (threshold 0) (next-threshold #f))
@@ -137,9 +184,13 @@
                                       (append (make-list 120 (intent v: v))
                                               (make-list 180 NO-INTENT))) '(-1 1))))))
                          (and (not halted) (pair? scripts)
-                              (let ((end (observe (replay node (car scripts)) target)))
-                                (or (and (still? end) (walk end (+ depth 1)))
-                                    (recover (cdr scripts))))))
+                              (or
+                                (let resume ((nodes (observe (replay node (car scripts)) target)))
+                                  (and (not halted) (pair? nodes)
+                                       (or (and (still? (car nodes))
+                                                (walk (car nodes) (+ depth 1)))
+                                           (resume (cdr nodes)))))
+                                (recover (cdr scripts)))))
                        (let* ((graph (guides node)) (tm (graph-tm graph))
                               (dist (distance-for graph target))
                               (edges
@@ -161,20 +212,25 @@
                                                   (stage (if (eq? (car phases) 'actual) node
                                                              (and proof (car proof)))))
                                              (and stage
-                                                  (let* ((end (observe
-                                                                (replay stage (witness-script (cdar edges))) target))
-                                                         (next (and end (cell-of end)))
-                                                         (d (and next (vector-ref dist
-                                                                       (cell-index tm (car next) (cdr next)))))
-                                                         (here (vector-ref dist
-                                                                          (cell-index tm (car cell) (cdr cell))))
-                                                         (changed
-                                                           (and end
-                                                                (or (not (equal? (timed-node-data node)
-                                                                                 (timed-node-data end)))
-                                                                    (not (eq? (body-down (timed-node-body node))
-                                                                              (body-down (timed-node-body end))))))))
-                                                    (and next
+                                                  (let resume
+                                                    ((nodes (observe
+                                                              (replay stage (witness-script (cdar edges))) target)))
+                                                    (and (not halted) (pair? nodes)
+                                                      (or
+                                                        (let* ((end (car nodes))
+                                                               (next (and end (cell-of end)))
+                                                               (d (and next
+                                                                       (vector-ref dist
+                                                                         (cell-index tm (car next) (cdr next)))))
+                                                               (here (vector-ref dist
+                                                                       (cell-index tm (car cell) (cdr cell))))
+                                                               (changed
+                                                                 (and end
+                                                                      (or (not (equal? (timed-node-data node)
+                                                                                       (timed-node-data end)))
+                                                                          (not (eq? (body-down (timed-node-body node))
+                                                                                    (body-down (timed-node-body end))))))))
+                                                          (and next
                                                          ;; Frozen composite shortcuts
                                                          ;; can give optimistic hop
                                                          ;; costs. Use those costs to
@@ -187,7 +243,8 @@
                                                          (or changed
                                                              (and d here
                                                                   (not (equal? next cell))))
-                                                         (walk end (+ depth 1))))))
+                                                               (walk end (+ depth 1))))
+                                                        (resume (cdr nodes)))))))
                                            (depart (cdr phases)))))
                                   (try (cdr edges)))))))))))
             ;; Progressively widen the suggestion budget before following a

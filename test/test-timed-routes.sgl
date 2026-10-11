@@ -134,4 +134,80 @@
         (assert-true arrival)
         (assert-false incomplete)
         (when arrival
+          (assert-equal (timed-key fresh) (timed-key arrival))))))
+  (test "a composite's real intermediate rest can wait and resume a local route"
+    (let* ((hazard-tm (tilemap-set TM 7 2 'hazard))
+           (advance
+             (lambda (node in)
+               (let ((b (body-step (timed-node-body node) in hazard-tm F)))
+                 (and (not (memq 'hazard (body-events b)))
+                      (timed-node node body: b)))))
+           (finish (append (make-list 30 (intent h: 1)) (make-list 30 NO-INTENT)))
+           (fresh (car (reverse (timed-run advance END finish))))
+           (goal (rest-cell hazard-tm F (timed-node-body fresh)))
+           (composite (append SCRIPT (make-list 80 (intent h: 1))))
+           (edges (make-vector 32 '())))
+      ;; The composite reaches a real waiting rest, then its later departure
+      ;; is mistimed and hazardous. That prefix offers a legal place to stop
+      ;; and replay a different local suggestion; no new body may be seeded.
+      (vector-set! edges (cell-index TM 1 2)
+        (list (cons (cell-index TM (car goal) (cdr goal))
+                    (witness from: '(1 . 2) script: composite))))
+      (vector-set! edges (cell-index TM (car TARGET) (cdr TARGET))
+        (list (cons (cell-index TM (car goal) (cdr goal))
+                    (witness from: TARGET script: finish))))
+      (let* ((graph (reach-graph tm: hazard-tm cells: (standable-cells hazard-tm)
+                                 edges: edges))
+             (route (timed-route-finder advance (lambda (carry) hazard-tm) F
+                      (lambda (node) graph)
+                      (lambda (node) (timed-shelter? hazard-tm F advance node))
+                      (timed-waiter hazard-tm F advance)
+                      20 (lambda (node) #t) (lambda () #t)))
+             (arrival (route START goal)))
+        (assert-false (timed-run advance START composite))
+        (assert-true arrival)
+        (when arrival
+          (assert-equal (timed-key fresh) (timed-key arrival))))))
+  (test "phase-varying hidden fields retain every real intermediate rest"
+    (let* ((hazard-tm (tilemap-set TM 7 2 'hazard))
+           (advance
+             (lambda (node in)
+               (let* ((b (timed-node-body node))
+                      (cell (rest-cell hazard-tm F b)))
+                 (and (not (and (equal? cell TARGET)
+                                (= (body-vx b) 0)
+                                (> (intent-h in) 0)
+                                (not (<= 400 (body-tau b) 407))))
+                      (let* ((next (body-step b in hazard-tm F))
+                             (tau (body-tau next))
+                             (side (if (or (<= 400 tau 407) (<= 411 tau 418)) -1 1)))
+                        (and (not (memq 'hazard (body-events next)))
+                             (timed-node node body: (body next side: side))))))))
+           (finish (append (make-list 30 (intent h: 1)) (make-list 30 NO-INTENT)))
+           (prefix (timed-run advance START SCRIPT))
+           (anchor (find (lambda (node) (= (body-tau (timed-node-body node)) 407)) prefix))
+           (fresh (car (reverse (timed-run advance anchor finish))))
+           (goal (rest-cell hazard-tm F (timed-node-body fresh)))
+           (composite (append SCRIPT (make-list 80 (intent h: 1))))
+           (edges (make-vector 32 '())))
+      ;; Two equal-looking poses share side=-1 at different phases. Their
+      ;; no-input cycle changes that hidden field, and only the earlier
+      ;; departure is useful. A shelter's position-only test is insufficient.
+      (vector-set! edges (cell-index TM 1 2)
+        (list (cons (cell-index TM (car goal) (cdr goal))
+                    (witness from: '(1 . 2) script: composite))))
+      (vector-set! edges (cell-index TM (car TARGET) (cdr TARGET))
+        (list (cons (cell-index TM (car goal) (cdr goal))
+                    (witness from: TARGET script: finish))))
+      (let* ((graph (reach-graph tm: hazard-tm cells: (standable-cells hazard-tm)
+                                 edges: edges))
+             (route (timed-route-finder advance (lambda (carry) hazard-tm) F
+                      (lambda (node) graph)
+                      (lambda (node) (timed-shelter? hazard-tm F advance node))
+                      (timed-waiter hazard-tm F advance)
+                      40 (lambda (node) #t) (lambda () #t)))
+             (arrival (route START goal)))
+        (assert-false (timed-run advance START composite))
+        (assert-true arrival)
+        (when arrival
           (assert-equal (timed-key fresh) (timed-key arrival)))))))
