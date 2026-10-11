@@ -1,0 +1,68 @@
+;;; Cloudstair's exact replay adapter. Engine owns movement/time; Harkfell
+;;; owns harmonic pickup and Cattails acquisition. A larger carry starts at
+;;; actual contact and keeps that body's phase, including during a flight.
+(define-library (harkfell cloudstair reach)
+  (import (sigil list)
+          (sigil math)
+          (engine body)
+          (engine air)
+          (engine tilemap)
+          (engine worldmap)
+          (engine reach)
+          (engine reach timed)
+          (harkfell content)
+          (harkfell feel)
+          (harkfell check)
+          (harkfell down))
+
+  (export cloudstair-stepper cloudstair-entry-phases
+          cloudstair-shelter? cloudstair-window)
+
+  (begin
+    (define (cloudstair-stepper ct)
+      (let ((tiles '())
+            (wm (content-map ct))
+            (pickups (content-pickup-cells ct)))
+        (define (tiles-for carry)
+          (let ((prior (assoc carry tiles)))
+            (if prior
+                (cdr prior)
+                (let ((tm (tiles-carrying ct carry)))
+                  (set! tiles (cons (cons carry tm) tiles))
+                  tm))))
+        (lambda (node in)
+          (let* ((carry (timed-node-data node))
+                 (tm (tiles-for carry))
+                 (b (body-step (timed-node-body node) in tm HARKFELL-FEEL))
+                 (center (body-center b HARKFELL-FEEL))
+                 (p (worldmap-room-at-px wm (car center) (cdr center)))
+                 (rm (and p (placed-data p))))
+            (and p (not (memq 'hazard (body-events b)))
+                 (let* ((carry (carry-union carry
+                                 (map car (filter (lambda (pickup)
+                                                    (body-touches? tm b (cdr pickup)))
+                                                  pickups))))
+                        (down (or (body-down b)
+                                  (down-touched? rm (worldmap-origin wm p) b HARKFELL-FEEL carry))))
+                   (timed-node body: (body b down: down) data: carry)))))))
+
+    ;; Artificial diagnostic seeds cover all phases independently. The
+    ;; progression search uses its actual acquisition/arrival nodes instead.
+    (define (cloudstair-entry-phases ct cell carry down)
+      (let ((tm (tiles-carrying ct carry)))
+        (map (lambda (tau)
+               (timed-node body: (body (stand-body tm HARKFELL-FEEL (car cell) (cdr cell))
+                                       down: down tau: tau)
+                           data: carry))
+             (iota AIR-PERIOD))))
+
+    (define (cloudstair-shelter? ct advance node)
+      (timed-shelter? (tiles-carrying ct (timed-node-data node))
+                      HARKFELL-FEEL advance node))
+
+    (define (cloudstair-window ct advance start family arrives? phase)
+      (and (cloudstair-shelter? ct advance start)
+           (timed-window advance start family arrives?
+                         (if (eq? phase 'gust) 360 0)
+                         (if (eq? phase 'gust) 479 239)
+                         120)))))

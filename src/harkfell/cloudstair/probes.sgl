@@ -1,0 +1,109 @@
+;;; Numerical recording fixtures for the proposed glide strengths. These
+;;; isolated grids are measurement instruments, not Cloudstair room layouts.
+(define-library (harkfell cloudstair probes)
+  (import (sigil list)
+          (engine body)
+          (engine air)
+          (engine tilemap)
+          (engine worldmap)
+          (engine reach)
+          (engine reach timed)
+          (harkfell feel)
+          (harkfell content)
+          (harkfell check))
+
+  (export probe-lift-map probe-lift-start probe-lift-script probe-step
+          probe-lift-arrives? probe-record
+          probe-entry-map probe-entry-start probe-entry-script probe-entry-arrives?)
+
+  (begin
+    (define (probe-lift-map pulsed)
+      (let* ((tm (make-tilemap 25 22 16))
+             (tm (let floor ((c 0) (tm tm))
+                   (if (= c 25)
+                       tm
+                       (floor (+ c 1) (tilemap-set tm c 21 'solid)))))
+             (tm (let sill ((c 11) (tm tm))
+                   (if (= c 19)
+                       tm
+                       (sill (+ c 1) (tilemap-set tm c 12 'solid))))))
+        (tilemap tm air: (list (air-field x: 128 y: 96 w: 48 h: 240
+                                          lift: (feel-lift-v HARKFELL-FEEL)
+                                          pulsed: pulsed)))))
+
+    (define (probe-lift-start tm tau down)
+      (timed-node body: (body (stand-body tm HARKFELL-FEEL 7 20) down: down tau: tau)
+                  data: '(2 4)))
+
+    (define (probe-lift-script node)
+      (append (make-list 15 (intent h: 1))
+              (list (intent jump: #t press: #t))
+              (make-list 35 (intent jump: #t))
+              (make-list 36 (intent h: 1 jump: #t))
+              (make-list 33 NO-INTENT)))
+
+    (define (probe-step tm)
+      (lambda (node in)
+        (let ((b (body-step (timed-node-body node) in tm HARKFELL-FEEL)))
+          (and (not (memq 'hazard (body-events b)))
+               (timed-node node body: b)))))
+
+    (define (probe-lift-arrives? node)
+      (let ((b (timed-node-body node)))
+        (and (eq? (body-mode b) 'ground)
+             (= (+ (body-y b) (feel-box-h HARKFELL-FEEL)) 192)
+             (>= (body-x b) 176))))
+
+    ;; Entrance proof instrument: the real Cairn/Updraft Edge/Rim with an
+    ;; isolated artificial landing above the north seam. This does not author
+    ;; A; its south throat is the columns 8..10 contract for ROOMS+LOOK.
+    (define (probe-entry-map ct carry)
+      (let* ((a (make-tilemap 25 11 16))
+             (a (let floor ((c 0) (a a))
+                  (if (= c 25)
+                      a
+                      (floor (+ c 1)
+                        (if (or (< c 8) (> c 10))
+                            (tilemap-set a c 10 'solid)
+                            a)))))
+             (a (let sill ((c 11) (a a))
+                  (if (= c 24)
+                      a
+                      (sill (+ c 1) (tilemap-set a c 8 'solid)))))
+             (a (tilemap a air: (list (air-field x: 128 y: 80 w: 48 h: 96 lift: 2.4))))
+             (up (room-placed (content-room ct 7 2)))
+             (up (if (memv 4 carry)
+                     (placed up tiles: (tilemap-set (placed-tiles up) 6 3 'air))
+                     up)))
+        (worldmap-tiles
+          (make-worldmap (list (placed x: 7 y: 1 tiles: a)
+                              (room-placed (content-room ct 6 2)) up
+                              (room-placed (content-room ct 7 3)))
+                         25 11 16))))
+
+    (define (probe-entry-start tm down)
+      (timed-node body: (body (stand-body tm HARKFELL-FEEL 29 14) down: down)
+                  data: '(2 4)))
+
+    (define (probe-entry-script node)
+      (append (make-list 70 (intent h: 1))
+              (list (intent jump: #t press: #t))
+              (make-list 65 (intent jump: #t))
+              (make-list 26 (intent h: 1 jump: #t))
+              (make-list 90 NO-INTENT)))
+
+    (define (probe-entry-arrives? node)
+      (let ((b (timed-node-body node)))
+        (and (eq? (body-mode b) 'ground)
+             (< (body-y b) 176))))
+
+    ;; (tick tau x y vx vy mode down gliding), including the actual origin.
+    (define (probe-record tm node script)
+      (let ((trace (timed-run (probe-step tm) node script)))
+        (and trace
+             (map (lambda (tick node)
+                    (let ((b (timed-node-body node)))
+                      (list tick (body-tau b) (body-x b) (body-y b)
+                            (body-vx b) (body-vy b) (body-mode b)
+                            (body-down b) (body-gliding b))))
+                  (iota (length trace)) trace))))))

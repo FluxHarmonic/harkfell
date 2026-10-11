@@ -54,6 +54,7 @@
           (sigil string)
           (sigil math)
           (engine tilemap)
+          (engine body)
           (engine roomfile)
           (engine worldmap)
           (engine air)
@@ -595,16 +596,8 @@
                                             a (grid-standable? (roomfile-grid rf) (car a) (cdr a)))
                                  (add! "things: down must rest in Cattails on a safe bank" "things"))))
                             ((eq? (car t) 'air-field)
-                             (let ((a (thing-at t))
-                                   (size (thing-kw t "size"))
-                                   (kind (thing-kw t "kind")))
-                               (unless (and a (int-pair? size)
-                                            (<= 0 (car a)) (<= 0 (cdr a))
-                                            (> (car size) 0) (> (cadr size) 0)
-                                            (<= (+ (car a) (car size)) ROOM-COLS)
-                                            (<= (+ (cdr a) (cadr size)) ROOM-ROWS)
-                                            (memq kind '(steady-lift pulsed-lift east-gust)))
-                                 (add! "things: air-field needs an in-room at:/size: rectangle and a known kind:" "things"))))
+                             (unless (air-thing-valid? t)
+                               (add! "things: air-field needs an in-room at:/size: rectangle and a known kind:" "things")))
                             ((eq? (car t) 'harmonic)          ; A3: a pickup
                              (let ((a (thing-kw t "at")) (o (thing-kw t "overtone")))
                                (cond ((not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
@@ -836,6 +829,17 @@
                                        '()))
                   all)))))
 
+    (define (air-thing-valid? thing)
+      (let ((at (thing-at thing))
+            (size (thing-kw thing "size"))
+            (kind (thing-kw thing "kind")))
+        (and at (int-pair? size)
+             (<= 0 (car at)) (<= 0 (cdr at))
+             (> (car size) 0) (> (cadr size) 0)
+             (<= (+ (car at) (car size)) ROOM-COLS)
+             (<= (+ (cdr at) (cadr size)) ROOM-ROWS)
+             (memq kind '(steady-lift pulsed-lift east-gust)))))
+
     ;; Footprints are authored in room tiles. Strength is shared product
     ;; tuning, never random or a per-room clock. ^ defaults to steady lift;
     ;; pulsed-lift overrides that default throughout its rectangle in calm.
@@ -849,7 +853,7 @@
                           lift: (if (eq? kind 'east-gust) 0.0 (feel-lift-v HARKFELL-FEEL))
                           east: (if (eq? kind 'east-gust) (feel-wind-cap HARKFELL-FEEL) 0.0)
                           pulsed: (not (eq? kind 'steady-lift)))))
-           (room-things-of rm 'air-field)))
+           (filter air-thing-valid? (room-things-of rm 'air-field))))
 
     ;; A room's tilemap and its placed form (the grid must be whole).
     (define (room-placed rm)

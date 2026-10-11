@@ -49,7 +49,8 @@
           content-reach-carrying content-reach-carrying* set-reach-reuse! sets-bare room-gated carry-label
           content-pickup-cells content-stone-cells tiles-carrying
           content-reach-seeded PICKUP-TOUCH carry-union edge-touches
-          cset? cset-carry cset-graph cset-entries cset-fwd cset-back cset-touch)
+          cset? cset-carry cset-graph cset-entries cset-fwd cset-back cset-touch
+          body-touches?)
 
   (begin
     (define (room-tile-origin ct rm)

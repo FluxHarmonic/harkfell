@@ -1,0 +1,188 @@
+;;; Time-dependent reach. Nodes retain the complete actual body and product
+;;; state; no cell snapping, phase resets, frozen-phase unions or free waits.
+;;; The caller supplies finite input families and the product's per-tick
+;;; acquisition adapter. Search exhaustion is explicit and cannot be PASS.
+(define-library (engine reach timed)
+  (import (sigil struct)
+          (sigil list)
+          (engine body)
+          (engine air)
+          (engine tilemap))
+
+  (export timed-node timed-node? timed-node-body timed-node-data timed-key
+          timed-run timed-wait? timed-shelter? timed-window
+          timed-graph timed-graph? timed-graph-nodes timed-graph-edges
+          timed-graph-complete timed-graph-traps timed-search
+          timed-memo-key timed-graph-memo timed-graph-reused)
+
+  (begin
+    (define-struct timed-node
+      (body default: #f)
+      (data default: '()))
+
+    ;; Events are outputs; every state field that can affect the next tick
+    ;; participates. data contains the product's harmonic carry/entry state.
+    (define (timed-key node)
+      (let ((b (timed-node-body node)))
+        (list (body-x b) (body-y b) (body-vx b) (body-vy b)
+              (body-mode b) (body-side b) (body-facing b)
+              (body-coyote b) (body-buffer b) (body-lock b)
+              (body-jumping b) (body-cut b) (body-brittle b)
+              (body-down b) (body-tau b) (body-gliding b)
+              (timed-node-data node))))
+
+    ;; A memo key also includes all force footprints/strengths, feel, tiles,
+    ;; the cycle constants and offset. Cached scripts still need real replay.
+    (define (timed-memo-key tm f node)
+      (list (timed-key node) f (tilemap-cols tm) (tilemap-rows tm)
+            (tilemap-size tm) (tilemap-edge tm) (tilemap-cells tm)
+            (tilemap-air tm) AIR-PERIOD AIR-WARNING AIR-GUST 0))
+
+    ;; advance: (node intent) -> actual next node, or #f at a hazard/outside.
+    ;; It must run body-step, then acquisition on actual contact that tick.
+    ;; Returns the complete trace, including the origin; #f rejects a hazard.
+    (define (timed-run advance node script)
+      (let loop ((node node) (script script) (trace '()))
+        (cond ((not node) #f)
+              ((null? script) (reverse (cons node trace)))
+              (else (loop (advance node (car script))
+                          (cdr script) (cons node trace))))))
+
+    ;; Search also keeps safe landings before a later hazard in the same
+    ;; input family. A failed suffix cannot erase those reachable catches.
+    (define (timed-prefix advance node script)
+      (let loop ((node node) (script script) (trace '()))
+        (cond ((not node) (reverse trace))
+              ((null? script) (reverse (cons node trace)))
+              (else (loop (advance node (car script))
+                          (cdr script) (cons node trace))))))
+
+    (define (still? b)
+      (and (eq? (body-mode b) 'ground)
+           (= (body-vx b) 0) (= (body-vy b) 0)))
+
+    (define (timed-wait? before after)
+      (and after
+           (let ((a (timed-node-body before)) (b (timed-node-body after)))
+             (and (still? a) (still? b)
+                  (= (body-x a) (body-x b)) (= (body-y a) (body-y b))
+                  (null? (body-events b))
+                  (= (body-tau b) (air-next (body-tau a)))
+                  (equal? (timed-node-data before) (timed-node-data after))
+                  (eq? (body-down a) (body-down b))))))
+
+    ;; A shelter must be outside every authored field, and its one-tick
+    ;; no-input edge must replay unchanged through the entire 600-tick cycle.
+    (define (timed-shelter? tm f advance node)
+      (let* ((b (timed-node-body node)) (c (body-center b f)))
+        (and (still? b)
+             (not (air-sample (tilemap-air tm) (car c) (cdr c) (body-tau b)))
+             (not (eq? (tile-at tm (car c) (cdr c)) 'updraft))
+             (let loop ((node node) (n AIR-PERIOD))
+               (if (= n 0)
+                   #t
+                   (let ((next (advance node NO-INTENT)))
+                     (and (timed-wait? node next) (loop next (- n 1)))))))))
+
+    ;; Every departure in [first,last] must replay ONE common input family
+    ;; from a genuine standing wait, through take-off and settling, to the
+    ;; next rest in at most limit ticks. Returns failed departures, not a
+    ;; single lucky witness. family: node -> script (can react to real body).
+    (define (timed-window advance start family arrives? first last limit)
+      (let loop ((tau first) (failed '()))
+        (if (> tau last)
+            (reverse failed)
+            (let* ((node (timed-node start body: (body (timed-node-body start) tau: tau)))
+                   (script (family node))
+                   (trace (and (<= (length script) limit) (timed-run advance node script)))
+                   (end (and trace (car (reverse trace)))))
+              (loop (+ tau 1)
+                    (if (and end (still? (timed-node-body end)) (arrives? end))
+                        failed
+                        (cons tau failed)))))))
+
+    (define-struct timed-graph
+      (nodes default: '())
+      (edges default: '())       ; (from-key to-key script), fully replayed
+      (complete default: #f)
+      (traps default: '())
+      (memo default: '())        ; (full-context-key . candidate scripts)
+      (reused default: 0))
+
+    ;; All nodes are forward reachable from the given legitimate entries.
+    ;; policies returns finite scripts for the ACTUAL node, including aerial
+    ;; release/steering recovery. Only validated shelters get a wait edge.
+    ;; Every surviving script endpoint is retained, even if still airborne.
+    ;; node-limit is a hard bound; an unfinished result is never a proof.
+    ;; Optional reuse: prior memo and a node -> full-context-key procedure.
+    ;; Only input families are cached. Every reused family replays again;
+    ;; bodies, edges, safe waits and return proofs are always rebuilt.
+    (define (timed-search starts advance policies shelter? home? node-limit . reuse)
+      (let ((known '()) (nodes '()) (edges '()) (front '()) (back '())
+            (count 0) (complete #t)
+            (prior (if (pair? reuse) (car reuse) '()))
+            (key-of (and (pair? reuse) (pair? (cdr reuse)) (cadr reuse)))
+            (memo '()) (reused 0))
+        (define (add! node)
+          (let ((key (timed-key node)))
+            (unless (member key known)
+              (set! known (cons key known))
+              (set! nodes (cons node nodes))
+              (set! back (cons node back))
+              (set! count (+ count 1)))))
+        (for-each add! starts)
+        (let drain ()
+          (cond ((> count node-limit) (set! complete #f))
+                ((and (null? front) (null? back)) #t)
+                ((null? front)
+                 (set! front (reverse back))
+                 (set! back '())
+                 (drain))
+                (else
+                 (let* ((node (car front))
+                        (context (and key-of (key-of node)))
+                        (cached (and context (assoc context prior)))
+                        (families (if cached (cdr cached) (policies node)))
+                        (scripts (append (if (shelter? node) (list (list NO-INTENT)) '())
+                                         families)))
+                   (when cached (set! reused (+ reused 1)))
+                   (when context (set! memo (cons (cons context families) memo)))
+                   (set! front (cdr front))
+                   (for-each
+                     (lambda (script)
+                       (let ((trace (timed-prefix advance node script)))
+                         (let landings ((trace (cdr trace)) (last node) (prefix '()) (remaining script))
+                           (when (pair? trace)
+                             (let* ((end (car trace))
+                                    (prefix (cons (car remaining) prefix))
+                                    (b (timed-node-body end))
+                                    ;; A planner cannot smuggle an unproved
+                                    ;; wait into a longer movement script.
+                                    (wait (and (= (length prefix) 1) (timed-wait? last end))))
+                               (unless (and wait (not (shelter? last)))
+                                 (when (or (still? b) (null? (cdr trace)))
+                                   (add! end)
+                                   (set! edges (cons (list (timed-key last) (timed-key end) (reverse prefix)) edges)))
+                                 ;; Retain the observed continuation from the
+                                 ;; actual landing, without normalizing it.
+                                 (let ((landed (or (still? b) (null? (cdr trace)))))
+                                   (landings (cdr trace) (if landed end last)
+                                             (if landed '() prefix) (cdr remaining)))))))))
+                     scripts)
+                   (drain)))))
+        ;; Directed return proof at actual future phases. No hazard/reset
+        ;; edge is present, and waiting can only follow a physical wait edge.
+        (let ((returns (map timed-key (filter home? nodes))))
+          (let close ()
+            (let ((before (length returns)))
+              (for-each
+                (lambda (edge)
+                  (when (and (member (cadr edge) returns)
+                             (not (member (car edge) returns)))
+                    (set! returns (cons (car edge) returns))))
+                edges)
+              (unless (= before (length returns)) (close))))
+          (timed-graph nodes: (reverse nodes) edges: (reverse edges)
+                       complete: complete
+                       memo: memo reused: reused
+                       traps: (filter (lambda (node) (not (member (timed-key node) returns))) nodes)))))))

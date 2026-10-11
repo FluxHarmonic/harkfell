@@ -1,0 +1,13 @@
+;;; Recorded movement rows, consumed by the SYSTEMS evidence log.
+;;; sigil -L src -L build/dev/lib eval -f tools/cloudstair-physics.sgl
+(import (engine reach timed)
+        (harkfell cloudstair probes))
+
+(define TM (probe-lift-map #t))
+(define START (probe-lift-start TM 360 #t))
+(display "(tick tau x y vx vy mode down gliding)\n")
+(for-each (lambda (row) (write row) (newline))
+          (probe-record TM START (probe-lift-script START)))
+(display "failed gust departures: ")
+(write (timed-window (probe-step TM) START probe-lift-script probe-lift-arrives? 360 479 120))
+(newline)
