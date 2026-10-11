@@ -2,16 +2,16 @@
 title: Harkfell 0.3
 date: 2026-10-11
 version: 0.3.0
-summary: The Pipes are open: a dark limestone cave under the Old Cut, full of old pipes that breathe in the wind, with a new note waiting at the very bottom.
+summary: The Pipes are open: a dark limestone cave beneath the Hollow, full of old pipes that breathe in the wind, with a new note waiting at the very bottom.
 ---
 
 Harkfell 0.3 opens up a new region underground: the Pipes! It's also the first version you can install and play offline through your web browser.
 
 ## The Pipes
 
-You've probably heard the wind sounding a note behind the fallen rock at the Old Cut. Carry the amber note from Reedfen there, and the way finally opens.
+In the Hollow there's a doorway cut into the fell, blocked by fallen rock, and you've probably heard the wind sounding a note somewhere behind it. Carry the amber note from Reedfen there, and the way finally opens.
 
-Under the Old Cut, someone long ago bored the limestone into pipes. Some hang from the ceiling, others rise out of the floor, and the paths wind between their mouths. Wind crosses holes far above you, and the whole cave answers in slow, low breaths. It's 24 rooms, which brings the world to 82.
+Beyond it, someone long ago bored the limestone into pipes. Some hang from the ceiling, others rise out of the floor, and the paths wind between their mouths. Wind crosses holes far above you, and the whole cave answers in slow, low breaths. It's 24 rooms, which brings the world to 82.
 
 It's dark down there, as dark as the glass caves. The moths that roost in the Pipes keep their distance at first, but they come close to the right note, and once they do, they light the way for you.
 
