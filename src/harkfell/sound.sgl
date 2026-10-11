@@ -1590,14 +1590,48 @@
     ;; past its 60 s at 15 frames a second).
     (define LATE-CUES
       (list 'ice-crack 'ice-fall 'ice-shatter
-            'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4
-            'pickup-h5 'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
+            'moth-h3 'owl-h3 'vole
+            'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
             'gust-lift 'gust-east))
+    ;; THE STONES' AND PICKUPS' CUES ARE PREPARED EAGERLY: right after the
+    ;; movement sounds, before anything else, so a pickup's tune lands on its
+    ;; frame. Measured before (c7dcaf0, the test's budget): a pickup the bank
+    ;; had not reached sounded 1.33 to 1.37 s late, or not at all under a
+    ;; moment before that. A dev door can still land near a stone before the
+    ;; bank is through; gate-proximity-frame! then pulls that stone's cues to
+    ;; the head (and they render under a moment).
+    (define (starts? p s) (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
+    (define (gate-cue-names)
+      (filter (lambda (n) (let ((s (symbol->string n)))
+                            (or (starts? "pickup-h" s) (starts? "ring-h" s) (starts? "miss-h" s))))
+              (map car SPOTS)))
     (define *late-cues* '())
+    ;; Near a stone or an unfound pickup (inside a finding tone's range) its
+    ;; cues are wanted: to the head of the queue, rendered even under a moment.
+    (define *cues-wanted* '())
+    (define (want-cue! name)
+      (unless (or (not (spot-ref name)) (assq name *cues*) (memq name *cues-wanted*)
+                  (and *cue-job* (eq? (vector-ref *cue-job* 0) name)))
+        (set! *cues-wanted* (cons name *cues-wanted*))
+        (set! *late-cues* (filter (lambda (n) (not (eq? n name))) *late-cues*))
+        (set! *cue-queue* (cons name (filter (lambda (n) (not (eq? n name))) *cue-queue*)))))
+    (define (gate-proximity-frame! pl)
+      (for-each (lambda (sp)
+                  (when (< (caddr (geometry-to pl (cadr sp) (caddr sp))) TONE-OPEN-ROOMS)
+                    (want-cue! (harmonic-cue "pickup-h" (car sp)))))
+                (tone-spots pl))
+      (for-each (lambda (st)
+                  (when (and (eq? (cadr st) 'shut)
+                             (< (caddr (geometry-to pl (caddr st) (cadddr st))) TONE-OPEN-ROOMS))
+                    (want-cue! (harmonic-cue "ring-h" (car st)))
+                    (want-cue! (harmonic-cue "miss-h" (car st)))))
+                (place-stones pl)))
     (define (bank-order)
-      (append (filter spot-ref MOVING-CUES)
-              (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))
-              (map car GUST-LOOPS)))
+      (let ((gates (gate-cue-names)))
+        (append (filter spot-ref MOVING-CUES)
+                gates
+                (filter (lambda (n) (not (or (memq n MOVING-CUES) (memq n gates)))) (map car SPOTS))
+                (map car GUST-LOOPS))))
     (define *cue-job* #f)         ; #(name player chunks frames silent heard?) being rendered
     (define *cue-buf* (make-bytevector (* 8 CUE-BLOCK) 0))
     (define *moving-said* #f)
@@ -1911,7 +1945,7 @@
       ;; from nothing: the late-cue gate relies on it)
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
       (set! *cue-job* #f) (set! *cues* (quote ())) (set! *loops* (quote ())) (set! *pending-cues* (quote ()))
-      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ()))
+      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ())) (set! *cues-wanted* (quote ()))
       (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
       (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
@@ -1996,12 +2030,14 @@
           (when (urgent-work?) (urgent-work! more?))
           (boot-work! more?)))
     (define (gate-wanted?) (any (lambda (p) (not (assq (car p) *cues*))) *pending-cues*))
-    (define (urgent-work?) (or (loop-wanted?) (gate-wanted?)))
+    (define (cue-wanted?) (any (lambda (n) (not (assq n *cues*))) *cues-wanted*))
+    (define (urgent-work?) (or (loop-wanted?) (gate-wanted?) (cue-wanted?)))
     (define (urgent-work! more?)
       (let loop ()
         (when (or *cue-job*
                   (and (pair? *cue-queue*)
-                       (or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*))
+                       (or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)
+                           (memq (car *cue-queue*) *cues-wanted*))
                        (tune-text (cue-tune-of (car *cue-queue*)))))
           (render-next-cue!)
           (when (and (urgent-work?) (more?)) (loop)))))
@@ -2060,6 +2096,7 @@
         (upward-frame! pl now)
         (local-frame! pl now)
         (gust-frame! pl now)
+        (gate-proximity-frame! pl)
         (news-frame! pl)
         (movement-frame! pl)
         (pending-cues-frame!)
