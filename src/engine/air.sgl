@@ -4,7 +4,7 @@
   (import (sigil struct))
 
   (export AIR-PERIOD AIR-WARNING AIR-GUST air-phase air-next
-          air-field air-field? air-field-x air-field-y air-field-w air-field-h
+          air-field air-field? air-field-x air-field-y air-field-w air-field-h air-field-west air-field-gate
           air-field-lift air-field-east air-field-pulsed
           air-contains? air-sample air-shift)
 
@@ -21,8 +21,11 @@
     (define (air-next tau)
       (modulo (+ tau 1) AIR-PERIOD))
 
-    ;; lift is a target upward speed, east an additive bounded air speed.
-    ;; A pulsed field is silent mechanically until AIR-GUST.
+    ;; lift is a target upward speed, east an additive bounded air speed and
+    ;; west the same toward the west. A pulsed field is silent mechanically
+    ;; until AIR-GUST. A gated field (gate: a global pixel (x . y)) blows only
+    ;; while that cell is open: Cloudstair's homeward wind behind the rose
+    ;; stone in the Windworn Arch (D50), so carry gates it as it gates stones.
     (define-struct air-field
       (x default: 0.0)
       (y default: 0.0)
@@ -30,7 +33,9 @@
       (h default: 0.0)
       (lift default: 0.0)
       (east default: 0.0)
-      (pulsed default: #f))
+      (west default: 0.0)
+      (pulsed default: #f)
+      (gate default: #f))
 
     (define (air-contains? field x y)
       (and (<= (air-field-x field) x)
@@ -39,22 +44,31 @@
            (< y (+ (air-field-y field) (air-field-h field)))))
 
     ;; #f means outside all fields. An authored calm footprint returns zero
-    ;; so it overrides a decorative ^'s default steady lift too.
-    (define (air-sample fields x y tau)
-      (let loop ((fields fields) (inside #f) (lift 0.0) (east 0.0))
+    ;; so it overrides a decorative ^'s default steady lift too. The result is
+    ;; (lift . east), east signed (west is negative). OPEN? (optional):
+    ;; (x y) -> whether that global pixel is open; without it a gated field
+    ;; is shut (a footprint that does not blow).
+    (define (air-sample fields x y tau . open?)
+      (let loop ((fields fields) (inside #f) (lift 0.0) (east 0.0) (west 0.0))
         (if (null? fields)
-            (and inside (cons lift east))
+            (and inside (cons lift (- east west)))
             (let* ((field (car fields))
                    (hit (air-contains? field x y))
+                   (gate (air-field-gate field))
                    (active (and hit
                                 (or (not (air-field-pulsed field))
-                                    (eq? (air-phase tau) 'gust)))))
+                                    (eq? (air-phase tau) 'gust))
+                                (or (not gate)
+                                    (and (pair? open?) ((car open?) (car gate) (cdr gate)))))))
               (loop (cdr fields)
                     (or inside hit)
                     (if active (max lift (air-field-lift field)) lift)
-                    (if active (max east (air-field-east field)) east))))))
+                    (if active (max east (air-field-east field)) east)
+                    (if active (max west (air-field-west field)) west))))))
 
     (define (air-shift field dx dy)
-      (air-field field
-                 x: (+ (air-field-x field) dx)
-                 y: (+ (air-field-y field) dy)))))
+      (let ((gate (air-field-gate field)))
+        (air-field field
+                   x: (+ (air-field-x field) dx)
+                   y: (+ (air-field-y field) dy)
+                   gate: (and gate (cons (+ (car gate) dx) (+ (cdr gate) dy))))))))

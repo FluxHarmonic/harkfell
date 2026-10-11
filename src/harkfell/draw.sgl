@@ -1500,7 +1500,8 @@
               ;; elsewhere a lift column's seeds (the Hollow's launch lift)
               (if (cloudstair? rm)
                   (let ((c (body-center b HARKFELL-FEEL)))
-                    (draw-cloudstair-air! rm t (world-tau w))
+                    (draw-cloudstair-air! rm t (world-tau w)
+                                         (lambda (x y) (not (kind-solid? (tile-at tm (+ x ox) (+ y oy))))))
                     (draw-cloudstair-seeds! rm t (world-tau w) (- (car c) ox) (- (cdr c) oy) (world-carry w)))
                   (draw-lift-seeds! rm t (world-tau w)))
               ;; the authored down gift, until it is yours
@@ -1558,6 +1559,10 @@
                     (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) cave-moths)
                     (draw-moth-light! cave-moths b rm ox oy t))
                   (draw-firefly-light! (filter (kind? 'firefly) moths) b rm ox oy)
+                  ;; D50: the homeward shaft's light, and the arch's once it answers H5
+                  (when (cloudstair? rm)
+                    (draw-homeward-light! rm t)
+                    (draw-arch-light! rm t (lambda (x y) (not (kind-solid? (tile-at tm (+ x ox) (+ y oy)))))))
                   ;; the waiting down glows a little where the room is darker
                   ;; than daylight (in daylight it shows as it is)
                   (unless (or (world-down w) (>= (room-render-light rm) 1.0))
