@@ -151,7 +151,7 @@
                              (starts (cloudstair-entry-phases CT cell carry down))
                              (family (list-ref leg 5)) (arrives? (list-ref leg 6))
                              (window-reds 0) (survived 0) (stranded '())
-                             (negative-crossings 0))
+                             (negative-crossings 0) (diagnostic-return-misses 0))
                         (when down
                           (for-each
                             (lambda (window)
@@ -189,12 +189,22 @@
                                                             (shelter? end))
                                                         (return-to-bank leg end)))))
                                     (unless (and back (home back))
-                                      (set! stranded (cons (body-tau (timed-node-body start)) stranded))))))))
+                                      ;; No-down gap seeds cannot occur in play:
+                                      ;; the entrance gate excludes every such
+                                      ;; carry set from every Cloudstair room.
+                                      ;; Keep their local outcomes diagnostic,
+                                      ;; while every reachable gap catch and
+                                      ;; the lift negatives retain obligations.
+                                      (if (or down (eq? (list-ref leg 8) 'lift))
+                                          (set! stranded (cons (body-tau (timed-node-body start)) stranded))
+                                          (set! diagnostic-return-misses (+ diagnostic-return-misses 1)))))))))
                           starts)
                         (set! failures (+ failures window-reds negative-crossings (length stranded)))
                         (log (list (car leg) 'carry carry 'down down 'phases AIR-PERIOD
                                      'window-failures window-reds 'survivors survived
-                                     'no-down-crossings negative-crossings 'stranded (reverse stranded)))))
+                                     'no-down-crossings negative-crossings 'stranded (reverse stranded)
+                                     'required-return (or down (eq? (list-ref leg 8) 'lift))
+                                     'unreachable-profile-return-misses diagnostic-return-misses))))
                     (if (pair? selected)
                         (filter (lambda (leg) (eq? (car leg) (car selected))) LEGS)
                         LEGS))))
