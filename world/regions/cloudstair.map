@@ -12,8 +12,8 @@
 ;;;   A -> B -  C -  D                y1   A over Updraft Edge (7,2)
 ;;;
 ;;; The map's bars are open seams; direction is the terrain's. Lifts:
-;;; D-H, J-P, K-Q steady; F-L, M-S pulsed with the shared gust (calm 0-359,
-;;; warning 300-359, gust 360-599). One way: A->B (a seven-tile drop),
+;;; D-H, J-P, K-Q steady; F-L, M-S pulsed with the shared gust (calm 0-239,
+;;; warning 240-299, gust 300-479). One way: A->B (a seven-tile drop),
 ;;; E->A, G->C, U->O (drops onto broad shelves). The optional G-M glide and
 ;;; single wall kick is omitted: with the measured glide (fall 3 px/tick at
 ;;; 1.32 px/tick across) a four-tile glide loses as much height as the jump
