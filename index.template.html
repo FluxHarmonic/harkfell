@@ -342,16 +342,17 @@
     var fsRequest = gameEl.requestFullscreen || gameEl.webkitRequestFullscreen;
     var fsExit = document.exitFullscreen || document.webkitExitFullscreen;
     // 0.3.3 (David: "there's no need for the fullscreen button in PWA mode,
-    // it should always be treated as fullscreen"): the installed game opens
-    // full screen (the manifest's display), or in its own window where a
-    // platform gives it standalone, or from the iOS home screen
-    // (navigator.standalone). There the button stays hidden and F is an
-    // ordinary key; a browser tab keeps both. test/test-pwa.mjs runs this
-    // function as written here.
+    // it should always be treated as fullscreen"): where the installed game
+    // IS full screen, display-mode fullscreen (the manifest's display, which
+    // Android honours) or the iOS home screen (navigator.standalone, full
+    // screen there), the button stays hidden and F is an ordinary key. A
+    // desktop browser opens the installed app as a standalone window, which
+    // is not full screen, so it keeps both, as a browser tab does (the
+    // leader's ruling, option B). test/test-pwa.mjs runs this function as
+    // written here.
     function installedApp(w, nav) {
       var mm = w.matchMedia;
-      return !!((mm && (mm.call(w, "(display-mode: fullscreen)").matches ||
-                        mm.call(w, "(display-mode: standalone)").matches)) ||
+      return !!((mm && mm.call(w, "(display-mode: fullscreen)").matches) ||
                 (nav && nav.standalone === true));
     }
     var fsInstalled = installedApp(window, navigator);
