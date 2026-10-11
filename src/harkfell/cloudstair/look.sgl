@@ -16,8 +16,8 @@
 ;;;   (draw-cloudstair-sky! rm t)                     slow cloud, per frame
 ;;;   (draw-cloudstair-air! rm t tau)                 lifts, gusts, the gaps
 ;;;   (draw-lift-seeds! rm t tau)                     any room's lift columns
-;;;   (draw-cloudstair-seeds! rm t tau bx by)         the seeds
-;;;   (cloudstair-seeds rm t tau bx by)               their places, for sound
+;;;   (draw-cloudstair-seeds! rm t tau bx by [carry]) the seeds, answering H5
+;;;   (cloudstair-seeds rm t tau bx by [carry])       their places, for sound
 ;;;   (cloudstair-wind tau base)                      the grass's sway wind
 ;;;   (cloudstair-shade rm t)                         a passing cloud's shadow
 ;;;   (draw-down-tuft! b x y t)                       on the player
@@ -119,40 +119,60 @@
                   (put! bv x y (vector-ref (vector s0 s1 s2 s3) (min band 3))))
                 (cols (+ x 1))))
             (rows (+ y 1))))
-        ;; far stone: a long cliff wall low down, lone crags higher up
+        ;; far stone, pale with haze but plainly rock: a ragged top lit along
+        ;; its rim, a lit west face and a shaded east one, faint broken
+        ;; strata, its foot fading into the cloud. Low down a long cliff wall
+        ;; in buttresses; higher up lone spires standing out of the sea.
+        ;; TONES: (lit body shade) slots. The spires are pale against the
+        ;; deep sky; the low wall a step darker, so it reads against the haze.
+        (let ((far-rock!
+               (lambda (x top left right salt tones)
+          (let ((wd (max 1 (- right left)))
+                (lit (car tones)) (body (cadr tones)) (shade (caddr tones)))
+            (let fill ((y top))
+              (when (< y (+ yc 6))
+                (let* ((u (/ (- x left) wd)) (d (- y top)) (b (bayer x y))
+                       (stratum (and (> d 2) (= 0 (modulo (+ y (* 5 salt) (exact (round (* 1.5 (sin (* x 0.13)))))) 7))
+                                     (= 0 (modulo (hash3 (quotient x 4) y salt) 2))))
+                       (s (cond ((= d 0) lit)
+                                ((and (> y (- yc 12)) (< b (/ (- y (- yc 12)) 14.0))) s3)
+                                ((< u 0.08) (if (< b 0.6) lit body))
+                                (stratum shade)
+                                ((> u 0.6) (if (< b (* 2.5 (- u 0.6))) shade body))
+                                (else body))))
+                  (put! bv x y s))
+                (fill (+ y 1))))))))
         (if (>= k 2)
-            (let cols ((x 0))
+            ;; the far cliff wall: one ragged ridge, its light broken into
+            ;; buttresses every 26-60 px
+            (let cols ((x 0) (left 0) (right 0) (seg -1) (lift 0))
               (when (< x VIEW-W)
-                (let* ((u (+ x (* 131 v)))
-                       (top (pixel (- yc 26 (* 14.0 (+ 0.5 (* 0.5 (sin (* u 0.021)))))
-                                      (* 6.0 (abs (sin (* u 0.067))))
-                                      (if (= 0 (modulo (quotient u 23) 4)) 6 0)))))
-                  (let fill ((y top))
-                    (when (< y (+ yc 8))
-                      (put! bv x y (cond ((= y top) s3)
-                                         ((and (= 0 (modulo (hash3 (quotient u 9) 1 v) 3))
-                                               (= 0 (modulo u 9)))
-                                          s1)
-                                         (else s2)))
-                      (fill (+ y 1)))))
-                (cols (+ x 1))))
+                (if (>= x right)
+                    (let* ((n (+ seg 1)) (w (+ 26 (modulo (hash3 n v 31) 34))))
+                      (cols x x (+ x w) n (modulo (hash3 n v 32) 14)))
+                    (let* ((u (+ x (* 131 v)))
+                           (top (pixel (- yc 26
+                                          (* 12.0 (+ 0.5 (* 0.5 (sin (* u 0.021)))))
+                                          (* 7.0 (abs (sin (+ (* u 0.067) 1.0))))
+                                          (* 3.0 (abs (sin (* u 0.17))))
+                                          (- (modulo (hash3 (quotient u 2) v 33) 3))))))
+                      (far-rock! x top left right seg (list s2 s1 s0))
+                      (cols (+ x 1) left right seg lift)))))
             (let crags ((j 0))
               (when (< j 5)
                 (let* ((xc (modulo (+ (* 97 j) (* 61 v) (hash3 j v 5)) VIEW-W))
-                       (w (+ 8 (modulo (hash3 j v 6) 16)))
-                       (h (+ 26 (modulo (hash3 j v 7) (if (= k 0) 30 48)))))
-                  (let up ((dy 0))
-                    (when (< dy h)
-                      (let* ((f (/ dy h))
-                             (half (pixel (* 0.5 w (- 1.0 (* 0.55 f f)))))
-                             (lean (pixel (* 3.0 f (if (odd? j) 1 -1))))
-                             (y (- yc dy)))
-                        (let across ((dx (- half)))
-                          (when (<= dx half)
-                            (put! bv (+ xc dx lean) y (cond ((<= dx (- 1 half)) s3) ((>= dx (- half 1)) s1) (else s2)))
-                            (across (+ dx 1)))))
-                      (up (+ dy 1)))))
-                (crags (+ j 1)))))
+                       (w (+ 14 (modulo (hash3 j v 6) 18)))
+                       (h (+ 26 (modulo (hash3 j v 7) (if (= k 0) 30 48))))
+                       (left (- xc (quotient w 2))) (right (+ xc (quotient w 2))))
+                  (let cols ((x left))
+                    (when (<= x right)
+                      (let* ((t (/ (- x xc) (* 0.5 w)))
+                             (rag (+ (modulo (hash3 (quotient x 2) j 8) 4)
+                                     (if (= 0 (modulo (hash3 (quotient x 4) j 9) 5)) 4 0)))
+                             (top (pixel (- yc (* h (- 1.0 (* 0.62 t t))) (- rag)))))
+                        (when (< -1 x VIEW-W) (far-rock! x top left right j (list s3 s2 s1))))
+                      (cols (+ x 1)))))
+                (crags (+ j 1))))))
         ;; far fells under the lowest rooms' cloud band
         (when (= k 3)
           (let cols ((x 0))
@@ -377,6 +397,57 @@
         (rect! (quote ground-2) 283 106 1 14)
         (rect! (quote ground-2) 276 107 1 4)))
 
+    ;; The Broken Stair (G, 9,0): the three surviving steps are cut stone,
+    ;; not turf (dressed tops, chisel marks, a joint every 16 px, lit west
+    ;; edges), and the top one breaks off ragged in the air over the drop
+    ;; to C, a few fallen pieces on the floor by it. Drawn over the stone;
+    ;; nothing here changes what is solid.
+    (define STAIR-STEPS (list (list 96 112 32 16) (list 160 80 48 16) (list 224 48 64 16)))
+
+    (define (draw-stair-cuts!)
+      (for-each
+        (lambda (s)
+          (let ((x (car s)) (y (cadr s)) (w (caddr s)) (h (cadddr s)))
+            ;; no grass on cut stone: clear the blades above, then dress the top
+            (with-blend-mode 'none
+              (set-color 0.0 0.0 0.0 0.0)
+              (draw-filled-rect x (- y TURF-ABOVE) w TURF-ABOVE))
+            (set-blend-mode 'normal)
+            (rect! 'ground-4 x y w 1)
+            (rect! 'ground-3 x (+ y 1) w 3)
+            (rect! 'ground-2 x (+ y 4) w 1)
+            ;; chisel marks along the dressed edge
+            (let marks ((i 2))
+              (when (< i w)
+                (rect! 'ground-2 (+ x i) (+ y 2) 1 2)
+                (marks (+ i 5))))
+            ;; joints down the face and the lit west edge
+            (let joints ((i 16))
+              (when (< i w)
+                (rect! 'ground-1 (+ x i) (+ y 5) 1 (- h 7))
+                (rect! 'ground-4 (+ x i 1) (+ y 5) 1 (- h 7))
+                (joints (+ i 16))))
+            (rect! 'ground-4 x y 1 h)))
+        STAIR-STEPS)
+      ;; the top step's broken end: notches out of its corner, a ragged edge
+      (with-blend-mode 'none
+        (set-color 0.0 0.0 0.0 0.0)
+        (draw-filled-rect 284 48 4 3)
+        (draw-filled-rect 286 51 2 4)
+        (draw-filled-rect 285 58 3 6))
+      (set-blend-mode 'normal)
+      (rect! 'ground-1 283 51 3 1)
+      (rect! 'ground-1 285 55 1 3)
+      (rect! 'ground-2 284 55 1 3)
+      (rect! 'ground-1 283 58 2 6)
+      (rect! 'ground-4 284 48 1 1)
+      ;; fallen pieces on the floor east of the old stair, short of the drop
+      (for-each (lambda (p)
+                  (rect! 'ground-3 (car p) (cadr p) (caddr p) 2)
+                  (rect! 'ground-4 (car p) (cadr p) 1 1)
+                  (rect! 'ground-1 (car p) (+ (cadr p) 2) (caddr p) 1))
+                (list (list 292 125 4) (list 300 126 3) (list 308 124 5))))
+
     ;; Draw the room's rock, ledges and gap floors into the current (slot)
     ;; target. KIND-AT: local (c r), -1..25 and -1..11, to the material
     ;; there; GX0, GY0: the room's top-left global pixel. Like cells merge
@@ -473,7 +544,9 @@
                   (lambda (c0 c1 k)
                     (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
                       (strip! x y w S (modulo (+ gx0 x) PERIOD-X) GAP-Y))))
-            (rows (+ r 1))))))
+            (rows (+ r 1))))
+        ;; the Broken Stair's cut stone, over its turf
+        (when (and (= (room-x rm) 9) (= (room-y rm) 0)) (draw-stair-cuts!))))
 
     ;; --- the air, per frame ------------------------------------------------------
     ;; tau's phase as a lift's strength, 0..1: still in calm, stirring through
@@ -576,10 +649,10 @@
                    (w (pixel (air-field-w f))) (h (pixel (air-field-h f)))
                    (gust (>= tau AIR-GUST)))
               (let streak ((i 0))
-                (when (< i (if gust 16 4))
+                (when (< i (if gust 16 7))
                   (let* ((hh (hash3 i x0 23))
                          (y (+ y0 8 (modulo hh (max 1 (- h 16)))))
-                         (len (if gust (+ 8 (modulo hh 12)) (+ 2 (quotient (- tau AIR-WARNING) 20))))
+                         (len (if gust (+ 8 (modulo hh 12)) (+ 3 (quotient (- tau AIR-WARNING) 9))))
                          (span (+ w 40))
                          (x (if gust
                                 (+ x0 -20 (modulo (+ (* 3 (- tau AIR-GUST)) (* 13 i) (modulo hh 40)) span))
@@ -589,6 +662,45 @@
                       (rect! 'sky-4 sx y sw 1)
                       (rect! 'sky-2 sx (+ y 1) (max 0 (- sw 2)) 1)))
                   (streak (+ i 1)))))))
+        (room-air-fields rm))
+      ;; loose down on the bank upwind of each eastward field (I's west bank,
+      ;; P's west bank and its middle rest): lying still through the calm,
+      ;; lifting and shivering through the warning, then blown east over the
+      ;; gap by the gust and coming back to rest after it
+      (for-each
+        (lambda (f)
+          (when (> (air-field-east f) 0)
+            (let* ((x0 (pixel (air-field-x f)))
+                   (top (- (pixel (+ (air-field-y f) (air-field-h f))) 16))
+                   (w (pixel (air-field-w f))))
+              (let tuft ((i 0))
+                (when (< i 6)
+                  (let* ((hh (hash3 i x0 41))
+                         (bx (+ x0 -40 (modulo hh 34)))
+                         (p (/ (modulo hh 97) 97.0)))
+                    (cond
+                      ((>= tau AIR-GUST)
+                       ;; across the gap and on, then gone until the calm
+                       (let* ((d (* (+ 1.6 p) (- tau AIR-GUST)))
+                              (x (+ bx (pixel d)))
+                              (y (- top 4 (pixel (* 0.08 d)) (pixel (* 2.0 (sin (+ (* tau 0.2) i)))))))
+                         (when (< x (+ x0 w 40))
+                           (rect! 'sky-4 x y 3 1)
+                           (rect! 'sky-4 (+ x 1) (- y 1) 1 1)
+                           (rect! 'leaf-1 x (+ y 1) 1 1))))
+                      ((>= tau AIR-WARNING)
+                       (let* ((f (/ (- tau AIR-WARNING) 60.0))
+                              (x (+ bx (pixel (* 3.0 f)) (if (odd? (quotient (+ tau i) 3)) 1 0)))
+                              (y (- top 2 (pixel (* (+ 4.0 (* 6.0 p)) f)))))
+                         (rect! 'sky-4 x y 3 1)
+                         (rect! 'sky-4 (+ x 1) (- y 1) 1 1)
+                         (rect! 'leaf-1 x (+ y 1) 1 1)))
+                      ((> tau 90)
+                       ;; settled again on the bank
+                       (rect! 'sky-4 bx (- top 2) 3 1)
+                       (rect! 'sky-4 (+ bx 1) (- top 3) 1 1)
+                       (rect! 'leaf-1 bx (- top 1) 2 1))))
+                  (tuft (+ i 1)))))))
         (room-air-fields rm))
       ;; the deep gaps: pale wisps crossing far down in the dark
       (let rows ((r 0))
@@ -631,50 +743,74 @@
       (let ((col (find (lambda (k) (= (car k) c)) (room-columns rm))))
         (and col (cadddr col))))
 
-    ;; ((x y frame) ...) for one room. bx by: the body's centre, room px.
-    (define (cloudstair-seeds rm t tau bx by)
-      (apply append
-        (map
-          (lambda (thing)
-            (let* ((at (thing-at thing))
-                   (n (or (thing-kw thing "count") 3))
-                   (c (car at)) (r (cdr at))
-                   (lift (near-lift rm c r))
-                   (stand (grid-standable? (room-grid rm) c r)))
-              (map
-                (lambda (i)
-                  (let* ((h (hash3 (+ (* 13 c) i) (+ (* 7 r) (room-y rm)) 29))
-                         (p (/ (modulo h 991) 991.0))
-                         (flap (if (odd? (quotient (+ t (* 7 i)) 9)) 'seed-drift-a 'seed-drift-b)))
-                    (cond
-                      (lift
-                       (let* ((col (find (lambda (k) (= (car k) lift)) (room-columns rm)))
-                              (r0 (cadr col)) (r1 (caddr col)) (pulsed (cadddr col))
-                              (foot (* S (+ r1 1))) (span (* S (+ 1 (- r1 r0))))
-                              (up (mote-height pulsed (+ t (* 40 i)) tau p span))
-                              (x (+ (* S lift) 2 (modulo h 12)
-                                    (* 2.5 (sin (+ (* t 0.03) (* 6.0 p)))))))
-                         (list x (- foot up) (if (and pulsed (< tau AIR-WARNING)) 'seed-rest flap))))
-                      (stand
-                       (let* ((x0 (+ (* S c) 8.0 (* 7.0 (- i (* 0.5 (- n 1)))) (* 2.0 (- p 0.5))))
-                              (y0 (* S (+ r 1.0)))
-                              (d (sqrt (+ (* (- bx x0) (- bx x0)) (* (- by y0) (- by y0)))))
-                              (shy (max 0.0 (- 1.0 (/ d 48.0))))
-                              (hop (if (= 0 (modulo (quotient (+ t (* 53 i)) 70) 5)) 2.0 0.0)))
-                         (list (+ x0 (* shy 14.0 (if (< bx x0) 1.0 -1.0)))
-                               (- y0 hop (* shy 18.0) (* shy 3.0 (sin (+ (* t 0.2) i))))
-                               (if (> shy 0.05) flap 'seed-rest))))
-                      (else
-                       (let* ((cx (+ (* S c) 8.0)) (cy (+ (* S r) 8.0))
-                              (d (sqrt (+ (* (- bx cx) (- bx cx)) (* (- by cy) (- by cy)))))
-                              (part (max 0.0 (- 1.0 (/ d 80.0))))
-                              (a (+ (* 6.2831853 p) (* t (+ 0.006 (* 0.004 p)))))
-                              (rad (+ 18.0 (* 22.0 p) (* 40.0 part))))
-                         (list (+ cx (* rad (cos a)))
-                               (+ cy (* 0.45 rad (sin a)) (* 3.0 (sin (+ (* t 0.05) i))))
-                               flap))))))
-                (iota n))))
-          (room-things-of rm 'seed))))
+    ;; ((x y frame answer?) ...) for one room. bx by: the body's centre, room
+    ;; px. CARRY (optional): with H5 carried the seeds answer it (the bible's
+    ;; "after H5 they answer"): resting seeds near the body lift and hover
+    ;; instead of fleeing, circling ones draw in round it, and every seed
+    ;; within 64 px is answering (it shows a fleck of rose; SOUND's phrases
+    ;; can follow the same flag).
+    (define (cloudstair-seeds rm t tau bx by . carry)
+      (let ((h5 (and (pair? carry) (memv 5 (car carry)) #t)))
+        (apply append
+          (map
+            (lambda (thing)
+              (let* ((at (thing-at thing))
+                     (n (or (thing-kw thing "count") 3))
+                     (c (car at)) (r (cdr at))
+                     (lift (near-lift rm c r))
+                     (stand (grid-standable? (room-grid rm) c r)))
+                (map
+                  (lambda (i)
+                    (let* ((h (hash3 (+ (* 13 c) i) (+ (* 7 r) (room-y rm)) 29))
+                           (p (/ (modulo h 991) 991.0))
+                           (flap (if (odd? (quotient (+ t (* 7 i)) 9)) 'seed-drift-a 'seed-drift-b))
+                           (near? (lambda (x y) (and h5 (< (+ (* (- bx x) (- bx x)) (* (- by y) (- by y))) 4096.0)))))
+                      (cond
+                        (lift
+                         (let* ((col (find (lambda (k) (= (car k) lift)) (room-columns rm)))
+                                (r0 (cadr col)) (r1 (caddr col)) (pulsed (cadddr col))
+                                (foot (* S (+ r1 1))) (span (* S (+ 1 (- r1 r0))))
+                                (up (mote-height pulsed (+ t (* 40 i)) tau p span))
+                                (x (+ (* S lift) 2 (modulo h 12)
+                                      (* 2.5 (sin (+ (* t 0.03) (* 6.0 p))))))
+                                (y (- foot up)))
+                           (list x y (if (and pulsed (< tau AIR-WARNING)) 'seed-rest flap) (near? x y))))
+                        (stand
+                         (let* ((x0 (+ (* S c) 8.0 (* 7.0 (- i (* 0.5 (- n 1)))) (* 2.0 (- p 0.5))))
+                                (y0 (* S (+ r 1.0)))
+                                (d (sqrt (+ (* (- bx x0) (- bx x0)) (* (- by y0) (- by y0)))))
+                                (close (max 0.0 (- 1.0 (/ d 64.0))))
+                                (hop (if (= 0 (modulo (quotient (+ t (* 53 i)) 70) 5)) 2.0 0.0)))
+                           (if (and h5 (> close 0.0))
+                               ;; answering: up off the grass, hovering, leaning toward you
+                               (list (+ x0 (* close 0.15 (- bx x0)))
+                                     (- y0 (* close (+ 8.0 (* 3.0 (sin (+ (* t 0.07) (* 2.0 i)))))))
+                                     flap #t)
+                               (let ((shy (max 0.0 (- 1.0 (/ d 48.0)))))
+                                 (list (+ x0 (* shy 14.0 (if (< bx x0) 1.0 -1.0)))
+                                       (- y0 hop (* shy 18.0) (* shy 3.0 (sin (+ (* t 0.2) i))))
+                                       (if (> shy 0.05) flap 'seed-rest)
+                                       #f)))))
+                        (else
+                         (let* ((cx (+ (* S c) 8.0)) (cy (+ (* S r) 8.0))
+                                (d (sqrt (+ (* (- bx cx) (- bx cx)) (* (- by cy) (- by cy)))))
+                                (a (+ (* 6.2831853 p) (* t (+ 0.006 (* 0.004 p))))))
+                           (if h5
+                               ;; drawn in round the body as it comes near
+                               (let* ((pull (max 0.0 (- 1.0 (/ d 110.0))))
+                                      (ox (+ cx (* pull (- bx cx))))
+                                      (oy (+ cy (* pull (- (- by 4.0) cy))))
+                                      (rad (+ 18.0 (* 22.0 p) (* -22.0 pull)))
+                                      (x (+ ox (* rad (cos a))))
+                                      (y (+ oy (* 0.45 rad (sin a)) (* 3.0 (sin (+ (* t 0.05) i))))))
+                                 (list x y flap (near? x y)))
+                               (let* ((part (max 0.0 (- 1.0 (/ d 80.0))))
+                                      (rad (+ 18.0 (* 22.0 p) (* 40.0 part))))
+                                 (list (+ cx (* rad (cos a)))
+                                       (+ cy (* 0.45 rad (sin a)) (* 3.0 (sin (+ (* t 0.05) i))))
+                                       flap #f))))))))
+                  (iota n))))
+            (room-things-of rm 'seed)))))
 
     (define *seed-cells* '())
     (define (seed-cell name)
@@ -685,15 +821,22 @@
               (when i (set! *seed-cells* (cons (cons name i) *seed-cells*)))
               i))))
 
-    (define (draw-cloudstair-seeds! rm t tau bx by)
+    (define (draw-cloudstair-seeds! rm t tau bx by . carry)
       (set-color 1.0 1.0 1.0 1.0)
       (for-each
         (lambda (s)
           (let ((i (seed-cell (caddr s))))
             (when i
-              (let ((sz (atlas-size i)))
-                (atlas-draw! i (- (pixel (car s)) (quotient (car sz) 2)) (- (pixel (cadr s)) (cdr sz)) 1)))))
-        (cloudstair-seeds rm t tau bx by)))
+              (let* ((sz (atlas-size i))
+                     (x (- (pixel (car s)) (quotient (car sz) 2)))
+                     (y (- (pixel (cadr s)) (cdr sz))))
+                (set-color 1.0 1.0 1.0 1.0)
+                (atlas-draw! i x y 1)
+                ;; answering H5: a fleck of rose in the tuft, coming and going
+                (when (and (cadddr s) (not (= 0 (modulo (quotient (+ t (* 7 x)) 11) 5))))
+                  (rect! 'h5 (+ x (quotient (car sz) 2) -1) (+ y 2) 3 1)
+                  (rect! 'h5 (+ x (quotient (car sz) 2)) (+ y 1) 1 1))))))
+        (apply cloudstair-seeds rm t tau bx by carry)))
 
     ;; --- the down -----------------------------------------------------------------------
     ;; On the player (the box at x y, view px): held open over the head while

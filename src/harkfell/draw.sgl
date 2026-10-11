@@ -1501,7 +1501,7 @@
               (if (cloudstair? rm)
                   (let ((c (body-center b HARKFELL-FEEL)))
                     (draw-cloudstair-air! rm t (world-tau w))
-                    (draw-cloudstair-seeds! rm t (world-tau w) (- (car c) ox) (- (cdr c) oy)))
+                    (draw-cloudstair-seeds! rm t (world-tau w) (- (car c) ox) (- (cdr c) oy) (world-carry w)))
                   (draw-lift-seeds! rm t (world-tau w)))
               ;; the Cattails' down, until it is yours
               (unless (world-down w)
