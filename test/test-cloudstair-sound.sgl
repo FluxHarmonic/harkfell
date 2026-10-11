@@ -84,6 +84,7 @@
           (assert-equal 6 (tune-speed t))
           (assert-equal '(240) (on 1))
           (assert-equal '(300) (on 2))
+          (assert-equal '(300) (on 3))
           (assert-true (every (lambda (c) (< (* 6 (cell-row c)) 480)) offs))))
       '("gust-lift" "gust-east")))
   (test "both gust loops give the same warning"

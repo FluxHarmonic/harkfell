@@ -1613,15 +1613,24 @@
           (set! *cue-queue* (cdr *cue-queue*))
           (when p (set! *cue-job* (vector name p '() 0 0 #f)))))
       (when *cue-job*
-        (let* ((j *cue-job*) (p (vector-ref j 1)) (limit (exact (round (* (if (loop-ref (vector-ref j 0)) (+ GUST-CYCLE-S 1.0) CUE-LIMIT-S) (mixer-rate)))))
-               (more (and (< (vector-ref j 3) limit) (player-pull! p *cue-buf* 0 CUE-BLOCK))))
+        (let* ((j *cue-job*) (p (vector-ref j 1))
+               (loop? (loop-ref (vector-ref j 0)))
+               (limit (exact (round (* (if loop? (+ GUST-CYCLE-S 1.0) CUE-LIMIT-S)
+                                      (mixer-rate)))))
+               ;; Fold exactly one second of release, independent of how the
+               ;; cycle/rate divides into render blocks. Ordinary cue trimming
+               ;; still uses complete blocks.
+               (frames (if loop? (min CUE-BLOCK (max 0 (- limit (vector-ref j 3))))
+                                 CUE-BLOCK))
+               (more (and (< (vector-ref j 3) limit)
+                          (player-pull! p *cue-buf* 0 frames))))
           (if more
-              (let* ((mp (mono-of *cue-buf* CUE-BLOCK))
+              (let* ((mp (mono-of *cue-buf* frames))
                      (quiet (< (cdr mp) SILENT-PEAK))
                      (heard (or (vector-ref j 5) (not quiet)))
                      (silent (if (and heard quiet) (+ (vector-ref j 4) 1) 0)))
                 (vector-set! j 2 (cons (car mp) (vector-ref j 2)))
-                (vector-set! j 3 (+ (vector-ref j 3) CUE-BLOCK))
+                (vector-set! j 3 (+ (vector-ref j 3) frames))
                 (vector-set! j 4 silent)
                 (vector-set! j 5 heard)
                 (when (and (>= silent SILENT-BLOCKS) (not (loop-ref (vector-ref j 0)))) (finish-cue! j)))
@@ -1646,11 +1655,13 @@
       (let ((s (spot-ref name)))
         (if s (cadr s) (let ((l (loop-ref name))) (and l (cadr l))))))
 
-    ;; A gust loop: its render (GUST-CYCLE-S and its release, untrimmed) folded
-    ;; into exactly one cycle, the release added onto the start, which is
-    ;; where it falls in play (the rush releases as calm returns at tau 0).
+    ;; A gust loop: its cycle and one-second release folded into exactly one
+    ;; cycle, the release added onto the start, where it falls in play. Ease
+    ;; the quiet tail's last 20 ms to zero at the render cap to avoid a cut.
     (define (finish-loop! j)
       (let* ((n (loop-frames))
+             (limit (+ n (mixer-rate)))
+             (fade (max 1 (exact (round (* 0.02 (mixer-rate))))))
              (out (make-bytevector (* 4 n) 0)))
         (player-close! (vector-ref j 1))
         (let fill ((cs (reverse (vector-ref j 2))) (at 0))
@@ -1660,9 +1671,10 @@
               (when (> inside 0) (bytevector-copy! out (* 4 at) c 0 (* 4 inside)))
               (let over ((i inside))
                 (when (< i len)
-                  (let ((k (* 4 (modulo (+ at i) n))))
+                  (let ((k (* 4 (modulo (+ at i) n)))
+                        (gain (min 1.0 (/ (max 0 (- limit (+ at i) 1)) (* 1.0 fade)))))
                     (bytevector-ieee-single-set! out k (+ (bytevector-ieee-single-ref out k 'little)
-                                                          (bytevector-ieee-single-ref c (* 4 i) 'little))
+                                                          (* gain (bytevector-ieee-single-ref c (* 4 i) 'little)))
                                                  'little))
                   (over (+ i 1))))
               (fill (cdr cs) (+ at len)))))
