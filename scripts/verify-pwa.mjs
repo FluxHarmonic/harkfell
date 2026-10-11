@@ -107,7 +107,8 @@ try {
       const line = message.params.args.map((a) => a.value ?? a.description ?? "").join(" ");
       lines.push(line);
       if (message.params.type === "error") errors.push(line);
-    } else if (message.method === "Runtime.exceptionThrown") errors.push(message.params.exceptionDetails.text);
+    } else if (message.method === "Runtime.exceptionThrown") errors.push(
+      message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
     else if (message.method === "Network.requestWillBeSent") networkURLs.set(message.params.requestId, message.params.request.url);
     else if (message.method === "Network.loadingFailed") networkFailures.push({
       url: networkURLs.get(message.params.requestId), ...message.params
@@ -119,7 +120,7 @@ try {
   await send("Network.enable");
   await send("Network.setCacheDisabled", { cacheDisabled: true });
   await send("Page.addScriptToEvaluateOnNewDocument", { source: `
-    window.pwaControlledAtLoad = !!navigator.serviceWorker.controller;
+    window.pwaControlledAtLoad = !!navigator.serviceWorker?.controller;
     window.pwaWaitingEvents = 0;
     window.addEventListener('harkfell-update-waiting', () => window.pwaWaitingEvents++);
   ` });
@@ -129,6 +130,21 @@ try {
     await wait(() => lines.some((line) => line.startsWith("harkfell: boot")), "game boot");
     await wait(() => evaluate("!!navigator.serviceWorker.controller"), "worker controlling first load");
     await wait(() => lines.some((line) => line.startsWith("harkfell: sound cues-moving")), "movement cues ready");
+  }
+  async function waitingWorker(label) {
+    // A failed browser fetch can make an installing worker redundant. Retry
+    // the explicit check only when no installation is running; still require
+    // a real waiting worker and preserve once-only announcement assertions.
+    let retryAt = Date.now() + 3000;
+    await wait(async () => {
+      if (await evaluate("!!harkfellUpdate.registration?.waiting")) return true;
+      if (Date.now() >= retryAt && !await evaluate("!!harkfellUpdate.registration?.installing")) {
+        console.log(`Retry worker check: ${label}`);
+        await evaluate("harkfellUpdate.check()");
+        retryAt = Date.now() + 3000;
+      }
+      return false;
+    }, label);
   }
   await boot(updates ? "trace&frame=on&new" : undefined);
   assert.equal(await evaluate("pwaControlledAtLoad"), false, "fresh profile has no previous controller");
@@ -147,8 +163,9 @@ try {
     // installed. It is still the player's first visit: only a subsequent
     // document that was already controlled may announce that update.
     revision = 1;
+    await wait(() => lines.some(line => line.startsWith("harkfell: sound cues-all")), "first boot deferred work complete");
     await evaluate("harkfellUpdate.check()");
-    await wait(() => evaluate("!!harkfellUpdate.registration?.waiting"), "update installed during first visit");
+    await waitingWorker("update installed during first visit");
     assert.notEqual(await evaluate("harkfellUpdate.state"), "waiting",
       "a document first loaded without a controller stays quiet after its first worker claims it");
     assert.equal(await evaluate("pwaWaitingEvents"), 0);
@@ -235,6 +252,7 @@ try {
     assert(!lines.slice(first).some((line) => line.startsWith("harkfell: update-line")));
     revision = 1;
     await evaluate("harkfellUpdate.check()");
+    await waitingWorker("returning player's update installed");
     await wait(() => evaluate("harkfellUpdate.state === 'waiting'"), "new worker waiting");
     assert.equal(await evaluate("pwaControlledAtLoad"), true, "update begins on a controlled page");
     assert.equal(await evaluate("pwaWaitingEvents"), 1, "a real update announces once");
@@ -281,6 +299,16 @@ try {
   }
 } catch (error) {
   console.error(error.stack);
+  try {
+    console.error("worker diagnostics:", JSON.stringify(await evaluate(`(async () => {
+      const r = await navigator.serviceWorker.getRegistration();
+      return { update: window.harkfellUpdate?.state, controlledAtLoad: window.pwaControlledAtLoad,
+        controller: navigator.serviceWorker.controller?.state, installing: r?.installing?.state,
+        waiting: r?.waiting?.state, active: r?.active?.state,
+        caches: await Promise.all((await caches.keys()).map(async name =>
+          ({ name, entries: (await (await caches.open(name)).keys()).length }))) };
+    })()`)));
+  } catch {}
   console.error(lines.slice(-20).join("\n"));
   console.error(JSON.stringify(networkFailures, null, 2));
   process.exitCode = 1;
