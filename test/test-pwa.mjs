@@ -95,6 +95,7 @@ test("the installed app has no fullscreen button; a browser tab keeps it", () =>
   assert.equal(f(...display("browser", false)), false, "iOS Safari tab");
   assert.equal(f({}, {}), false, "no matchMedia");
   // the button is shown only where fsOK holds, and fsOK needs a tab
+  assert.match(pageSource, /var fsInstalled = installedApp\(window, navigator\);/);
   assert.match(pageSource, /var fsOK = !fsInstalled && /);
   assert.match(pageSource, /if \(fsOK\) \{\n *fsEl\.hidden = false;/);
 });

@@ -306,6 +306,24 @@ try {
     assert.deepEqual(errors, []);
     console.log(`PASS updates: waiting line; tap applies worker and reloads without stepping in; ${info.summary ? `New in ${info.version} uses version.json, persists once` : `${info.version} (no post) is marked seen and announces nothing new`}, and old cache is removed`);
   }
+  // 0.3.3: a browser tab shows the fullscreen button; the installed app
+  // (display-mode fullscreen, as the manifest asks) is already full screen
+  // and shows none. Headless Chrome is never installed, so the second boot
+  // answers the page's display-mode query as the installed app would.
+  await boot();
+  assert.equal(await evaluate("document.getElementById('fs').hidden"), false, "a browser tab shows the fullscreen button");
+  const installed = await send("Page.addScriptToEvaluateOnNewDocument", { source: `{
+    const mm = window.matchMedia.bind(window);
+    window.matchMedia = (q) => q === "(display-mode: fullscreen)"
+      ? { matches: true, media: q, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }
+      : mm(q);
+  }` });
+  await boot();
+  assert.equal(await evaluate("document.getElementById('fs').hidden"), true, "the installed app shows no fullscreen button");
+  assert(lines.includes("harkfell: page installed, no fullscreen button"), "the installed page says so");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: installed.identifier });
+  assert.deepEqual(errors, []);
+  console.log("PASS fullscreen: a browser tab shows the button; installed (display-mode fullscreen) it stays hidden");
 } catch (error) {
   console.error(error.stack);
   try {
