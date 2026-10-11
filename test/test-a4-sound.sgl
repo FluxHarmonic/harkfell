@@ -451,12 +451,20 @@
 (mixer-open-headless! RATE #f)
 (sound-reset!)
 (sound-boot! '("no-such-moment" "seed-wind") say)
-(frames! 0.0 60.0 (/ 1.0 15.0) (lambda (t) (fen 'queue WET)) #f)
+;; This tests the missing-text timeout and queue progress, independently of
+;; the growing cue bank's number of render blocks. Give deferred work an
+;; unrestricted block budget, but keep the simulated timeout bounded.
+(let loop ((t 0.0))
+  (when (< t 12.0)
+    (sound-frame! t (/ 1.0 15.0) (fen 'queue WET))
+    (sound-work! (lambda () #t))
+    (loop (+ t (/ 1.0 15.0)))))
 (define AHEAD (sound-moments-ahead))
 
 (test-group "a4 sound: 6, the pre-open queue"
   (test "a moment named with no file does not hold up the ones behind it"
     (display "  opened ahead: ") (display AHEAD) (newline)
+    (assert-true (said? "sound" "error" "no-text" "no-such-moment"))
     (assert-true (member "seed-wind" AHEAD))
     (assert-false (member "no-such-moment" AHEAD))))
 
