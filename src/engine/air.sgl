@@ -1,0 +1,60 @@
+;;; Shared air fields, in pixels and 60 Hz ticks. Presentation and movement
+;;; read this clock; warning is still calm physics. Fields have offset zero.
+(define-library (engine air)
+  (import (sigil struct))
+
+  (export AIR-PERIOD AIR-WARNING AIR-GUST air-phase air-next
+          air-field air-field? air-field-x air-field-y air-field-w air-field-h
+          air-field-lift air-field-east air-field-pulsed
+          air-contains? air-sample air-shift)
+
+  (begin
+    (define AIR-PERIOD 600)
+    (define AIR-WARNING 300)
+    (define AIR-GUST 360)
+
+    (define (air-phase tau)
+      (cond ((>= tau AIR-GUST) 'gust)
+            ((>= tau AIR-WARNING) 'warning)
+            (else 'calm)))
+
+    (define (air-next tau)
+      (modulo (+ tau 1) AIR-PERIOD))
+
+    ;; lift is a target upward speed, east an additive bounded air speed.
+    ;; A pulsed field is silent mechanically until AIR-GUST.
+    (define-struct air-field
+      (x default: 0.0)
+      (y default: 0.0)
+      (w default: 0.0)
+      (h default: 0.0)
+      (lift default: 0.0)
+      (east default: 0.0)
+      (pulsed default: #f))
+
+    (define (air-contains? field x y)
+      (and (<= (air-field-x field) x)
+           (< x (+ (air-field-x field) (air-field-w field)))
+           (<= (air-field-y field) y)
+           (< y (+ (air-field-y field) (air-field-h field)))))
+
+    ;; #f means outside all fields. An authored calm footprint returns zero
+    ;; so it overrides a decorative ^'s default steady lift too.
+    (define (air-sample fields x y tau)
+      (let loop ((fields fields) (inside #f) (lift 0.0) (east 0.0))
+        (if (null? fields)
+            (and inside (cons lift east))
+            (let* ((field (car fields))
+                   (hit (air-contains? field x y))
+                   (active (and hit
+                                (or (not (air-field-pulsed field))
+                                    (eq? (air-phase tau) 'gust)))))
+              (loop (cdr fields)
+                    (or inside hit)
+                    (if active (max lift (air-field-lift field)) lift)
+                    (if active (max east (air-field-east field)) east))))))
+
+    (define (air-shift field dx dy)
+      (air-field field
+                 x: (+ (air-field-x field) dx)
+                 y: (+ (air-field-y field) dy)))))

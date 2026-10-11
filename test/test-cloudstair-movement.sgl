@@ -1,0 +1,117 @@
+;;; Real movement/save probes; no renderer or player's store is involved.
+(import (sigil test)
+        (sigil list)
+        (engine air)
+        (engine body)
+        (engine tilemap)
+        (engine worldmap)
+        (engine reach)
+        (harkfell feel)
+        (harkfell source)
+        (harkfell content)
+        (harkfell check)
+        (harkfell gates)
+        (harkfell world)
+        (harkfell save))
+
+(define F HARKFELL-FEEL)
+(define AIR (make-tilemap 25 30 16))
+(define HOLD (intent jump: #t))
+(define FALL (body (body-at 100 100) vy: 7.0 down: #t))
+(define (steps b in tm n)
+  (if (= n 0)
+      b
+      (steps (body-step b in tm F) in tm (- n 1))))
+(define COLUMN
+  (tilemap AIR air: (list (air-field x: 80 y: 0 w: 64 h: 400 lift: 2.4))))
+(define PULSE
+  (tilemap AIR air: (list (air-field x: 80 y: 0 w: 64 h: 400 lift: 2.4 pulsed: #t))))
+(define WIND
+  (tilemap AIR air: (list (air-field x: 80 y: 0 w: 64 h: 400 east: 100 pulsed: #t))))
+
+(test-group "Cloudstair: shared gust clock"
+  (test "exact calm, warning, gust and wrap boundaries"
+    (assert-equal 'calm (air-phase 299))
+    (assert-equal 'warning (air-phase 300))
+    (assert-equal 'warning (air-phase 359))
+    (assert-equal 'gust (air-phase 360))
+    (assert-equal 'gust (air-phase 599))
+    (assert-equal 0 (air-next 599)))
+  (test "warning has zero force and a pulse crosses its boundary in replay"
+    (let* ((b (body FALL tau: 359))
+           (calm (body-step b HOLD PULSE F))
+           (gust (body-step calm HOLD PULSE F)))
+      (assert-equal (feel-glide-fall F) (body-vy calm))
+      (assert-equal 360 (body-tau calm))
+      (assert-true (< (body-vy gust) (body-vy calm)))
+      (assert-equal 361 (body-tau gust)))))
+
+(test-group "Cloudstair: glide and fields"
+  (test "held down caps descent; release and no down keep the ordinary fall"
+    (assert-equal (feel-glide-fall F) (body-vy (body-step FALL HOLD AIR F)))
+    (assert-equal 7.0 (body-vy (body-step FALL NO-INTENT AIR F)))
+    (assert-equal 7.0 (body-vy (body-step (body FALL down: #f) HOLD AIR F))))
+  (test "ordinary jump rise is identical with down"
+    (let* ((b (body FALL vy: -4.0 jumping: #t))
+           (g (body-step b HOLD AIR F))
+           (bare (body-step (body b down: #f) HOLD AIR F)))
+      (assert-equal (body-y bare) (body-y g))
+      (assert-equal (body-vy bare) (body-vy g))
+      (assert-false (body-gliding g))))
+  (test "steady lift reverses a fast fall, only with down and hold"
+    (assert-true (< (body-vy (steps FALL HOLD COLUMN 40)) 0))
+    (assert-equal 7.0 (body-vy (steps FALL NO-INTENT COLUMN 20)))
+    (assert-equal 7.0 (body-vy (steps (body FALL down: #f) HOLD COLUMN 20))))
+  (test "east drift is capped and does not accumulate steering velocity"
+    (let ((b (body-step (body FALL tau: 360) HOLD WIND F)))
+      (assert-equal 0.0 (body-vx b))
+      (assert-true (< (abs (- (body-x b) 100.66)) 1e-8))
+      (assert-equal 100.0 (body-x (body-step (body FALL tau: 300) HOLD WIND F)))))
+  (test "wind stops outside its authored footprint"
+    (let ((b (body FALL x: 150 tau: 360)))
+      (assert-equal 150 (body-x (body-step b HOLD WIND F))))))
+
+(define CT (load-content (read-world-source "world")))
+(define RM (content-room CT 15 3))
+(define GIFT (local->global CT RM 8 7))
+(define TM (worldmap-tiles (content-map CT)))
+(define ENTRY (stand-body TM F (car GIFT) (cdr GIFT)))
+(define (at-gift carry)
+  (world-populate (world-at (content-map CT) ENTRY)
+                  (content-stones CT) (content-pickups CT) carry))
+(define EARNED (world-tick (at-gift '(2)) NO-INTENT))
+(define OLD
+  '(harkfell-save 1 (room reedfen 15 3) (cell 8 7)
+                    (carry 2) (stones) (moments) (played 12.5)
+                    (revealed #t) (aurora #t)))
+
+(test-group "Cloudstair: contact, persistence and frozen fades"
+  (test "old H2 saves retain progress without silently earning down"
+    (let ((r (save-restore CT OLD)))
+      (assert-false (restored-down r))
+      (assert-equal 0 (restored-tau r))
+      (assert-equal '(2) (restored-carry r))
+      (assert-true (restored-revealed r))
+      (assert-true (restored-aurora r))))
+  (test "Cattails earns down on contact after H2 only"
+    (assert-false (world-down (world-tick (at-gift '()) NO-INTENT)))
+    (assert-true (world-down EARNED))
+    (assert-true (find (lambda (n) (eq? (car n) 'down)) (world-news EARNED))))
+  (test "reset and both fade phases preserve ability and phase"
+    (let* ((w (world EARNED body: (body (world-body EARNED) tau: 479)))
+           (dark (world-tick (world w phase: 'dark timer: 1) NO-INTENT))
+           (light (world-tick (world dark timer: 1) NO-INTENT)))
+      (assert-equal 479 (world-tau (world-reset w)))
+      (assert-true (world-down (world-reset w)))
+      (assert-equal 479 (world-tau dark))
+      (assert-equal 479 (world-tau light))
+      (assert-true (world-down light))
+      (assert-equal 480 (world-tau (world-tick light NO-INTENT)))))
+  (test "save round trip keeps exact phase and down independently of H2"
+    (let* ((b (body ENTRY down: #t tau: 599))
+           (d (save-datum CT b '(2) '() '() 13.0 #t #t))
+           (r (save-restore CT d)))
+      (assert-true (restored-down r))
+      (assert-equal 599 (restored-tau r))))
+  (test "invalid optional phase is forgiven to zero"
+    (assert-equal 0 (restored-tau (save-restore CT (append OLD '((tau 600))))))))

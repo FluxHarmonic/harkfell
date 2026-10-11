@@ -1,0 +1,22 @@
+#!/bin/sh
+# Serialize heavy local jobs across worktrees and verify David's desktop
+# resource rule immediately before the job starts. Other workers use the
+# same advisory lock; inspect running compilers for workers predating it.
+set -eu
+exec 9>/tmp/harkfell-heavy-build.lock
+flock -n 9 || { echo 'BLOCKED: another heavy Harkfell job holds the lock'; exit 2; }
+awk '{ if ($1 >= 8) exit 1 }' /proc/loadavg || {
+  echo 'BLOCKED: load1 is not below 8'; exit 2;
+}
+awk '/MemAvailable:/ { if ($2 < 25165824) exit 1; found=1 } END { if (!found) exit 1 }' /proc/meminfo || {
+  echo 'BLOCKED: less than 24 GiB memory available'; exit 2;
+}
+if ps -eo comm=,args= | awk '
+  $1 ~ /^(cc1|cc1plus|clang|clang-[0-9]+|zig|ld.lld|lld)$/ { found=1 }
+  $1 == "sigil" && $3 ~ /^(build|test)$/ { found=1 }
+  END { exit !found }'; then
+  echo 'BLOCKED: another compiler or Sigil job is running'; exit 2
+fi
+printf 'Resource check: '; cat /proc/loadavg
+awk '/MemAvailable:/ { printf "Available memory: %.1f GiB\n", $2/1048576 }' /proc/meminfo
+"$@"

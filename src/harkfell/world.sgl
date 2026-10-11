@@ -51,7 +51,8 @@
           (harkfell cues)
           (harkfell content)
           (harkfell creatures)
-          (harkfell ice))
+          (harkfell ice)
+          (harkfell down))
 
   (export world world? world-new world-at
           world-room world-body world-entry world-phase world-timer
@@ -61,7 +62,7 @@
           entry-body cell-body
           world-gates world-carry world-news world-still world-take-news world-populate
           world-stones world-pickups world-critters world-ice world-aurora world-aurora-at
-          map-shift map-cell-shift)
+          map-shift map-cell-shift world-down world-tau)
 
   (begin
     (define DIM-TICKS 15)
@@ -95,6 +96,8 @@
       (news default: '()))
 
     (define (world-carry w) (if (world-gates w) (gstate-carry (world-gates w)) '()))
+    (define (world-down w) (body-down (world-body w)))
+    (define (world-tau w) (body-tau (world-body w)))
     (define (world-stones w) (if (world-gates w) (gstate-stones (world-gates w)) '()))
     (define (world-pickups w) (if (world-gates w) (gstate-pickups (world-gates w)) '()))
 
@@ -314,10 +317,22 @@
                   w))
             w)))
 
+    (define (down-tick w)
+      (let* ((p (world-room w))
+             (rm (and p (placed-data p)))
+             (b (world-body w)))
+        (if (and (eq? (world-phase w) 'play)
+                 (not (body-down b))
+                 (down-touched? rm (world-origin w) b HARKFELL-FEEL (world-carry w)))
+            (let ((c (body-center b HARKFELL-FEEL)))
+              (world w body: (body b down: #t)
+                     news: (append (world-news w) (list (list 'down (car c) (cdr c))))))
+            w)))
+
     (define (world-tick w in)
       (homecoming-tick
         (standing-chord-tick
-          (ice-tick (critters-tick (still-tick (gates-tick (world-tick-body w in))) w) w))))
+          (ice-tick (critters-tick (still-tick (down-tick (gates-tick (world-tick-body w in)))) w) w))))
 
     (define (world-tick-body w in)
       (let ((w (world w ticks: (+ (world-ticks w) 1))))
@@ -331,7 +346,7 @@
           ((dark)
            (if (<= (world-timer w) 1)
                (world w
-                      body: (world-entry w)
+                      body: (body (world-entry w) down: (world-down w) tau: (world-tau w) gliding: #f)
                       phase: 'light
                       timer: DIM-TICKS
                       returns: (+ (world-returns w) 1))
@@ -358,7 +373,8 @@
     ;; Back to the current room's entry at once (the R key).
     (define (world-reset w)
       ;; a fresh start in the room: its icicles grow back (as a soft return's do)
-      (world w body: (world-entry w) phase: 'play timer: 0
+      (world w body: (body (world-entry w) down: (world-down w) tau: (world-tau w) gliding: #f)
+             phase: 'play timer: 0
              ice: (and (world-ice w) (room-ice (world-wm w) (world-room w)))))
 
     ;; In rock or in a hazard: not a place to leave a body after a reload.
@@ -388,7 +404,8 @@
              (tm (worldmap-tiles wm))
              (room (and (world-room w)
                         (worldmap-room wm (placed-x (world-room w)) (placed-y (world-room w)))))
-             (entry (if (inside-rock? tm (world-entry w)) fallback (world-entry w)))
+             (entry (body (if (inside-rock? tm (world-entry w)) fallback (world-entry w))
+                          down: (world-down w) tau: (world-tau w) gliding: #f))
              (b (if (inside-rock? tm (world-body w)) entry (world-body w))))
         (world w wm: wm room: (or room (world-room w)) body: b entry: entry gates: #f
                ground: (if (inside-rock? tm (or (world-ground w) entry)) entry (world-ground w)))))

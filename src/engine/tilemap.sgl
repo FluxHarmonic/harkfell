@@ -26,7 +26,7 @@
           (sigil math))
 
   (export tilemap tilemap? make-tilemap
-          tilemap-cols tilemap-rows tilemap-size tilemap-edge tilemap-cells
+          tilemap-cols tilemap-rows tilemap-size tilemap-edge tilemap-cells tilemap-air
           tilemap-ref tilemap-set tilemap-width tilemap-height
           tile-at px->col
           kind-solid? kind-climbable? kind-ledge? kind-floor?
@@ -38,7 +38,8 @@
       (rows default: 0)
       (size default: 16)            ; pixels per tile side
       (cells default: #f)           ; a vector of kinds, row-major
-      (edge default: 'solid))       ; the kind outside the grid
+      (edge default: 'solid)        ; the kind outside the grid
+      (air default: '()))           ; (engine air) footprints in global pixels
 
     ;; cols x rows of air.
     (define (make-tilemap cols rows size)

@@ -146,6 +146,15 @@
       (let ((kicks (filter-map (lambda (b) (and (memq 'wall-jump (body-events b)) (body-y b))) hist)))
         (assert-true (>= (length kicks) 3))
         (assert-true (every (lambda (y) (>= y (car kicks))) (cdr kicks)))
+        (assert-true (< rise (* 16 6.0))))))
+  (let* ((tm (tiles ONE-WALL))
+         (start (body (stand 9 10) down: #t))
+         (hist (history start tm (one-wall-policy tm) 900))
+         (rise (- (body-y start) (min-y hist))))
+    (test "down cannot turn the same smooth wall into an infinite climb"
+      (let ((kicks (filter-map (lambda (b) (and (memq 'wall-jump (body-events b)) (body-y b))) hist)))
+        (assert-true (>= (length kicks) 3))
+        (assert-true (every (lambda (y) (>= y (car kicks))) (cdr kicks)))
         (assert-true (< rise (* 16 6.0)))))))
 
 ;; --- climb -----------------------------------------------------------------------

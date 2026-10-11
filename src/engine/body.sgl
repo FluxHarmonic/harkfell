@@ -68,7 +68,8 @@
   (import (sigil struct)
           (sigil math)
           (engine tilemap)
-          (engine collide))
+          (engine collide)
+          (engine air))
 
   (export feel feel?
           feel-box-w feel-box-h feel-run feel-accel feel-decel feel-turn
@@ -79,12 +80,13 @@
           feel-climb feel-mantle-v feel-mantle-x feel-mantle-lock
           feel-swim feel-swim-accel feel-sink feel-water-jump-v feel-water-damp
           feel-hazard-inset feel-brittle-ticks
+          feel-glide-fall feel-lift-v feel-lift-accel feel-wind-cap
           intent intent? intent-h intent-v intent-jump intent-press
           NO-INTENT
           body body? body-at
           body-x body-y body-vx body-vy body-mode body-side body-facing
           body-coyote body-buffer body-lock body-jumping body-cut body-events
-          body-brittle on-brittle?
+          body-brittle on-brittle? body-down body-tau body-gliding
           body-step body-grounded? body-center body-in-water?)
 
   (begin
@@ -121,7 +123,11 @@
       (water-jump-v default: 4.0)
       (water-damp default: 0.35)
       (hazard-inset default: 2.0)
-      (brittle-ticks default: #f))  ; thin ice gives after this many ticks stood on
+      (brittle-ticks default: #f)  ; thin ice gives after this many ticks stood on
+      (glide-fall default: 3.0)
+      (lift-v default: 2.4)
+      (lift-accel default: 0.3)
+      (wind-cap default: 0.66))
 
     ;; --- the input ------------------------------------------------------------
 
@@ -156,7 +162,10 @@
       (jumping default: #f)
       (cut default: #f)
       (events default: '())
-      (brittle default: 0))
+      (brittle default: 0)
+      (down default: #f)
+      (tau default: 0)
+      (gliding default: #f))
 
     ;; A body at rest at x y.
     (define (body-at x y)
@@ -221,7 +230,8 @@
       (let* ((wet-before (body-in-water? b tm f))
              (b (body b
                       buffer: (if (intent-press in) (feel-buffer f) (body-buffer b))
-                      events: '()))
+                      events: '()
+                      gliding: #f))
              (b (cond ((body-in-water? b tm f) (swim-step b in tm f))
                       ((eq? (body-mode b) 'cling) (cling-step b in tm f))
                       (else (platform-step b in tm f))))
@@ -234,7 +244,8 @@
              (b (brittle-check b tm f)))
         (body b
               buffer: (max 0 (- (body-buffer b) 1))
-              lock: (max 0 (- (body-lock b) 1)))))
+              lock: (max 0 (- (body-lock b) 1))
+              tau: (air-next (body-tau b)))))
 
     ;; The ground and the air.
     (define (platform-step b in tm f)
@@ -314,9 +325,32 @@
                      (feel-slide-max f)
                      vy))
              (vy (min vy (feel-max-fall f)))
+             ;; Down never alters ordinary jump rise. A held jump opens it
+             ;; on the fall or in a lift; release restores normal gravity.
+             ;; Wind is a displacement added to steering, never accumulated
+             ;; into vx, so it cannot leak beyond its authored footprint.
+             (center (body-center b f))
+             (field (air-sample (tilemap-air tm) (car center) (cdr center) (body-tau b)))
+             (lift (if field
+                       (car field)
+                       (if (eq? (tile-at tm (car center) (cdr center)) 'updraft)
+                           (feel-lift-v f)
+                           0.0)))
+             (glide (and (body-down b) (intent-jump in)
+                         (not drop) (not (body-in-water? b tm f))
+                         (or (not grounded) launch)
+                         (or (>= vy 0) (> lift 0))))
+             (vy (cond ((and glide (> lift 0))
+                        (approach (body-vy b) (- lift) (feel-lift-accel f)))
+                       (glide (min vy (feel-glide-fall f)))
+                       (else vy)))
+             (wind (if (and glide field (not grounded))
+                       (min (feel-wind-cap f) (cdr field))
+                       0.0))
+             (b (body b gliding: glide))
              (w (feel-box-w f))
              (bh (feel-box-h f))
-             (mx (move-x tm x y w bh vx))
+             (mx (move-x tm x y w bh (+ vx wind)))
              (x (car mx))
              (vx (if (and (not (= (cdr mx) 0)) (not locked)) 0.0 vx))
              (my (move-y tm x y w bh vy))
@@ -346,7 +380,7 @@
                (add-event (body b mode: 'cling side: grab facing: grab vx: 0.0 vy: 0.0 jumping: #f cut: #f coyote: 0) 'grab))
               ((body-in-water? b tm f)
                (body b mode: 'swim vy: (* (body-vy b) (feel-water-damp f))))
-              (grounded-now (body b mode: 'ground))
+              (grounded-now (body b mode: 'ground gliding: #f))
               (else (body b mode: 'air)))))
 
     ;; Holding a climbable wall.

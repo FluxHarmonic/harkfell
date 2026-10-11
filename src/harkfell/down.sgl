@@ -1,0 +1,23 @@
+;;; Product policy: contact with the Cattails' down after H2 earns glide.
+;;; Shared by play and reach; no grant from region metadata or save carry.
+(define-library (harkfell down)
+  (import (sigil list)
+          (engine body)
+          (harkfell content))
+
+  (export down-touched?)
+
+  (begin
+    (define (down-touched? rm origin b f carry)
+      (and rm (memv 2 carry)
+           (find
+             (lambda (thing)
+               (let* ((at (thing-at thing))
+                      (x (+ (car origin) (* 16 (car at)) 8))
+                      (y (+ (cdr origin) (* 16 (cdr at)) 8)))
+                 (and (< (body-x b) (+ x 6))
+                      (> (+ (body-x b) (feel-box-w f)) (- x 6))
+                      (< (body-y b) (+ y 6))
+                      (> (+ (body-y b) (feel-box-h f)) (- y 6)))))
+             (room-things-of rm 'down))
+           #t))))

@@ -82,7 +82,14 @@
             water-jump-v: 4.0
             water-damp: 0.35
             hazard-inset: 2.0
-            brittle-ticks: BRITTLE-TICKS))
+            brittle-ticks: BRITTLE-TICKS
+            ;; Slower caps make repeated kicks climb one smooth wall. 3.0
+            ;; retains the original same-wall negative control while slowing
+            ;; the 7.0 px/tick terminal fall (tools/cloudstair-wall-control).
+            glide-fall: 3.0
+            lift-v: 2.4
+            lift-accel: 0.3
+            wind-cap: 0.66))
 
     ;; The feel with the one speed changed and everything else kept (the
     ;; envelope's sabotage raises it by a third).

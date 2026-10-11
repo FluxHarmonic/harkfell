@@ -15,11 +15,8 @@
 ;;;   'x'   hazard (the region says which)  hazard        hazard
 ;;;   '+'   a false wall: looks like rock,  air           rock
 ;;;         is air
-;;;   '^'   an updraft column               air           updraft
-;;;
-;;; The updraft is air to the physics until the glide exists (A4: Reedfen's
-;;; cattail down); the reach checker treats it as air until then, which is
-;;; the conservative reading (it can only lift you).
+;;;   '^'   an updraft column               updraft       updraft
+;;;         passable; lifts only with down and held jump
 ;;;
 ;;; Edges (the seam rule, (engine worldmap)): a cell is open when its kind
 ;;; is air or water, so rock, ledges, ring-stones and hazards close an edge
@@ -45,7 +42,7 @@
             (list #\o 'solid 'stone)
             (list #\x 'hazard 'hazard)
             (list #\+ 'air 'rock)
-            (list #\^ 'air 'updraft)))
+            (list #\^ 'updraft 'updraft)))
 
     (define LEGEND-CHARS (map car WORLD-LEGEND))
 

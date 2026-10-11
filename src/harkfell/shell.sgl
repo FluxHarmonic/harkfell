@@ -358,8 +358,12 @@
              (content-stones *content*))))
 
     (define (populate w old carry)
-      (world-populate w (kept-stones old) (content-pickups *content*)
-                      (append carry (if old (world-carry old) '()))))
+      (world-populate
+        (if old
+            (world w body: (body (world-body w) down: (world-down old) tau: (world-tau old)))
+            w)
+        (kept-stones old) (content-pickups *content*)
+        (append carry (if old (world-carry old) '()))))
 
     ;; ?carry=: from now on the body carries hs (and whatever it has found).
     (define (shell-set-carry! hs)
@@ -446,7 +450,9 @@
                                          (stone s state: 'open)
                                          s))
                                    (content-stones *content*)))
-                      (w (world-at (content-map *content*) (body-in-cell (restored-cell r)))))
+                      (w (world-at (content-map *content*)
+                                   (body (body-in-cell (restored-cell r))
+                                         down: (restored-down r) tau: (restored-tau r)))))
                  (set! *world* (world (world-populate w stones (content-pickups *content*) (restored-carry r))
                                       aurora: (restored-aurora r)))
                  ;; D47: the region you continue in counts as announced, its
@@ -459,13 +465,15 @@
                  ;; D40: a save to continue, so the start screen offers starting over
                  (set! *frame* (frame-new web? #t))
                  (restored-notes r)))
-              (else (shell-goto-start!) #f))))
+              (else (set! *world* #f) (shell-goto-start!) #f))))
 
     ;; The save of the world now, or #f outside the written world.
     (define (current-save)
       (and *content* *world* (world-gates *world*)
            (let ((x (*save-get*)))
-             (save-datum *content* (world-entry *world*) (world-carry *world*) (world-stones *world*)
+             (save-datum *content*
+                         (body (world-entry *world*) down: (world-down *world*) tau: (world-tau *world*))
+                         (world-carry *world*) (world-stones *world*)
                          (car x) (cadr x) *revealed* (world-aurora *world*) *announced*))))
 
     ;; Write the save when what it holds has changed: the entry (a room
@@ -476,7 +484,7 @@
              (sig (list (body-x e) (body-y e) (world-carry *world*)
                         (length (filter stone-open? (world-stones *world*)))
                         (car (*save-get*))
-                        *revealed* (world-aurora *world*) *announced*)))
+                        *revealed* (world-aurora *world*) *announced* (world-down *world*))))
         (unless (equal? sig *save-sig*)
           (let ((d (current-save)))
             (when d

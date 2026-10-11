@@ -27,7 +27,8 @@
           (sigil list)
           (sigil math)
           (sigil string)
-          (engine tilemap))
+          (engine tilemap)
+          (engine air))
 
   (export placed placed? placed-x placed-y placed-tiles placed-data
           worldmap worldmap? make-worldmap
@@ -88,7 +89,15 @@
                       (loop (+ r 1))))))
               rooms)
             (worldmap rooms: rooms cols: cols rows: rows size: size x0: x0 y0: y0
-                      tiles: (tilemap cols: gc rows: gr size: size cells: cells edge: 'solid)))))
+                      tiles: (tilemap cols: gc rows: gr size: size cells: cells edge: 'solid
+                                      air: (apply append
+                                             (map (lambda (p)
+                                                    (map (lambda (field)
+                                                           (air-shift field
+                                                             (* size cols (- (placed-x p) x0))
+                                                             (* size rows (- (placed-y p) y0))))
+                                                         (tilemap-air (placed-tiles p))))
+                                                  rooms)))))))
 
     ;; The map with one room swapped for another at the same coordinate (or
     ;; added), rebuilt: what a live reload does.

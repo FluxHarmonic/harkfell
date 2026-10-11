@@ -56,6 +56,7 @@
           (engine tilemap)
           (engine roomfile)
           (engine worldmap)
+          (engine air)
           (harkfell legend)
           (harkfell feel))
 
@@ -77,7 +78,7 @@
           icicle-floor-row icicle-placement-problems
           room-thin-ice thin-ice-placement-problems room-dark? room-has-drawn-moths?
           room-under? room-moth-cave? room-firefly-cave? room-daylight-pools?
-          moment-forms moment-kw room-moments moment-key)
+          moment-forms moment-kw room-moments moment-key room-air-fields)
 
   (begin
     (define ROOM-COLS 25)
@@ -587,6 +588,23 @@
                       (cond ((not (and (pair? t) (symbol? (car t))))
                              (add! (string-append "things: " (datum->string t) " is not (KIND ...)") "things"))
                             ((eq? (car t) 'ring-stone) #f)   ; checked against the grid below
+                            ((eq? (car t) 'down)
+                             (let ((a (thing-at t)))
+                               (unless (and (eq? region-sym 'reedfen)
+                                            (equal? (roomfile-field rf 'at) '(15 3))
+                                            a (grid-standable? (roomfile-grid rf) (car a) (cdr a)))
+                                 (add! "things: down must rest in Cattails on a safe bank" "things"))))
+                            ((eq? (car t) 'air-field)
+                             (let ((a (thing-at t))
+                                   (size (thing-kw t "size"))
+                                   (kind (thing-kw t "kind")))
+                               (unless (and a (int-pair? size)
+                                            (<= 0 (car a)) (<= 0 (cdr a))
+                                            (> (car size) 0) (> (cadr size) 0)
+                                            (<= (+ (car a) (car size)) ROOM-COLS)
+                                            (<= (+ (cdr a) (cadr size)) ROOM-ROWS)
+                                            (memq kind '(steady-lift pulsed-lift east-gust)))
+                                 (add! "things: air-field needs an in-room at:/size: rectangle and a known kind:" "things"))))
                             ((eq? (car t) 'harmonic)          ; A3: a pickup
                              (let ((a (thing-kw t "at")) (o (thing-kw t "overtone")))
                                (cond ((not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
@@ -818,6 +836,21 @@
                                        '()))
                   all)))))
 
+    ;; Footprints are authored in room tiles. Strength is shared product
+    ;; tuning, never random or a per-room clock. ^ defaults to steady lift;
+    ;; pulsed-lift overrides that default throughout its rectangle in calm.
+    (define (room-air-fields rm)
+      (map (lambda (thing)
+             (let ((at (thing-at thing))
+                   (size (thing-kw thing "size"))
+                   (kind (thing-kw thing "kind")))
+               (air-field x: (* TILE (car at)) y: (* TILE (cdr at))
+                          w: (* TILE (car size)) h: (* TILE (cadr size))
+                          lift: (if (eq? kind 'east-gust) 0.0 (feel-lift-v HARKFELL-FEEL))
+                          east: (if (eq? kind 'east-gust) (feel-wind-cap HARKFELL-FEEL) 0.0)
+                          pulsed: (not (eq? kind 'steady-lift)))))
+           (room-things-of rm 'air-field)))
+
     ;; A room's tilemap and its placed form (the grid must be whole).
     (define (room-placed rm)
       (let* ((tm (make-tilemap ROOM-COLS ROOM-ROWS TILE))
@@ -835,7 +868,7 @@
                       (vector-set! cells (+ (car cr) (* (cdr cr) ROOM-COLS)) 'brittle)))
                   (room-thin-ice rm))
         (placed x: (room-x rm) y: (room-y rm)
-                tiles: (tilemap tm cells: cells)
+                tiles: (tilemap tm cells: cells air: (room-air-fields rm))
                 data: rm)))
 
     (define (grid-whole? rm)

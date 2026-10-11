@@ -1,0 +1,47 @@
+;;; The existing single-wall negative control, extended vertically to see
+;;; whether holding down permits repeated same-wall kicks to earn height.
+(import (sigil list)
+        (engine body)
+        (engine collide)
+        (engine tilemap)
+        (engine reach)
+        (harkfell feel))
+
+(define F HARKFELL-FEEL)
+(define TM
+  (let rows ((r 0) (tm (make-tilemap 25 42 16)))
+    (if (= r 42)
+        tm
+        (rows (+ r 1)
+              (let cols ((c 0) (tm tm))
+                (if (= c 25)
+                    tm
+                    (cols (+ c 1)
+                          (if (or (= r 41) (and (>= r 3) (>= c 14)))
+                              (tilemap-set tm c r 'solid)
+                              tm))))))))
+
+(define (record down)
+  (let* ((start (body (stand-body TM F 13 40) down: down)))
+    (display (if down "DOWN\n" "BARE\n"))
+    (let loop ((tick 0) (b start) (was #f) (min-y (body-y start)))
+      (if (= tick 900)
+          (begin (display "rise: ") (write (- (body-y start) min-y)) (newline))
+          (let* ((at-wall (touching? TM (body-x b) (body-y b)
+                                    (feel-box-w F) (feel-box-h F) 'right kind-solid?))
+                 (press (and (or (= tick 0) at-wall) (not was)))
+                 (in (intent h: 1 jump: #t press: press))
+                 (next (body-step b in TM F)))
+            (when (memq 'wall-jump (body-events next))
+              (write (list 'kick tick 'tau (body-tau next) 'x (body-x next) 'y (body-y next)))
+              (newline))
+            (loop (+ tick 1) next press (min min-y (body-y next))))))))
+
+(record #f)
+(record #t)
+(for-each
+  (lambda (cap)
+    (display "glide-fall: ") (write cap) (newline)
+    (set! F (feel HARKFELL-FEEL glide-fall: cap))
+    (record #t))
+  '(2.0 2.5 3.0 3.5))
