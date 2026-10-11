@@ -114,7 +114,8 @@
       (assert-true (> (source-gain g T) 0.1))))
   (test "the warning and the rush's start dip the moment 3 dB, and it comes back"
     (run S 45 320)
-    (assert-true (< (abs (- GUST-MOMENT-DIP (source-factor (mixer-find MOMENT-ID) 'gust T))) 0.02))
+    ;; a literal, not GUST-MOMENT-DIP: a test reading the constant moves with it
+    (assert-true (< (source-factor (mixer-find MOMENT-ID) 'gust T) 0.75))
     (run S 60 440)
     (assert-true (> (source-factor (mixer-find MOMENT-ID) 'gust T) 0.98))))
 
@@ -151,4 +152,11 @@
     (run (place K gliding: #t) 1 0)
     (assert-true (assq 'glide-open (sound-moved)))
     (run (place K gliding: #t) 1 0)
-    (assert-false (assq 'glide-open (sound-moved)))))
+    (assert-false (assq 'glide-open (sound-moved))))
+  (test "a glide let go and taken again within 0.4 s does not open it again"
+    (run (place K gliding: #f) 2 0)
+    (run (place K gliding: #t) 1 0)
+    (assert-false (assq 'glide-open (sound-moved)))
+    (run (place K gliding: #f) 12 0)
+    (run (place K gliding: #t) 1 0)
+    (assert-true (assq 'glide-open (sound-moved)))))
