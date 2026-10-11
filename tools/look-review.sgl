@@ -9,7 +9,8 @@
 ;;;   atlas               every room of the world at 1/4, as the ?atlas door
 ;;;   room:REGION:X:Y:C:R:CARRY:TICKS
 ;;;                       one room in play: body at cell (C R), carrying
-;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks
+;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks;
+;;;                       C "start" (any R) puts it where ?room= would
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
 ;;;                       the same room on a W x H window (fitted as the web
 ;;;                       fits it), with D47's region name over it at ALPHA
@@ -33,7 +34,10 @@
 
 (define (review-world ct parts)
   (let* ((rm (content-room ct (num (list-ref parts 2)) (num (list-ref parts 3))))
-         (g (local->global ct rm (num (list-ref parts 4)) (num (list-ref parts 5))))
+         ;; C "start": where the ?room= door puts the body (room-start-cell)
+         (g (if (string=? (list-ref parts 4) "start")
+                (room-start-cell ct rm)
+                (local->global ct rm (num (list-ref parts 4)) (num (list-ref parts 5)))))
          (wm (content-map ct))
          (b (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g)))
          (w (world-populate (world-at wm b) (content-stones ct) (content-pickups ct)

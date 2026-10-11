@@ -38,7 +38,7 @@
           (harkfell gates)
           (harkfell creatures))
 
-  (export draw-critter draw-critter-glow draw-stone draw-stone-light draw-pickup draw-pickup-light
+  (export draw-critter draw-critter-glow draw-moth-hint draw-stone draw-stone-light draw-pickup draw-pickup-light
           draw-flash draw-flash-light harmonic-role firefly-halo-pixels)
 
   (begin
@@ -175,6 +175,26 @@
                (pulse (+ 0.85 (* 0.15 (sin (* 0.11 (+ t (critter-anim c))))))))
           (light-disc! x y (+ 4.0 (* 2.5 g)) (* (if drawn 0.3 0.18) g pulse))
           (light-disc! x y 2.5 (* (if drawn 0.35 0.2) g pulse)))))
+
+
+    ;; D48: an idle moth in the Pipes, before you carry its harmonic, shows
+    ;; that harmonic's colour on its wing tips (the frame's "d...d" row), so
+    ;; a player without H3 can see what the moths answer to. Two pixels: a
+    ;; small green glint that flutters with the wings, never a light. Drawn
+    ;; over the frame draw-critter has just drawn.
+    (define (draw-moth-hint c ox oy t slot)
+      (when (and (eq? (critter-kind c) 'moth) (not (eq? (critter-state c) 'drawn)))
+        (let* ((x (floor-int (- (critter-x c) ox)))
+               (y (floor-int (- (critter-y c) oy)))
+               (up (< (modulo (+ t (critter-anim c)) 6) 3))
+               (ty (if up (- y 1) (+ y 1))))
+          (paint-slot! (slot (harmonic-role (or (critter-drawn c) 3))))
+          (draw-filled-rect (- x 2) ty 1 1)
+          (draw-filled-rect (+ x 2) ty 1 1)
+          ;; and a few pixels of the colour round it, shifting as it flies
+          ;; (the fen fireflies' halo, at full glow): a small green haze
+          (for-each (lambda (p) (draw-filled-rect (+ x (car p)) (+ y (cdr p)) 1 1))
+                    (firefly-halo-pixels 1.0 (modulo (quotient (+ t (critter-anim c)) 8) 4))))))
 
     ;; --- ring-stones ----------------------------------------------------------------------------
     ;; x y: the cell's top-left. The stone stands in its cell, rounded, with

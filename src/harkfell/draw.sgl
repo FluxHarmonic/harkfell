@@ -48,6 +48,7 @@
           (harkfell palette)
           (harkfell render)
           (harkfell atlas)
+          (harkfell cues)
           (harkfell pipes look)
           (harkfell sprites))
 
@@ -108,7 +109,30 @@
                       '()))
       (set! *strips-stale* (map car *strip-texs*))
       (set! *layers-key* #f)
+      (set! *ways* #f)
       (drop-overview!))
+
+    ;; D48: each room's openings that lead back toward its region's way in
+    ;; ((harkfell cues) room-ways-out), worked out once per content and kept
+    ;; by (region x y), so a copy of a room (the overview's lit sheet) finds
+    ;; its own.
+    (define *ways* #f)
+    (define (ways-out rm)
+      (if (not *content*)
+          '()
+          (begin
+            (unless *ways*
+              (set! *ways*
+                (apply append
+                  (map (lambda (in)
+                         (let ((ds (region-distances *content* (car in))))
+                           (map (lambda (p)
+                                  (cons (list (room-region (car p)) (room-x (car p)) (room-y (car p)))
+                                        (room-ways-out *content* (car p) ds)))
+                                ds)))
+                       REGION-WAYS-IN))))
+            (let ((e (assoc (list (room-region rm) (room-x rm) (room-y rm)) *ways*)))
+              (if e (cdr e) '())))))
 
     ;; The strips for a region: its own texture, made on first use, its
     ;; colours brought up to date once after the content changes.
@@ -1497,7 +1521,7 @@
               (draw-crusts!)
               (draw-snow! rm t)
               (for-each (lambda (c) (draw-critter c ox oy t slot)) (filter eyes? cs))
-              (draw-pipes-cues! rm t)
+              (draw-pipes-cues! rm t (ways-out rm))
               ;; front decoration, in front of the creature, swaying
               (set-blend-mode (quote normal))
               (sway-composite! *front-rt* t (wind-at t))
@@ -1507,6 +1531,13 @@
                         (world-pickups w))
               (let ((moths (filter (lambda (c) (memq (critter-kind c) '(moth firefly))) cs)))
                 (for-each (lambda (c) (draw-critter c ox oy t slot)) moths)
+                ;; D48: the Pipes' moths show the colour they answer to
+                ;; while you do not carry it yet
+                (when (eq? (room-region rm) 'pipes)
+                  (for-each (lambda (c)
+                              (when (and (critter-drawn c) (not (memv (critter-drawn c) (world-carry w))))
+                                (draw-moth-hint c ox oy t slot)))
+                            (filter (kind? 'moth) moths)))
                 ;; light last: B, added
                 (with-additive-blend
                   (for-each (lambda (st)
@@ -1525,7 +1556,7 @@
                   (draw-firefly-light! (filter (kind? 'firefly) moths) b rm ox oy)
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
-                  (draw-pipes-lights! rm t)
+                  (draw-pipes-lights! rm t (ways-out rm))
                   (draw-glints! t)
                   (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
@@ -1614,10 +1645,10 @@
       (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
       (draw-reedfen-water-haze! rm 0)
       (draw-pipes-panels! rm)
-      (draw-pipes-cues! rm 0)
+      (draw-pipes-cues! rm 0 (ways-out rm))
       (draw-upward-drips! rm 0)
       (with-additive-blend
-        (draw-pipes-lights! rm 0))
+        (draw-pipes-lights! rm 0 (ways-out rm)))
       (draw-water! rm))
 
     ;; Outside any pass: resolve one bounded batch per frame. Every
