@@ -16,20 +16,26 @@
           (harkfell down))
 
   (export cloudstair-stepper cloudstair-entry-phases
-          cloudstair-shelter? cloudstair-window)
+          cloudstair-shelter? cloudstair-window cloudstair-diagnostic-profiles
+          cloudstair-search cloudstair-progress)
 
   (begin
-    (define (cloudstair-stepper ct)
-      (let ((tiles '())
-            (wm (content-map ct))
-            (pickups (content-pickup-cells ct)))
-        (define (tiles-for carry)
+    (define (cloudstair-tiles ct)
+      (let ((tiles '()))
+        (lambda (carry)
           (let ((prior (assoc carry tiles)))
             (if prior
                 (cdr prior)
                 (let ((tm (tiles-carrying ct carry)))
                   (set! tiles (cons (cons carry tm) tiles))
-                  tm))))
+                  tm))))))
+
+    (define (cloudstair-stepper ct)
+      (cloudstair-advance ct (cloudstair-tiles ct)))
+
+    (define (cloudstair-advance ct tiles-for)
+      (let ((wm (content-map ct))
+            (pickups (content-pickup-cells ct)))
         (lambda (node in)
           (let* ((carry (timed-node-data node))
                  (tm (tiles-for carry))
@@ -55,6 +61,49 @@
                                        down: down tau: tau)
                            data: carry))
              (iota AIR-PERIOD))))
+
+    ;; Sixteen harmonic subsets, each with and without down. Diagnostic seeds
+    ;; never stand in for the actual contact transitions in progression.
+    (define (cloudstair-diagnostic-profiles)
+      (apply append
+        (map (lambda (mask)
+               (let ((carry (filter (lambda (harmonic)
+                                      (odd? (quotient mask (expt 2 (- harmonic 2)))))
+                                    '(2 3 4 5))))
+                 (list (cons carry #f) (cons carry #t))))
+             (iota 16))))
+
+    ;; Region policies must include physical routes and aerial recoveries.
+    ;; The returned graph is evidence, not a whole-world acceptance verdict:
+    ;; authors must also check required cells, windows and sabotage controls.
+    (define (cloudstair-search ct starts policies home? bound . prior)
+      (let* ((tiles-for (cloudstair-tiles ct))
+             (advance (cloudstair-advance ct tiles-for)))
+        (timed-search starts advance policies
+                      (lambda (node)
+                        (timed-shelter? (tiles-for (timed-node-data node))
+                                        HARKFELL-FEEL advance node))
+                      home? bound
+                      (if (pair? prior) (car prior) '())
+                      (lambda (node)
+                        (timed-memo-key (tiles-for (timed-node-data node))
+                                        HARKFELL-FEEL node)))))
+
+    ;; The only progression seed is the real world start, with neither gift
+    ;; nor harmonic and phase zero. Larger states arise only inside advance.
+    (define (cloudstair-progress ct policies bound)
+      (let* ((cell (start-cell ct))
+             (tm (tiles-carrying ct '()))
+             (b (and cell (real-stand-body tm HARKFELL-FEEL (car cell) (cdr cell)))))
+        (and b
+             (cloudstair-search ct (list (timed-node body: b)) policies
+               (lambda (node)
+                 (let ((b (timed-node-body node)))
+                   (and (eq? (body-mode b) 'ground)
+                        (= (body-vx b) 0) (= (body-vy b) 0)
+                        (equal? cell (rest-cell (tiles-carrying ct (timed-node-data node))
+                                               HARKFELL-FEEL b)))))
+               bound))))
 
     (define (cloudstair-shelter? ct advance node)
       (timed-shelter? (tiles-carrying ct (timed-node-data node))

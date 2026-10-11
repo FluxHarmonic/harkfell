@@ -110,6 +110,12 @@
       (iota 600))))
 
 (test-group "timed reach: actual acquisition"
+  (test "diagnostics cover all sixteen subsets, with and without down"
+    (let ((profiles (cloudstair-diagnostic-profiles)))
+      (assert-equal 32 (length profiles))
+      (assert-equal 16 (length (filter cdr profiles)))
+      (assert-true (member (cons '(2 3 4 5) #t) profiles))
+      (assert-true (member (cons '() #f) profiles))))
   (test "diagnostics include all 600 entry phases"
     (assert-equal 600 (length SEEDS)))
   (test "Cattails grant retains the arrival phase and does not alter harmonics"

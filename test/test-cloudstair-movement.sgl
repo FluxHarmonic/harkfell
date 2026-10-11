@@ -113,5 +113,12 @@
            (r (save-restore CT d)))
       (assert-true (restored-down r))
       (assert-equal 599 (restored-tau r))))
+  (test "D47 announced regions coexist with the new optional fields"
+    (let* ((b (body ENTRY down: #t tau: 479))
+           (d (save-datum CT b '(2) '() '() 13.0 #t #t '(hollow reedfen)))
+           (r (save-restore CT d)))
+      (assert-equal '(hollow reedfen) (restored-announced r))
+      (assert-true (restored-down r))
+      (assert-equal 479 (restored-tau r))))
   (test "invalid optional phase is forgiven to zero"
     (assert-equal 0 (restored-tau (save-restore CT (append OLD '((tau 600))))))))

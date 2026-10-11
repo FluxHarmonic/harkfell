@@ -41,6 +41,8 @@
           (engine reach)
           (engine worldmap)
           (engine body)
+          (engine air)
+          (engine tilemap)
           (harkfell feel)
           (harkfell content)
           (harkfell check)
@@ -129,6 +131,9 @@
                   (say "PASS room-check --parse-only: " (number->string (length (content-rooms ct)))
                        " rooms, parse seams map green (reach NOT run)")
                   0)
+                ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct))))
+                  (say "SETUP-FAILED room-check: timed fields require the exact-phase world gate; spatial reach is insufficient")
+                  2)
                 (else
                   (let* ((g (if (member "--verbose" args)
                                 (content-reach ct (lambda (n steps kind cell)
