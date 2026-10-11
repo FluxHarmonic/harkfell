@@ -23,9 +23,9 @@
         (harkfell cloudstair takeoff))
 
 (define F HARKFELL-FEEL)
-;; 15 ticks is the playtest target; with the drift cap measured at 0.66 the
-;; three-tile, one-up crossings reach 13, with 0.8 they reach 15
-(define GUST-EAST-MIN (if (>= (feel-wind-cap F) 0.8) 15 13))
+;; The approved playtest minimum stays fixed if physics changes: reverting
+;; the drift cap must fail the gate rather than lowering its standard.
+(define GUST-EAST-MIN 15)
 (define CALM-WEST-MIN 8)
 
 (define CT (load-content (read-world-source "world")))
