@@ -105,8 +105,12 @@
       (assert-equal 'low-cloud (moment-kw (m 10 -1) "tune"))
       (assert-equal 8 (moment-kw (m 10 -1) "still"))
       (assert-equal 'above-the-cloud (moment-kw (m 9 -2) "tune"))))
-  (test "no other Cloudstair room has a fixed moment (none in A, D, I, P or V), and no two share an edge"
-    (let ((with (filter room-moment CLOUD)))
+  ;; The first-visit moments keep to their rooms and apart. D50's arch answer
+  ;; is a different kind: it waits for H5 (carrying: 5), so it sits beside Q
+  ;; and S on purpose, and the hush keeps any two moments apart in time.
+  (test "no other Cloudstair room has a first-visit moment (none in A, D, I, P or V), and no two share an edge"
+    (let ((with (filter (lambda (rm) (and (room-moment rm) (not (moment-kw (room-moment rm) "carrying"))))
+                        CLOUD)))
       (assert-equal 3 (length with))
       (for-each (lambda (a)
                   (for-each (lambda (b)
@@ -114,6 +118,12 @@
                                 (assert-false (= 1 (+ (abs (- (room-x a) (room-x b))) (abs (- (room-y a) (room-y b))))))))
                             with))
                 with)))
+  (test "the Windworn Arch answers H5 (D50): its moment waits for carrying 5, and is the only one that does"
+    (let ((carried (filter (lambda (rm) (and (room-moment rm) (moment-kw (room-moment rm) "carrying"))) CLOUD)))
+      (assert-equal 1 (length carried))
+      (assert-equal '(8 -2) (list (room-x (car carried)) (room-y (car carried))))
+      (assert-equal 'windworn-arch (moment-kw (room-moment (car carried)) "tune"))
+      (assert-equal 5 (moment-kw (room-moment (car carried)) "carrying"))))
   (test "every Cloudstair room names its air level"
     (for-each (lambda (rm) (assert-true (memq 'air (room-bed rm)))) CLOUD))
   (test "the bowl's H5 homecoming comes after hollow-octave, carrying 5"
