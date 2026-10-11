@@ -1,0 +1,29 @@
+;; The actual bowl isolated from alternate routes through the world. H5 is
+;; diagnostic here until V is authored; no save or carried state is changed.
+(import (sigil list)
+        (engine worldmap)
+        (engine reach)
+        (harkfell feel)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check))
+
+(define WORLD (load-content (read-world-source "world")))
+(define RM (content-room WORLD 4 3))
+(define P (room-placed RM))
+(define CT (content WORLD rooms: (list P)
+                         wmap: (make-worldmap (list P) 25 11 16)))
+(for-each
+  (lambda (carry)
+    (let* ((tm (tiles-carrying CT carry))
+           (start (cons 18 8))
+           (pocket (cons 20 6))
+           (graph (reach-search-down tm HARKFELL-FEEL (list start) witness-lands? #t))
+           (forward (reach-forward graph (list start)))
+           (backward (reach-backward graph (list start))))
+      (write (list 'carry carry
+                   'pocket-reached (vector-ref forward (cell-index tm 20 6))
+                   'pocket-return (vector-ref backward (cell-index tm 20 6))
+                   'stats (graph-stats graph)))
+      (newline)))
+  '((2 3 4 5) (2 4 5) (2 3 4)))
