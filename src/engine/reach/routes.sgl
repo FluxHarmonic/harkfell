@@ -1,0 +1,153 @@
+;;; Constructive routes on complete actual states. Spatial graphs suggest
+;;; scripts only; accepted motion and waits have directed physical proofs.
+(define-library (engine reach routes)
+  (import (sigil list)
+          (engine body) (engine tilemap) (engine reach) (engine reach timed))
+
+  (export timed-route-finder)
+
+  (begin
+    (define (still? node)
+      (and node
+           (let ((b (timed-node-body node)))
+             (and (eq? (body-mode b) 'ground)
+                  (= (body-vx b) 0) (= (body-vy b) 0)))))
+
+    (define (last-node trace) (and (pair? trace) (car (reverse trace))))
+
+    (define (distances graph target)
+      (let* ((tm (graph-tm graph)) (n (* (tilemap-cols tm) (tilemap-rows tm)))
+             (incoming (make-vector n '())) (dist (make-vector n #f)))
+        (let fill ((i 0))
+          (when (< i n)
+            (for-each
+              (lambda (edge)
+                (vector-set! incoming (car edge)
+                             (cons i (vector-ref incoming (car edge)))))
+              (vector-ref (graph-edges graph) i))
+            (fill (+ i 1))))
+        (let loop ((front (list (cons (cell-index tm (car target) (cdr target)) 0)))
+                   (back '()))
+          (cond
+            ((and (null? front) (null? back)) dist)
+            ((null? front) (loop (reverse back) '()))
+            (else
+             (let* ((entry (car front)) (i (car entry)) (d (cdr entry)))
+               (if (vector-ref dist i)
+                   (loop (cdr front) back)
+                   (begin
+                     (vector-set! dist i d)
+                     (loop (cdr front)
+                           (append (map (lambda (j) (cons j (+ d 1)))
+                                        (vector-ref incoming i)) back))))))))))
+
+    ;; guides: actual node -> spatial candidate graph in that ability/carry.
+    ;; wait: actual node, target phase -> (actual node . real elapsed ticks).
+    ;; record! receives genuine safe catches and nonhazard terminal states.
+    ;; incomplete! is called at a hard bound; callers must never report PASS.
+    (define (timed-route-finder advance tiles-for f guides shelter? wait
+                                bound record! incomplete!)
+      (let ((distance-cache '()))
+        (define (cell-of node)
+          (and (still? node)
+               (rest-cell (tiles-for (timed-node-data node)) f (timed-node-body node))))
+        (define (distance-for graph target)
+          (let ((prior (find (lambda (e) (and (eq? (car e) graph)
+                                             (equal? (cadr e) target))) distance-cache)))
+            (if prior (caddr prior)
+                (let ((dist (distances graph target)))
+                  (set! distance-cache (cons (list graph target dist) distance-cache))
+                  dist))))
+        (define (replay node script)
+          (let run ((node node) (script script) (rev '()))
+            (cond
+              ((not node) (reverse (cons #f rev)))
+              ((null? script)
+               (let settle ((node node) (n 0) (rev (cons node rev)))
+                 (cond
+                   ((not node) (reverse rev))
+                   ((or (still? node) (= n 180)) (reverse rev))
+                   (else
+                    (let ((next (advance node NO-INTENT)))
+                      (settle next (+ n 1) (cons next rev)))))))
+              (else
+               (let ((next (advance node (car script))))
+                 (if (and (timed-wait? node next) (not (shelter? node)))
+                     (reverse (cons node rev))
+                     (run next (cdr script) (cons node rev))))))))
+        (define (observe trace)
+          (for-each (lambda (node) (when (still? node) (record! node))) trace)
+          (let ((end (last-node trace)))
+            (when (and end (not (still? end))) (record! end))
+            end))
+        (lambda (start target)
+          (let ((seen #{}) (count 0))
+            (define (walk node depth)
+              (let ((cell (cell-of node)))
+                (cond
+                  ((and cell (equal? cell target)) node)
+                  ((or (> depth 2048) (>= count bound)) (incomplete!) #f)
+                  ((dict-contains? seen (timed-key node)) #f)
+                  (else
+                   (set! seen (dict-set seen (timed-key node) #t))
+                   (set! count (+ count 1))
+                   (if (not cell)
+                       (let recover
+                         ((scripts
+                           (cons (make-list 360 NO-INTENT)
+                             (append
+                               (apply append
+                                 (map (lambda (h)
+                                        (map (lambda (held)
+                                               (append
+                                                 (if held (list (intent h: h jump: #t press: #t)) '())
+                                                 (make-list 120 (intent h: h jump: held))
+                                                 (make-list 180 NO-INTENT)))
+                                             '(#f #t))) '(-1 1)))
+                               (map (lambda (v)
+                                      (append (make-list 120 (intent v: v))
+                                              (make-list 180 NO-INTENT))) '(-1 1))))))
+                         (and (pair? scripts)
+                              (let ((end (observe (replay node (car scripts)))))
+                                (or (and (still? end) (walk end (+ depth 1)))
+                                    (recover (cdr scripts))))))
+                       (let* ((graph (guides node)) (tm (graph-tm graph))
+                              (dist (distance-for graph target))
+                              (edges
+                                (list-sort
+                                  (lambda (a b)
+                                    (< (vector-ref dist (cell-index tm (caar a) (cdar a)))
+                                       (vector-ref dist (cell-index tm (caar b) (cdar b)))))
+                                  (filter (lambda (e)
+                                            (vector-ref dist (cell-index tm (caar e) (cdar e))))
+                                          (graph-edges-from graph cell)))))
+                         (let try ((edges edges))
+                           (and (pair? edges)
+                                (or
+                                  (let depart ((phases '(actual 360 0)))
+                                    (and (pair? phases)
+                                         (or
+                                           (let* ((proof (and (not (eq? (car phases) 'actual))
+                                                              (wait node (car phases))))
+                                                  (stage (if (eq? (car phases) 'actual) node
+                                                             (and proof (car proof)))))
+                                             (and stage
+                                                  (let* ((end (observe
+                                                                (replay stage (witness-script (cdar edges)))))
+                                                         (next (and end (cell-of end)))
+                                                         (d (and next (vector-ref dist
+                                                                       (cell-index tm (car next) (cdr next)))))
+                                                         (here (vector-ref dist
+                                                                          (cell-index tm (car cell) (cdr cell))))
+                                                         (changed
+                                                           (and end
+                                                                (or (not (equal? (timed-node-data node)
+                                                                                 (timed-node-data end)))
+                                                                    (not (eq? (body-down (timed-node-body node))
+                                                                              (body-down (timed-node-body end))))))))
+                                                    (and next
+                                                         (or changed (and d here (< d here)))
+                                                         (walk end (+ depth 1))))))
+                                           (depart (cdr phases)))))
+                                  (try (cdr edges)))))))))))
+            (walk start 0)))))))

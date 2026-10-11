@@ -95,7 +95,7 @@
   (export make-intent* NOTHING
           standable? standable-cells stand-body real-stand-body rest-cell body-cell
           witness witness? witness-from witness-script witness-hops witness-origin
-          reach-search-down
+          reach-search-down reach-search-down*
           reach-graph reach-graph? reach-search reach-search* graph-memo tilemap-changes graph-stand-scripts
           graph-same-edges?
           graph-tm graph-cells graph-edges graph-starts graph-stats
@@ -475,6 +475,11 @@
     ;; which keeps actual arrivals and acquisition rather than cell anchors.
     (define (reach-search-down tm f starts accept? down . log)
       (apply reach-search-profile* tm f starts accept? #f '() down log))
+
+    ;; Candidate-script reuse for the same ability profile. Acceptance of
+    ;; timed routes still requires replay on their actual bodies and fields.
+    (define (reach-search-down* tm f starts accept? down prior changed . log)
+      (apply reach-search-profile* tm f starts accept? prior changed down log))
 
     (define (reach-search-profile* tm f starts accept? prior changed down . log)
       (when (find air-field-pulsed (tilemap-air tm))

@@ -16,7 +16,7 @@
           (harkfell check)
           (harkfell down))
 
-  (export cloudstair-stepper cloudstair-entry-phases
+  (export cloudstair-stepper cloudstair-tile-provider cloudstair-entry-phases
           cloudstair-shelter? cloudstair-shelter-checker
           cloudstair-waiter
           cloudstair-window cloudstair-diagnostic-profiles
@@ -32,6 +32,8 @@
                 (let ((tm (tiles-carrying ct carry)))
                   (set! tiles (cons (cons carry tm) tiles))
                   tm))))))
+
+    (define (cloudstair-tile-provider ct) (cloudstair-tiles ct))
 
     (define (cloudstair-stepper ct)
       (cloudstair-advance ct (cloudstair-tiles ct)))
