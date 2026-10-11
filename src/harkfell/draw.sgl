@@ -49,6 +49,7 @@
           (harkfell render)
           (harkfell atlas)
           (harkfell pipes look)
+          (harkfell cloudstair look)
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
@@ -432,6 +433,8 @@
         (if e
             (cdr e)
             (let ((t (make-texture-from-pixels VIEW-W VIEW-H
+                                               (if (cloudstair-backdrop-key? key)
+                                                   (cloudstair-backdrop-bytes key)
                                                (case key
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
@@ -445,7 +448,7 @@
                                                  ((glasswood-sun-3) (glasswood-bytes 0.75))
                                                  ((glasswood-sun-4) (glasswood-bytes 1.0))
                                                  ((reedfen) (reedfen-bytes))
-                                                 (else (backdrop-bytes key)))
+                                                 (else (backdrop-bytes key))))
                                                'nearest)))
               (set! *backdrops* (cons (cons key t) *backdrops*))
               t))))
@@ -454,7 +457,11 @@
     ;; more than 15 of its 25 cells solid or climbable) has earth behind it.
     ;; Not "a room above it": the Hollow stacks two rows of open-air rooms
     ;; under one sky, and the first rule drew its dawn bowl as a cave.
-    (define under? room-under?)
+    ;; Cloudstair's rooms are all outdoors: a closed top there is the shelf
+    ;; above, with the sky still behind (the region's seams close every
+    ;; unjoined pair of rooms, so most tops are rock).
+    (define (under? rm) (and (not (cloudstair? rm)) (room-under? rm)))
+    (define (cloudstair? rm) (eq? (room-region rm) 'cloudstair))
 
     ;; The focus pull (D16, section 7's depth): while a music moment plays the
     ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
@@ -478,6 +485,7 @@
     ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
       (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
+                                 ((cloudstair? rm) (cloudstair-backdrop-key rm))
                                  ((and (not (under? rm)) (glasswood-sheet? rm))
                                   ;; Glasswood's sky by the room's sun, in quarters
                                   (vector-ref (vector (quote glasswood-sun-0) (quote glasswood-sun-1) (quote glasswood-sun-2) (quote glasswood-sun-3) (quote glasswood-sun-4))
@@ -542,9 +550,10 @@
              (cave? (and (under? rm) (mat-cells sheet "cave") #t)))
         ;; under water nothing grows: a solid with water on it takes the mask
         ;; of one covered from above (no turf on a pool's floor)
-        (each-tile rm (if (eq? (room-region rm) 'pipes)
-                          (lambda (m) (memq m (list 'ledge 'hazard)))
-                          solid-mat?)
+        (each-tile rm (cond ((eq? (room-region rm) 'pipes)
+                             (lambda (m) (memq m (list 'ledge 'hazard))))
+                            ((cloudstair? rm) (lambda (m) #f))   ; all painted ((harkfell cloudstair look))
+                            (else solid-mat?))
                    (lambda (mat x y m gc gr)
                      (let ((m (if (and (not (mask-has? m MASK-UP)) (eq? (material-at gc (- gr 1)) 'water))
                                   (+ m MASK-UP)
@@ -702,6 +711,12 @@
                 (draw-pipes-solids! rm
                                     (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
                                     (* S (car g)) (* S (cdr g)))))
+            ;; Cloudstair's cliffs likewise ((harkfell cloudstair look))
+            (when (cloudstair? rm)
+              (let ((g (global-tile rm 0 0)))
+                (draw-cloudstair-solids! rm
+                                         (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
+                                         (* S (car g)) (* S (cdr g)))))
             (draw-solids! rm)
             (draw-drifts! rm)
             (draw-sun-on-branches! rm)
@@ -1460,8 +1475,12 @@
                                    (- t (world-aurora-at w))))
               (set-blend-mode 'normal)
               (draw-clouds! rm t)
+              (when (cloudstair? rm) (draw-cloudstair-sky! rm t))
               (sway-composite! *foliage-rt* t
-                               (if (eq? (room-region rm) 'pipes) 0.0 (wind-at t)))
+                               (cond ((eq? (room-region rm) 'pipes) 0.0)
+                                     ;; the grass leans with the gust's warning and blows with it
+                                     ((cloudstair? rm) (cloudstair-wind (world-tau w) (wind-at t)))
+                                     (else (wind-at t))))
               (for-each (lambda (st)
                           (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                  (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
@@ -1477,6 +1496,20 @@
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
               (draw-reedfen-water-haze! rm t)
               (draw-pipes-panels! rm)
+              ;; Cloudstair's lifts, gusts and seeds, on the shared air clock;
+              ;; elsewhere a lift column's seeds (the Hollow's launch lift)
+              (if (cloudstair? rm)
+                  (let ((c (body-center b HARKFELL-FEEL)))
+                    (draw-cloudstair-air! rm t (world-tau w))
+                    (draw-cloudstair-seeds! rm t (world-tau w) (- (car c) ox) (- (cdr c) oy)))
+                  (draw-lift-seeds! rm t (world-tau w)))
+              ;; the Cattails' down, until it is yours
+              (unless (world-down w)
+                (for-each (lambda (d)
+                            (let ((at (thing-at d)))
+                              (when at
+                                (draw-down-gift! rm t (+ (* S (car at)) 8) (+ (* S (cdr at)) 8)))))
+                          (room-things-of rm 'down)))
               ;; falling ice ((harkfell ice)), in front of the rock it hangs from
               (draw-ice! w ox oy t)
               ;; D43: the upward icicle, where the room has one
@@ -1492,6 +1525,8 @@
                               (draw-critter c (- ox d) oy t slot))))
                         (filter (lambda (c) (not (memq (critter-kind c) '(moth firefly)))) cs))
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
+              (when (body-down b)
+                (draw-down-tuft! b (- (body-x b) ox) (- (body-y b) oy) t))
               (draw-water! rm)
               (cover-thin-water! w ox oy)
               (draw-crusts!)
@@ -1523,6 +1558,15 @@
                     (for-each (lambda (c) (draw-critter-glow c ox oy t slot)) cave-moths)
                     (draw-moth-light! cave-moths b rm ox oy t))
                   (draw-firefly-light! (filter (kind? 'firefly) moths) b rm ox oy)
+                  ;; the waiting down glows a little where the room is darker
+                  ;; than daylight (in daylight it shows as it is)
+                  (unless (or (world-down w) (>= (room-render-light rm) 1.0))
+                    (for-each (lambda (d)
+                                (let ((at (thing-at d)))
+                                  (when at
+                                    (light-disc! (+ (* S (car at)) 8) (+ (* S (cdr at)) 6)
+                                                 (+ 7.0 (sin (* t 0.05))) 0.3))))
+                              (room-things-of rm 'down)))
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
                   (draw-pipes-lights! rm t)
@@ -1547,6 +1591,8 @@
              (rm (and p (placed-data p)))
              (region (if rm (room-region rm) 'none)))
         (when rm (prepare-layers! rm (world-tiles w)))
+        ;; a passing cloud's shadow on Cloudstair's stone, none anywhere else
+        (apply set-cloud-shade! (if (and rm (cloudstair? rm)) (cloudstair-shade rm (world-ticks w)) (list 0.0 0.0 0.0)))
         (use-region! region)
         (with-render-target (room-index-rt)
           (set-blend-mode 'normal)
@@ -1609,10 +1655,14 @@
       (draw-backdrop! rm)
       (set-blend-mode 'normal)
       (draw-clouds! rm 0)
+      (when (cloudstair? rm) (draw-cloudstair-sky! rm 0))
       (sway-composite! *foliage-rt* 0 0.0)
       (set-color 1.0 1.0 1.0 1.0)
       (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
       (draw-reedfen-water-haze! rm 0)
+      (when (cloudstair? rm)
+        (draw-cloudstair-air! rm 0 0)
+        (draw-cloudstair-seeds! rm 0 0 -1000.0 -1000.0))
       (draw-pipes-panels! rm)
       (draw-pipes-cues! rm 0)
       (draw-upward-drips! rm 0)

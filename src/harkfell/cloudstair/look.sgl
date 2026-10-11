@@ -1,0 +1,722 @@
+;;; (harkfell cloudstair look) - Cloudstair's pictures (the bible's "The
+;;; look"): pale cliffs and shelves in a large sky, dry grass on every top,
+;;; the slow cloud behind and below, the seeds, the lifts' rising seeds and
+;;; the gust's visible tells, the cattail down on the player and the gift
+;;; that waits for it in the Cattails.
+;;;
+;;; Everything is palette slots (harkfell render). The cliffs are painted
+;;; from global pixels, so a seam between two rooms shows one stone. The
+;;; moving parts read the shared air clock (engine air): a pulsed lift's
+;;; seeds rest low in calm, stir and lean through the warning (tau 300-359)
+;;; and stream up through the gust (360-599), and an eastward gust shows
+;;; streaks over its gap only while it blows, exactly when the force does.
+;;;
+;;;   (cloudstair-backdrop-key rm) / (cloudstair-backdrop-bytes key)
+;;;   (draw-cloudstair-solids! rm kind-at gx0 gy0)   baked with the room
+;;;   (draw-cloudstair-sky! rm t)                     slow cloud, per frame
+;;;   (draw-cloudstair-air! rm t tau)                 lifts, gusts, the gaps
+;;;   (draw-lift-seeds! rm t tau)                     any room's lift columns
+;;;   (draw-cloudstair-seeds! rm t tau bx by)         the seeds
+;;;   (cloudstair-seeds rm t tau bx by)               their places, for sound
+;;;   (cloudstair-wind tau base)                      the grass's sway wind
+;;;   (cloudstair-shade rm t)                         a passing cloud's shadow
+;;;   (draw-down-tuft! b x y t)                       on the player
+;;;   (draw-down-gift! rm t x y)                      in the Cattails
+(define-library (harkfell cloudstair look)
+  (import (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (engine air)
+          (engine body)
+          (harkfell content)
+          (harkfell palette)
+          (harkfell render)
+          (harkfell atlas))
+
+  (export cloudstair-backdrop-key cloudstair-backdrop-key? cloudstair-backdrop-bytes
+          draw-cloudstair-solids! draw-cloudstair-sky! draw-cloudstair-air!
+          draw-cloudstair-seeds! cloudstair-seeds cloudstair-wind draw-lift-seeds!
+          draw-down-tuft! draw-down-gift! cliff-bytes cloudstair-shade)
+
+  (begin
+    (define S 16)
+
+    (define (pixel x) (exact (floor x)))
+
+    (define BAYER4 (vector 0 8 2 10 12 4 14 6 3 11 1 9 15 7 13 5))
+    (define (bayer x y)
+      (/ (+ 0.5 (vector-ref BAYER4 (+ (* 4 (modulo y 4)) (modulo x 4)))) 16.0))
+
+    ;; A small deterministic hash of two integers and a salt: 0..65520.
+    (define (hash3 a b k)
+      (let* ((h (modulo (+ (* (modulo a 65521) 7919) (* (modulo b 65521) 104729)
+                           (* k 31337) 17)
+                        65521))
+             (h (modulo (+ (* h h) 12345) 65521)))
+        (modulo (+ (* h 40503) k) 65521)))
+
+    (define (rect! s x y w h)
+      (paint-slot! (slot-of s))
+      (draw-filled-rect x y w h))
+
+    ;; --- the backdrop -------------------------------------------------------
+    ;; The sky in four flat bands with dithered seams, then what lies far off:
+    ;; from the lowest row of rooms (y 1) a far cliff wall stands behind and
+    ;; the cloud crosses in front of the far fells below; higher up the cloud
+    ;; becomes a sea that sinks down the view, with lone crags standing out
+    ;; of it. Keyed by the row of rooms and a variant, so neighbours differ.
+
+    (define (cloudstair-backdrop-key rm)
+      (let ((k (max 0 (min 3 (+ (room-y rm) 2))))
+            (v (modulo (room-x rm) 3)))
+        (string->symbol (string-append "cloudstair-b-" (number->string k) "-" (number->string v)))))
+
+    (define (cloudstair-backdrop-key? key)
+      (and (symbol? key)
+           (let ((s (symbol->string key)))
+             (and (> (string-length s) 13) (string=? (substring s 0 13) "cloudstair-b-")))))
+
+    (define (key-numbers key)
+      (let ((s (symbol->string key)))
+        (cons (- (char->integer (string-ref s 13)) 48)
+              (- (char->integer (string-ref s 15)) 48))))
+
+    ;; The cloud sea's top by row of rooms (0: the highest rooms).
+    (define SEA-TOP (vector 138 120 100 78))
+
+    (define (put! bv x y s)
+      (when (and (< -1 x VIEW-W) (< -1 y VIEW-H))
+        (let ((o (* 4 (+ x (* y VIEW-W)))))
+          (bytevector-u8-set! bv o s)
+          (bytevector-u8-set! bv (+ o 3) 255))))
+
+    (define (billow x v)
+      (+ (* 6.0 (abs (sin (+ (* x 0.043) (* 1.7 v)))))
+         (* 3.0 (abs (sin (+ (* x 0.113) (* 2.9 v)))))
+         (* 1.5 (abs (sin (+ (* x 0.29) v))))))
+
+    (define (cloudstair-backdrop-bytes key)
+      (let* ((kv (key-numbers key)) (k (car kv)) (v (cdr kv))
+             (bv (make-bytevector (* 4 VIEW-W VIEW-H) 0))
+             (s0 (slot-of 'sky-1)) (s1 (slot-of 'sky-2))
+             (s2 (slot-of 'sky-3)) (s3 (slot-of 'sky-4))
+             (cl (slot-of 'water))
+             (yc (vector-ref SEA-TOP k))
+             (seams (list 40 (max 56 (- yc 12)) (if (= k 3) 150 (+ yc 4)))))
+        ;; the sky's bands
+        (let rows ((y 0))
+          (when (< y VIEW-H)
+            (let cols ((x 0))
+              (when (< x VIEW-W)
+                (let* ((th (bayer x y))
+                       (band (let loop ((ss seams) (i 0))
+                               (cond ((null? ss) i)
+                                     ((< y (- (car ss) 6)) i)
+                                     ((< y (+ (car ss) 6))
+                                      (if (< th (/ (- y (- (car ss) 6)) 12.0)) (loop (cdr ss) (+ i 1)) i))
+                                     (else (loop (cdr ss) (+ i 1)))))))
+                  (put! bv x y (vector-ref (vector s0 s1 s2 s3) (min band 3))))
+                (cols (+ x 1))))
+            (rows (+ y 1))))
+        ;; far stone: a long cliff wall low down, lone crags higher up
+        (if (>= k 2)
+            (let cols ((x 0))
+              (when (< x VIEW-W)
+                (let* ((u (+ x (* 131 v)))
+                       (top (pixel (- yc 26 (* 14.0 (+ 0.5 (* 0.5 (sin (* u 0.021)))))
+                                      (* 6.0 (abs (sin (* u 0.067))))
+                                      (if (= 0 (modulo (quotient u 23) 4)) 6 0)))))
+                  (let fill ((y top))
+                    (when (< y (+ yc 8))
+                      (put! bv x y (cond ((= y top) s3)
+                                         ((and (= 0 (modulo (hash3 (quotient u 9) 1 v) 3))
+                                               (= 0 (modulo u 9)))
+                                          s1)
+                                         (else s2)))
+                      (fill (+ y 1)))))
+                (cols (+ x 1))))
+            (let crags ((j 0))
+              (when (< j 5)
+                (let* ((xc (modulo (+ (* 97 j) (* 61 v) (hash3 j v 5)) VIEW-W))
+                       (w (+ 8 (modulo (hash3 j v 6) 16)))
+                       (h (+ 26 (modulo (hash3 j v 7) (if (= k 0) 30 48)))))
+                  (let up ((dy 0))
+                    (when (< dy h)
+                      (let* ((f (/ dy h))
+                             (half (pixel (* 0.5 w (- 1.0 (* 0.55 f f)))))
+                             (lean (pixel (* 3.0 f (if (odd? j) 1 -1))))
+                             (y (- yc dy)))
+                        (let across ((dx (- half)))
+                          (when (<= dx half)
+                            (put! bv (+ xc dx lean) y (cond ((<= dx (- 1 half)) s3) ((>= dx (- half 1)) s1) (else s2)))
+                            (across (+ dx 1)))))
+                      (up (+ dy 1)))))
+                (crags (+ j 1)))))
+        ;; far fells under the lowest rooms' cloud band
+        (when (= k 3)
+          (let cols ((x 0))
+            (when (< x VIEW-W)
+              (let ((top (pixel (- 152 (* 10.0 (+ 0.5 (* 0.5 (sin (+ (* x 0.017) v)))))
+                                   (* 4.0 (sin (* x 0.05)))))))
+                (let fill ((y top))
+                  (when (< y VIEW-H)
+                    (put! bv x y (if (< (bayer x y) (/ (- y top) 14.0)) s0 s1))
+                    (fill (+ y 1)))))
+              (cols (+ x 1)))))
+        ;; the cloud: a sea in the high rooms, a band in the lowest
+        (let cols ((x 0))
+          (when (< x VIEW-W)
+            (let* ((top (pixel (- yc (billow x v))))
+                   (bottom (if (= k 3) (+ yc 30 (pixel (* 4.0 (sin (* x 0.031))))) VIEW-H)))
+              (let fill ((y top))
+                (when (< y bottom)
+                  (let* ((d (- y top)) (th (bayer x y))
+                         (s (cond ((< d 2) s3)
+                                  ((and (= k 3) (> d (- bottom top 5))) (if (< th 0.5) cl s2))
+                                  ((< d 7) (if (< th (/ (- d 2) 5.0)) s2 s3))
+                                  ((< th (/ (- d 24) 70.0)) cl)
+                                  (else s2))))
+                    (put! bv x y s))
+                  (fill (+ y 1)))))
+            (cols (+ x 1))))
+        bv))
+
+    ;; --- the slow cloud, per frame -------------------------------------------
+    ;; Two soft clouds cross behind the stone, a pixel every few seconds, each
+    ;; at its own height; the room's coordinate offsets them.
+    (define (cloud-shape! x y w h)
+      (let rows ((dy 0))
+        (when (< dy h)
+          (let* ((f (/ (- dy (* 0.55 h)) (* 0.55 h)))
+                 (half (pixel (* 0.5 w (sqrt (max 0.0 (- 1.0 (* f f)))))))
+                 (wob (pixel (* 3.0 (sin (+ (* dy 0.9) (* x 0.01)))))))
+            (when (> half 0)
+              (rect! (if (= dy (- h 1)) 'sky-3 'sky-4) (+ x (- half) wob) (+ y dy) (* 2 half) 1)))
+          (rows (+ dy 1)))))
+
+    (define (draw-cloudstair-sky! rm t)
+      (let* ((k (max 0 (min 3 (+ (room-y rm) 2))))
+             (span (+ VIEW-W 140))
+             (base (+ (* 173 (room-x rm)) (* 59 (room-y rm)))))
+        (set-blend-mode 'normal)
+        (for-each
+          (lambda (c)
+            (let* ((x (- (modulo (+ (car c) base (quotient t (cadddr c))) span) 70))
+                   (y (cadr c)))
+              (cloud-shape! x y (caddr c) (quotient (caddr c) 6))))
+          (list (list 40 (+ 30 (* 10 k)) 96 210)
+                (list 260 (+ 62 (* 8 k)) 70 300)))))
+
+    ;; A cloud's shadow on the stone (the bible's environmental light): about
+    ;; every 40 s a soft band 120 px wide crosses the room west to east at a
+    ;; pixel every 3 ticks, darkening stone and grass one step, then the sun
+    ;; is back. (strength x half-width) for (harkfell render)'s set-cloud-shade!.
+    (define SHADE-PERIOD 2400)
+    (define (cloudstair-shade rm t)
+      (let* ((phase (modulo (+ t (* 997 (room-x rm)) (* 389 (room-y rm))) SHADE-PERIOD))
+             (x (- (/ phase 3.0) 90.0)))
+        (if (< x (+ VIEW-W 90.0))
+            (list 1.0 x 60.0)
+            (list 0.0 0.0 0.0))))
+
+    ;; --- the cliffs ------------------------------------------------------------
+    ;; One periodic picture of pale stone: blocky columns in beds, each block
+    ;; lit on its left and top edges and shaded on its right, joints dark,
+    ;; a few weathered pocks. ROCK for a face, DEEP (a step darker) for a
+    ;; cell buried in rock on every side. Tabulated once into a texture.
+    (define PERIOD-X 128)
+    (define PERIOD-Y 96)
+    (define CLIFF-W PERIOD-X)
+    (define BAND (+ PERIOD-Y S))          ; any 16-row window without a wrap
+    (define ROCK-Y 0)
+    (define DEEP-Y BAND)
+    ;; TURF: a top's dry grass, TURF-ABOVE rows of blades over the stone's
+    ;; edge and five rows into it; GAP: a gap floor going down into the dark.
+    (define TURF-ABOVE 3)
+    (define TURF-H 8)
+    (define TURF-Y (* 2 BAND))
+    (define GAP-Y (+ TURF-Y TURF-H))
+    (define CLIFF-H (+ GAP-Y S))
+    (define WIDTHS (list 14 11 17 9 13 16 10 12 15 11))
+    (define HEIGHTS (list 18 13 22 16 27))
+
+    ;; the part of a periodic partition holding p: (index offset width)
+    (define (part parts p)
+      (let loop ((ps parts) (i 0) (o p))
+        (if (or (null? (cdr ps)) (< o (car ps)))
+            (list i o (car ps))
+            (loop (cdr ps) (+ i 1) (- o (car ps))))))
+
+    ;; Weathered strata: beds of uneven thickness whose planes wander a pixel
+    ;; or two, each bed pale at its top and greying toward its foot, the
+    ;; planes themselves dark but broken; a few fractures run down a bed,
+    ;; lit on their left; scattered pocks. Periodic in x (PERIOD-X) and y.
+    (define (wobble x k)
+      (exact (round (+ (* 1.3 (sin (+ (* x 0.0981748) k))) (* 0.8 (sin (+ (* x 0.2454369) (* 2.0 k))))))))
+
+    (define (cliff-tone x y)
+      (let* ((yy (modulo (+ y (wobble x 0.0)) PERIOD-Y))
+             (bed (part HEIGHTS yy))
+             (bi (car bed)) (by (cadr bed)) (bh (caddr bed))
+             (f (/ by bh))
+             (b (bayer x y))
+             ;; this bed's fractures: one per 32 px, at a hashed place
+             (u (modulo (+ x (* 29 bi)) PERIOD-X))
+             (fx (modulo u 32))
+             (fpos (+ 5 (modulo (hash3 (quotient u 32) bi 3) 24)))
+             (fdepth (+ 4 (modulo (hash3 (quotient u 32) bi 5) (max 1 (- bh 4))))))
+        (cond ((= by 0) (if (= 0 (modulo (hash3 (quotient x 5) bi 7) 4)) 2 1))
+              ((and (= fx fpos) (> by 1) (< by fdepth)) 1)
+              ((and (= fx (- fpos 1)) (> by 1) (< by fdepth)) 4)
+              ((= by 1) (if (< b 0.75) 4 3))
+              ((and (= by 2) (< b 0.3)) 4)
+              ((= 0 (modulo (hash3 (quotient x 2) (quotient y 2) 9) 53)) 2)
+              ((> f 0.72) (if (< b (* 2.2 (- f 0.6))) 2 3))
+              (else 3))))
+
+    (define (cliff-bytes)
+      (let* ((bv (make-bytevector (* 4 CLIFF-W CLIFF-H) 0))
+             (g (vector 0 (slot-of 'ground-1) (slot-of 'ground-2) (slot-of 'ground-3) (slot-of 'ground-4)))
+             (deep (vector 0 1 2 2 3))
+             (set (lambda (x y s)
+                    (let ((o (* 4 (+ x (* y CLIFF-W)))))
+                      (bytevector-u8-set! bv o s)
+                      (bytevector-u8-set! bv (+ o 3) 255)))))
+        (let rows ((y 0))
+          (when (< y BAND)
+            (let cols ((x 0))
+              (when (< x CLIFF-W)
+                (let ((tone (cliff-tone x y)))
+                  (set x (+ ROCK-Y y) (vector-ref g tone))
+                  ;; buried rock: the same beds without their lit edges, quieter
+                  (set x (+ DEEP-Y y)
+                       (vector-ref g (cond ((= tone 1) 1)
+                                           ((= tone 4) 3)
+                                           (else tone)))))
+                (cols (+ x 1))))
+            (rows (+ y 1))))
+        ;; the turf: blades (about one column in four, one to three tall, a
+        ;; few sunlit at the tip) over a lit top, sun caught here and there,
+        ;; greying down into the stone; transparent where nothing grows
+        (let cols ((x 0))
+          (when (< x CLIFF-W)
+            (let* ((h (hash3 x 3 11))
+                   (bh (and (= 0 (modulo h 4)) (+ 1 (modulo (quotient h 4) 3))))
+                   (leaf (lambda (n) (slot-of (vector-ref (vector 'leaf-1 'leaf-2 'leaf-3) (- n 1))))))
+              (when bh
+                (let blade ((d 1))
+                  (when (<= d bh)
+                    (set x (+ TURF-Y (- TURF-ABOVE d))
+                         (cond ((< d bh) (leaf 2))
+                               ((= 0 (modulo (quotient h 16) 5)) (slot-of 'accent))
+                               (else (leaf 3))))
+                    (blade (+ d 1)))))
+              (let ((y0 (+ TURF-Y TURF-ABOVE)) (b (bayer x 0)) (b2 (bayer x 2)) (b4 (bayer x 4)))
+                (set x y0 (if (= 0 (modulo h 7)) (slot-of 'accent) (leaf 3)))
+                (set x (+ y0 1) (leaf 2))
+                (set x (+ y0 2) (if (< b2 0.5) (leaf 1) (leaf 2)))
+                (set x (+ y0 3) (leaf 1))
+                (when (< b4 0.25) (set x (+ y0 4) (vector-ref g 2)))))
+            (cols (+ x 1))))
+        ;; the gap floor: shadow thinning into black
+        (let rows ((d 0))
+          (when (< d S)
+            (let cols ((x 0))
+              (when (< x CLIFF-W)
+                (set x (+ GAP-Y d)
+                     (if (and (< d 6) (< (bayer x d) (- 1.0 (/ d 6.0)))) (vector-ref g 1) (slot-of 'black)))
+                (cols (+ x 1))))
+            (rows (+ d 1))))
+        bv))
+
+    (define *cliff* #f)
+    (define (cliff-texture)
+      (unless *cliff*
+        (set! *cliff* (make-texture-from-pixels CLIFF-W CLIFF-H (cliff-bytes) 'nearest)))
+      *cliff*)
+
+    ;; The Windworn Arch (R, 8,-2): the bible's wordless architectural beat,
+    ;; an old arch on the ridge with the sky through it, and two cut steps
+    ;; beside it climbing to nothing. Drawn behind the ridge's own stone,
+    ;; lit from the west like it, never solid.
+    (define (draw-arch!)
+      (let ((cx 200) (cy 84) (rin 34) (rout 46) (foot 128))
+        (define (tone x y)
+          (let* ((dx (- x cx)) (dy (- y cy))
+                 (d (sqrt (+ (* dx dx) (* dy dy))))
+                 (in-ring (if (< y cy) (and (>= d rin) (<= d rout))
+                              (>= (abs dx) rin)))
+                 ;; a voussoir lost from the ring, high on the east side
+                 (lost (and (< y cy) (> dx 14) (< dx 30) (< dy -28))))
+            (and in-ring (not lost)
+                 (let ((joint (if (< y cy)
+                                  (let ((a (* 9.0 (atan dy dx)))) (< (abs (- a (round a))) 0.06))
+                                  (= 0 (modulo (- foot y) 14)))))
+                   (cond (joint (quote ground-2))
+                         ((or (= x (- cx rout)) (and (>= y cy) (= dx rin)) (< (abs (- d rout)) 1.0)) (quote ground-4))
+                         ((or (and (>= y cy) (= dx (- rin))) (< (abs (- d rin)) 1.0) (= x (+ cx rout))) (quote ground-2))
+                         (else (quote ground-3)))))))
+        ;; row by row, one rect per run of one tone
+        (let rows ((y (- cy rout)))
+          (when (< y foot)
+            (let cols ((x (- cx rout)) (start #f) (k #f))
+              (let ((kx (and (<= x (+ cx rout)) (tone x y))))
+                (if (and start (eq? kx k))
+                    (cols (+ x 1) start k)
+                    (begin
+                      (when start (rect! k start y (- x start) 1))
+                      (when (<= x (+ cx rout)) (cols (+ x 1) (and kx x) kx))))))
+            (rows (+ y 1))))
+        ;; two steps east of it, broken off
+        (rect! (quote ground-3) 262 120 22 24)
+        (rect! (quote ground-4) 262 120 22 1)
+        (rect! (quote ground-2) 283 120 1 24)
+        (rect! (quote ground-3) 270 106 14 14)
+        (rect! (quote ground-4) 270 106 14 1)
+        (rect! (quote ground-2) 283 106 1 14)
+        (rect! (quote ground-2) 276 107 1 4)))
+
+    ;; Draw the room's rock, ledges and gap floors into the current (slot)
+    ;; target. KIND-AT: local (c r), -1..25 and -1..11, to the material
+    ;; there; GX0, GY0: the room's top-left global pixel. Like cells merge
+    ;; into runs: one texture window per run of a row, a few rects per edge.
+    (define (draw-cloudstair-solids! rm kind-at gx0 gy0)
+      (let* ((tex (cliff-texture))
+             (solid? (lambda (c r) (memq (kind-at c r) '(rock rough))))
+             (open? (lambda (c r) (not (memq (kind-at c r) '(rock rough ledge hazard stone)))))
+             (strip! (lambda (x y w h sx sy)
+                       (let loop ((x x) (w w) (sx sx))
+                         (when (> w 0)
+                           (let ((seg (min w (- CLIFF-W sx))))
+                             (set-color 1.0 1.0 1.0 1.0)
+                             (draw-texture-region tex x y seg h sx sy seg h)
+                             (loop (+ x seg) (- w seg) (modulo (+ sx seg) PERIOD-X)))))))
+             (runs (lambda (n key emit)
+                     (let loop ((i 0) (start #f) (k #f))
+                       (let ((ki (and (< i n) (key i))))
+                         (if (and start (equal? ki k))
+                             (loop (+ i 1) start k)
+                             (begin
+                               (when start (emit start (- i 1) k))
+                               (when (< i n) (loop (+ i 1) (and ki i) ki)))))))))
+        (set-blend-mode 'normal)
+        (when (and (= (room-x rm) 8) (= (room-y rm) -2)) (draw-arch!))
+        ;; the stone, row by row
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (let* ((y (* S r))
+                   (py (modulo (+ gy0 y) PERIOD-Y)))
+              (runs ROOM-COLS
+                    (lambda (c)
+                      (and (solid? c r)
+                           (if (and (solid? (- c 1) r) (solid? (+ c 1) r)
+                                    (solid? c (- r 1)) (solid? c (+ r 1))
+                                    (solid? (- c 1) (- r 1)) (solid? (+ c 1) (- r 1))
+                                    (solid? (- c 1) (+ r 1)) (solid? (+ c 1) (+ r 1)))
+                               DEEP-Y ROCK-Y)))
+                    (lambda (c0 c1 band)
+                      (strip! (* S c0) y (* S (+ 1 (- c1 c0))) S
+                              (modulo (+ gx0 (* S c0)) PERIOD-X) (+ band py)))))
+            (rows (+ r 1))))
+        ;; shade under each exposed underside, and down each exposed right side
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (and (solid? c r) (open? c (+ r 1))))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (rect! 'ground-2 x (+ y 13) w 1)
+                      (rect! 'ground-1 x (+ y 14) w 2))))
+            (rows (+ r 1))))
+        (let cl ((c 0))
+          (when (< c ROOM-COLS)
+            (runs ROOM-ROWS
+                  (lambda (r) (and (solid? c r) (open? (+ c 1) r)))
+                  (lambda (r0 r1 k)
+                    (let ((x (* S c)) (y (* S r0)) (h (* S (+ 1 (- r1 r0)))))
+                      (rect! 'ground-2 (+ x 13) y 1 h)
+                      (rect! 'ground-1 (+ x 14) y 2 h))))
+            (runs ROOM-ROWS
+                  (lambda (r) (and (solid? c r) (open? (- c 1) r)))
+                  (lambda (r0 r1 k)
+                    (let ((x (* S c)) (y (* S r0)) (h (* S (+ 1 (- r1 r0)))))
+                      (rect! 'ground-4 x y 1 h)
+                      (rect! 'sky-4 x y 1 (min h 3)))))
+            (cl (+ c 1))))
+        ;; dry turf on every top open to the sky, its blades standing above
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (and (solid? c r) (open? c (- r 1))))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (strip! x (- y TURF-ABOVE) w TURF-H (modulo (+ gx0 x) PERIOD-X) TURF-Y))))
+            (rows (+ r 1))))
+        ;; fixed stone shelves (=): a thin slab, lit on top
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (eq? (kind-at c r) 'ledge))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (rect! 'ground-4 x y w 1)
+                      (rect! 'ground-3 x (+ y 1) w 2)
+                      (rect! 'ground-2 x (+ y 3) w 1)
+                      (rect! 'ground-1 x (+ y 4) w 1))))
+            (rows (+ r 1))))
+        ;; the deep gaps (x): open down into the dark under the shelves
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (eq? (kind-at c r) 'hazard))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (strip! x y w S (modulo (+ gx0 x) PERIOD-X) GAP-Y))))
+            (rows (+ r 1))))))
+
+    ;; --- the air, per frame ------------------------------------------------------
+    ;; tau's phase as a lift's strength, 0..1: still in calm, stirring through
+    ;; the warning, full in the gust.
+    (define (gust-level tau)
+      (cond ((>= tau AIR-GUST) 1.0)
+            ((>= tau AIR-WARNING) (* 0.35 (/ (- tau AIR-WARNING) (- AIR-GUST AIR-WARNING))))
+            (else 0.0)))
+
+    ;; The grass's sway wind: the room's own, and the gust's when it blows.
+    (define (cloudstair-wind tau base)
+      (max base (cond ((>= tau AIR-GUST) 1.0)
+                      ((>= tau AIR-WARNING) (+ 0.4 (* 0.5 (/ (- tau AIR-WARNING) 60.0))))
+                      (else 0.0))))
+
+    ;; The lift columns of a room: ((c r0 r1 pulsed?) ...), one per column of
+    ;; ^ cells (top row r0 to bottom row r1).
+    (define *columns* (quote ()))
+    (define (room-columns rm)
+      (let ((e (assq rm *columns*)))
+        (if e (cdr e)
+            (let ((cs (find-columns rm)))
+              (set! *columns* (cons (cons rm cs) (if (> (length *columns*) 40) (quote ()) *columns*)))
+              cs))))
+
+    (define (find-columns rm)
+      (let ((fields (room-air-fields rm)))
+        (let cl ((c 0) (acc '()))
+          (if (= c ROOM-COLS)
+              (reverse acc)
+              (let rw ((r 0) (start #f) (acc acc))
+                (let ((up (and (< r ROOM-ROWS) (char=? (room-char rm c r) #\^))))
+                  (cond ((and up (not start)) (rw (+ r 1) r acc))
+                        ((and (not up) start)
+                         (let* ((cx (+ (* S c) 8.0)) (cy (+ (* S start) 8.0))
+                                (pulsed (find (lambda (f) (and (air-field-pulsed f) (> (air-field-lift f) 0)
+                                                               (air-contains? f cx cy)))
+                                              fields)))
+                           (if (< r ROOM-ROWS)
+                               (rw (+ r 1) #f (cons (list c start (- r 1) (and pulsed #t)) acc))
+                               (cl (+ c 1) (cons (list c start (- r 1) (and pulsed #t)) acc)))))
+                        ((< r ROOM-ROWS) (rw (+ r 1) start acc))
+                        (else (cl (+ c 1) acc)))))))))
+
+    ;; How far a mote has risen above its column's foot, px, at tau and
+    ;; world tick t. Steady: always rising. Pulsed: resting low through the
+    ;; calm (settling from where the last gust left it), lifting a little
+    ;; through the warning, streaming up through the gust.
+    (define (mote-height pulsed t tau p span)
+      (let ((rest (+ 2.0 (* 10.0 p))))
+        (if (not pulsed)
+            (modulo (+ (* 0.7 t) (* p span)) span)
+            (let* ((lift (+ rest 8.0))
+                   ;; each seed its own speed, so the stream spreads up the column
+                   (v (+ 0.9 (* 1.6 (modulo (* 7.0 p) 1.0))))
+                   (top (modulo (+ lift (* v (- AIR-PERIOD AIR-GUST))) span)))
+              (cond ((>= tau AIR-GUST) (modulo (+ lift (* v (- tau AIR-GUST))) span))
+                    ((>= tau AIR-WARNING)
+                     (+ rest (* 8.0 (let ((f (/ (- tau AIR-WARNING) 60.0))) (* f f)))
+                        (* 1.5 (sin (+ (* tau 0.4) (* 9.0 p))))))
+                    (else (max rest (- top (* 0.22 tau)))))))))
+
+    ;; Any room's lift columns: their seeds, on the shared clock (the Hollow's
+    ;; launch lift and the Rim's column show them too).
+    (define (draw-lift-seeds! rm t tau)
+      (set-blend-mode (quote normal))
+      (for-each
+        (lambda (col)
+          (let* ((c (car col)) (r0 (cadr col)) (r1 (caddr col)) (pulsed (cadddr col))
+                 (foot (* S (+ r1 1))) (span (* S (+ 1 (- r1 r0))))
+                 (n (+ 3 (quotient span 7)))
+                 (g (if pulsed (gust-level tau) 1.0)))
+            (let mote ((i 0))
+              (when (< i n)
+                (let* ((h (hash3 (+ (* 31 c) i) (room-x rm) 21))
+                       (p (/ (modulo h 997) 997.0))
+                       (up (mote-height pulsed t tau p span))
+                       (lean (if (and pulsed (>= tau AIR-WARNING) (< tau AIR-GUST))
+                                 (* 2.0 (/ (- tau AIR-WARNING) 60.0)) 0.0))
+                       (x (pixel (+ (* S c) 2 (modulo h 12) lean
+                                    (* (+ 0.6 g) (sin (+ (* t 0.05) (* 7.0 p)))))))
+                       (y (pixel (- foot up 1))))
+                  (when (and (>= y (* S r0)) (< y foot))
+                    (rect! (if (= 0 (modulo h 3)) 'sky-4 'leaf-3) x y 1 1)
+                    (rect! 'leaf-1 x (+ y 1) 1 1)
+                    ;; moving fast: a streak under it
+                    (when (> g 0.9) (rect! 'sky-2 x (+ y 2) 1 (if (= 0 (modulo h 2)) 2 1)))))
+                (mote (+ i 1))))))
+        (room-columns rm)))
+
+    (define (draw-cloudstair-air! rm t tau)
+      (set-blend-mode (quote normal))
+      (draw-lift-seeds! rm t tau)
+      ;; the eastward gust over its gap: streaks only while it blows; the
+      ;; warning shows a few short ones gathering at the upwind edge
+      (for-each
+        (lambda (f)
+          (when (and (> (air-field-east f) 0) (>= tau AIR-WARNING))
+            (let* ((x0 (pixel (air-field-x f))) (y0 (pixel (air-field-y f)))
+                   (w (pixel (air-field-w f))) (h (pixel (air-field-h f)))
+                   (gust (>= tau AIR-GUST)))
+              (let streak ((i 0))
+                (when (< i (if gust 16 4))
+                  (let* ((hh (hash3 i x0 23))
+                         (y (+ y0 8 (modulo hh (max 1 (- h 16)))))
+                         (len (if gust (+ 8 (modulo hh 12)) (+ 2 (quotient (- tau AIR-WARNING) 20))))
+                         (span (+ w 40))
+                         (x (if gust
+                                (+ x0 -20 (modulo (+ (* 3 (- tau AIR-GUST)) (* 13 i) (modulo hh 40)) span))
+                                (+ x0 -4 (modulo hh 6)))))
+                    (let ((sx (max x0 x)) (sw (max 0 (- (min (+ x len) (+ x0 w)) (max x0 x)))))
+                      ;; a pale line with a darker trail under it, readable on cloud and sky
+                      (rect! 'sky-4 sx y sw 1)
+                      (rect! 'sky-2 sx (+ y 1) (max 0 (- sw 2)) 1)))
+                  (streak (+ i 1)))))))
+        (room-air-fields rm))
+      ;; the deep gaps: pale wisps crossing far down in the dark
+      (let rows ((r 0))
+        (when (< r ROOM-ROWS)
+          (let cl ((c 0))
+            (when (< c ROOM-COLS)
+              (when (and (char=? (room-char rm c r) #\x)
+                         (or (= c 0) (not (char=? (room-char rm (- c 1) r) #\x))))
+                (let* ((end (let e ((k c)) (if (and (< (+ k 1) ROOM-COLS) (char=? (room-char rm (+ k 1) r) #\x)) (e (+ k 1)) k)))
+                       (w (* S (+ 1 (- end c)))))
+                  (let wisp ((i 0))
+                    (when (< i 2)
+                      (let* ((len (+ 6 (* 3 i)))
+                             (x (+ (* S c) (modulo (+ (quotient t (+ 9 (* 5 i))) (* 23 i)) (+ w len)) (- len)))
+                             (y (+ (* S r) 7 (* 4 i))))
+                        (rect! 'sky-1 (max (* S c) x) y
+                               (max 0 (- (min (+ x len) (+ (* S c) w)) (max (* S c) x))) 1))
+                      (wisp (+ i 1))))))
+              (cl (+ c 1))))
+          (rows (+ r 1)))))
+
+    ;; --- the seeds ------------------------------------------------------------------
+    ;; (seed at: (C R) count: N). Near a lift (a ^ within a column of the
+    ;; cell) they ride it, rising with its force; on a standable cell they
+    ;; rest, and lift away from a body moving near; in open air they circle
+    ;; their place, and part as the body comes close. Positions are room px,
+    ;; a seed's FEET; computed from time, phase and the body, nothing kept.
+    (define (near-lift rm c r)
+      (let loop ((dc -1))
+        (and (<= dc 1)
+             (or (let ((cc (+ c dc)))
+                   (and (< -1 cc ROOM-COLS)
+                        (let col ((rr 0))
+                          (and (< rr ROOM-ROWS)
+                               (or (char=? (room-char rm cc rr) #\^) (col (+ rr 1)))))
+                        cc))
+                 (loop (+ dc 1))))))
+
+    (define (lift-pulsed? rm c)
+      (let ((col (find (lambda (k) (= (car k) c)) (room-columns rm))))
+        (and col (cadddr col))))
+
+    ;; ((x y frame) ...) for one room. bx by: the body's centre, room px.
+    (define (cloudstair-seeds rm t tau bx by)
+      (apply append
+        (map
+          (lambda (thing)
+            (let* ((at (thing-at thing))
+                   (n (or (thing-kw thing "count") 3))
+                   (c (car at)) (r (cdr at))
+                   (lift (near-lift rm c r))
+                   (stand (grid-standable? (room-grid rm) c r)))
+              (map
+                (lambda (i)
+                  (let* ((h (hash3 (+ (* 13 c) i) (+ (* 7 r) (room-y rm)) 29))
+                         (p (/ (modulo h 991) 991.0))
+                         (flap (if (odd? (quotient (+ t (* 7 i)) 9)) 'seed-drift-a 'seed-drift-b)))
+                    (cond
+                      (lift
+                       (let* ((col (find (lambda (k) (= (car k) lift)) (room-columns rm)))
+                              (r0 (cadr col)) (r1 (caddr col)) (pulsed (cadddr col))
+                              (foot (* S (+ r1 1))) (span (* S (+ 1 (- r1 r0))))
+                              (up (mote-height pulsed (+ t (* 40 i)) tau p span))
+                              (x (+ (* S lift) 2 (modulo h 12)
+                                    (* 2.5 (sin (+ (* t 0.03) (* 6.0 p)))))))
+                         (list x (- foot up) (if (and pulsed (< tau AIR-WARNING)) 'seed-rest flap))))
+                      (stand
+                       (let* ((x0 (+ (* S c) 8.0 (* 7.0 (- i (* 0.5 (- n 1)))) (* 2.0 (- p 0.5))))
+                              (y0 (* S (+ r 1.0)))
+                              (d (sqrt (+ (* (- bx x0) (- bx x0)) (* (- by y0) (- by y0)))))
+                              (shy (max 0.0 (- 1.0 (/ d 48.0))))
+                              (hop (if (= 0 (modulo (quotient (+ t (* 53 i)) 70) 5)) 2.0 0.0)))
+                         (list (+ x0 (* shy 14.0 (if (< bx x0) 1.0 -1.0)))
+                               (- y0 hop (* shy 18.0) (* shy 3.0 (sin (+ (* t 0.2) i))))
+                               (if (> shy 0.05) flap 'seed-rest))))
+                      (else
+                       (let* ((cx (+ (* S c) 8.0)) (cy (+ (* S r) 8.0))
+                              (d (sqrt (+ (* (- bx cx) (- bx cx)) (* (- by cy) (- by cy)))))
+                              (part (max 0.0 (- 1.0 (/ d 80.0))))
+                              (a (+ (* 6.2831853 p) (* t (+ 0.006 (* 0.004 p)))))
+                              (rad (+ 18.0 (* 22.0 p) (* 40.0 part))))
+                         (list (+ cx (* rad (cos a)))
+                               (+ cy (* 0.45 rad (sin a)) (* 3.0 (sin (+ (* t 0.05) i))))
+                               flap))))))
+                (iota n))))
+          (room-things-of rm 'seed))))
+
+    (define *seed-cells* '())
+    (define (seed-cell name)
+      (let ((e (assq name *seed-cells*)))
+        (if e (cdr e)
+            ;; cached only once found: before the atlas is ready there is none
+            (let ((i (and (atlas-ready?) (atlas-index (string-append "cloudstair/" (symbol->string name))))))
+              (when i (set! *seed-cells* (cons (cons name i) *seed-cells*)))
+              i))))
+
+    (define (draw-cloudstair-seeds! rm t tau bx by)
+      (set-color 1.0 1.0 1.0 1.0)
+      (for-each
+        (lambda (s)
+          (let ((i (seed-cell (caddr s))))
+            (when i
+              (let ((sz (atlas-size i)))
+                (atlas-draw! i (- (pixel (car s)) (quotient (car sz) 2)) (- (pixel (cadr s)) (cdr sz)) 1)))))
+        (cloudstair-seeds rm t tau bx by)))
+
+    ;; --- the down -----------------------------------------------------------------------
+    ;; On the player (the box at x y, view px): held open over the head while
+    ;; gliding, folded on the back otherwise.
+    (define (draw-down-tuft! b x y t)
+      (let* ((open (body-gliding b))
+             (i (seed-cell (if open 'down-open 'down-fold))))
+        (when i
+          (let* ((sz (atlas-size i))
+                 (face (body-facing b))
+                 (cx (pixel (+ x 4))))
+            (set-color 1.0 1.0 1.0 1.0)
+            (if open
+                (atlas-draw! i (- cx (quotient (car sz) 2))
+                             (- (pixel y) (cdr sz) (if (odd? (quotient t 8)) 1 0)) face)
+                (atlas-draw! i (if (> face 0) (- cx 6) (+ cx 1)) (+ (pixel y) 5) face))))))
+
+    ;; The Cattails' tuft, waiting on its seed head (cell centre x y, view
+    ;; px): it lifts and turns in the reed wind.
+    (define (draw-down-gift! rm t x y)
+      (let ((i (seed-cell (if (odd? (quotient t 37)) 'down-gift-a 'down-gift-b))))
+        (when i
+          (let ((sz (atlas-size i)))
+            (set-color 1.0 1.0 1.0 1.0)
+            (atlas-draw! i (- (pixel x) (quotient (car sz) 2))
+                         (- (pixel (+ y (* 1.5 (sin (* t 0.06))))) (cdr sz) -2) 1)))))))

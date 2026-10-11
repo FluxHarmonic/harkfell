@@ -51,7 +51,7 @@
           paint-slot! paint-slot-a! paint-water! paint-light!
           strip-bytes make-strips strips-update! draw-strips!
           ensure-render! room-index-rt room-color-rt
-          resolve! dark-steps DARK-GAIN LIGHT-POOL-REACH LIGHT-POOL-EDGE
+          resolve! set-cloud-shade! dark-steps DARK-GAIN LIGHT-POOL-REACH LIGHT-POOL-EDGE
           sway-composite! sway-offset draw-texture-scattered! draw-texture-dissolved!
           GLSL-PREFIX VERT-SOURCE)
 
@@ -202,6 +202,9 @@
        "uniform float u_dark;\n"
        "uniform float u_pool;\n"
        "uniform float u_pool_y;\n"
+       "uniform float u_shade;\n"
+       "uniform float u_shade_x;\n"
+       "uniform float u_shade_w;\n"
        "float daylightPool(int x, int y) {\n"
        "    if (u_pool < 0.5) return 0.0;\n"
        "    float nearest = 100000.0;\n"
@@ -270,6 +273,12 @@
        "    int ds = (s.g > 0.5) ? (own ? 11 : lslot) : slot;\n"
        "    float L = s.b;\n"
        "    float dk = u_dark - L * 5.0;\n"
+       ;; a passing cloud's shadow (Cloudstair): one more DARK step on stone and
+       ;; grass (slots 4-10 and the accent) inside a band, its edges dithered
+       ;; over 24 px; sky, cloud, the player and harmonic colours keep theirs
+       "    if (u_shade > 0.0 && ((slot >= 4 && slot <= 10) || slot == 12)) {\n"
+       "        dk += u_shade * clamp((u_shade_w - abs(float(x) - u_shade_x)) / 24.0, 0.0, 1.0);\n"
+       "    }\n"
        ;; Pool interiors restore daylight; only the four-pixel edge band
        ;; interpolates DARK coverage. Outside the pool the full step is clean.
        "    if (u_pool > 0.5) dk = u_dark * (1.0 - daylightPool(x, y));\n"
@@ -451,6 +460,13 @@
     (define (room-index-rt) *index-rt*)
     (define (room-color-rt) *color-rt*)
 
+    ;; A cloud's shadow for the next resolves: STRENGTH (0 is none, 1 a whole
+    ;; DARK step) over a band centred at view column X, W px either side. The
+    ;; next resolve! uses it and clears it, so it is set each frame it is wanted.
+    (define *shade* (vector 0.0 0.0 0.0))
+    (define (set-cloud-shade! strength x w)
+      (set! *shade* (vector strength x w)))
+
     ;; The index target resolved into the colour target. t: the world's
     ;; ticks; black: 0..1, the dithered fade; hue: the slot of the light's
     ;; own colour (the harmonic lighting the room); light (optional, 1.0 by
@@ -479,6 +495,11 @@
       (set-shader-uniform *resolve* 'u_dark dark)
       (set-shader-uniform *resolve* 'u_pool (if pools? 1.0 0.0))
       (set-shader-uniform *resolve* 'u_pool_y (inexact POOL-Y))
+      (set-shader-uniform *resolve* 'u_shade (inexact (vector-ref *shade* 0)))
+      (set-shader-uniform *resolve* 'u_shade_x (inexact (vector-ref *shade* 1)))
+      (set-shader-uniform *resolve* 'u_shade_w (inexact (vector-ref *shade* 2)))
+      ;; set for one resolve only: the title, the card and the overview get none
+      (set! *shade* (vector 0.0 0.0 0.0))
       (with-render-target *color-rt*
         (set-blend-mode 'none)
         (set-color 1.0 1.0 1.0 1.0)

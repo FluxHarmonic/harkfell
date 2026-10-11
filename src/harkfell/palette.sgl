@@ -154,7 +154,8 @@
             (cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2)))
 
     (define (region-dark-lookup name)
-      (if (eq? name 'hollow) HOLLOW-SHADE DARK))
+      ;; Cloudstair's cloud shadow keeps its grass on the grass's own ramp too
+      (if (memq name '(hollow cloudstair)) HOLLOW-SHADE DARK))
 
     ;; The slot a lookup table sends slot i to.
     (define (lookup table i)
