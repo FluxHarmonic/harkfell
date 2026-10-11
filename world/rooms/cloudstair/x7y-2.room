@@ -20,4 +20,5 @@
    "# | ^^^ |  ########  | | "
    "####^^^##################")
   things: ((reedling flock: 5 zone: reeds))
+  moment: (tune: the-last-grass when: first-visit)
   decor: auto)

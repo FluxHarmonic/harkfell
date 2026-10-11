@@ -29,7 +29,8 @@
            (lantern-moth at: (11 5) count: 4 drawn: 2))
   moment: ((tune: hollow-answers when: first-visit carrying: 2)
            (tune: hollow-fifth when: first-visit carrying: 3)
-           (tune: hollow-octave when: first-visit carrying: 4))
+           (tune: hollow-octave when: first-visit carrying: 4)
+           (tune: hollow-third when: first-visit carrying: 5))
   unreached: ((20 6))
   decor: auto)
 ;; Existing amber, green and blue identities stay fixed. Blue reveals only

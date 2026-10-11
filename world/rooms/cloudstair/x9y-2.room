@@ -21,4 +21,5 @@
    "  |  |     ^^^   ####### "
    "###########^^^###########")
   things: ((air-field at: (11 4) size: (3 7) kind: pulsed-lift))
+  moment: (tune: above-the-cloud when: first-visit)
   decor: auto)
