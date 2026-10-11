@@ -1,0 +1,76 @@
+(import (sigil test)
+        (sigil list)
+        (engine body)
+        (engine tilemap)
+        (engine worldmap)
+        (engine reach)
+        (harkfell content)
+        (harkfell source)
+        (harkfell feel)
+        (harkfell cloudstair reach)
+        (harkfell cloudstair region))
+
+;; A flat three-room fixture allows real witness flights across the border.
+;; The Cloudstair rooms are deliberately away from any designated A rest.
+(define ROOM-TILES
+  (let loop ((c 0) (tm (make-tilemap 25 11 16)))
+    (if (= c 25) tm
+        (loop (+ c 1) (tilemap-set tm c 10 'solid)))))
+(define PLACES
+  (map (lambda (x)
+         (placed x: x y: 0 tiles: ROOM-TILES
+                 data: (room x: x y: 0 region: (if (= x 0) 'hollow 'cloudstair))))
+       '(0 1 2)))
+(define WM (make-worldmap PLACES 25 11 16))
+(define CT (content rooms: PLACES wmap: WM))
+(define TM (worldmap-tiles WM))
+
+(define (fixture-graph from script)
+  (let* ((w (witness from: from script: script))
+         (end (replay-witness TM HARKFELL-FEEL w))
+         (to (and end (rest-cell TM HARKFELL-FEEL end)))
+         (edges (make-vector (* (tilemap-cols TM) (tilemap-rows TM)) '())))
+    (unless (and to (witness-lands? TM HARKFELL-FEEL w to))
+      (error "fixture witness must land physically"))
+    (vector-set! edges (cell-index TM (car from) (cdr from))
+                 (list (cons (cell-index TM (car to) (cdr to)) w)))
+    (reach-graph tm: TM cells: (standable-cells TM) edges: edges)))
+
+(test-group "Cloudstair entrance negatives inspect every room visit"
+  (test "an unreachable Cloudstair witness is not an entrance bypass"
+    (let ((graph (fixture-graph '(50 . 9) (make-list 10 (intent h: 1)))))
+      (assert-equal '() (cloudstair-reached-rooms CT graph '((4 . 9)) HARKFELL-FEEL))))
+  (test "landing in a different Cloudstair cell still fails the empty-room control"
+    (let ((graph (fixture-graph '(24 . 9) (make-list 12 (intent h: 1)))))
+      (assert-equal '((1 . 0))
+                    (cloudstair-reached-rooms CT graph '((24 . 9)) HARKFELL-FEEL))))
+  (test "a physical border visit counts even when the witness returns to Hollow"
+    (let* ((graph (fixture-graph '(24 . 9)
+                    (append (make-list 30 (intent h: 1))
+                            (make-list 30 (intent h: -1))
+                            (make-list 20 NO-INTENT))))
+           (to (caar (graph-edges-from graph '(24 . 9)))))
+      (assert-true (< (car to) 25))
+      (assert-equal '((1 . 0))
+                    (cloudstair-reached-rooms CT graph '((24 . 9)) HARKFELL-FEEL)))))
+
+(define ACTUAL-CT (load-content (read-world-source "world")))
+
+(test-group "Cloudstair's legal entrance gates every no-down carry set"
+  (test "without down, none of the sixteen carry sets reaches any Cloudstair room"
+    (let ((probe (cloudstair-entrance-probe ACTUAL-CT)))
+      (for-each
+        (lambda (profile)
+          (unless (cdr profile)
+            (assert-equal (list (car profile) '())
+                          (list (car profile) (probe (car profile) #f)))))
+        (cloudstair-diagnostic-profiles))))
+  (test "an extra outside border cannot be silently omitted from the isolate"
+    (let* ((a (find (lambda (p) (and (= (placed-x p) 7) (= (placed-y p) 1)))
+                    (content-rooms ACTUAL-CT)))
+           (extra (placed a x: 6 data: (room (placed-data a) x: 6))))
+      (assert-true
+        (guard (error (#t #t))
+          (cloudstair-entrance-probe
+            (content ACTUAL-CT rooms: (cons extra (content-rooms ACTUAL-CT))))
+          #f)))))

@@ -8,7 +8,8 @@
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach))
 
-  (export cloudstair-region-content cloudstair-region-check)
+  (export cloudstair-region-content cloudstair-region-check
+          cloudstair-reached-rooms cloudstair-entrance-probe)
 
   (begin
     (define (cloudstair-region-content ct)
@@ -27,6 +28,78 @@
                   (= (body-vx b) 0) (= (body-vy b) 0)))))
 
     (define (last-node trace) (and (pair? trace) (car (reverse trace))))
+
+    ;; Check every reachable cell and the intermediate bodies of its accepted
+    ;; witnesses. Entering a room counts even when the flight lands back out
+    ;; of it or never touches the room's designated resting place.
+    (define (cloudstair-reached-rooms ct graph starts f)
+      (let ((wm (content-map ct))
+            (tm (graph-tm graph))
+            (forward (reach-forward graph starts))
+            (reached '()))
+        (define (visit px py)
+          (let ((p (worldmap-room-at-px wm px py)))
+            (when (and p (eq? (room-region (placed-data p)) 'cloudstair))
+              (let ((key (cons (placed-x p) (placed-y p))))
+                (unless (member key reached)
+                  (set! reached (cons key reached)))))))
+        (for-each
+          (lambda (cell)
+            (when (vector-ref forward (cell-index tm (car cell) (cdr cell)))
+              (visit (* (tilemap-size tm) (+ (car cell) 0.5))
+                     (* (tilemap-size tm) (+ (cdr cell) 0.5)))
+              (for-each
+                (lambda (edge)
+                  (for-each
+                    (lambda (b)
+                      (let ((center (body-center b f)))
+                        (visit (car center) (cdr center))))
+                    (witness-trace tm f (cdr edge))))
+                (graph-edges-from graph cell))))
+          (graph-cells graph))
+        (reverse reached)))
+
+    (define (cloudstair-entrance-probe source)
+      (let* ((ct (cloudstair-region-content source))
+             (rooms (filter (lambda (p)
+                              (or (not (eq? (room-region (placed-data p)) 'cloudstair))
+                                  (and (= (placed-x p) 7) (= (placed-y p) 1))))
+                            (content-rooms ct)))
+             (probe (content ct rooms: rooms wmap: (make-worldmap rooms 25 11 16)))
+             (cache #{}))
+        ;; The isolate proves all-room exclusion only while A is the sole
+        ;; outside border. Refuse a changed map instead of omitting an entry.
+        (for-each
+          (lambda (a)
+            (when (eq? (room-region (placed-data a)) 'cloudstair)
+              (for-each
+                (lambda (b)
+                  (when (and (not (eq? (room-region (placed-data b)) 'cloudstair))
+                             (= (+ (abs (- (placed-x a) (placed-x b)))
+                                   (abs (- (placed-y a) (placed-y b)))) 1)
+                             (not (and (= (placed-x a) 7) (= (placed-y a) 1)
+                                       (= (placed-x b) 7) (= (placed-y b) 2))))
+                    (error "Cloudstair entrance isolate omits an outside border")))
+                (content-rooms source))))
+          (content-rooms source))
+        (lambda (carry down)
+          (let* ((tiles (tiles-carrying probe carry))
+                 ;; Cache only identical physical contexts, rather than
+                 ;; assuming that harmonics other than H4 cannot matter.
+                 (key (list down (tilemap-cells tiles) (tilemap-air tiles))))
+            (if (dict-contains? cache key)
+                (dict-ref cache key)
+                (let* ((start (start-cell probe))
+                       (graph (reach-search-down tiles HARKFELL-FEEL
+                                                 (list start) witness-lands? down))
+                       (reached (cloudstair-reached-rooms probe graph (list start) HARKFELL-FEEL)))
+                  ;; No phase-dependent field lies before A in this isolate.
+                  ;; The identical negative searched policies therefore hold
+                  ;; for all actual clock rotations, without a frozen pulse.
+                  ;; A is the sole Hollow/Cloudstair entrance: no visit to any
+                  ;; part of A implies no visit to any of the 22 rooms.
+                  (set! cache (dict-set cache key reached))
+                  reached))))))
 
     (define (cloudstair-region-check source profiles bound log)
       (log '(candidate-geometry starting actual-replay-required))
@@ -55,33 +128,12 @@
                              (filter (lambda (p)
                                        (eq? (room-region (placed-data p)) 'cloudstair))
                                      (content-rooms ct)))))
-             (route-cache '()) (negative-cache #{}) (failures 0)
+             (route-cache '()) (entry-rooms (cloudstair-entrance-probe source)) (failures 0)
              (search-incomplete #f))
         (log (list 'candidate-geometry 'complete 'stats (graph-stats candidate)))
         (define (cell-of node)
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
-        (define (entry-bypassed? carry down)
-          (let ((key (list down (and (memv 4 carry) #t))))
-            (if (dict-contains? negative-cache key)
-                (dict-ref negative-cache key)
-                (let* ((rooms (filter (lambda (p)
-                                        (or (not (eq? (room-region (placed-data p)) 'cloudstair))
-                                            (and (= (placed-x p) 7) (= (placed-y p) 1))))
-                                      (content-rooms ct)))
-                       (probe (content ct rooms: rooms wmap: (make-worldmap rooms 25 11 16)))
-                       (tiles (tiles-carrying probe carry))
-                       (start (start-cell probe))
-                       (a (local->global probe (content-room probe 7 1) 4 7))
-                       (graph (reach-search-down tiles HARKFELL-FEEL
-                                                 (list start) witness-lands? down))
-                       (forward (reach-forward graph (list start)))
-                       (bypass (vector-ref forward (cell-index tiles (car a) (cdr a)))))
-                  ;; No phase-dependent field lies before A in this isolate.
-                  ;; The identical negative searched policies therefore hold
-                  ;; for all actual clock rotations, without a frozen pulse.
-                  (set! negative-cache (dict-set negative-cache key bypass))
-                  bypass))))
         ;; Normalize TIME only by real no-input ticks from a certified rest.
         ;; The arrival's position, momentum, ability and carry are never set.
         (define (align node tau)
@@ -157,10 +209,15 @@
                                  (drain)))))))
                   ;; Artificial negative profiles must fail at the legal
                   ;; entrance, rather than being spawned past its seal.
-                  (begin
-                    (when (entry-bypassed? carry down)
+                  (let ((reached (entry-rooms carry down)))
+                    (unless down
+                      (log (list 'no-down-cloudstair 'carry carry
+                                 'entry-phases AIR-PERIOD 'reachable-rooms reached
+                                 'pass (null? reached))))
+                    (unless (null? reached)
                       (set! failures (+ failures 1))
-                      (log (list 'RED 'entry-bypass 'carry carry 'down down)))))
+                      (log (list 'RED 'entry-bypass 'carry carry 'down down
+                                 'reachable-rooms reached)))))
               (when search-incomplete (set! complete #f))
               (set! failures (+ failures entry-fails (length unreached) (length traps)
                                 (if complete 0 1)))

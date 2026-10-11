@@ -148,7 +148,12 @@
                                   (set! end (last-node (timed-run STEP end (make-list 180 NO-INTENT)))))
                                 (when end
                                   (set! survived (+ survived 1))
-                                  (when (and (not down) (arrives? end))
+                                  ;; Down gates the legal Cloudstair entrance.
+                                  ;; I/P's short gaps may be crossed without it
+                                  ;; from these artificial diagnostic seeds.
+                                  (when (and (not down)
+                                             (eq? (list-ref leg 8) 'lift)
+                                             (arrives? end))
                                     (set! negative-crossings (+ negative-crossings 1)))
                                   (let* ((home (if (eq? (list-ref leg 8) 'lift)
                                                    (rests-in (list-ref leg 1) (list-ref leg 2) 0 10)
