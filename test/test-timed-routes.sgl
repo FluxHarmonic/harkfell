@@ -51,4 +51,25 @@
            (route (finder (guide TARGET) step 0 (lambda (node) #t)
                           (lambda () (set! incomplete #t)))))
       (assert-false (route START TARGET))
-      (assert-true incomplete))))
+      (assert-true incomplete)))
+  (test "an optimistic direct suggestion cannot hide a real route through a waiting rest"
+    (let* ((goal '(7 . 2))
+           (edges (make-vector 32 '()))
+           (second (append (make-list 50 (intent h: 1)) (make-list 30 NO-INTENT))))
+      ;; The claimed direct edge fails actual replay. It makes both the start
+      ;; and the intermediate rest one suggested hop from the goal; physical
+      ;; progress through that rest must not be pruned by that optimistic cost.
+      (vector-set! edges (cell-index TM 1 2)
+        (list (cons (cell-index TM 7 2) (witness from: '(1 . 2) script: (list NO-INTENT)))
+              (cons (cell-index TM (car TARGET) (cdr TARGET))
+                    (witness from: '(1 . 2) script: SCRIPT))))
+      (vector-set! edges (cell-index TM (car TARGET) (cdr TARGET))
+        (list (cons (cell-index TM 7 2) (witness from: TARGET script: second))))
+      (let* ((graph (reach-graph tm: TM cells: (standable-cells TM) edges: edges))
+             (route (finder graph step 20 (lambda (node) #t) (lambda () #t)))
+             (arrival (route START goal))
+             (fresh (car (reverse (timed-run step END second)))))
+        (assert-true arrival)
+        (when arrival
+          (assert-equal goal (rest-cell TM F (timed-node-body arrival)))
+          (assert-equal (timed-key fresh) (timed-key arrival)))))))

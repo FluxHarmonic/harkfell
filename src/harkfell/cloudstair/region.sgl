@@ -186,9 +186,14 @@
                                      'landings landing-count 'unreached (length unreached))))
                         (if (or (>= landing-count bound) (not complete))
                             (set! complete #f)
-                            (unless (or (dict-contains? covered target)
-                                        (seek root target record!))
-                              (set! unreached (cons target unreached)))))
+                            (begin
+                              (unless (or (dict-contains? covered target)
+                                          (seek root target record!))
+                                (set! unreached (cons target unreached)))
+                              (when search-incomplete
+                                (set! complete #f)
+                                (log (list 'RED 'regional-route-bound 'carry carry
+                                           'target target 'bound bound))))))
                       targets)
                     ;; Directed return from each genuine retained landing.
                     ;; New landings from return trials also create obligations.
@@ -197,14 +202,20 @@
                         (let ((pending (filter (lambda (entry)
                                                  (not (dict-contains? checked (car entry))))
                                                (dict-entries landings))))
-                          (cond ((>= landing-count bound) (set! complete #f))
+                          (cond ((not complete) #f)
+                                ((>= landing-count bound) (set! complete #f))
                                 ((null? pending) #t)
                                 (else
                                  (for-each
                                    (lambda (entry)
-                                     (set! checked (dict-set checked (car entry) #t))
-                                     (unless (seek (cdr entry) home record!)
-                                       (set! traps (cons (timed-key (cdr entry)) traps))))
+                                     (when complete
+                                       (set! checked (dict-set checked (car entry) #t))
+                                       (unless (seek (cdr entry) home record!)
+                                         (set! traps (cons (timed-key (cdr entry)) traps)))
+                                       (when search-incomplete
+                                         (set! complete #f)
+                                         (log (list 'RED 'regional-return-bound 'carry carry
+                                                    'bound bound)))))
                                    pending)
                                  (drain)))))))
                   ;; Artificial negative profiles must fail at the legal

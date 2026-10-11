@@ -81,12 +81,16 @@
             (when (and end (not (still? end))) (record! end))
             end))
         (lambda (start target)
-          (let ((seen #{}) (count 0))
+          (let ((seen #{}) (count 0) (halted #f))
             (define (walk node depth)
               (let ((cell (cell-of node)))
                 (cond
                   ((and cell (equal? cell target)) node)
-                  ((or (> depth 2048) (>= count bound)) (incomplete!) #f)
+                  ((or halted (> depth 2048) (>= count bound))
+                   (unless halted
+                     (set! halted #t)
+                     (incomplete!))
+                   #f)
                   ((dict-contains? seen (timed-key node)) #f)
                   (else
                    (set! seen (dict-set seen (timed-key node) #t))
@@ -107,7 +111,7 @@
                                (map (lambda (v)
                                       (append (make-list 120 (intent v: v))
                                               (make-list 180 NO-INTENT))) '(-1 1))))))
-                         (and (pair? scripts)
+                         (and (not halted) (pair? scripts)
                               (let ((end (observe (replay node (car scripts)))))
                                 (or (and (still? end) (walk end (+ depth 1)))
                                     (recover (cdr scripts))))))
@@ -122,10 +126,10 @@
                                             (vector-ref dist (cell-index tm (caar e) (cdar e))))
                                           (graph-edges-from graph cell)))))
                          (let try ((edges edges))
-                           (and (pair? edges)
+                           (and (not halted) (pair? edges)
                                 (or
                                   (let depart ((phases (list 'actual AIR-GUST 0)))
-                                    (and (pair? phases)
+                                    (and (not halted) (pair? phases)
                                          (or
                                            (let* ((proof (and (not (eq? (car phases) 'actual))
                                                               (wait node (car phases))))
@@ -146,7 +150,18 @@
                                                                     (not (eq? (body-down (timed-node-body node))
                                                                               (body-down (timed-node-body end))))))))
                                                     (and next
-                                                         (or changed (and d here (< d here)))
+                                                         ;; Frozen composite shortcuts
+                                                         ;; can give optimistic hop
+                                                         ;; costs. Use those costs to
+                                                         ;; order suggestions, never
+                                                         ;; to reject an actual route
+                                                         ;; through a waiting rest.
+                                                         ;; A phase-only self-loop adds
+                                                         ;; no movement option beyond
+                                                         ;; the explicit departures.
+                                                         (or changed
+                                                             (and d here
+                                                                  (not (equal? next cell))))
                                                          (walk end (+ depth 1))))))
                                            (depart (cdr phases)))))
                                   (try (cdr edges)))))))))))
