@@ -4,6 +4,7 @@
 #   scripts/gate-look              green: every leg must pass
 #   scripts/gate-look --sabotage   each plant must turn its leg red, and the
 #                                  tree is restored to its pre-plant hash
+#   scripts/gate-look --sabotage-sky   the haze plants alone (two rebuilds)
 #
 #   --palette | --firefly | --pools | --daylight | --sky runs a single visual leg.
 #   GATE_FIREFLY_WORLD may name a scratch world for a negative control.
@@ -24,8 +25,9 @@
 #             and lit round the body when its moths come to H3
 #   sky       Hollow x3y2 with its first-visit moment playing and without:
 #             the sky round a band seam must be the still sky exactly one
-#             haze step on (the focus pull once scattered it into zigzag
-#             teeth, D50 playtest)
+#             haze step on, and the still sky again 75 s in (the focus pull
+#             once scattered it into zigzag teeth; the haze once stayed),
+#             D50 playtest and the haze demo
 # Needs: build/dev for native palette frames; build/web for exact daylight frames.
 #
 # Exit 0 green, 1 red, 2 SETUP-FAILED.
@@ -408,7 +410,10 @@ leg_daylight() {
 # the body and the grass) holds hol-sky-2 and hol-sky-3 still; with the
 # moment it must be exactly that crop one step on (hol-sky-2 as hol-sky-3,
 # hol-sky-3 as hol-sky-4): no pixel moved, none another colour, and the
-# step there. The sky has no parallax.
+# step there. The sky has no parallax. A third shot, 75 s in (the tune's
+# rows and its tail long over), must be the still crop again, exactly:
+# the haze leaves with the music (David on the haze demo: "it never goes
+# back down to the normal palette colors").
 leg_sky() {
   command -v convert > /dev/null 2>&1 && command -v compare > /dev/null 2>&1 || { say "sky: SETUP-FAILED (no ImageMagick)"; return 2; }
   [ -x build/dev/bin/harkfell ] || { say "sky: SETUP-FAILED (no build/dev)"; return 2; }
@@ -435,11 +440,21 @@ leg_sky() {
   # one step on: sky-3 first, so sky-2's new pixels are not stepped twice
   convert "$S/sky-still-crop.png" -fill "#$s4" -opaque "#$s3" -fill "#$s3" -opaque "#$s2" "$S/sky-stepped-crop.png"
   d=$(compare -metric AE "$S/sky-moment-crop.png" "$S/sky-stepped-crop.png" null: 2>&1)
-  if [ "$d" = "0" ]; then say "sky: GREEN (Hollow x3y2 with its moment playing: the sky one haze step on, 0 of 50400 pixels otherwise)"; return 0; fi
-  same=$(compare -metric AE "$S/sky-moment-crop.png" "$S/sky-still-crop.png" null: 2>&1)
-  if [ "$same" = "0" ]; then say "sky: RED (Hollow x3y2: no haze step while its moment plays)"; return 1; fi
-  say "sky: RED (Hollow x3y2, $d of 50400 sky pixels are not the still sky one haze step on while its moment plays)"
-  return 1
+  if [ "$d" != "0" ]; then
+    same=$(compare -metric AE "$S/sky-moment-crop.png" "$S/sky-still-crop.png" null: 2>&1)
+    if [ "$same" = "0" ]; then say "sky: RED (Hollow x3y2: no haze step while its moment plays)"; return 1; fi
+    say "sky: RED (Hollow x3y2, $d of 50400 sky pixels are not the still sky one haze step on while its moment plays)"
+    return 1
+  fi
+  # and back: 75 s in, the tune (22 s of rows) and its tail long over even
+  # on a slow clock, the sky must be the still sky again, pixel for pixel
+  SHOOT_WAIT=75 shoot "$S/shot-sky-after.png" --room hollow:3,2 --at 22,5 || return 2
+  grep -q 'sound moment high-fell start' "$S/game.log" || { say "sky: SETUP-FAILED (the moment did not play in the after run)"; return 2; }
+  convert "$S/shot-sky-after.png" -crop "$crop" +repage "$S/sky-after-crop.png"
+  a=$(compare -metric AE "$S/sky-after-crop.png" "$S/sky-still-crop.png" null: 2>&1)
+  if [ "$a" != "0" ]; then say "sky: RED (Hollow x3y2, 75 s in, its moment long over: $a of 50400 sky pixels are not back to the still sky)"; return 1; fi
+  say "sky: GREEN (Hollow x3y2: one haze step while its moment plays, 0 of 50400 pixels otherwise; back to the still sky after, 0 differ)"
+  return 0
 }
 
 run_green() {
@@ -499,6 +514,10 @@ run_sabotage() {
   plant no-fireflies world/rooms/reedfen/x11y3.room '{ sub(/\(firefly at: \(14 5\) count: 5 drawn: 2\)/, ""); print }' leg_firefly "RED firefly sprites/halo" || fail=1
   # David's ruling on stones (2026-09-27): no effect shifts a harmonic's colour
   plant dark-shifts-h4 src/harkfell/palette.sgl "{ sub(/\\(cons 'fur-1 'fur-2\\) \\(cons 'fur-2 'ground-2\\)\\)\\)/, \"(cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2) (cons 'h4 'ground-2)))\"); print }" leg_art "every lookup leaves the harmonics' colours as they are" || fail=1
+  # D51's haze (David on the haze demo, 2026-10-12): the sky must come back
+  # once the music stops, and a stepped band is one step, never two
+  plant haze-never-out src/harkfell/haze.sgl '{ sub(/\(max 0\.0 \(- focus \(\/ d HAZE-OUT-S\)\)\)/, "focus"); print }' leg_sky_rebuilt "back to the still sky" || fail=1
+  plant haze-stacks src/harkfell/haze.sgl '{ sub(/\(\+ s 1\) s\)/, "(+ s 2) s)"); print }' leg_sky_rebuilt "not the still sky one haze step on" || fail=1
   return $fail
 }
 
@@ -514,8 +533,23 @@ leg_palette_rebuilt() {
   return $rc
 }
 
-if [ "$MODE" = "--sabotage" ]; then
-  run_sabotage; rc=$?
+# the sky leg on a build of the planted tree (restored and rebuilt after)
+leg_sky_rebuilt() {
+  env -u DISPLAY -u WAYLAND_DISPLAY scripts/dev sigil build > "$S/build.log" 2>&1 || { say "sky: SETUP-FAILED (the planted tree did not build)"; return 2; }
+  leg_sky; rc=$?
+  return $rc
+}
+
+# only the haze plants (--sabotage-sky): the same two as in run_sabotage
+run_sabotage_sky() {
+  fail=0
+  plant haze-never-out src/harkfell/haze.sgl '{ sub(/\(max 0\.0 \(- focus \(\/ d HAZE-OUT-S\)\)\)/, "focus"); print }' leg_sky_rebuilt "back to the still sky" || fail=1
+  plant haze-stacks src/harkfell/haze.sgl '{ sub(/\(\+ s 1\) s\)/, "(+ s 2) s)"); print }' leg_sky_rebuilt "not the still sky one haze step on" || fail=1
+  return $fail
+}
+
+if [ "$MODE" = "--sabotage" ] || [ "$MODE" = "--sabotage-sky" ]; then
+  if [ "$MODE" = "--sabotage-sky" ]; then run_sabotage_sky; rc=$?; else run_sabotage; rc=$?; fi
   env -u DISPLAY -u WAYLAND_DISPLAY scripts/dev sigil build > "$S/rebuild.log" 2>&1 || { say "SETUP-FAILED: the restored tree did not rebuild"; exit 2; }
   git diff --quiet HEAD || { say "the tree differs from HEAD after the sabotage run"; git diff --stat; exit 2; }
   [ "$rc" -eq 0 ] && say "SABOTAGE: every plant RED, every file restored" || say "SABOTAGE: a plant stayed green"
