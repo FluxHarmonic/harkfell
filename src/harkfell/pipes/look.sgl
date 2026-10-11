@@ -13,7 +13,7 @@
 
   (export PIPES-DARK pipes-backdrop-bytes pipes-backdrop-key draw-pipes-solids!
           stone-bytes draw-pipes-panels! draw-pipes-cues!
-          draw-pipes-lights! way-light-columns draw-upward-drips! draw-aurora!)
+          draw-pipes-lights! way-light-columns spill-rows draw-upward-drips! draw-aurora!)
 
   (begin
     (define (pixel x) (exact (floor x)))

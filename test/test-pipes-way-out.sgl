@@ -134,6 +134,29 @@
         PIPES)
       ;; A (the Old Cut) and the thirteen rooms whose way up is a shaft
       (assert-equal 14 shafts)))
+  (test "a side spill never shines inside the rock, and reaches at least its edge cell"
+    (let ((ds (region-distances CT 'pipes)) (spills 0) (clipped 0))
+      (for-each
+        (lambda (rm)
+          (for-each
+            (lambda (span)
+              (when (memq (car span) '(west east))
+                (set! spills (+ spills 1))
+                (for-each
+                  (lambda (row)
+                    (let ((cells (quotient (cdr row) 16)))
+                      (assert-true (>= cells 1))
+                      (when (< cells 4) (set! clipped (+ clipped 1)))
+                      (for-each (lambda (n)
+                                  (unless (open-cell? rm (if (eq? (car span) 'west) n (- ROOM-COLS 1 n)) (car row))
+                                    (assert-equal (list 'spill-in-rock (label rm) span row) '())))
+                                (iota cells))))
+                  (spill-rows rm span))))
+            (room-ways-out CT rm ds)))
+        PIPES)
+      ;; Broken Choir's west way out is a two-cell nook: some rows are cut short
+      (assert-true (> spills 0))
+      (assert-true (> clipped 0))))
   (test "regions with no way in get no way-out lights"
     (assert-equal '() (region-distances CT 'glasswood))
     (assert-equal '() (room-ways-out CT (content-room CT 0 5) (region-distances CT 'pipes)))))
