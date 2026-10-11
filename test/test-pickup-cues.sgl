@@ -1,0 +1,73 @@
+;;; Every harmonic the world places sounds its pickup when taken, and every
+;;; ring-stone its ring, in the worst case: two seconds after a fresh boot
+;;; (the cue bank has not reached the late cues), with a moment playing (the
+;;; bank pauses for moments). David's D50 playtest took H5 soon after the
+;;; demo's door during a moment and heard nothing: pickup-h5 existed and was
+;;; wired, but was pending, unrendered, and dropped after PENDING-S. A cue
+;;; may be late; it may not be missing or dropped. Run through the native
+;;; audio harness.
+(import (sigil test)
+        (sigil list)
+        (engine mixer)
+        (engine worldmap)
+        (harkfell source)
+        (harkfell content)
+        (harkfell gates)
+        (harkfell sound)
+        (only (harkfell audio) room-moment-names))
+
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(define CT (load-content (read-world-source "world")))
+(define MOMENTS (apply append (map (lambda (p) (room-moment-names (placed-data p))) (content-rooms CT))))
+(define (uniq l) (let loop ((l l) (acc '())) (cond ((null? l) (reverse acc)) ((memv (car l) acc) (loop (cdr l) acc)) (else (loop (cdr l) (cons (car l) acc))))))
+(define PICKUPS (uniq (map pickup-overtone (content-pickups CT))))
+(define STONES (uniq (map stone-overtone (content-stones CT))))
+(define SAID '())
+(define T 0.0)
+(define HERE (place key: "cloudstair:12,-2" region: 'cloudstair bed-tune: "cloudstair-bed" groups: '(wind water air drone)
+                    levels: '((wind . 0.6) (air . 0) (drone . 0.3)) carry: '(2 4) tones: '() stones: '()
+                    px: 5000.0 py: -250.0 rx: 12 ry: -2 tau: 0))
+(define (run frames . news)
+  (let loop ((i 0))
+    (when (< i frames)
+      (set! T (+ T (/ 1.0 30.0)))
+      (sound-frame! T (/ 1.0 30.0) (if (and (= i 0) (pair? news)) (place HERE news: (car news)) HERE))
+      (mixer-pump! T)
+      (loop (+ i 1)))))
+
+;; What the director said about cue NAME after a fresh boot, a moment, and the event.
+(define (heard name event)
+  (sound-boot! MOMENTS (lambda parts (set! SAID (cons parts SAID))))
+  (sound-reset!)
+  (set! SAID '())
+  (run 60)
+  (sound-audition! "above-the-cloud")
+  (run 3)
+  (let ((playing (sound-moment-playing)))
+    (run 1 (list event))
+    (run 150)
+    (list playing
+          (map cadr (filter (lambda (s) (and (= 3 (length s)) (equal? (caddr s) name))) (reverse SAID))))))
+(define (sounded? r) (and (equal? "above-the-cloud" (car r))
+                          (or (member "cue" (cadr r)) (member "cue-late" (cadr r)))
+                          (not (member "cue-missing" (cadr r)))
+                          (not (member "cue-dropped" (cadr r)))))
+
+(test-group "every pickup and every stone sounds, even early and under a moment"
+  (test "the world places harmonics 2 to 5 and stones (the check has its subjects)"
+    (for-each (lambda (n) (assert-true (memv n PICKUPS))) '(2 3 4 5))
+    (assert-true (pair? STONES)))
+  (test "each placed harmonic's pickup tune plays when it is taken"
+    (for-each (lambda (n)
+                (let* ((name (string-append "pickup-h" (number->string n)))
+                       (r (heard name (list 'pickup n 5000.0 -250.0))))
+                  (unless (sounded? r) (display "  not sounded: ") (display name) (display " ") (display r) (newline))
+                  (assert-true (sounded? r))))
+              PICKUPS))
+  (test "each stone's ring plays when it rings"
+    (for-each (lambda (n)
+                (let* ((name (string-append "ring-h" (number->string n)))
+                       (r (heard name (list 'ring n 5000.0 -250.0))))
+                  (unless (sounded? r) (display "  not sounded: ") (display name) (display " ") (display r) (newline))
+                  (assert-true (sounded? r))))
+              STONES)))

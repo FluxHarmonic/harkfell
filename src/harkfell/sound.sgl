@@ -1983,19 +1983,28 @@
     (define (in-frame-more?)
       (let ((n 1)) (lambda () (set! n (+ n 1)) (<= n CUE-BLOCKS-PER-FRAME))))
     ;; more?: a thunk, #t while there is time for another step.
-    ;; While a moment plays only a gust loop a gust room is waiting for
-    ;; renders (and the cue ahead of it, finished first): the warning must
-    ;; not wait for a moment to end.
+    ;; While a moment plays only what something is waiting for renders: a
+    ;; gust loop a gust room asked for, or a gate cue the player has just
+    ;; caused (a pickup, a ring) that the bank had not reached (and the cue
+    ;; ahead of it, finished first). The warning must not wait for a moment
+    ;; to end, and a pickup must not be dropped because one is playing
+    ;; (David's D50 playtest: taking H5 soon after the demo door, during a
+    ;; moment, was silent: pickup-h5 is a late cue, the bank was paused, and
+    ;; the pending cue was dropped after PENDING-S).
     (define (sound-work! more?)
       (if (moment-busy?)
-          (when (loop-wanted?) (loop-work! more?))
+          (when (urgent-work?) (urgent-work! more?))
           (boot-work! more?)))
-    (define (loop-work! more?)
+    (define (gate-wanted?) (any (lambda (p) (not (assq (car p) *cues*))) *pending-cues*))
+    (define (urgent-work?) (or (loop-wanted?) (gate-wanted?)))
+    (define (urgent-work! more?)
       (let loop ()
         (when (or *cue-job*
-                  (and (pair? *cue-queue*) (loop-ref (car *cue-queue*)) (tune-text (cue-tune-of (car *cue-queue*)))))
+                  (and (pair? *cue-queue*)
+                       (or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*))
+                       (tune-text (cue-tune-of (car *cue-queue*)))))
           (render-next-cue!)
-          (when (and (loop-wanted?) (more?)) (loop)))))
+          (when (and (urgent-work?) (more?)) (loop)))))
     ;; Is the bank still rendering (the game gives it more time while it is)?
     (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*) (pair? *late-cues*)))
     ;; A rendered cue by name ((engine mixer) make-cue), or #f: for the tests.
