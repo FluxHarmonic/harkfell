@@ -198,6 +198,11 @@ try {
   assert.equal(new URL(manifest.scope, origin + "/play/assets/manifest.webmanifest").pathname, "/play/");
   const installability = await send("Page.getInstallabilityErrors");
   assert.deepEqual(installability.installabilityErrors, []);
+  // the creature's icons (scripts/art/icons): one for each purpose, at both sizes
+  for (const purpose of ["any", "maskable"]) {
+    assert.deepEqual(manifest.icons.filter((icon) => icon.purpose === purpose).map((icon) => icon.sizes).sort(),
+                     ["192x192", "512x512"], `the ${purpose} icons`);
+  }
   for (const icon of manifest.icons) {
     assert.equal(await evaluate(`(async () => {
       const response = await fetch('assets/' + ${JSON.stringify(icon.src)});

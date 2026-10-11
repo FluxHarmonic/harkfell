@@ -1,0 +1,72 @@
+#!/bin/sh
+# The installed game's icons: the creature, as on the site's favicon (David,
+# 2026-10-11: "It should be the icon with the character", not the Flux
+# Harmonic mark). Its idle frame from assets/art/player.txt, in its own three
+# palette colours (fur-1, fur-2, ink: the same in every region), scaled by a
+# whole number with no smoothing, centred on the game's black.
+#
+#   scripts/art/icons           -> assets/icon-{192,512}.png,
+#                                  assets/icon-maskable-{192,512}.png
+#   scripts/art/icons --check   the images are what this would write
+#
+# Two kinds (assets/manifest.webmanifest names both):
+#   icon-N            purpose "any", shown as drawn (and the page's
+#                     apple-touch-icon, which iOS rounds itself): the frame
+#                     about 73% of the icon's height
+#   icon-maskable-N   purpose "maskable", which Android crops to a circle,
+#                     squircle or rounded square: the whole 10 x 14 frame,
+#                     corners included, inside the central circle of 80% of
+#                     the icon (the maskable safe zone)
+set -eu
+export LC_ALL=C
+cd "$(dirname "$0")/../.." || exit 1
+CHECK="${1:-}"
+hex() { awk -v role="$1" '$0 ~ "^ *\\(" role " \"#" { l = $0; sub(/^[^"]*"#/, "", l); print substr(l, 1, 6); exit }' world/world.sgl; }
+FUR1="$(hex fur-1)"; FUR2="$(hex fur-2)"; INK="$(hex ink)"; BLACK="$(hex black)"
+for h in "$FUR1" "$FUR2" "$INK" "$BLACK"; do [ -n "$h" ] || { echo "icons: a palette role has no colour in world/world.sgl"; exit 1; }; done
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# The idle frame as a plain PPM with a PGM mask: F fur-1, f fur-2, k ink, . clear.
+triple() { printf "%d %d %d" "0x$(echo "$1" | cut -c1-2)" "0x$(echo "$1" | cut -c3-4)" "0x$(echo "$1" | cut -c5-6)"; }
+awk -v f1="$(triple "$FUR1")" -v f2="$(triple "$FUR2")" -v ik="$(triple "$INK")" -v ppm="$tmp/frame.ppm" -v pgm="$tmp/mask.pgm" '
+  $0 == "= idle-a" { on = 1; next }
+  on && /^$/ { on = 0 }
+  on { rows[n++] = $0 }
+  END {
+    if (n != 14 || length(rows[0]) != 10) { print "icons: idle-a is not 10 x 14" > "/dev/stderr"; exit 1 }
+    print "P3\n10 14\n255" > ppm; print "P2\n10 14\n255" > pgm
+    for (r = 0; r < n; r++) for (c = 1; c <= 10; c++) {
+      ch = substr(rows[r], c, 1)
+      if (ch == "F") { print f1 > ppm; print 255 > pgm }
+      else if (ch == "f") { print f2 > ppm; print 255 > pgm }
+      else if (ch == "k") { print ik > ppm; print 255 > pgm }
+      else if (ch == ".") { print "0 0 0" > ppm; print 0 > pgm }
+      else { print "icons: idle-a has an unknown cell " ch > "/dev/stderr"; exit 1 }
+    }
+  }' assets/art/player.txt
+convert "$tmp/frame.ppm" "$tmp/mask.pgm" -alpha off -compose CopyOpacity -composite "PNG32:$tmp/frame.png"
+
+# icon NAME SIZE K: the frame at K x, centred on a SIZE x SIZE black square.
+icon() {
+  w=$((10 * $3)); h=$((14 * $3))
+  convert -size "$2x$2" "xc:#$BLACK" \( "$tmp/frame.png" -filter point -scale "${w}x${h}!" \) \
+    -geometry "+$((($2 - w) / 2))+$((($2 - h) / 2))" -compose over -composite \
+    -alpha off -define png:color-type=2 -strip "$tmp/$1.png"
+}
+icon icon-192 192 10
+icon icon-512 512 26
+icon icon-maskable-192 192 8
+icon icon-maskable-512 512 21
+
+bad=0
+for f in icon-192 icon-512 icon-maskable-192 icon-maskable-512; do
+  if [ "$CHECK" = "--check" ]; then
+    [ -f "assets/$f.png" ] && [ "$(compare -metric AE "assets/$f.png" "$tmp/$f.png" null: 2>&1)" = "0" ] \
+      || { echo "icons: assets/$f.png is not what scripts/art/icons writes"; bad=1; }
+  else
+    cp "$tmp/$f.png" "assets/$f.png"
+  fi
+done
+[ "$bad" = 0 ] || exit 1
+echo "icons: 4 images ($([ "$CHECK" = "--check" ] && echo current || echo written))"
