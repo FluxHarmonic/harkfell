@@ -23,8 +23,9 @@
 #             blue hour, and Root Ice (light 0.25), which must be mostly shadow,
 #             and lit round the body when its moths come to H3
 #   sky       Hollow x3y2 with its first-visit moment playing and without:
-#             the sky round a band seam must be the same pixels (the focus
-#             pull scattered it into zigzag teeth, D50 playtest)
+#             the sky round a band seam must be the still sky exactly one
+#             haze step on (the focus pull once scattered it into zigzag
+#             teeth, D50 playtest)
 # Needs: build/dev for native palette frames; build/web for exact daylight frames.
 #
 # Exit 0 green, 1 red, 2 SETUP-FAILED.
@@ -394,16 +395,20 @@ leg_daylight() {
   say "daylight: GREEN (Hollow and Glasswood, 0 changed pixels)"
 }
 
-# The sky holds still while a moment plays (D50 playtest: the Hollow's sky
-# "would start out looking right and as I walked through the screen, it
-# would glitch out"). Walking into a room starts its first-visit moment;
-# the focus pull then scattered the backdrop by a Bayer jitter of up to
-# 2.2 px, which cut regular teeth into every band seam. Hollow x3y2 is
-# shot twice, 8 s in: in the world, where its first-visit tune (high-fell)
-# plays, and in a copy of the world with that moment taken out. A crop of
-# open sky round the seam at row 80 (view x 176-335, y 56-90; under the
-# clouds, which drift, and clear of the body and the grass) must be the
-# same pixels in both. The sky has no parallax, so nothing else may move.
+# A moment moves the sky one haze step and nothing else (D50 playtest: the
+# Hollow's sky "would start out looking right and as I walked through the
+# screen, it would glitch out"). Walking into a room starts its first-
+# visit moment, and D16's focus pull then scattered the backdrop by a
+# Bayer jitter of up to 2.2 px, cutting regular teeth into every band
+# seam. Now each sky band goes one palette step toward the haze. Hollow
+# x3y2 is shot twice, 8 s in (the step long since eased in): in the world,
+# where its first-visit tune (high-fell) plays, and in a copy of the world
+# with that moment taken out. A crop of open sky round the seam at row 80
+# (view x 176-335, y 56-90; under the clouds, which drift, and clear of
+# the body and the grass) holds hol-sky-2 and hol-sky-3 still; with the
+# moment it must be exactly that crop one step on (hol-sky-2 as hol-sky-3,
+# hol-sky-3 as hol-sky-4): no pixel moved, none another colour, and the
+# step there. The sky has no parallax.
 leg_sky() {
   command -v convert > /dev/null 2>&1 && command -v compare > /dev/null 2>&1 || { say "sky: SETUP-FAILED (no ImageMagick)"; return 2; }
   [ -x build/dev/bin/harkfell ] || { say "sky: SETUP-FAILED (no build/dev)"; return 2; }
@@ -411,6 +416,8 @@ leg_sky() {
   xvfb_up || return 2
   sky_room=world/rooms/hollow/x3y2.room
   grep -q 'moment: (tune: high-fell when: first-visit)' "$sky_room" || { say "sky: SETUP-FAILED ($sky_room has no first-visit high-fell moment)"; return 2; }
+  s2=$(role_hex hol-sky-2); s3=$(role_hex hol-sky-3); s4=$(role_hex hol-sky-4)
+  [ -n "$s2" ] && [ -n "$s3" ] && [ -n "$s4" ] || { say "sky: SETUP-FAILED (no hol-sky-2..4 in world/world.sgl)"; return 2; }
   sky_still=$(mktemp -d "$S/sky-still.XXXXXX")
   cp -R world/. "$sky_still"
   grep -v 'moment: (tune: high-fell when: first-visit)' "$sky_room" > "$sky_still/rooms/hollow/x3y2.room"
@@ -422,11 +429,16 @@ leg_sky() {
   crop=480x105+528+168
   convert "$S/shot-sky-moment.png" -crop "$crop" +repage "$S/sky-moment-crop.png"
   convert "$S/shot-sky-still.png" -crop "$crop" +repage "$S/sky-still-crop.png"
-  n=$(convert "$S/sky-still-crop.png" -format '%k' info: 2>/dev/null || echo 0)
-  [ "$n" -ge 2 ] || { say "sky: SETUP-FAILED (the crop has $n colours: no seam in it)"; return 2; }
-  d=$(compare -metric AE "$S/sky-moment-crop.png" "$S/sky-still-crop.png" null: 2>&1)
-  if [ "$d" = "0" ]; then say "sky: GREEN (Hollow x3y2, the sky the same with its moment playing: 0 of 50400 pixels differ)"; return 0; fi
-  say "sky: RED (Hollow x3y2, $d of 50400 sky pixels differ while its moment plays)"
+  have=$(convert "$S/sky-still-crop.png" -unique-colors txt:- 2>/dev/null | tail -n +2 | sed -n 's/.*#\([0-9A-Fa-f]\{6\}\).*/\1/p' | tr a-f A-F | sort | tr '\n' ' ')
+  want=$(printf '%s\n%s\n' "$s2" "$s3" | sort | tr '\n' ' ')
+  [ "$have" = "$want" ] || { say "sky: SETUP-FAILED (the still crop holds $have, not hol-sky-2 and hol-sky-3: $want)"; return 2; }
+  # one step on: sky-3 first, so sky-2's new pixels are not stepped twice
+  convert "$S/sky-still-crop.png" -fill "#$s4" -opaque "#$s3" -fill "#$s3" -opaque "#$s2" "$S/sky-stepped-crop.png"
+  d=$(compare -metric AE "$S/sky-moment-crop.png" "$S/sky-stepped-crop.png" null: 2>&1)
+  if [ "$d" = "0" ]; then say "sky: GREEN (Hollow x3y2 with its moment playing: the sky one haze step on, 0 of 50400 pixels otherwise)"; return 0; fi
+  same=$(compare -metric AE "$S/sky-moment-crop.png" "$S/sky-still-crop.png" null: 2>&1)
+  if [ "$same" = "0" ]; then say "sky: RED (Hollow x3y2: no haze step while its moment plays)"; return 1; fi
+  say "sky: RED (Hollow x3y2, $d of 50400 sky pixels are not the still sky one haze step on while its moment plays)"
   return 1
 }
 

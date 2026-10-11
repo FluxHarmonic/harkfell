@@ -463,20 +463,30 @@
     (define (under? rm) (and (not (cloudstair? rm)) (room-under? rm)))
     (define (cloudstair? rm) (eq? (room-region rm) 'cloudstair))
 
-    ;; No focus pull. D16 had a music moment scatter the backdrop by up to
-    ;; 2.2 px (a Bayer jitter, palette-true); at the game's whole scale it
-    ;; cut regular zigzag teeth into every band seam, and David took it for
-    ;; corrupted textures (D50 playtest). The sky now holds still while a
-    ;; moment plays; gate-look's sky leg keeps it so.
+    ;; The haze step (D51, replacing D16's focus pull): while a
+    ;; music moment plays the far sky goes one palette step toward the
+    ;; region's haze (sky-4), band by band from the horizon up, easing in
+    ;; over about a second and out again after; the room itself is as it
+    ;; was. Whole bands change slot, so no pixel moves and no seam breaks
+    ;; (D16 first scattered the backdrop's pixels, and at the game's whole
+    ;; scale every band seam grew zigzag teeth). *focus* is 0..1, stepped
+    ;; once a drawn frame; the Pipes' backdrop (its sky slots are cave
+    ;; walls) is left as it is.
+    (define *focus* 0.0)
+    (define *moment* #f)
     (define *bed-wind* 0.5)
 
-    ;; From the shell, each frame: whether a moment plays (no longer drawn),
-    ;; and the bed's wind level now (0..1; the reeds bend with what you hear).
+    ;; From the shell, each frame: whether a moment plays, and the bed's wind
+    ;; level now (0..1; the reeds bend with what you hear).
     (define (set-look-sound! moment wind)
+      (set! *moment* (and moment #t))
       (set! *bed-wind* (if (number? wind) wind 0.5)))
 
+    (define (step-focus!)
+      (set! *focus* (if *moment* (min 1.0 (+ *focus* 0.018)) (max 0.0 (- *focus* 0.012)))))
+
     ;; The room's backdrop: its region's sky, or earth when it lies under
-    ;; another room.
+    ;; another room; stepped into the haze while a moment plays.
     (define (draw-backdrop! rm)
       (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
                                  ((cloudstair? rm) (cloudstair-backdrop-key rm))
@@ -489,7 +499,9 @@
                                  (else (quote under))))))
         (with-blend-mode (quote none)
           (set-color 1.0 1.0 1.0 1.0)
-          (draw-texture tex 0 0 VIEW-W VIEW-H))))
+          (if (and (> *focus* 0.0) (not (eq? (room-region rm) 'pipes)))
+              (draw-texture-hazed! tex VIEW-W VIEW-H *focus*)
+              (draw-texture tex 0 0 VIEW-W VIEW-H)))))
     ;; The sky's slow movers: three clouds over a room open to the sky, a
     ;; pixel every two seconds (section 7), each at its own height, coming
     ;; back round from the west. Placed by the room's coordinate, so two
@@ -1582,6 +1594,7 @@
     (define (present-play! w after . black)
       (ensure-render!)
       (atlas-ensure!)
+      (step-focus!)
       (let* ((p (world-room w))
              (rm (and p (placed-data p)))
              (region (if rm (room-region rm) 'none)))
