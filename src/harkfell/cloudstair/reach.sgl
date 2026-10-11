@@ -142,5 +142,5 @@
       (and (cloudstair-shelter? ct advance start)
            (timed-window advance start family arrives?
                          (if (eq? phase 'gust) AIR-GUST 0)
-                         (if (eq? phase 'gust) (+ AIR-GUST 89) (- AIR-WARNING 1))
+                         (if (eq? phase 'gust) (+ AIR-GUST 89) (- AIR-GUST 120))
                          120)))))

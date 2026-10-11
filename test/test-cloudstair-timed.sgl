@@ -169,6 +169,12 @@
          (= (+ (body-y b) (feel-box-h F)) (* 16 (+ 1 (cdr bank)))))))
 
 (test-group "timed reach: authored F/L control"
+  (test "a full-length calm return finishes by the gust onset"
+    (assert-equal '()
+      (cloudstair-window CT ADVANCE AUTHORED-F-START
+        (lambda (node) (make-list 120 NO-INTENT))
+        (lambda (node) (<= (body-tau (timed-node-body node)) AIR-GUST))
+        'calm)))
   (test "the actual authored lower wait reaches L at all 90 gust starts"
     (assert-equal '() (timed-window ADVANCE AUTHORED-F-START probe-lift-script
                                    authored-lift-arrives? 300 389 120)))
