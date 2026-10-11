@@ -1,0 +1,45 @@
+;;; The timed lifts' departure windows over the WHOLE gust, on the authored
+;;; rooms, for whatever cycle (engine air) holds: from the wait bank, the
+;;; measured lift family ((harkfell cloudstair probes) probe-lift-script)
+;;; departs at each tau of the gust; how many contiguous ticks from the
+;;; gust's start still reach the upper sill within 120 ticks. Used to size
+;;; a shorter shared cycle (David's playtest: "Maybe the gusts should come
+;;; more frequently?").
+;;;   CS_WORLD=DIR scripts/dev build/look-harness/bin/harkfell-test \
+;;;     --no-strict tools/cloudstair-lift-window.sgl
+(import (sigil list) (sigil string) (sigil process)
+        (engine body) (engine air) (engine tilemap) (engine worldmap)
+        (engine reach) (engine reach timed)
+        (harkfell feel) (harkfell content) (harkfell source) (harkfell check)
+        (harkfell cloudstair probes))
+
+(define F HARKFELL-FEEL)
+(define CT (load-content (read-world-source (or (getenv "CS_WORLD") "world"))))
+(define WM (content-map CT))
+(define TM (tiles-carrying CT '(2 4)))
+(define STEP (probe-step TM))
+(define (gcol rx c) (+ c (* 25 (- rx (worldmap-x0 WM)))))
+(define (grow ry r) (+ r (* 11 (- ry (worldmap-y0 WM)))))
+
+(define (rests-in rx ry c0 c1)
+  (lambda (node)
+    (let* ((b (timed-node-body node)) (c (body-center b F)))
+      (and (eq? (body-mode b) 'ground) (= (body-vx b) 0) (= (body-vy b) 0)
+           (>= (car c) (* 16 (gcol rx c0))) (< (car c) (* 16 (+ 1 (gcol rx c1))))
+           (>= (cdr c) (* 16 (grow ry 0))) (< (cdr c) (* 16 (grow ry 11)))))))
+
+(display (string-append "cycle " (number->string AIR-PERIOD) ", warning " (number->string AIR-WARNING)
+                        ", gust " (number->string AIR-GUST) " (" (number->string (- AIR-PERIOD AIR-GUST))
+                        " ticks of gust)\n"))
+(for-each
+  (lambda (leg)
+    (let* ((start (timed-node body: (body (stand-body TM F (gcol (cadr leg) 10) (grow (caddr leg) 7)) down: #t)
+                              data: '(2 4)))
+           (failed (timed-window STEP start probe-lift-script (cadddr leg) AIR-GUST (- AIR-PERIOD 1) 120))
+           (first-fail (if (null? failed) AIR-PERIOD (apply min failed))))
+      (display (string-append (car leg) ": departures from the gust's start that rise: "
+                              (number->string (- first-fail AIR-GUST)) " ticks ("
+                              (number->string (length failed)) " of " (number->string (- AIR-PERIOD AIR-GUST))
+                              " gust ticks fail)\n"))))
+  (list (list "F->L" 8 0 (rests-in 8 -1 14 24))
+        (list "M->S" 9 -1 (rests-in 9 -2 14 24))))

@@ -1,0 +1,147 @@
+;;; Take-off windows for Cloudstair's gap crossings (David's playtest of the
+;;; demo, 2026-10-11: P's second gap "you basically have to let yourself fall
+;;; off the lip for a split second before jumping"). The standard: the
+;;; challenge is timing the gust, not frame-perfect footwork.
+;;;
+;;; For a crossing, from a standing start well back on its bank: run toward
+;;; the gap for R ticks, press jump (held, steering, until it lands or 59
+;;; ticks), let go, and
+;;; settle. R sweeps every tick from standing to past the edge, so R is the
+;;; take-off position at running speed. A take-off COUNTS only when the
+;;; press comes while the body still stands on the bank (body mode ground
+;;; on the press tick): a jump made in coyote time after running off the
+;;; lip does not count. The WINDOW is the longest run of consecutive R that
+;;; counts and lands at rest on the far bank. Each R starts at the tau that
+;;; puts its press at the asked tau, so a row measures one phase.
+;;;
+;;;   CS_WORLD=DIR (default world) CS_FIXTURE=sweep (optional: the synthetic
+;;;   design sweep instead of the authored rooms)
+;;;   scripts/dev build/look-harness/bin/harkfell-test --no-strict \
+;;;     tools/cloudstair-takeoff.sgl
+(import (sigil list) (sigil string) (sigil process)
+        (engine body) (engine air) (engine tilemap) (engine worldmap) (engine reach)
+        (harkfell feel) (harkfell content) (harkfell source) (harkfell check)
+        (harkfell cloudstair takeoff))
+
+(define F0 HARKFELL-FEEL)
+;; CS_WIND: try another eastward drift cap (px/tick; the measured 0.66 by default)
+(define F (let ((w (getenv "CS_WIND"))) (if w (feel F0 wind-cap: (string->number w)) F0)))
+(define RMAX 120)
+
+;; (window coyote-only) at press tau: (harkfell cloudstair takeoff)
+(define (window tm start h tau target?) (takeoff-window tm F start h tau target? RMAX))
+
+(define (on-x-range x0 x1)       ; at rest with the body's centre in [x0, x1) px
+  (lambda (b) (let ((cx (car (body-center b F)))) (and (>= cx x0) (< cx x1)))))
+
+(define (report name tm start h target? taus)
+  (for-each
+    (lambda (tau)
+      (let ((w (window tm start h tau target?)))
+        (display (string-append "  " name " press tau " (number->string tau)
+                                ": window " (number->string (car w)) " ticks"
+                                (if (caddr w) (string-append " (run-up " (number->string (caddr w)) "-" (number->string (+ (caddr w) (car w) -1)) ")") "")
+                                (if (> (cadr w) 0) (string-append ", coyote-only " (number->string (cadr w))) "")
+                                "\n"))))
+    taus))
+
+;; press taus: calm well before the warning; gust early, middle, late enough
+;; that the flight still ends inside it
+(define CALM (list 30 120 (- AIR-WARNING 70)))
+(define GUST (list (+ AIR-GUST 5) (+ AIR-GUST 60) (- AIR-PERIOD 70)))
+
+(define (sweep)
+  ;; a 30x12 map: bank A floor row ya from col 0, a gap of g tiles at col 12,
+  ;; bank B floor row yb beyond it; the eastward field over the gap's air;
+  ;; the deep drop two rows under the lower bank
+  (for-each
+    (lambda (g)
+      (for-each
+        (lambda (dy)
+          (let* ((ya 8) (yb (+ 8 dy)) (low (max ya yb)) (gx 12)
+                 (tm (let fill ((c 0) (tm (make-tilemap 30 12 16)))
+                       (if (= c 30) tm
+                           (fill (+ c 1)
+                                 (cond ((< c gx) (let col ((r ya) (tm tm)) (if (= r 12) tm (col (+ r 1) (tilemap-set tm c r 'solid)))))
+                                       ((< c (+ gx g)) (tilemap-set tm c (+ low 2) 'hazard))
+                                       (else (let col ((r yb) (tm tm)) (if (= r 12) tm (col (+ r 1) (tilemap-set tm c r 'solid))))))))))
+                 (tm (tilemap tm air: (list (air-field x: (* 16 gx) y: 0 w: (* 16 g) h: (* 16 (+ low 1))
+                                                      east: (feel-wind-cap F) pulsed: #t)))))
+            (display (string-append "gap " (number->string g) " tiles, east bank "
+                                    (number->string (- dy)) " tile(s) higher\n"))
+            (report "east calm" tm (cons (- gx 5) (- ya 1)) 1 (on-x-range (* 16 (+ gx g)) 9999) CALM)
+            (report "east gust" tm (cons (- gx 5) (- ya 1)) 1 (on-x-range (* 16 (+ gx g)) 9999) GUST)
+            (report "west calm" tm (cons (+ gx g 5) (- yb 1)) -1 (on-x-range 0 (* 16 gx)) CALM)))
+        '(0 -1 -2)))
+    '(3 4)))
+
+(define (rooms)
+  (let* ((ct (load-content (read-world-source (or (getenv "CS_WORLD") "world"))))
+         (wm (content-map ct))
+         (tm (tiles-carrying ct '(2 4)))
+         (gcol (lambda (rx c) (+ c (* 25 (- rx (worldmap-x0 wm))))))
+         (grow (lambda (ry r) (+ r (* 11 (- ry (worldmap-y0 wm))))))
+         (px (lambda (rx c) (* 16 (gcol rx c))))
+         (leg (lambda (name rx ry c r h trx x0 x1)
+                (display (string-append name "\n"))
+                (report "calm" tm (cons (gcol rx c) (grow ry r)) h (on-x-range (px trx x0) (px trx x1)) CALM)
+                (when (> h 0)
+                  (report "gust" tm (cons (gcol rx c) (grow ry r)) h (on-x-range (px trx x0) (px trx x1)) GUST)))))
+    ;; each leg: start well back on its bank, the far bank's columns
+    (for-each (lambda (l) (apply leg l)) (rooms-legs))))
+
+;; CS_LEGS="NAME,RX,RY,C,R,H,TRX,X0,X1;...": start in room (RX,RY) at local
+;; cell (C,R), run H (1 east, -1 west), land in room TRX's columns X0..X1-1
+;; (same row of rooms)
+(define (rooms-legs)
+  (let ((s (getenv "CS_LEGS")))
+    (if s
+        (map (lambda (one)
+               (let ((f (string-split one ",")))
+                 (cons (car f) (map string->number (cdr f)))))
+             (string-split s ";"))
+        '())))
+
+(display (string-append "cycle " (number->string AIR-PERIOD) " ticks, warning "
+                        (number->string AIR-WARNING) ", gust " (number->string AIR-GUST) "\n"))
+
+
+;; CS_FIXTURE=sweep2: a 3-tile gap, the east bank a tile higher, with the
+;; eastward field reaching E tiles on over the landing bank and W tiles
+;; back over the take-off bank, above a standing body's head (rows above
+;; the bank's standing row), so a body waiting on either bank is outside it
+(define (sweep2)
+  (for-each
+    (lambda (ew)
+      (let* ((e (car ew)) (w (cadr ew)) (g 3) (ya 8) (yb 7) (low 8) (gx 12)
+             (solid-from (lambda (tm c r0)
+                           (let col ((r r0) (tm tm)) (if (= r 12) tm (col (+ r 1) (tilemap-set tm c r 'solid))))))
+             (tm (let fill ((c 0) (tm (make-tilemap 30 12 16)))
+                   (if (= c 30) tm
+                       (fill (+ c 1)
+                             (cond ((< c gx) (solid-from tm c ya))
+                                   ((< c (+ gx g)) (tilemap-set tm c (+ low 2) 'hazard))
+                                   (else (solid-from tm c yb)))))))
+             (fields (append
+                       (list (air-field x: (* 16 gx) y: 0 w: (* 16 g) h: (* 16 (+ low 1))
+                                        east: (feel-wind-cap F) pulsed: #t))
+                       (if (> e 0)
+                           (list (air-field x: (* 16 (+ gx g)) y: 0 w: (* 16 e) h: (* 16 (- yb 1))
+                                            east: (feel-wind-cap F) pulsed: #t))
+                           '())
+                       (if (> w 0)
+                           (list (air-field x: (* 16 (- gx w)) y: 0 w: (* 16 w) h: (* 16 (- ya 1))
+                                            east: (feel-wind-cap F) pulsed: #t))
+                           '())))
+             (tm (tilemap tm air: fields)))
+        (display (string-append "gap 3, east bank 1 higher, field +" (number->string e)
+                                " over the landing, +" (number->string w) " over the take-off\n"))
+        (report "east calm" tm (cons (- gx 5) (- ya 1)) 1 (on-x-range (* 16 (+ gx g)) 9999) (list 120))
+        (report "east gust" tm (cons (- gx 5) (- ya 1)) 1 (on-x-range (* 16 (+ gx g)) 9999) (list (+ AIR-GUST 5) (- AIR-PERIOD 70)))
+        (report "west calm" tm (cons (+ gx g 5) (- yb 1)) -1 (on-x-range 0 (* 16 gx)) (list 120))))
+    '((0 0) (1 0) (2 0) (0 1) (1 1) (2 1))))
+
+(let ((fx (getenv "CS_FIXTURE")))
+  (cond ((equal? fx "sweep") (sweep))
+        ((equal? fx "sweep2") (sweep2))
+        (else (rooms))))

@@ -1,0 +1,66 @@
+;;; (harkfell cloudstair takeoff) - Take-off windows for a gap crossing
+;;; (David's playtest of the Cloudstair demo, 2026-10-11: on P's second gap
+;;; "you basically have to let yourself fall off the lip for a split second
+;;; before jumping"). The standard: the challenge is timing the gust, not
+;;; frame-perfect footwork.
+;;;
+;;; From a standing start well back on a bank: run toward the gap for R
+;;; ticks, press jump, hold it and steer until the landing (or 59 ticks),
+;;; let go, settle. R sweeps every tick from standing to past the edge, so R
+;;; is the take-off position at running speed. A take-off COUNTS only when
+;;; the press comes while the body still stands on the bank (body mode
+;;; ground on the press tick): a jump in coyote time after running off the
+;;; lip does not. The window is the longest run of consecutive R that count
+;;; and come to rest on the far side. Each R starts at the tau that puts its
+;;; press at TAU, so a window measures one phase of the gust.
+;;;
+;;;   (takeoff-attempt tm f start h tau r lands?) -> #f | (grounded? . landed?)
+;;;   (takeoff-window tm f start h tau lands? [rmax]) -> (window coyote-only first-r)
+;;;     start: (col . row), a standable global cell; h: 1 east, -1 west;
+;;;     lands?: body -> whether a body at rest is on the far side
+(define-library (harkfell cloudstair takeoff)
+  (import (engine body)
+          (engine air)
+          (engine reach))
+
+  (export takeoff-attempt takeoff-window TAKEOFF-RMAX)
+
+  (begin
+    (define TAKEOFF-RMAX 120)
+
+    (define (takeoff-attempt tm f start h tau r lands?)
+      (let loop ((b (body (stand-body tm f (car start) (cdr start)) down: #t
+                          tau: (modulo (- tau r) AIR-PERIOD)))
+                 (k 0))
+        (cond
+          ((memq 'hazard (body-events b)) #f)
+          ((< k r) (loop (body-step b (intent h: h) tm f) (+ k 1)))
+          (else
+           (let ((grounded (eq? (body-mode b) 'ground)))
+             (let fly ((b (body-step b (intent h: h jump: #t press: #t) tm f)) (n 1))
+               (cond
+                 ((memq 'hazard (body-events b)) (cons grounded #f))
+                 ;; steer and hold until the landing, then let go, as a player does
+                 ((and (< n 60) (not (and (> n 3) (eq? (body-mode b) 'ground))))
+                  (fly (body-step b (intent h: h jump: #t) tm f) (+ n 1)))
+                 (else
+                  (let settle ((b b) (n 0))
+                    (cond ((memq 'hazard (body-events b)) (cons grounded #f))
+                          ((and (eq? (body-mode b) 'ground) (= (body-vx b) 0) (= (body-vy b) 0))
+                           (cons grounded (lands? b)))
+                          ((> n 150) (cons grounded #f))
+                          (else (settle (body-step b NO-INTENT tm f) (+ n 1)))))))))))))
+
+    (define (takeoff-window tm f start h tau lands? . opt)
+      (let ((rmax (if (pair? opt) (car opt) TAKEOFF-RMAX)))
+        ;; the longest run of counting R: its length and first R
+        (let loop ((r 0) (run 0) (from 0) (best 0) (best-from #f) (coyote 0))
+          (if (> r rmax)
+              (if (> run best) (list run coyote from) (list best coyote best-from))
+              (let* ((a (takeoff-attempt tm f start h tau r lands?))
+                     (ok (and a (car a) (cdr a)))
+                     (cy (and a (not (car a)) (cdr a))))
+                (if ok
+                    (loop (+ r 1) (+ run 1) (if (= run 0) r from) best best-from (if cy (+ coyote 1) coyote))
+                    (loop (+ r 1) 0 from (if (> run best) run best) (if (> run best) from best-from)
+                          (if cy (+ coyote 1) coyote))))))))))

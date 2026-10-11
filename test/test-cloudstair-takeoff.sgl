@@ -1,0 +1,85 @@
+;;; Cloudstair's gap crossings meet the playtest standard (David, 2026-10-11:
+;;; "you basically have to let yourself fall off the lip for a split second
+;;; before jumping"): the challenge is timing the gust, not the footwork.
+;;; Take-off windows ((harkfell cloudstair takeoff)) count only presses made
+;;; while still standing on the bank, never coyote time:
+;;;   - eastward with the gust: a generous window (GUST-EAST-MIN ticks);
+;;;   - westward, the return, in calm: a modest one (CALM-WEST-MIN);
+;;;   - eastward in calm is the harder way (each eastward leg lands a tile
+;;;     higher), so waiting for the gust is the play.
+;;; The control: the demo's flat four-tile gap, crossed only through coyote
+;;; time, must fail the standard.
+(import (sigil test)
+        (sigil list)
+        (engine body)
+        (engine air)
+        (engine tilemap)
+        (engine worldmap)
+        (engine reach)
+        (harkfell feel)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell cloudstair takeoff))
+
+(define F HARKFELL-FEEL)
+;; 15 ticks is the playtest target; with the drift cap measured at 0.66 the
+;; three-tile, one-up crossings reach 13, with 0.8 they reach 15
+(define GUST-EAST-MIN (if (>= (feel-wind-cap F) 0.8) 15 13))
+(define CALM-WEST-MIN 8)
+
+(define CT (load-content (read-world-source "world")))
+(define WM (content-map CT))
+(define TM (tiles-carrying CT '(2 4)))
+(define (gcol rx c) (+ c (* 25 (- rx (worldmap-x0 WM)))))
+(define (grow ry r) (+ r (* 11 (- ry (worldmap-y0 WM)))))
+(define (lands-between rx c0 c1)
+  (lambda (b) (let ((x (car (body-center b F))))
+                (and (>= x (* 16 (gcol rx c0))) (< x (* 16 (gcol rx c1)))))))
+
+;; (name room-x room-y start-c start-r far-room far-c0 far-c1)
+(define EAST
+  (list (list "I" 11 0 6 7 11 13 22)
+        (list "P first" 12 -1 0 7 12 8 14)
+        (list "P second" 12 -1 8 6 12 17 21)))
+(define WEST
+  (list (list "I" 11 0 18 6 11 0 10)
+        (list "P first" 12 -1 13 6 12 -25 5)
+        (list "P second" 12 -1 20 5 12 8 14)))
+
+(define (leg-window leg h tau)
+  (takeoff-window TM F (cons (gcol (list-ref leg 1) (list-ref leg 3)) (grow (list-ref leg 2) (list-ref leg 4)))
+                  h tau (lands-between (list-ref leg 5) (list-ref leg 6) (list-ref leg 7))))
+
+(define GUST-TAU (+ AIR-GUST 5))
+(define CALM-TAU 120)
+
+(test-group "Cloudstair's gaps: time the gust, not the footwork"
+  (test "eastward with the gust, every crossing has a generous standing take-off"
+    (for-each (lambda (leg)
+                (let ((w (leg-window leg 1 GUST-TAU)))
+                  (assert-equal (list (car leg) "east in the gust" #t) (list (car leg) "east in the gust" (>= (car w) GUST-EAST-MIN)))))
+              EAST))
+  (test "westward in calm, every return has a standing take-off"
+    (for-each (lambda (leg)
+                (let ((w (leg-window leg -1 CALM-TAU)))
+                  (assert-equal (list (car leg) "west in calm" #t) (list (car leg) "west in calm" (>= (car w) CALM-WEST-MIN)))))
+              WEST))
+  (test "eastward in calm is the harder way: the gust widens every window"
+    (for-each (lambda (leg)
+                (assert-equal (list (car leg) "calm under gust" #t)
+                              (list (car leg) "calm under gust" (< (car (leg-window leg 1 CALM-TAU)) (car (leg-window leg 1 GUST-TAU))))))
+              EAST))
+  (test "the control: a crossing made only in coyote time fails the standard"
+    ;; the demo's flat four-tile gap, crossed westward in calm
+    (let* ((tm (let fill ((c 0) (tm (make-tilemap 30 12 16)))
+                 (if (= c 30) tm
+                     (fill (+ c 1)
+                           (if (and (>= c 12) (< c 16))
+                               (tilemap-set tm c 10 'hazard)
+                               (let col ((r 8) (tm tm)) (if (= r 12) tm (col (+ r 1) (tilemap-set tm c r 'solid)))))))))
+           (w (takeoff-window tm F (cons 21 7) -1 CALM-TAU
+                              (lambda (b) (< (car (body-center b F)) (* 16 12))))))
+      ;; it can be crossed, in coyote time, but not from a standing take-off
+      (assert-true (> (cadr w) 0))
+      (assert-true (< (car w) CALM-WEST-MIN)))))
