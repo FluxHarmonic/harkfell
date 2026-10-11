@@ -74,7 +74,7 @@
   (test "pickup-h5 rises through H5's own partials, 5 10 15 20 25 30 times D2"
     (assert-equal '("F#4" "F#5" "C#6" "F#6" "A#6" "C#7")
                   (map (lambda (c) (midi->note-name (cell-note c))) (sounding (tune-parsed "pickup-h5")))))
-  (test "the gust loops keep the bible's clock: a row is 6 ticks, warning at tau 300, rush at tau 360, both off by tau 599"
+  (test "the gust loops keep the bible's clock: a row is 6 ticks, warning at tau 240, rush at tau 300, both off by tau 479"
     (for-each
       (lambda (n)
         (let* ((t (tune-parsed n))
@@ -82,9 +82,9 @@
                (offs (filter (lambda (c) (and (eq? (cell-note c) 'off) (memv (cell-channel c) '(2 3)))) (cells t))))
           (assert-equal 150 (tune-tempo t))
           (assert-equal 6 (tune-speed t))
-          (assert-equal '(300) (on 1))
-          (assert-equal '(360) (on 2))
-          (assert-true (every (lambda (c) (< (* 6 (cell-row c)) 600)) offs))))
+          (assert-equal '(240) (on 1))
+          (assert-equal '(300) (on 2))
+          (assert-true (every (lambda (c) (< (* 6 (cell-row c)) 480)) offs))))
       '("gust-lift" "gust-east")))
   (test "both gust loops give the same warning"
     (let ((w (lambda (n) (let ((t (tune-parsed n)))

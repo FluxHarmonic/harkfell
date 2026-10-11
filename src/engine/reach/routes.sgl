@@ -2,7 +2,7 @@
 ;;; scripts only; accepted motion and waits have directed physical proofs.
 (define-library (engine reach routes)
   (import (sigil list)
-          (engine body) (engine tilemap) (engine reach) (engine reach timed))
+          (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed))
 
   (export timed-route-finder)
 
@@ -124,7 +124,7 @@
                          (let try ((edges edges))
                            (and (pair? edges)
                                 (or
-                                  (let depart ((phases '(actual 360 0)))
+                                  (let depart ((phases (list 'actual AIR-GUST 0)))
                                     (and (pair? phases)
                                          (or
                                            (let* ((proof (and (not (eq? (car phases) 'actual))

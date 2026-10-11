@@ -9,9 +9,9 @@
           air-contains? air-sample air-shift)
 
   (begin
-    (define AIR-PERIOD 600)
-    (define AIR-WARNING 300)
-    (define AIR-GUST 360)
+    (define AIR-PERIOD 480)
+    (define AIR-WARNING 240)
+    (define AIR-GUST 300)
 
     (define (air-phase tau)
       (cond ((>= tau AIR-GUST) 'gust)

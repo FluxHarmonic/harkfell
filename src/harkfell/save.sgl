@@ -18,7 +18,7 @@
 ;;;                                   in the order they showed; added in 0.3,
 ;;;                                   absent in older v1 saves means none
 ;;;     (down #t|#f)                earned ability; absent means #f, even with H2
-;;;     (tau 0..599))               movement gust phase; absent means zero
+;;;     (tau 0..479))               movement gust phase; absent means zero
 ;;;
 ;;; Plain symbols and lists, no keywords: a keyword does not write out as text
 ;;; and read back (measured: it prints as #<object>).
@@ -43,6 +43,7 @@
           (sigil math)
           (engine tilemap)
           (engine body)
+          (engine air)
           (engine worldmap)
           (engine reach)
           (harkfell feel)
@@ -223,7 +224,8 @@
                                         (if (list? v) (filter symbol? v) '()))
                            down: (let ((v (field fields 'down))) (and (pair? v) (eq? (car v) #t)))
                            tau: (let ((v (field fields 'tau)))
-                                  (if (and (pair? v) (exact-integer? (car v)) (<= 0 (car v) 599))
+                                  (if (and (pair? v) (exact-integer? (car v))
+                                           (<= 0 (car v)) (< (car v) AIR-PERIOD))
                                       (car v)
                                       0))
                            notes: (reverse notes))))))))

@@ -12,7 +12,7 @@
 (define TM
   (let floor ((c 0) (tm (make-tilemap 25 12 16)))
     (if (= c 25)
-        (tilemap tm air: (list (air-field x: 160 y: 0 w: 64 h: 160 east: 0.66 pulsed: #t)))
+        (tilemap tm air: (list (air-field x: 160 y: 0 w: 64 h: 160 east: (feel-wind-cap F) pulsed: #t)))
         (floor (+ c 1) (if (and (>= c 10) (< c 14))
                           (tilemap-set tm c 11 'hazard)
                           (tilemap-set tm c 9 'solid))))))
@@ -50,8 +50,8 @@
     (newline))
   '(-1 1))
 (write (list 'east-gust-failures
-         (timed-window STEP (start 360 #t 1) (lambda (n) (script 1 32))
-                       (lambda (n) (arrives? 1 n)) 360 479 120)))
+         (timed-window STEP (start AIR-GUST #t 1) (lambda (n) (script 1 32))
+                       (lambda (n) (arrives? 1 n)) AIR-GUST (+ AIR-GUST 89) 120)))
 (newline)
 
 ;; Recover from the ACTUAL reached bank and phase. Only physical safe waits

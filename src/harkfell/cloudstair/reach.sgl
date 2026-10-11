@@ -141,6 +141,6 @@
     (define (cloudstair-window ct advance start family arrives? phase)
       (and (cloudstair-shelter? ct advance start)
            (timed-window advance start family arrives?
-                         (if (eq? phase 'gust) 360 0)
-                         (if (eq? phase 'gust) 479 239)
+                         (if (eq? phase 'gust) AIR-GUST 0)
+                         (if (eq? phase 'gust) (+ AIR-GUST 89) (- AIR-WARNING 1))
                          120)))))

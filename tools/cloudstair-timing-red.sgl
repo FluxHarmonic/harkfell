@@ -1,5 +1,5 @@
 ;; Shorten only the fixture's pulse until its real ascent has one viable
-;; launch tick. The 120-tick departure gate must reject that lucky witness.
+;; launch tick. The 90-tick departure gate must reject that lucky witness.
 ;; This sabotage does not change the game's shared clock or room fields.
 (import (sigil list)
         (engine body)
@@ -9,7 +9,7 @@
 
 (define TM (probe-lift-map #t))
 (define OFF (tilemap TM air: '()))
-(define START (probe-lift-start TM 360 #t))
+(define START (probe-lift-start TM 300 #t))
 (define ON-STEP (probe-step TM))
 (define OFF-STEP (probe-step OFF))
 
@@ -23,19 +23,19 @@
          (trace (timed-run advance start (probe-lift-script start))))
     (and trace (probe-lift-arrives? (car (reverse trace))))))
 
-(let find ((cut 390))
+(let find ((cut 330))
   (cond
-    ((> cut 470)
+    ((> cut 410)
       (display "INCOMPLETE: no single-tick sabotage found")
       (newline))
     (else
       (let ((advance (short-pulse cut)))
-        (if (and (lands? advance 360) (not (lands? advance 361)))
+        (if (and (lands? advance 300) (not (lands? advance 301)))
             (begin
               (write (list 'last-force-tick cut
                            'first-departure-succeeds #t
                            'failed-departures
                            (length (timed-window advance START probe-lift-script
-                                                 probe-lift-arrives? 360 479 120))))
+                                                 probe-lift-arrives? 300 389 120))))
               (newline))
             (find (+ cut 1)))))))

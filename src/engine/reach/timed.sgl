@@ -72,7 +72,7 @@
                   (eq? (body-down a) (body-down b))))))
 
     ;; A shelter must be outside every authored field, and its one-tick
-    ;; no-input edge must replay unchanged through the entire 600-tick cycle.
+    ;; no-input edge must replay unchanged through the entire shared cycle.
     (define (timed-shelter? tm f advance node)
       (let* ((b (timed-node-body node)) (c (body-center b f)))
         (and (still? b)

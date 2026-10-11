@@ -89,7 +89,7 @@
             glide-fall: 3.0
             lift-v: 2.4
             lift-accel: 0.3
-            wind-cap: 0.66))
+            wind-cap: 0.8))
 
     ;; The feel with the one speed changed and everything else kept (the
     ;; envelope's sabotage raises it by a third).

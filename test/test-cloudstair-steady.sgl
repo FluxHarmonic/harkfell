@@ -7,7 +7,7 @@
         (harkfell cloudstair probes))
 
 (define TM (probe-lift-map #f))
-(define START (probe-lift-start TM 359 #t))
+(define START (probe-lift-start TM 299 #t))
 (define SCRIPT (probe-lift-script START))
 (define W (witness from: (cons 7 20)
                    origin: (timed-node-body START)
@@ -19,7 +19,7 @@
           (trace (witness-trace TM HARKFELL-FEEL W)))
       (assert-true end)
       (assert-true (body-down end))
-      (assert-equal 479 (body-tau end))
+      (assert-equal 419 (body-tau end))
       (assert-true (witness-lands? TM HARKFELL-FEEL W (cons 12 11)))
       (assert-true (every body-down trace))))
   (test "the same script without an ability origin cannot ascend"

@@ -20,7 +20,7 @@
         tm
         (loop (+ c 1) (tilemap-set tm c 11 'solid)))))
 (define NODE
-  (timed-node body: (body (stand-body FLOOR F 4 10) down: #t tau: 359) data: '(2 4)))
+  (timed-node body: (body (stand-body FLOOR F 4 10) down: #t tau: 299) data: '(2 4)))
 (define (stepper tm)
   (lambda (node in)
     (let ((b (body-step (timed-node-body node) in tm F)))
@@ -37,9 +37,9 @@
                  (trace (timed-run STEP node (make-list (cdr proof) NO-INTENT))))
             (assert-true (> (cdr proof) 0))
             (assert-equal (timed-key (car (reverse trace))) (timed-key (car proof)))))
-        '(359 599 0 300 479))))
+        '(299 479 0 240 389))))
   (test "exposed waits and frozen clocks cannot create cycle edges"
-    (let* ((tm (tilemap FLOOR air: (list (air-field x: 64 y: 144 w: 32 h: 32 east: 0.66 pulsed: #t))))
+    (let* ((tm (tilemap FLOOR air: (list (air-field x: 64 y: 144 w: 32 h: 32 east: 0.8 pulsed: #t))))
            (exposed (timed-waiter tm F (stepper tm)))
            (frozen (timed-waiter FLOOR F (lambda (n in) n))))
       (assert-false (exposed NODE 0))
@@ -57,36 +57,36 @@
     (assert-true (timed-shelter? FLOOR F STEP NODE)))
   (test "a wait advances the actual clock without resetting it"
     (let ((trace (timed-run STEP NODE (list NO-INTENT NO-INTENT))))
-      (assert-equal '(359 360 361) (map (lambda (n) (body-tau (timed-node-body n))) trace))))
+      (assert-equal '(299 300 301) (map (lambda (n) (body-tau (timed-node-body n))) trace))))
   (test "force overlapping a wait rejects the shelter, even during calm"
-    (let ((tm (tilemap FLOOR air: (list (air-field x: 64 y: 144 w: 32 h: 32 east: 0.66 pulsed: #t)))))
+    (let ((tm (tilemap FLOOR air: (list (air-field x: 64 y: 144 w: 32 h: 32 east: 0.8 pulsed: #t)))))
       (assert-false (timed-shelter? tm F (stepper tm) NODE))))
   (test "missing support rejects the wait"
     (let ((tm (tilemap-set FLOOR 4 11 'air)))
       (assert-false (timed-shelter? tm F (stepper tm) NODE))))
   (test "clock, ability, field changes all invalidate memo identity"
     (assert-false (equal? (timed-memo-key FLOOR F NODE)
-                         (timed-memo-key FLOOR F (timed-node NODE body: (body (timed-node-body NODE) tau: 360)))))
+                         (timed-memo-key FLOOR F (timed-node NODE body: (body (timed-node-body NODE) tau: 300)))))
     (assert-false (equal? (timed-memo-key FLOOR F NODE)
                          (timed-memo-key FLOOR F (timed-node NODE body: (body (timed-node-body NODE) down: #f)))))
     (assert-false (equal? (timed-memo-key FLOOR F NODE)
-                         (timed-memo-key (tilemap FLOOR air: (list (air-field east: 0.66))) F NODE)))))
+                         (timed-memo-key (tilemap FLOOR air: (list (air-field east: 0.8))) F NODE)))))
 
 (test-group "timed reach: broad windows and sabotage reds"
   (test "a safe one-tick family replays at every calm and gust departure"
     (let ((family (lambda (node) (list NO-INTENT))))
-      (assert-equal '() (timed-window STEP NODE family (lambda (n) #t) 360 479 120))
+      (assert-equal '() (timed-window STEP NODE family (lambda (n) #t) 300 389 120))
       (assert-equal '() (timed-window STEP NODE family (lambda (n) #t) 0 239 120))))
   (test "sabotage: an edge valid at only one tick fails the gust margin"
     (let ((failed (timed-window STEP NODE (lambda (node) (list NO-INTENT))
-                               (lambda (node) (= (body-tau (timed-node-body node)) 361))
-                               360 479 120)))
-      (assert-equal 119 (length failed))
-      (assert-false (memv 360 failed))))
+                               (lambda (node) (= (body-tau (timed-node-body node)) 301))
+                               300 389 120)))
+      (assert-equal 89 (length failed))
+      (assert-false (memv 300 failed))))
   (test "a family longer than two seconds cannot pass by eventually landing"
-    (assert-equal 120 (length (timed-window STEP NODE
+    (assert-equal 90 (length (timed-window STEP NODE
                                (lambda (node) (make-list 121 NO-INTENT))
-                               (lambda (node) #t) 360 479 120))))
+                               (lambda (node) #t) 300 389 120))))
   (test "a bounded unfinished search is explicitly incomplete"
     (let ((g (timed-search (list NODE) STEP (lambda (n) '())
                           (lambda (n) #t) (lambda (n) #t) 2)))
@@ -106,15 +106,15 @@
 (define CELL (local->global CT RM 14 8))
 (define SEEDS (cloudstair-entry-phases CT CELL '(2) #f))
 (define ADVANCE (cloudstair-stepper CT))
-(define CONTACT (ADVANCE (list-ref SEEDS 359) NO-INTENT))
+(define CONTACT (ADVANCE (list-ref SEEDS 299) NO-INTENT))
 
 (define LIFT (probe-lift-map #t))
-(define LIFT-START (probe-lift-start LIFT 360 #t))
+(define LIFT-START (probe-lift-start LIFT 300 #t))
 (define LIFT-STEP (probe-step LIFT))
 
 (define AUTHORED-F-START
   (list-ref (cloudstair-entry-phases CT
-              (local->global CT (content-room CT 8 0) 10 7) '(2 4) #t) 360))
+              (local->global CT (content-room CT 8 0) 10 7) '(2 4) #t) 300))
 (define AUTHORED-OFF
   (let ((tm (tiles-carrying CT '(2 4))))
     (tilemap tm air: (map (lambda (field)
@@ -128,44 +128,44 @@
          (= (+ (body-y b) (feel-box-h F)) (* 16 (+ 1 (cdr bank)))))))
 
 (test-group "timed reach: authored F/L control"
-  (test "the actual authored lower wait reaches L at all 120 gust starts"
+  (test "the actual authored lower wait reaches L at all 90 gust starts"
     (assert-equal '() (timed-window ADVANCE AUTHORED-F-START probe-lift-script
-                                   authored-lift-arrives? 360 479 120)))
-  (test "cutting the actual force after 427 leaves one lucky start and 119 reds"
+                                   authored-lift-arrives? 300 389 120)))
+  (test "cutting the actual force after 367 leaves one lucky start and 89 reds"
     (let* ((short (lambda (node in)
-                    (if (<= (body-tau (timed-node-body node)) 427)
+                    (if (<= (body-tau (timed-node-body node)) 367)
                         (ADVANCE node in)
                         (let ((b (body-step (timed-node-body node) in AUTHORED-OFF F)))
                           (and (not (memq 'hazard (body-events b)))
                                (timed-node node body: b))))))
            (failed (timed-window short AUTHORED-F-START probe-lift-script
-                                 authored-lift-arrives? 360 479 120)))
-      (assert-equal 119 (length failed))
-      (assert-false (memv 360 failed))
-      (assert-true (memv 361 failed)))))
+                                 authored-lift-arrives? 300 389 120)))
+      (assert-equal 89 (length failed))
+      (assert-false (memv 300 failed))
+      (assert-true (memv 301 failed)))))
 
 (test-group "timed reach: measured pulsed lift"
-  (test "144 px ascent settles at all 120 required gust departures"
+  (test "144 px ascent settles at all 90 required gust departures"
     (assert-equal '() (timed-window LIFT-STEP LIFT-START probe-lift-script
-                                   probe-lift-arrives? 360 479 120)))
+                                   probe-lift-arrives? 300 389 120)))
   (test "sabotage: a shortened real pulse has one lucky launch and fails the margin"
     (let* ((off (probe-step (tilemap LIFT air: '())))
            (short (lambda (node in)
-                    ((if (<= (body-tau (timed-node-body node)) 427) LIFT-STEP off)
+                    ((if (<= (body-tau (timed-node-body node)) 367) LIFT-STEP off)
                      node in)))
            (failed (timed-window short LIFT-START probe-lift-script
-                                 probe-lift-arrives? 360 479 120)))
-      (assert-equal 119 (length failed))
-      (assert-false (memv 360 failed))
-      (assert-true (memv 361 failed))))
+                                 probe-lift-arrives? 300 389 120)))
+      (assert-equal 89 (length failed))
+      (assert-false (memv 300 failed))
+      (assert-true (memv 301 failed))))
   (test "no down and calm physics cannot substitute for the lift"
-    (let* ((bare (probe-lift-start LIFT 360 #f))
+    (let* ((bare (probe-lift-start LIFT 300 #f))
            (calm (probe-lift-start LIFT 0 #t))
            (end (lambda (start)
                   (car (reverse (timed-run LIFT-STEP start (probe-lift-script start)))))))
       (assert-false (probe-lift-arrives? (end bare)))
       (assert-false (probe-lift-arrives? (end calm)))))
-  (test "all 600 late/early departures settle at the catch or upper bank"
+  (test "all 480 late/early departures settle at the catch or upper bank"
     (for-each
       (lambda (tau)
         (let* ((start (probe-lift-start LIFT tau #t))
@@ -175,7 +175,7 @@
           (assert-equal 'ground (body-mode end))
           (assert-true (or (= (+ (body-y end) (feel-box-h F)) 192)
                            (= (+ (body-y end) (feel-box-h F)) 336)))))
-      (iota 600))))
+      (iota 480))))
 
 (test-group "timed reach: actual acquisition"
   (test "diagnostics cover all sixteen subsets, with and without down"
@@ -184,11 +184,11 @@
       (assert-equal 16 (length (filter cdr profiles)))
       (assert-true (member (cons '(2 3 4 5) #t) profiles))
       (assert-true (member (cons '() #f) profiles))))
-  (test "diagnostics include all 600 entry phases"
-    (assert-equal 600 (length SEEDS)))
+  (test "diagnostics include all 480 entry phases"
+    (assert-equal 480 (length SEEDS)))
   (test "Behind the Stone grant retains the arrival phase and does not alter harmonics"
     (assert-true (body-down (timed-node-body CONTACT)))
-    (assert-equal 360 (body-tau (timed-node-body CONTACT)))
+    (assert-equal 300 (body-tau (timed-node-body CONTACT)))
     (assert-equal '(2) (timed-node-data CONTACT)))
   (test "no H2 means no down, even at the gift"
     (let ((n (ADVANCE (timed-node (car SEEDS) data: '()) NO-INTENT)))
@@ -198,7 +198,7 @@
   (test "H5 contact retains the physical body and wrapped arrival phase"
     (let* ((rm (content-room CT 12 -2))
            (cell (local->global CT rm 16 5))
-           (entry (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 599))
+           (entry (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 479))
            (next (ADVANCE entry NO-INTENT)))
       (assert-equal '(2 4 5) (timed-node-data next))
       (assert-equal 0 (body-tau (timed-node-body next)))
@@ -206,10 +206,10 @@
       (assert-true (body-down (timed-node-body next)))))
   (test "a bypassed H5 stays absent"
     (let* ((cell (local->global CT (content-room CT 12 -2) 14 5))
-           (entry (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 479))
+           (entry (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 389))
            (next (ADVANCE entry NO-INTENT)))
       (assert-equal '(2 4) (timed-node-data next))
-      (assert-equal 480 (body-tau (timed-node-body next)))))
+      (assert-equal 390 (body-tau (timed-node-body next)))))
   (test "a full-cycle certificate agrees with fresh rotated validation"
     (let* ((cell (local->global CT (content-room CT 8 0) 10 7))
            (entries (cloudstair-entry-phases CT cell '(2 4) #t))
@@ -218,13 +218,13 @@
                   (let ((node (list-ref entries tau)))
                     (assert-true (certified? node))
                     (assert-equal (cloudstair-shelter? CT ADVANCE node) (certified? node))))
-                '(0 299 300 359 360 479 599)))))
+                '(0 239 240 299 300 389 479)))))
 
 (define CACHE-START (timed-node NODE body: (body (timed-node-body NODE) tau: 0)))
 (define (cache-policies node)
   (let ((tau (body-tau (timed-node-body node))))
     (cond ((= tau 0) (list (list NO-INTENT)))
-          ((= tau 1) (list (make-list 599 NO-INTENT)))
+          ((= tau 1) (list (make-list 479 NO-INTENT)))
           (else '()))))
 (define (cache-home? node) (= (body-tau (timed-node-body node)) 0))
 (define (cache-key node) (timed-memo-key FLOOR F node))
@@ -243,7 +243,7 @@
     (assert-equal (map timed-key (timed-graph-traps FRESH))
                   (map timed-key (timed-graph-traps REUSED))))
   (test "changed force footprints discard all matching phase candidates"
-    (let* ((changed (tilemap FLOOR air: (list (air-field x: 160 y: 0 w: 16 h: 16 east: 0.66))))
+    (let* ((changed (tilemap FLOOR air: (list (air-field x: 160 y: 0 w: 16 h: 16 east: 0.8))))
            (g (timed-search (list CACHE-START) (stepper changed) cache-policies
                             (lambda (n) #t) cache-home? 2000
                             (timed-graph-memo FRESH)
@@ -251,11 +251,11 @@
       (assert-equal 0 (timed-graph-reused g))))
   (test "sabotage: freezing the warning instead of advancing changes physics"
     (let* ((tm (tilemap FLOOR air: (list (air-field x: 64 y: 0 w: 32 h: 176 lift: 2.4 pulsed: #t))))
-           (start (timed-node NODE body: (body (timed-node-body NODE) mode: 'air y: 120 vy: 1 tau: 359)))
+           (start (timed-node NODE body: (body (timed-node-body NODE) mode: 'air y: 120 vy: 1 tau: 299)))
            (step (stepper tm))
            (frozen (lambda (node in)
                      (let ((n (step node in)))
-                       (and n (timed-node n body: (body (timed-node-body n) tau: 359))))))
+                       (and n (timed-node n body: (body (timed-node-body n) tau: 299))))))
            (script (make-list 20 (intent jump: #t)))
            (actual (car (reverse (timed-run step start script))))
            (false (car (reverse (timed-run frozen start script)))))

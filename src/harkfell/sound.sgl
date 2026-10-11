@@ -60,6 +60,7 @@
           (sigil string)
           (motif tune)
           (motif tune player)
+          (engine air)
           (engine mixer)
           (harkfell tunes)
           (harkfell hush))
@@ -149,7 +150,7 @@
       (hums default: '()) (light default: 1.0)
       ;; Local unpitched sources: ((high|low x y) ...) and ((x y) ...).
       (exits default: '()) (static default: '())
-      ;; Cloudstair: tau, the shared gust clock (0..599 simulation ticks,
+      ;; Cloudstair: tau, the shared gust clock (0..479 simulation ticks,
       ;; (engine air)), or #f; the room's timed air fields ((lift|east x y w
       ;; h) ...) and its deep-gap cells ((x y) ...) and seed creatures ((x y)
       ;; ...), absolute world pixels; gliding: the down is open this frame.
@@ -1177,11 +1178,11 @@
     (define GAP-GAIN 0.7)
 
     ;; --- Cloudstair: the gust's warning and rush, on the simulation's clock ----------------
-    ;; One shared cycle, 600 ticks at 60 Hz ((engine air)): calm 0..359 with
-    ;; the warning (a narrow breath drawn in, rising) from 300, the gust
-    ;; 360..599 (a broad rush), released at 0. In a room with a timed field
+    ;; One shared cycle, 480 ticks at 60 Hz ((engine air)): calm 0..299 with
+    ;; the warning (a narrow breath drawn in, rising) from 240, the gust
+    ;; 300..479 (a broad rush), released at 0. In a room with a timed field
     ;; (F, L, M, S: pulsed lifts; I, P: the eastward gust) one source plays a
-    ;; 10 s loop of that cycle, its read position kept on TAU, never on the
+    ;; 8 s loop of that cycle, its read position kept on TAU, never on the
     ;; bed's playback or an audio callback, so what you hear is the phase the
     ;; physics is in: entering mid-gust you hear the rush, not a fresh
     ;; warning. The loops (gust-lift, gust-east, the same warning in both) are
@@ -1201,15 +1202,14 @@
     ;; dip the moment GUST-MOMENT-DIP, so the warning is not lost under S's.
     (define GUST-ID "gust")
     (define GUST-LOOPS '((gust-lift "gust-lift") (gust-east "gust-east")))
-    (define GUST-PERIOD 600)
-    (define GUST-CYCLE-S 10.0)
+    (define GUST-CYCLE-S (/ AIR-PERIOD 60.0))
     (define GUST-GAIN 0.85)
     (define GUST-SNAP-S 0.08)
     (define GUST-FREEZE-S 0.05)
     (define GUST-XFADE 256)
     (define GUST-MOMENT-DIP 0.7)   ; -3 dB
-    (define GUST-DIP-FROM 290)
-    (define GUST-DIP-TO 420)
+    (define GUST-DIP-FROM (- AIR-WARNING 10))
+    (define GUST-DIP-TO (+ AIR-GUST 60))
     (define *loops* '())           ; ((name . mono f32 bytevector, GUST-CYCLE-S long) ...)
     (define *loops-wanted* '())    ; loops a gust room asked for
     (define *loops-failed* '())    ; loops whose text never came: not asked for again

@@ -4,10 +4,10 @@
         (harkfell cloudstair probes))
 
 (define TM (probe-lift-map #t))
-(define START (probe-lift-start TM 360 #t))
+(define START (probe-lift-start TM 300 #t))
 (display "(tick tau x y vx vy mode down gliding)\n")
 (for-each (lambda (row) (write row) (newline))
           (probe-record TM START (probe-lift-script START)))
 (display "failed gust departures: ")
-(write (timed-window (probe-step TM) START probe-lift-script probe-lift-arrives? 360 479 120))
+(write (timed-window (probe-step TM) START probe-lift-script probe-lift-arrives? 300 389 120))
 (newline)

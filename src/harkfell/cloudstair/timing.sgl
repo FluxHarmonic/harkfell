@@ -44,22 +44,22 @@
       (define LEGS
         (list
           (list 'F-L 8 0 10 7 probe-lift-script (rests-in 8 -1 14 24)
-                '((360 479)) 'lift 11 1)
+                (list (list AIR-GUST (+ AIR-GUST 89))) 'lift 11 1)
           (list 'M-S 9 -1 10 7 probe-lift-script (rests-in 9 -2 14 24)
-                '((360 479)) 'lift 11 1)
+                (list (list AIR-GUST (+ AIR-GUST 89))) 'lift 11 1)
           (list 'I-east 11 0 8 7 (gap-script 1) (rests-in 11 0 14 24)
-                '((0 239) (360 479)) 'gap 10 1)
+                (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 10 1)
           (list 'I-west 11 0 15 7 (gap-script -1) (rests-in 11 0 0 9)
-                '((0 239)) 'gap 10 -1)
+                (list (list 0 (- AIR-WARNING 1))) 'gap 10 -1)
           (list 'P-west-gap-east 12 -1 1 7 (gap-script 1) (rests-in 12 -1 7 11)
-                '((0 239) (360 479)) 'gap 3 1)
+                (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 3 1)
           (list 'P-west-gap-west 12 -1 8 7 (gap-script -1)
                 (lambda (n) (or ((rests-in 12 -1 0 2) n) ((rests-in 11 -1 0 24) n)))
-                '((0 239)) 'gap 3 -1)
+                (list (list 0 (- AIR-WARNING 1))) 'gap 3 -1)
           (list 'P-east-gap-east 12 -1 10 7 (gap-script 1) (rests-in 12 -1 16 20)
-                '((0 239) (360 479)) 'gap 12 1)
+                (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 12 1)
           (list 'P-east-gap-west 12 -1 17 7 (gap-script -1) (rests-in 12 -1 7 11)
-                '((0 239)) 'gap 12 -1)))
+                (list (list 0 (- AIR-WARNING 1))) 'gap 12 -1)))
 
       ;; Feedback generates actual inputs, then callers replay the entire script.
       ;; Stop at a threshold, retaining the genuine offset and velocity.
@@ -163,7 +163,7 @@
                                       (set! stranded (cons (body-tau (timed-node-body start)) stranded))))))))
                           starts)
                         (set! failures (+ failures window-reds negative-crossings (length stranded)))
-                        (log (list (car leg) 'carry carry 'down down 'phases 600
+                        (log (list (car leg) 'carry carry 'down down 'phases AIR-PERIOD
                                      'window-failures window-reds 'survivors survived
                                      'no-down-crossings negative-crossings 'stranded (reverse stranded)))))
                     (if (pair? selected)

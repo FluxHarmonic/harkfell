@@ -5,6 +5,7 @@
 (import (sigil test)
         (sigil list)
         (sigil math)
+        (engine air)
         (engine mixer)
         (harkfell sound))
 
@@ -39,16 +40,16 @@
       (set! T (+ T (/ 1.0 120.0)))
       (sound-frame! T (/ 1.0 120.0) (place pl tau: tau))
       (mixer-pump! T)
-      (loop (+ i 1) (if (odd? i) (modulo (+ tau 1) 600) tau))))
-  (modulo (+ tau0 (quotient (- frames 1) 2)) 600))
+      (loop (+ i 1) (if (odd? i) (modulo (+ tau 1) AIR-PERIOD) tau))))
+  (modulo (+ tau0 (quotient (- frames 1) 2)) AIR-PERIOD))
 (define (run pl frames tau0 . freeze)
   (let loop ((i 0) (tau tau0))
     (when (< i frames)
       (set! T (+ T (/ 1.0 30.0)))
       (sound-frame! T (/ 1.0 30.0) (place pl tau: tau))
       (mixer-pump! T)
-      (loop (+ i 1) (if (and (pair? freeze) (car freeze)) tau (modulo (+ tau 2) 600)))))
-  (modulo (+ tau0 (if (and (pair? freeze) (car freeze)) 0 (* 2 (- frames 1)))) 600))
+      (loop (+ i 1) (if (and (pair? freeze) (car freeze)) tau (modulo (+ tau 2) AIR-PERIOD)))))
+  (modulo (+ tau0 (if (and (pair? freeze) (car freeze)) 0 (* 2 (- frames 1)))) AIR-PERIOD))
 
 ;; the loops render on demand: entering a gust room pulls them to the queue's head
 (define (until-loops pl)
@@ -67,23 +68,23 @@
 (define (db x) (* 20.0 (/ (log (max x 1e-9)) (log 10.0))))
 (define (head) (cadr (sound-gust)))
 (define (gust-src) (sound-gust-source))
-(define (cycle-diff a b) (let ((d (- a b))) (cond ((> d 5.0) (- d 10.0)) ((< d -5.0) (+ d 10.0)) (else d))))
+(define (cycle-diff a b) (let ((d (- a b))) (cond ((> d 4.0) (- d 8.0)) ((< d -4.0) (+ d 8.0)) (else d))))
 
 (test-group "cloudstair: the gust's loops"
-  (test "both loops are exactly one 10 s cycle"
-    (assert-equal (* 4 10 RATE) (bytevector-length (sound-loop 'gust-lift)))
-    (assert-equal (* 4 10 RATE) (bytevector-length (sound-loop 'gust-east))))
-  (test "calm is silent once the rush has released (by 1.5 s), the warning sounds in its last second, the rush after tau 360"
+  (test "both loops are exactly one 8 s cycle"
+    (assert-equal (* 4 8 RATE) (bytevector-length (sound-loop 'gust-lift)))
+    (assert-equal (* 4 8 RATE) (bytevector-length (sound-loop 'gust-east))))
+  (test "calm is silent once the rush has released (by 1.5 s), the warning sounds in its last second, the rush after tau 300"
     (for-each
       (lambda (n)
         (let ((bv (sound-loop n)))
-          (assert-true (< (db (rms bv 1.5 4.95)) -80.0))
-          (assert-true (> (db (rms bv 5.3 6.0)) -45.0))
-          (assert-true (> (db (rms bv 6.05 9.9)) -40.0))
+          (assert-true (< (db (rms bv 1.5 3.95)) -80.0))
+          (assert-true (> (db (rms bv 4.3 5.0)) -45.0))
+          (assert-true (> (db (rms bv 5.05 7.9)) -40.0))
           ;; the rush marks its start: at least 1.5 dB over the warning's last
           ;; half second and 4 dB over its first
-          (assert-true (> (rms bv 6.0 6.6) (* 1.19 (rms bv 5.5 6.0))))
-          (assert-true (> (rms bv 6.0 6.6) (* 1.58 (rms bv 5.0 5.5))))))
+          (assert-true (> (rms bv 5.0 5.6) (* 1.19 (rms bv 4.5 5.0))))
+          (assert-true (> (rms bv 5.0 5.6) (* 1.58 (rms bv 4.0 4.5))))))
       '(gust-lift gust-east)))
   (test "the rush's release is folded onto the cycle's start, then fades"
     (let ((bv (sound-loop 'gust-lift)))
@@ -91,14 +92,14 @@
       (assert-true (< (db (rms bv 1.0 1.5)) -50.0)))))
 
 (test-group "cloudstair: the gust follows tau"
-  (test "entering mid-gust plays the rush where the physics is (tau 450 -> 7.5 s), not a warning"
+  (test "entering mid-gust plays the rush where the physics is (tau 390 -> 6.5 s), not a warning"
     (sound-reset!)
-    (run F 1 450)
+    (run F 1 390)
     (assert-true (sound-gust))
     (assert-equal 'gust-lift (car (sound-gust)))
-    (assert-true (< (abs (cycle-diff (head) 7.5)) 0.06)))
+    (assert-true (< (abs (cycle-diff (head) 6.5)) 0.06)))
   (test "two seconds of play keep it on the clock"
-    (let ((tau (run F 60 451)))
+    (let ((tau (run F 60 391)))
       (assert-true (< (abs (cycle-diff (head) (/ tau 60.0))) 0.06))))
   (test "a frozen clock (a soft return's fade) silences it, and on release it re-aligns to tau"
     (let* ((tau (run F 30 100 #t)))
@@ -137,10 +138,10 @@
       (assert-equal 1.0 (source-factor g 'duck T))
       (assert-true (> (source-gain g T) 0.1))))
   (test "the warning and the rush's start dip the moment 3 dB, and it comes back"
-    (run S 45 320)
+    (run S 45 260)
     ;; a literal, not GUST-MOMENT-DIP: a test reading the constant moves with it
     (assert-true (< (source-factor (mixer-find MOMENT-ID) 'gust T) 0.75))
-    (run S 60 440)
+    (run S 60 380)
     (assert-true (> (source-factor (mixer-find MOMENT-ID) 'gust T) 0.98))))
 
 (test-group "cloudstair: the gap, the seeds, the down, H5"
@@ -207,7 +208,7 @@
     (let loop ((k 0) (tau 102))
       (when (and (< k 900) (not (sound-loop 'gust-lift)))
         (run S 1 tau)
-        (loop (+ k 1) (modulo (+ tau 2) 600))))
+        (loop (+ k 1) (modulo (+ tau 2) AIR-PERIOD))))
     (assert-true (sound-loop 'gust-lift))
     (assert-equal "above-the-cloud" (sound-moment-playing))
     (run S 2 300)

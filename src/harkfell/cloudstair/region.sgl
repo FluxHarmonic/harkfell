@@ -164,7 +164,7 @@
               (when search-incomplete (set! complete #f))
               (set! failures (+ failures entry-fails (length unreached) (length traps)
                                 (if complete 0 1)))
-              (log (list 'region 'carry carry 'down down 'entry-phases 600
+              (log (list 'region 'carry carry 'down down 'entry-phases AIR-PERIOD
                          'entry-failures entry-fails 'required-cells (length targets)
                          'unreached (reverse unreached) 'traps (length traps)
                          'actual-landings landing-count 'complete complete))))
