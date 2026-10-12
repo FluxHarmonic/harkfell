@@ -9,7 +9,7 @@
 # THE GREEN ARM
 #   score    tools/underhum-compose.mjs --check: the piece, its H7 version and
 #            the coda in assets/tunes are what the score writes
-#   test     test/test-underhum-sound.sgl, all 40 tests (parts 1 to 6)
+#   test     test/test-underhum-sound.sgl, all 41 tests (parts 1 to 6)
 # The test runs on a harkfell-test that loads THIS tree's src/ (folio
 # procedures/harkfell-look-review-harness, "For sound"): HARNESS, default
 # build/audio-harness/bin/harkfell-test, whose lib/harkfell and lib/engine
@@ -41,6 +41,7 @@
 #   bed-on-carry     a carry change during the ending reopens the bed
 #   csharp-untuned   the glass flute's C# without its cents (motif's tuning rule)
 #   told-early       the listener told of the fundamental at the fuse, not when it sounds
+#   down-is-climb    dropping below the chamber (Revision 1's K) counts as the climb
 # and the region's:
 #   h7-unstripped    H7's drone voice sounds without H7 carried
 #   heart-early      the heart calls with any harmonic carried
@@ -58,7 +59,7 @@ trap 'exit 130' INT TERM
 FAIL=0
 HARNESS=${HARNESS:-build/audio-harness/bin/harkfell-test}
 T=test/test-underhum-sound.sgl
-TOTAL=40
+TOTAL=41
 
 hash() { sha256sum "$1" | cut -c1-16; }
 setup_failed() { echo "SETUP-FAILED: $*"; echo "GATE-UNDERHUM-SOUND SETUP-FAILED"; exit 2; }
@@ -183,8 +184,8 @@ plant hold-no-loop "$F" \
   "((calm theme) '(hold . rise))" \
   "4" "staying in the chamber, hold loops"
 plant room-not-climb "$S" \
-  "((and (eq? (place-region pl) 'underhum) (not (equal? k CHAMBER-KEY))) (finale-want! 'rise))" \
-  "((and (eq? (place-region pl) 'underhum) (not (equal? k CHAMBER-KEY))) #f)" \
+  "((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) (finale-want! 'rise))" \
+  "((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) #f)" \
   "4" "a room entered is the climb"
 plant bed-kept "$S" \
   "        (bed-away! now FUSE-BED-OUT-S)" \
@@ -250,6 +251,11 @@ plant told-early "$S" \
   "(when (and ft (>= ft FINALE-FUNDAMENTAL-S)) (tell! st 'fundamental))" \
   "(when (and ft (>= ft 0.0)) (tell! st 'fundamental))" \
   "3" "the listener is told what is heard"
+
+plant down-is-climb "$S" \
+  "((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) (finale-want! 'rise))" \
+  "((and (eq? (place-region pl) 'underhum) row (not (= row CHAMBER-ROW))) (finale-want! 'rise))" \
+  "5" "Revision 1's rooms: going down (K, under the stone) is not the climb"
 
 if [ "$FAIL" -eq 0 ]; then echo "GATE-UNDERHUM-SOUND GREEN (every leg RED)"; else echo "GATE-UNDERHUM-SOUND RED"; fi
 exit $FAIL
