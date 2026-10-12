@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Shared by build-remote and gate-remote, locally and on the runner.
+# Ship the committed package's compiler pin without changing the host CLI.
+stage_remote_sigil() {
+  local stage=$1 version=$2
+  local compiler="$HOME/.sigil/versions/$version/sigil" reported
+  [ -x "$compiler" ] || { echo "SETUP-FAILED: no local pinned compiler $compiler" >&2; return 125; }
+  cp "$compiler" "$stage/sigil-delivered" || return 125
+  reported=$("$stage/sigil-delivered" --version 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+  case "$reported" in
+    "sigil $version "*) ;;
+    *) echo "SETUP-FAILED: delivered compiler reports '$reported', not $version" >&2; return 125 ;;
+  esac
+}
+
+use_remote_sigil() {
+  local version=$1 reported
+  if "$HOME/.sigil/bin/sigil" cli use "$version" > out/toolchain.log 2>&1; then
+    export PATH="$HOME/.sigil/bin:$PATH"
+  else
+    echo "remote: cli use $version failed; using delivered pinned compiler"
+    [ -f sigil-delivered ] || { echo "SETUP-FAILED: delivered compiler missing"; return 125; }
+    mkdir -p "$HOME/work/sigil-fallback" || return 125
+    cp sigil-delivered "$HOME/work/sigil-fallback/sigil" || return 125
+    chmod +x "$HOME/work/sigil-fallback/sigil" || return 125
+    export PATH="$HOME/work/sigil-fallback:$PATH"
+  fi
+  reported=$(sigil --version 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+  echo "remote: sigil $reported"
+  case "$reported" in
+    "sigil $version "*) ;;
+    *) echo "SETUP-FAILED: sigil reports '$reported', not $version"; return 125 ;;
+  esac
+}

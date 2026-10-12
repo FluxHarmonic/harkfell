@@ -83,6 +83,8 @@ say "HEAD $SHA ($FULL), sigil $SIGIL_V (package.sgl's pin), arms: ${ARMS[*]:-non
 
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/harkfell-build-remote.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
+. scripts/remote-sigil-toolchain
+stage_remote_sigil "$STAGE" "$SIGIL_V"
 git bundle create "$STAGE/src.bundle" HEAD 2>/dev/null
 : > "$STAGE/arms"
 for a in "${ARMS[@]+"${ARMS[@]}"}"; do printf '%s\n' "$a" >> "$STAGE/arms"; done
@@ -100,11 +102,8 @@ echo "remote: runner $(ip -4 -br addr show eth0 | awk '{print $3}') nproc=$(npro
 git clone --quiet src.bundle checkout || { echo "SETUP-FAILED: clone"; exit 125; }
 git -C checkout checkout --quiet "$FULL" || { echo "SETUP-FAILED: checkout $FULL"; exit 125; }
 [ "$(git -C checkout rev-parse HEAD)" = "$FULL" ] || { echo "SETUP-FAILED: checkout is not $FULL"; exit 125; }
-"$HOME/.sigil/bin/sigil" cli use "$SIGIL_V" >/dev/null 2>&1 || { echo "SETUP-FAILED: sigil cli use $SIGIL_V"; exit 125; }
-export PATH="$HOME/.sigil/bin:$PATH"
-GOT_V=$(sigil --version 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-echo "remote: sigil $GOT_V"
-case "$GOT_V" in "sigil $SIGIL_V "*) ;; *) echo "SETUP-FAILED: sigil reports '$GOT_V', not $SIGIL_V"; exit 125 ;; esac
+. ./remote-sigil-toolchain || exit 125
+use_remote_sigil "$SIGIL_V" || exit 125
 cd checkout
 T1=$(t); sigil deps install > ../out/deps.log 2>&1 || { echo "BUILD-FAILED: deps install (out/deps.log)"; tail -20 ../out/deps.log; exit 2; }
 T2=$(t); echo "remote: deps install $((T2-T1))s"
@@ -158,6 +157,7 @@ T0=$(date +%s)
 set +e
 "$REMOTE" --label "harkfell build $SHA" --timeout "${BUILD_TIMEOUT:-10800}" --detach \
   --put "$STAGE/src.bundle:src.bundle" --put "$STAGE/remote.sh:remote.sh" --put "$STAGE/arms:arms" \
+  --put "scripts/remote-sigil-toolchain:remote-sigil-toolchain" --put "$STAGE/sigil-delivered:sigil-delivered" \
   "${GETS[@]}" -- bash remote.sh "$FULL" "$SHA" "$SIGIL_V"
 rc=$?
 set -e
