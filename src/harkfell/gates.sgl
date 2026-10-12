@@ -239,6 +239,7 @@
                     (when (and (= listening 0) (>= (stone-listening s) 60)) (item 'drip-cancel))
                     (if (>= listening (* 60 (stone-still s)))
                         (begin
+                          (say! (list 'drip-open (car target) (cdr target)))
                           (item 'drip-fall)
                           (item 'sink)
                           (stone s state: 'sinking t: 0 listening: listening))

@@ -72,6 +72,7 @@
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
           place-ending
+          place-drip
           place-wander place-moment-carrying place-moment-still place-moment-key place-hums place-exits place-static UPWARD-ID
           place-tau place-gusts place-gaps place-seeds place-gliding
           sound-gust sound-gust-source sound-gust-nudge! sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-FREEZE-S GUST-MOMENT-DIP GAP-GAIN GAP-R
@@ -150,6 +151,7 @@
       (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f)
       (hums default: '()) (light default: 1.0)
       (ending default: #f)        ; (harkfell underhum finale) state, for SOUND
+      (drip default: #f)          ; (shut|open absolute-x absolute-y held-seconds)
       ;; Local unpitched sources: ((high|low x y) ...) and ((x y) ...).
       (exits default: '()) (static default: '())
       ;; Cloudstair: tau, the shared gust clock (0..479 simulation ticks,

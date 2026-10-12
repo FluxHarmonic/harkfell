@@ -26,12 +26,13 @@
           (harkfell tunes)
           (harkfell sound)
           (harkfell gates)
+          (harkfell feel)
           (harkfell cues)
           (harkfell hush)
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
-          audio-carry! audio-tone-room! audio-lines world-place room-moment-name room-moment-names room-moment-now
+          audio-carry! audio-tone-room! audio-lines world-place world-drip room-moment-name room-moment-names room-moment-now
           audio-pause! audio-resume! audio-paused? audio-set-wall-clock! audio-cue-words
           audio-sound-door! frame-event! save-extras restore-extras!)
 
@@ -251,6 +252,31 @@
 
     (define (list-head* l n) (if (or (= n 0) (null? l)) '() (cons (car l) (list-head* (cdr l) (- n 1)))))
 
+    ;; The nearest stillness door, at its listening source rather than its
+    ;; floor stone. The sole clock is gates' counter, in 60 Hz ticks.
+    ;; "open" means the five-second decision has started the stone sinking;
+    ;; physics clears the stone only after its existing 48-tick animation.
+    (define (world-drip w)
+      (let* ((wm (and w (world-map w)))
+             (tm (and wm (world-gates w) (world-tiles w)))
+             (centre (and tm (body-center (world-body w) HARKFELL-FEEL)))
+             (drips (if tm
+                        (map (lambda (st)
+                               (let* ((c (cell-centre tm (or (stone-listen st) (stone-cell st))))
+                                      (dx (- (car c) (car centre)))
+                                      (dy (- (cdr c) (cdr centre))))
+                                 (list (if (eq? (stone-state st) 'shut) 'shut 'open)
+                                       (+ (car c) (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)))
+                                       (+ (cdr c) (* (worldmap-rows wm) (worldmap-size wm) (worldmap-y0 wm)))
+                                       (/ (stone-listening st) 60.0)
+                                       (+ (* dx dx) (* dy dy)))))
+                             (filter stone-still (world-stones w)))
+                        '())))
+        (and (pair? drips)
+             (list-head*
+               (car (list-sort (lambda (a b) (< (list-ref a 4) (list-ref b 4))) drips))
+               4))))
+
     (define (world-place w ct . news)
       (let* ((wm (and w (world-map w)))
              (sx (if wm (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)) 0))
@@ -262,6 +288,7 @@
                    (place pl
                           carry: (world-carry w)
                           ending: (world-ending w)
+                          drip: (world-drip w)
                           tones: (map (lambda (p) (let ((c (cell-centre tm (pickup-cell p))))
                                                     (list (pickup-overtone p) (+ sx (car c)) (+ sy (cdr c)))))
                                       (filter (lambda (p)

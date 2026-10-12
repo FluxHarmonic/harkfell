@@ -28,6 +28,47 @@
 (define (answers w)
   (filter (lambda (item) (eq? (car item) 'hint-answer)) (world-news w)))
 
+;; Use the existing well's negative world coordinate. The door and drip
+;; occupy different cells so confusing their positions cannot pass.
+(define WELL (content-room CT -2 6))
+(define LISTEN-CELL (local->global CT WELL 15 9))
+(define DOOR-CELL (local->global CT WELL 11 9))
+(define (drip-world)
+  (let ((w (at-hint -2 6 15 9 '())))
+    (world-populate w
+      (list (stone cell: DOOR-CELL overtone: 7 still: 5 listen: LISTEN-CELL radius: 32.0))
+      '() '())))
+(define (drip-events w)
+  (filter (lambda (item) (eq? (car item) 'drip-open)) (world-news w)))
+
+(test-group "Wrongwater: the door owns the sound clock"
+  (test "no stillness door means no drip tuple"
+    (assert-false (world-drip (at-hint -2 6 15 9 '())))
+    (assert-false (world-drip #f)))
+  (test "the tuple uses the listening source in absolute world pixels"
+    (assert-equal '(shut -552.0 1208.0 0.0) (world-drip (drip-world))))
+  (test "held is exactly the door's counter and resets when its wait cancels"
+    (let* ((w (wait (drip-world) 294))
+           (g (gates-step (world-gates w) (cell-centre (world-tiles w) LISTEN-CELL)
+                          '(0 0 8 14) #t #f))
+           (cancel (world w gates: g)))
+      (assert-equal 4.9 (cadddr (world-drip w)))
+      (assert-equal 0.0 (cadddr (world-drip cancel)))
+      (assert-equal '() (drip-events w))))
+  (test "5 seconds starts logical opening; the cell clears after the 48-tick sink"
+    (let* ((before (wait (drip-world) 299))
+           (opening (wait before 1))
+           (open (wait opening 48))
+           (pl (world-place opening CT (world-news opening))))
+      (assert-equal '() (drip-events before))
+      (assert-equal '(open -552.0 1208.0 5.0) (place-drip pl))
+      (assert-equal 5.0 (cadddr (world-drip open)))
+      (assert-equal 'sinking (stone-state (car (world-stones opening))))
+      (assert-true (stone-open? (car (world-stones open))))
+      (assert-equal 1 (length (drip-events open)))
+      (assert-equal '((drip-open -552.0 1208.0))
+        (filter (lambda (item) (eq? (car item) 'drip-open)) (place-news pl))))))
+
 (test-group "Wrongwater: the three established hints"
   (test "each answers only after H7 and waits twelve seconds between answers"
     (for-each

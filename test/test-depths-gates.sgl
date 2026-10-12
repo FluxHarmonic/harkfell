@@ -77,7 +77,10 @@
     (let* ((sink (advance (initial DOOR '()) 300 #t))
            (open (advance sink 48 #t)))
       (assert-equal 'sinking (state sink))
-      (assert-equal '(drip-build drip-fall sink open) (kinds open))
+      (assert-equal '(drip-build drip-open drip-fall sink open) (kinds open))
+      (assert-equal 1 (length (filter (lambda (item) (eq? (car item) 'drip-open)) (gstate-news open))))
+      (assert-equal '() (filter (lambda (item) (eq? (car item) 'drip-open))
+                               (gstate-news (advance (initial DOOR '()) 299 #t))))
       (assert-equal 'open (state open))))
   (test "moving cancels the build and a new wait starts from zero"
     (let* ((waiting (advance (initial DOOR '()) 294 #t))
