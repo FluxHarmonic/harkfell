@@ -691,7 +691,7 @@
     ;; The heart: the bowl's stone keyed to the whole set (SYSTEMS's keys:);
     ;; (harkfell underhum look) draws it.
     (define (heart-stone? rm st)
-      (and (bowl? rm) (equal? (stone-keys st) '(2 3 4 5))))
+      (and (bowl? rm) (stone-heart? st)))
 
     ;; The Underhum's finale as the look draws it: fused once the
     ;; fundamental has been heard (finale-lit), listening while the breaths
@@ -1209,7 +1209,7 @@
     ;; a third of BRITTLE-TICKS. In a dark room only where the moth light is.
     (define (draw-thin-ice! w ox oy seen?)
       (let* ((p (world-room w)) (rm (and p (placed-data p))))
-        (when rm
+        (when (and rm (not (underhum? rm)))   ; the Underhum draws its worn treads itself
           (let ((crust (ice-cell "tarn-crust"))
                 (b (world-body w))
                 (n (body-brittle (world-body w))))
@@ -1532,6 +1532,7 @@
               (draw-reedfen-water-haze! rm t)
               (draw-pipes-panels! rm)
               (draw-underhum-scenery! rm t (underhum-phase-of w) (world-carry w))
+              (draw-underhum-treads! rm b ox oy)
               ;; Cloudstair's lifts, gusts and seeds, on the shared air clock;
               ;; elsewhere a lift column's seeds (the Hollow's launch lift)
               (if (cloudstair? rm)
@@ -1567,6 +1568,7 @@
               (when (body-down b)
                 (draw-down-tuft! b (- (body-x b) ox) (- (body-y b) oy) t))
               (draw-underhum-sprites! rm b (world-carry w) t (underhum-phase-of w) ox oy)
+              (draw-underhum-extras! rm b (world-carry w) t (underhum-phase-of w) ox oy)
               (draw-water! rm)
               (cover-thin-water! w ox oy)
               (draw-crusts!)
@@ -1593,6 +1595,7 @@
                                       (draw-stone-light st x y t slot)))))
                             (world-stones w))
                   (draw-underhum-lights! rm b (world-carry w) t (underhum-phase-of w) ox oy)
+                  (draw-underhum-extra-lights! rm b (world-carry w) t (underhum-phase-of w) ox oy)
                   (for-each (lambda (pk)
                               (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
                                 (when (in-room? x y) (draw-pickup-light (pickup-overtone pk) x y t))))

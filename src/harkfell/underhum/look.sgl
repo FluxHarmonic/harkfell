@@ -46,7 +46,8 @@
           underhum-backdrop-bytes draw-underhum-solids! draw-underhum-scenery!
           draw-underhum-sprites! draw-underhum-lights! underhum-orb-lights
           underhum-orbs underhum-dark-extra underhum-phase set-underhum-review-phase!
-          draw-heart! draw-heart-light! underhum-stone-bytes)
+          draw-heart! draw-heart-light! underhum-stone-bytes
+          draw-underhum-extras! draw-underhum-extra-lights! draw-underhum-treads!)
 
   (begin
     (define S 16)
@@ -311,7 +312,51 @@
                       (if (eq? k 'cut)
                           (begin (rect! 'leaf-3 x y w 1) (rect! 'leaf-2 x (+ y 1) w 1))
                           (begin (rect! 'ground-4 x y w 1) (rect! 'ground-3 x (+ y 1) w 1))))))
-            (rows (+ r 1))))))
+            (rows (+ r 1))))
+        ;; cut slabs (=): the grate in the chamber's floor, a thin dressed stone
+        ;; with a dark joint every 8 px, lit on top
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (eq? (kind-at c r) 'ledge))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (rect! 'leaf-3 x y w 1)
+                      (rect! 'leaf-2 x (+ y 1) w 3)
+                      (rect! 'leaf-1 x (+ y 4) w 1)
+                      (let bars ((i 3))
+                        (when (< i w)
+                          (rect! 'leaf-1 (+ x i) (+ y 1) 1 3)
+                          (bars (+ i 8)))))))
+            (rows (+ r 1))))
+        ;; the fissure (x): a crack into the dark, its lips broken
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (eq? (kind-at c r) 'hazard))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (rect! 'black x y w S)
+                      (let lip ((i 0))
+                        (when (< i w)
+                          (let ((h (hash3 (+ gx0 x i) (+ gy0 y) 31)))
+                            (rect! 'ground-1 (+ x i) (+ y 2 (modulo h 3)) 1 1)
+                            (when (= 0 (modulo h 5)) (rect! 'sky-2 (+ x i) (+ y 6 (modulo h 7)) 1 1)))
+                          (lip (+ i 1)))))))
+            (rows (+ r 1))))
+        ;; worn treads (the cistern's brittle stone): cut stone, pale with wear,
+        ;; already cracked; they give way if you stand on them (the live cracks
+        ;; are draw-underhum-treads!)
+        (for-each (lambda (cr)
+                    (let ((x (* S (car cr))) (y (* S (cdr cr))))
+                      (rect! 'leaf-2 x y S S)
+                      (rect! 'leaf-3 x y S 1)
+                      (rect! 'leaf-3 (+ x 2) (+ y 1) 5 1)
+                      (rect! 'leaf-1 (+ x 6) (+ y 2) 1 4)
+                      (rect! 'leaf-1 (+ x 7) (+ y 5) 4 1)
+                      (rect! 'leaf-1 (+ x 11) (+ y 6) 1 5)
+                      (rect! 'ground-1 x (+ y 13) S 3)))
+                  (room-thin-ice rm))))
 
     ;; --- the backdrop -----------------------------------------------------------
     ;; The far dark, never sky: rock receding in the four far slots, a few
@@ -515,6 +560,114 @@
         ;; the stone's foot on the floor
         (rect! 'ground-1 (- cx 28) (- foot 1) 57 1)))
 
+    ;; --- the cistern and the rooms beside it (Revision 1) -------------------
+
+    ;; The great stone's root: through K's ceiling, a dark tapering mass with
+    ;; a few tendrils; in M it comes down through the roof and ends in a round
+    ;; bulb over the floor. cx: its middle; y0, y1: its top and its end.
+    (define (draw-root! cx y0 y1 bulb?)
+      (let loop ((y y0))
+        (when (< y y1)
+          (let* ((f (/ (- y y0) (max 1.0 (* 1.0 (- y1 y0)))))
+                 (hw (max 2 (pixel (- 11 (* 8 f))))))
+            (rect! 'ground-1 (- cx hw) y (+ 1 (* 2 hw)) 1)
+            (rect! 'ground-2 (- cx hw) y (max 1 (quotient hw 3)) 1)
+            (when (= 0 (modulo (+ y (pixel cx)) 9)) (rect! 'sky-1 (+ cx (quotient hw 2)) y 1 1)))
+          (loop (+ y 1))))
+      ;; tendrils
+      (rect! 'ground-1 (- cx 7) (+ y0 4) 1 (- (pixel (* 0.7 (- y1 y0))) 4))
+      (rect! 'ground-1 (+ cx 6) (+ y0 6) 1 (- (pixel (* 0.5 (- y1 y0))) 6))
+      (when bulb?
+        (let loop ((dy -13))
+          (when (<= dy 13)
+            (let ((hw (pixel (sqrt (max 0.0 (- 169.0 (* dy dy)))))))
+              (rect! 'ground-1 (- cx hw) (+ y1 dy) (+ 1 (* 2 hw)) 1)
+              (rect! 'ground-2 (- cx hw) (+ y1 dy) (max 1 (quotient hw 3)) 1))
+            (loop (+ dy 1))))))
+    (define (root-geometry rm a)
+      ;; (cx y0 y1 bulb?) for a root thing at a in rm
+      (let ((cx (+ (* S (car a)) 8)))
+        (if (= (room-y rm) 7)
+            (list cx (* S (cdr a)) (+ (* S (cdr a)) 46) #t)       ; M: the end, a bulb
+            (list cx 0 (+ (* S (cdr a)) 58) #f))))                ; K: through the ceiling
+
+    ;; A Bearers' bench: a dressed seat on two feet, a tablet behind it cut
+    ;; with an open hand. The fifth (overtone 7) has the great stone over it,
+    ;; carved with five notches, the fifth violet. x: the bench's middle;
+    ;; foot: the floor's top.
+    (define (draw-bench! x foot o)
+      (rect! 'leaf-2 (- x 7) (- foot 7) 15 3)
+      (rect! 'leaf-3 (- x 7) (- foot 7) 15 1)
+      (rect! 'leaf-1 (- x 6) (- foot 4) 2 4)
+      (rect! 'leaf-1 (+ x 4) (- foot 4) 2 4)
+      ;; the tablet and its hand
+      (rect! 'leaf-2 (- x 5) (- foot 22) 11 14)
+      (rect! 'leaf-3 (- x 5) (- foot 22) 11 1)
+      (rect! 'leaf-1 (- x 2) (- foot 15) 5 4)
+      (rect! 'leaf-1 (- x 3) (- foot 19) 1 4)
+      (rect! 'leaf-1 (- x 1) (- foot 20) 1 5)
+      (rect! 'leaf-1 (+ x 1) (- foot 20) 1 5)
+      (rect! 'leaf-1 (+ x 3) (- foot 18) 1 3)
+      (when (= o 7)
+        (let ((cy (- foot 33)))
+          (let loop ((dy -7))
+            (when (<= dy 7)
+              (let ((hw (pixel (sqrt (max 0.0 (- 49.0 (* dy dy)))))))
+                (rect! 'leaf-1 (- x hw) (+ cy dy) 1 1)
+                (rect! 'leaf-1 (+ x hw) (+ cy dy) 1 1))
+              (loop (+ dy 1))))
+          (for-each (lambda (dx) (rect! 'leaf-1 (+ x dx) (- cy 3) 1 2)) '(-4 -2 0 2))
+          (rect! 'h7 (+ x 4) (- cy 3) 1 2))))
+
+    ;; The bearers' story along the Last Step's back wall, four panels:
+    ;; the lights carried down a stair; set into a round stone; a slab
+    ;; lowered over a bowl; four figures lying on benches. x0, y0: top-left.
+    (define (figure! x y) (rect! 'leaf-1 x y 2 5) (rect! 'leaf-1 x (- y 2) 2 1))
+    (define (draw-bearers-mural! x0 y0)
+      (let panel ((k 0))
+        (when (< k 4)
+          (let ((x (+ x0 (* k 48))))
+            (rect! 'leaf-2 x y0 44 40)
+            (rect! 'leaf-3 x y0 44 1)
+            (rect! 'leaf-1 (+ x 43) (+ y0 1) 1 39)
+            (case k
+              ((0) (let st ((i 0))
+                     (when (< i 4)
+                       (rect! 'leaf-1 (+ x 4 (* i 9)) (+ y0 10 (* i 7)) 10 1)
+                       (figure! (+ x 7 (* i 9)) (+ y0 4 (* i 7)))
+                       (rect! (list-ref '(h2 h3 h4 h5) i) (+ x 7 (* i 9)) (+ y0 (* i 7)) 2 1)
+                       (st (+ i 1)))))
+              ((1) (let ring ((dy -9))
+                     (when (<= dy 9)
+                       (let ((hw (pixel (sqrt (max 0.0 (- 81.0 (* dy dy)))))))
+                         (rect! 'leaf-1 (+ x 22 (- hw)) (+ y0 20 dy) 1 1)
+                         (rect! 'leaf-1 (+ x 22 hw) (+ y0 20 dy) 1 1))
+                       (ring (+ dy 1))))
+                   (let nt ((i 0))
+                     (when (< i 4)
+                       (rect! (list-ref '(h2 h3 h4 h5) i) (+ x 16 (* i 4)) (+ y0 17) 1 2)
+                       (nt (+ i 1))))
+                   (figure! (+ x 5) (+ y0 28)) (figure! (+ x 37) (+ y0 28)))
+              ((2) (rect! 'leaf-1 (+ x 8) (+ y0 30) 28 1)
+                   (rect! 'leaf-1 (+ x 6) (+ y0 26) 2 4) (rect! 'leaf-1 (+ x 36) (+ y0 26) 2 4)
+                   (rect! 'leaf-1 (+ x 10) (+ y0 14) 24 3)
+                   (rect! 'leaf-1 (+ x 21) (+ y0 6) 1 8)
+                   (figure! (+ x 20) (+ y0 3)))
+              (else (let bn ((i 0))
+                      (when (< i 4)
+                        (rect! 'leaf-1 (+ x 3 (* i 10)) (+ y0 30) 8 1)
+                        (rect! 'leaf-1 (+ x 3 (* i 10)) (+ y0 27) 7 2)
+                        (bn (+ i 1)))))))
+          (panel (+ k 1)))))
+
+    ;; The crack in Behind the Wall's west wall: a jagged dark line; once the
+    ;; fundamental has sounded, the chamber's white light shows through it.
+    (define CRACK '((0 0) (1 5) (0 10) (2 16) (1 22) (0 28) (2 34) (1 40) (0 46) (1 52) (2 58) (1 64)))
+    (define (draw-crack! x y ph)
+      (for-each (lambda (p)
+                  (rect! (if (eq? ph 'fused) 'fund 'black) (+ x (car p)) (+ y (cadr p)) 2 6))
+                CRACK))
+
     (define (draw-underhum-scenery! rm t ph . carry-opt)
       (when (underhum? rm)
         (let ((carry (if (pair? carry-opt) (car carry-opt) '())))
@@ -533,7 +686,22 @@
           (for-each (lambda (th)
                       (let ((a (thing-at th)))
                         (draw-great-stone! (+ (* S (car a)) 8) (* S (+ 1 (cdr a))) ph carry)))
-                    (things rm 'great-stone)))))
+                    (things rm 'great-stone))
+          (for-each (lambda (th) (apply draw-root! (root-geometry rm (thing-at th))))
+                    (things rm 'root))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (draw-bench! (+ (* S (car a)) 8) (* S (+ 1 (cdr a))) (thing-kw th "overtone"))))
+                    (things rm 'bench))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (when (eq? (thing-kw th "image") 'bearers-story)
+                          (draw-bearers-mural! (* S (car a)) (* S (cdr a))))))
+                    (things rm 'mural))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (draw-crack! (* S (car a)) (- (* S (cdr a)) 24) ph)))
+                    (things rm 'crack)))))
 
     ;; The motes of the listening place: threads leaving the great stone's
     ;; four notches, drifting down and circling the tile just above the
@@ -569,7 +737,7 @@
     ;; The rising motes of a lift column: A's from the start (the way back
     ;; up, shown), the chamber's and the stair's only after the fundamental.
     (define (column-motes rm t ph)
-      (let* ((shown (or (eq? ph 'fused) (and (= (room-x rm) 4) (= (room-y rm) 4))))
+      (let* ((shown (or (eq? ph 'fused) (and (= (room-x rm) 4) (= (room-y rm) 4)) (= (room-x rm) 8)))
              (cells (if (not shown)
                         '()
                         (let loop ((r 0) (acc '()))
@@ -598,7 +766,8 @@
       (let ((k (and rm (cons (room-x rm) (room-y rm)))))
         (unless (equal? *niche-room* k)
           (set! *niche-room* k)
-          (set! *lit-niches* (quote ())))))
+          (set! *lit-niches* (quote ()))
+          (set! *lit-benches* (quote ())))))
     (define (niche-lit? rm a bx by carry o)
       (when (and (memv o carry) (< (abs (- bx (+ (* S (car a)) 8))) 40) (not (member a *lit-niches*)))
         (set! *lit-niches* (cons a *lit-niches*)))
@@ -703,6 +872,121 @@
                                         (disc! (+ (car sc) (cadr n)) (+ (cdr sc) (caddr n)) 1.5 2.0)))
                                     NOTCHES)))
                       (things rm 'great-stone))))))
+
+    ;; --- the cistern's moving parts and the after-ending (Revision 1) ---------
+
+    ;; The tells: a draught of motes at the foot of each false wall (+), rising
+    ;; and fading, and motes sinking through the grate (=) in the chamber's
+    ;; floor: ((x y) ...) in room pixels. Seen only in light.
+    (define (tell-motes rm t)
+      (let loop ((r 0) (acc '()))
+        (if (= r ROOM-ROWS)
+            acc
+            (loop (+ r 1)
+                  (let cl ((c 0) (acc acc))
+                    (if (= c ROOM-COLS)
+                        acc
+                        (let ((ch (room-char rm c r)) (h (hash3 c r 37)))
+                          (cl (+ c 1)
+                              (cond ((and (char=? ch #\+) (< (+ r 1) ROOM-ROWS)
+                                          (memv (room-char rm c (+ r 1)) '(#\# #\%)))
+                                     (cons (list (+ (* S c) 3 (modulo h 10))
+                                                 (- (* S (+ r 1)) 2 (modulo (+ (* 0.3 t) h) 10.0)))
+                                           acc))
+                                    ((char=? ch #\=)
+                                     (cons (list (+ (* S c) 2 (modulo h 12))
+                                                 (+ (* S r) -10 (modulo (+ (* 0.4 t) h) 24.0)))
+                                           acc))
+                                    (else acc))))))))))
+
+    ;; Benches you have passed carrying their harmonic, after the ending.
+    (define *lit-benches* '())
+    (define (bench-lit? a bx carry o ph)
+      (when (and (eq? ph 'fused) (memv o carry) (< (abs (- bx (+ (* S (car a)) 8))) 32)
+                 (not (member a *lit-benches*)))
+        (set! *lit-benches* (cons a *lit-benches*)))
+      (and (member a *lit-benches*) #t))
+
+    ;; The root's end breathes the drone: one light per carried harmonic on
+    ;; its bulb, each at its own voice's breath. ((x y role breath) ...)
+    (define (root-breaths rm carry t)
+      (filter-map
+        (lambda (o)
+          (and (memv (car o) carry) (memv (car o) '(2 3 4 5 7))
+               (let* ((th (find (lambda (x) #t) (things rm 'root)))
+                      (g (and th (root-geometry rm (thing-at th)))))
+                 (and g (cadddr g)
+                      (let* ((k (case (car o) ((2) 0) ((3) 1) ((4) 2) ((5) 3) (else 4)))
+                             (a (+ 0.6 (* k 1.25)))
+                             (s (/ t 60.0)))
+                        (list (+ (car g) (* 9.0 (cos a))) (+ (caddr g) (* 8.0 (sin a)))
+                              (list-ref o 1)
+                              (+ 0.5 (* 0.5 (sin (+ (list-ref o 4) (* TAU (list-ref o 5) s)))))))))))
+        ORBS))
+
+    ;; After the body, in the index pass: the tell motes, the lit benches'
+    ;; hands, the root's breaths.
+    (define (draw-underhum-extras! rm b carry t ph ox oy)
+      (when (underhum? rm)
+        (let ((c (body-center b HARKFELL-FEEL)))
+          (for-each (lambda (m) (rect! 'sky-4 (pixel (car m)) (pixel (cadr m)) 1 1)) (tell-motes rm t))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)) (o (thing-kw th "overtone")))
+                        (when (bench-lit? a (- (car c) ox) carry o ph)
+                          (rect! (overtone-role o) (+ (* S (car a)) 7) (- (* S (+ 1 (cdr a))) 18) 3 3))))
+                    (things rm 'bench))
+          (unless (eq? ph 'fused)
+            (for-each (lambda (m) (rect! (caddr m) (pixel (car m)) (pixel (cadr m)) 2 2)) (root-breaths rm carry t))))))
+
+    ;; Their light (B), and the after-ending's: the crack's white line, the
+    ;; root's white glow carried down from the stone, the mural lit by it.
+    (define (draw-underhum-extra-lights! rm b carry t ph ox oy)
+      (when (underhum? rm)
+        (for-each (lambda (m) (disc! (car m) (cadr m) 3.0 0.12) (disc! (car m) (cadr m) 0.5 0.9)) (tell-motes rm t))
+        (for-each (lambda (th)
+                    (let ((a (thing-at th)))
+                      (when (member a *lit-benches*)
+                        (disc! (+ (* S (car a)) 8) (- (* S (+ 1 (cdr a))) 17) 12.0 0.3)
+                        (disc! (+ (* S (car a)) 8) (- (* S (+ 1 (cdr a))) 17) 1.5 1.6))))
+                  (things rm 'bench))
+        (if (eq? ph 'fused)
+            (begin
+              (for-each (lambda (th)
+                          (let ((a (thing-at th)))
+                            (for-each (lambda (p) (disc! (+ (* S (car a)) (car p) 1) (+ (- (* S (cdr a)) 24) (cadr p) 3) 3.0 0.3)) CRACK)
+                            (disc! (+ (* S (car a)) 1) (* S (cdr a)) 40.0 0.18)))
+                        (things rm 'crack))
+              (for-each (lambda (th)
+                          (let ((g (root-geometry rm (thing-at th))))
+                            (disc! (car g) (caddr g) 34.0 0.3)
+                            (disc! (car g) (caddr g) 12.0 0.7)
+                            (when (cadddr g) (disc! (car g) (caddr g) 5.0 1.6))))
+                        (things rm 'root))
+              (for-each (lambda (th)
+                          (when (eq? (thing-kw th "image") 'bearers-story)
+                            (let ((a (thing-at th)))
+                              (disc! (+ (* S (car a)) 96) (+ (* S (cdr a)) 20) 110.0 0.14))))
+                        (things rm 'mural)))
+            (for-each (lambda (m)
+                        (disc! (car m) (cadr m) 5.0 (* 0.3 (cadddr m)))
+                        (disc! (car m) (cadr m) 0.8 (* 1.6 (cadddr m))))
+                      (root-breaths rm carry t)))))
+
+    ;; The worn treads' live cracks, under a body standing on one (BRITTLE
+    ;; ticks, the same steps as Glasswood's thin ice). Index pass, before the
+    ;; body.
+    (define (draw-underhum-treads! rm b ox oy)
+      (when (underhum? rm)
+        (let ((n (body-brittle b)) (bx (- (+ (body-x b) 4.0) ox)))
+          (when (> n 0)
+            (for-each (lambda (cr)
+                        (let ((x (* S (car cr))) (y (* S (cdr cr))))
+                          (when (and (<= x bx) (< bx (+ x S)))
+                            (let ((k (+ 1 (quotient (* 3 n) BRITTLE-TICKS))))
+                              (rect! 'black (+ x 3) (+ y 1) 6 1)
+                              (when (>= k 2) (rect! 'black (+ x 8) (+ y 2) 5 1) (rect! 'black (+ x 1) (+ y 3) 4 1))
+                              (when (>= k 3) (rect! 'black (+ x 11) (+ y 1) 4 1) (rect! 'black (+ x 5) (+ y 3) 1 2))))))
+                      (room-thin-ice rm))))))
 
     ;; --- the heart, in the bowl -------------------------------------------------
     ;; The heart, the bowl's stone keyed to the whole set (heart-stone? in
