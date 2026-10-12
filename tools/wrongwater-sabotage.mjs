@@ -28,7 +28,7 @@ const LEGS = [
   ['climb-opens-from-zero', [[SOUND, '(vector-set! st 2 (+ (held->frame held) (source-lead s)))', '(vector-set! st 2 (source-lead s))']], AUDIO_T,
     'a climb that starts late (the count already at 3 s) starts where the count is'],
   ['h7-lands-late', [['assets/tunes/drip-climb.cts', '(row 40 (7 "C-5" 7 34 "000") (8 "C-6" 8 24 "000"))', '(row 44 (7 "C-5" 7 34 "000") (8 "C-6" 8 24 "000"))']], AUDIO_T,
-    'the buffer: H7 sounds from 4.0 s, and not in the 0.15 s before'],
+    'the buffer: H7 sounds from 4.0 s, and not in the 0.1 s before'],
   ['climb-never-falls-away', [[SOUND, '((< held DRIP-START-S) (drip-fall-away! now))', '((< held -1.0) (drip-fall-away! now))']], AUDIO_T,
     'moving at 3 s, it falls away over DRIP-FALLBACK-S and is gone'],
   // the drip
@@ -93,6 +93,12 @@ fs.mkdirSync('build', { recursive: true });
 let bad = 0;
 for (const [name, plants, testFile, mustFail] of LEGS) {
   if (only.length && !only.includes(name)) continue;
+  // the leg names a test that exists: a stale name can never print its
+  // failure marker, and would score a working gate NOT RED (seen 2026-10-12:
+  // h7-lands-late after its test was renamed)
+  if (!fs.readFileSync(testFile, 'utf8').includes(`(test "${mustFail}"`)) {
+    console.log(`SETUP-FAILED ${name}: no test named "${mustFail}" in ${testFile}`); bad++; continue;
+  }
   const files = [...new Set(plants.map((p) => p[0]))];
   const before = Object.fromEntries(files.map((f) => [f, sha(f)]));
   let landed = true;
