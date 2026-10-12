@@ -71,6 +71,7 @@
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
           place-carry place-tones place-stones place-news
+          place-ending
           place-wander place-moment-carrying place-moment-still place-moment-key place-hums place-exits place-static UPWARD-ID
           place-tau place-gusts place-gaps place-seeds place-gliding
           sound-gust sound-gust-source sound-gust-nudge! sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-FREEZE-S GUST-MOMENT-DIP GAP-GAIN GAP-R
@@ -148,6 +149,7 @@
       (wander default: '()) (moment-carrying default: #f) (moment-still default: #f) (moment-key default: #f)
       (moves default: '()) (mode default: #f) (vx default: 0.0) (bx default: 0.0) (foot default: #f)
       (hums default: '()) (light default: 1.0)
+      (ending default: #f)        ; (harkfell underhum finale) state, for SOUND
       ;; Local unpitched sources: ((high|low x y) ...) and ((x y) ...).
       (exits default: '()) (static default: '())
       ;; Cloudstair: tau, the shared gust clock (0..479 simulation ticks,
@@ -1078,7 +1080,8 @@
                          best
                          (let* ((st (car ss))
                                 (d (sqrt (+ (expt (- (caddr st) (place-px pl)) 2) (expt (- (cadddr st) (place-py pl)) 2)))))
-                           (if (and (eq? (cadr st) 'shut) (not (memv (car st) *carry*)) (< d bd))
+                           (if (and (= (length st) 4) (eq? (cadr st) 'shut)
+                                    (not (memv (car st) *carry*)) (< d bd))
                                (loop (cdr ss) (cons st d) d)
                                (loop (cdr ss) best bd))))))
              (n (and near (car (car near)))))

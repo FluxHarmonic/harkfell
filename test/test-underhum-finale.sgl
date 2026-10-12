@@ -1,0 +1,138 @@
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (harkfell underhum finale)
+        (harkfell save)
+        (harkfell gates)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell world)
+        (engine worldmap)
+        (engine reach))
+
+(define FULL '(2 3 4 5))
+(define (wait f ticks still? . carry)
+  (if (= ticks 0)
+      f
+      (wait (finale-step f #t still? #f #f #t (if (pair? carry) (car carry) FULL))
+            (- ticks 1) still? (if (pair? carry) (car carry) FULL))))
+
+(define CHAMBER
+  (load-content
+    (map (lambda (e)
+           (cons (car e)
+                 (string-replace (string-replace (cdr e) "stonefen" "underhum") "(0 0)" "(7 5)")))
+         (read-world-source "test/fixtures/worlds/stone"))))
+(define (world-wait w ticks)
+  (if (= ticks 0) w (world-wait (world-tick w NOTHING) (- ticks 1))))
+
+(test-group "Underhum: actual world integration"
+  (test "the body keeps control and the world emits fuse on its 120th still tick"
+    (let* ((tm (worldmap-tiles (content-map CHAMBER)))
+           (w (world-populate
+                (world-at (content-map CHAMBER) (cell-body tm HARKFELL-FEEL 2 8))
+                (content-stones CHAMBER) (content-pickups CHAMBER) FULL))
+           (before (world-wait w 119))
+           (after (world-wait before 1)))
+      (assert-false (world-ended before))
+      (assert-true (world-ended after))
+      (assert-equal 'play (world-phase after))
+      (assert-equal '(fuse)
+        (map cadr (filter (lambda (item) (eq? (car item) 'finale)) (world-news after))))
+      (assert-true (finale-lit (world-ending (world-finale-mark after 'fundamental)))))))
+
+(test-group "Underhum: chamber trigger paths"
+  (test "119 still ticks do not trigger; 120 do"
+    (assert-false (finale-ended (wait (finale) 119 #t)))
+    (assert-equal 'fuse (finale-phase (wait (finale) 120 #t))))
+  (test "moving resets stillness and the 15-second fallback remains"
+    (let ((moving (wait (wait (finale) 119 #t) 1 #f)))
+      (assert-false (finale-ended (wait moving 119 #t)))
+      (assert-equal 'fuse (finale-phase (wait moving 120 #t))))
+    (assert-false (finale-ended (wait (finale) 899 #f)))
+    (assert-true (finale-ended (wait (finale) 900 #f))))
+  (test "leaving resets chamber and stillness; soft return does not count"
+    (let ((left (finale-step (wait (finale) 899 #f) #f #t #f #f #t FULL)))
+      (assert-false (finale-ended (wait left 1 #f)))
+      (assert-equal 0 (finale-still left)))
+    (assert-false (finale-ended (finale-step (wait (finale) 119 #t) #t #t #f #f #f FULL))))
+  (test "entering the lift is a fallback even while moving"
+    (assert-equal 'fuse (finale-phase (finale-step (finale) #t #f #t #f #t FULL))))
+  (test "partial carries cannot trigger the ending through a demo door"
+    (assert-false (finale-ended (wait (finale) 1000 #t '(2 3 4)))))
+  (test "movement after triggering cannot cancel the fusion"
+    (assert-equal 'fuse (finale-phase (wait (wait (finale) 120 #t) 30 #f)))))
+
+(test-group "Underhum: climb, actual marks and daylight"
+  (test "light waits for the musical acknowledgment"
+    (let ((f (wait (finale) 120 #t)))
+      (assert-false (finale-lit f))
+      (assert-true (finale-lit (finale-mark f 'fundamental)))))
+  (test "climb starts credits, and a fast homecoming can skip theme"
+    (let* ((f (wait (finale) 120 #t))
+           (rise (finale-step f #t #f #t #f #t FULL))
+           (home (finale-step f #f #f #f #t #t FULL)))
+      (assert-equal 'rise (finale-phase rise))
+      (assert-equal 0 (finale-credits rise))
+      (assert-equal 'home (finale-phase home))
+      (assert-equal 1.0 (finale-night home))
+      (assert-equal 'home (finale-phase (finale-mark home 'theme)))))
+  (test "dawn ramps for 30 seconds; restored endings are already daylight"
+    (let* ((home (finale-step (wait (finale) 120 #t) #f #f #f #t #t FULL))
+           (dawn (finale-mark (finale-mark home 'close) 'dawn))
+           (half (wait dawn 900 #f))
+           (done (wait half 900 #f)))
+      (assert-equal 0.5 (finale-night half))
+      (assert-equal 'done (finale-phase done))
+      (assert-equal 0.0 (finale-night done))
+      (assert-equal 0.0 (finale-night (finale-restored #t FULL #f))))))
+
+(test-group "Underhum: H7 and once-only coda"
+  (test "an H7 ending records its voice and never plays a coda"
+    (let* ((f (wait (finale) 120 #t '(2 3 4 5 7)))
+           (back (finale-restored #t (finale-ended-with f) #f)))
+      (assert-equal '(2 3 4 5 7) (finale-ended-with f))
+      (assert-equal 'done (finale-phase (wait back 200 #t '(2 3 4 5 7))))))
+  (test "late H7 plays the short coda once, with no credits or repeat ending"
+    (let* ((back (finale-restored #t FULL #f))
+           (coda (wait back 1 #t '(2 3 4 5 7)))
+           (done (finale-mark coda 'done)))
+      (assert-equal 'coda (finale-phase coda))
+      (assert-true (finale-coda coda))
+      (assert-false (finale-credits coda))
+      (assert-equal 'done (finale-phase (wait done 200 #t '(2 3 4 5 7)))))))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+(define ROOM (content-room CT 9 3))
+(define CELL (room-start-cell CT ROOM))
+(define BODY (cell-body TM HARKFELL-FEEL (car CELL) (cdr CELL)))
+(define (saved ended with coda active)
+  (save-datum CT BODY FULL (content-stones CT) '() 1.0 #f #f '() ended with coda active))
+
+(test-group "Underhum: forgiving save state"
+  (test "old saves restore as not ended"
+    (let ((r (save-restore CT '(harkfell-save 1 (room reedfen 9 3) (cell 4 7)))))
+      (assert-false (restored-ended r))
+      (assert-equal '() (restored-ended-with r))
+      (assert-false (restored-coda r))))
+  (test "completed endings keep the ordinary soft-return entry"
+    (let ((r (save-restore CT (saved #t FULL #t #f))))
+      (assert-true (restored-ended r))
+      (assert-equal FULL (restored-ended-with r))
+      (assert-true (restored-coda r))
+      (assert-equal CELL (restored-cell r))))
+  (test "quitting during the piece resumes in the bowl without replay"
+    (let ((r (save-restore CT (saved #t FULL #f #t))))
+      (assert-equal (start-cell CT) (restored-cell r))
+      (assert-equal 'done (finale-phase (finale-restored (restored-ended r)
+                                                      (restored-ended-with r)
+                                                      (restored-coda r))))))
+  (test "malformed optional ending fields are forgiven"
+    (let ((r (save-restore CT '(harkfell-save 1 (room reedfen 9 3) (cell 4 7)
+                              (ended maybe) (ended-with 2 wrong 7) (coda #t)))))
+      (assert-false (restored-ended r))
+      (assert-equal '() (restored-ended-with r))
+      (assert-false (restored-coda r)))))

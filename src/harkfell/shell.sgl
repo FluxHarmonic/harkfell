@@ -67,6 +67,7 @@
           (harkfell save)
           (harkfell frame)
           (harkfell reveal)
+          (harkfell underhum finale)
           (harkfell title)
           (harkfell render))
 
@@ -79,7 +80,7 @@
           shell-key-down! shell-key-up! shell-keys-clear!
           shell-stick! shell-jump! shell-sector
           shell-set-ms! shell-set-stick-form! shell-stick-form
-          shell-world shell-clock shell-set-frame-stamp!
+          shell-world shell-clock shell-set-frame-stamp! shell-finale-mark!
           shell-latency-lines now-ms
           shell-load-content! shell-content shell-goto! shell-goto-start!
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
@@ -298,6 +299,11 @@
     (define (shell-set-extra-lines! proc) (set! *extra-lines* proc))
 
     (define (shell-world) *world*)
+    ;; The director acknowledges marks on the real song's clock. It never
+    ;; changes input, position or control while the ending plays.
+    (define (shell-finale-mark! mark)
+      (when *world*
+        (set! *world* (world-finale-mark *world* mark))))
     (define (shell-clock) *clock*)
 
     ;; --- boot ------------------------------------------------------------------
@@ -360,7 +366,8 @@
     (define (populate w old carry)
       (world-populate
         (if old
-            (world w body: (body (world-body w) down: (world-down old) tau: (world-tau old)))
+            (world w body: (body (world-body w) down: (world-down old) tau: (world-tau old))
+                     finale: (world-ending old))
             w)
         (kept-stones old) (content-pickups *content*)
         (append carry (if old (world-carry old) '()))))
@@ -454,7 +461,10 @@
                                    (body (body-in-cell (restored-cell r))
                                          down: (restored-down r) tau: (restored-tau r)))))
                  (set! *world* (world (world-populate w stones (content-pickups *content*) (restored-carry r))
-                                      aurora: (restored-aurora r)))
+                                      aurora: (restored-aurora r)
+                                      finale: (finale-restored (restored-ended r)
+                                                              (restored-ended-with r)
+                                                              (restored-coda r))))
                  ;; D47: the region you continue in counts as announced, its
                  ;; name unshown (an older save, read as none announced, too)
                  (set! *announced*
@@ -474,7 +484,10 @@
              (save-datum *content*
                          (body (world-entry *world*) down: (world-down *world*) tau: (world-tau *world*))
                          (world-carry *world*) (world-stones *world*)
-                         (car x) (cadr x) *revealed* (world-aurora *world*) *announced*))))
+                         (car x) (cadr x) *revealed* (world-aurora *world*) *announced*
+                         (world-ended *world*) (world-ended-with *world*) (world-coda *world*)
+                         (and (world-ended *world*)
+                              (not (eq? (finale-phase (world-ending *world*)) 'done)))))))
 
     ;; Write the save when what it holds has changed: the entry (a room
     ;; entered), the carry, the stones opened, the moments heard. Not the
@@ -484,7 +497,9 @@
              (sig (list (body-x e) (body-y e) (world-carry *world*)
                         (length (filter stone-open? (world-stones *world*)))
                         (car (*save-get*))
-                        *revealed* (world-aurora *world*) *announced* (world-down *world*))))
+                        *revealed* (world-aurora *world*) *announced* (world-down *world*)
+                        (world-ended *world*) (world-ended-with *world*) (world-coda *world*)
+                        (finale-phase (world-ending *world*)))))
         (unless (equal? sig *save-sig*)
           (let ((d (current-save)))
             (when d

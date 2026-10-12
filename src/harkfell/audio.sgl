@@ -261,6 +261,7 @@
                  (let ((tm (world-tiles w)))
                    (place pl
                           carry: (world-carry w)
+                          ending: (world-ending w)
                           tones: (map (lambda (p) (let ((c (cell-centre tm (pickup-cell p))))
                                                     (list (pickup-overtone p) (+ sx (car c)) (+ sy (cdr c)))))
                                       (filter (lambda (p)

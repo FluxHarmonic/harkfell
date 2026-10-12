@@ -64,7 +64,7 @@
       (assert-equal 'ringing (state ring))
       (assert-equal 'sinking (state sink))
       (assert-equal 'open (state open))
-      (assert-equal '(ring sink open) (kinds open))
+      (assert-equal '(chord sink open) (kinds open))
       (assert-equal 'air (tilemap-ref (gstate-tiles open) (car CELL) (cdr CELL)))
       (assert-equal 'air (tilemap-ref (tiles-carrying HEART '(2 3 4 5 7)) (car CELL) (cdr CELL))))))
 

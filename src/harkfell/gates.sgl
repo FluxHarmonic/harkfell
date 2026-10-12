@@ -221,7 +221,10 @@
                          (else (stone-near s))))
              (s (stone s near: near t: (+ (stone-t s) 1)
                        shiver: (max 0 (- (stone-shiver s) 1))))
-             (item (lambda (what) (say! (list what n (car c) (cdr c))))))
+             (item (lambda (what)
+                     (if (and (eq? what 'ring) (stone-keys s) (> (length (stone-keys s)) 1))
+                         (say! (list 'chord (stone-keys s) (car c) (cdr c)))
+                         (say! (list what n (car c) (cdr c)))))))
         (case (stone-state s)
           ((shut)
            ;; carrying the key inside the radius always rings a shut stone,
