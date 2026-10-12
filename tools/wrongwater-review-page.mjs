@@ -12,7 +12,8 @@ const dir = process.argv[2] || 'build/wrongwater-listening';
 const EXT = process.env.AUDIO_EXT || 'wav';
 const sections = [
   ['The Ice Well door', 'Standing still by the rising drip (David\'s ruling 1: it has to make you stop and anticipate). From 1 s of stillness the harmonic series of D climbs out of the crack, D4 E4 F#4, the 11th, A4, the 13th, each note held and a little louder, closer and closer together like the drop\'s rings, and lands on H7 at 5 s, when the drop falls into the crack with one plain drip and the door sinks. In play the climb follows the door\'s own count, so it cannot land early or late. The drip\'s H7 hum is under it here at a fixed level; in play it also swells by 6 dB over the five seconds.', [
-    ['door-opens', 'The door opens', 'Still from 0 s: the climb from 1 s, H7 and the stone at 5 s, the drop at 5.3 s.'],
+    ['door-opens', 'The door opens (the climb soft: the default)', 'Still from 0 s: the climb from 1 s, H7 and the stone at 5 s, the drop at 5.3 s. The bible calls the climb a soft cue; here it sits about 5 dB over the recess.'],
+    ['door-opens-moment', 'The door opens (the climb as loud as a moment)', 'The same, the first take: the climb at moment loudness. Choose by ear; in the game ?sound=climb:moment plays this one, climb:soft the other.'],
     ['door-moved-at-3s', 'You move at 3 s', 'The climb falls away over half a second. Stand still again and it starts from the beginning.'],
     ['door-climb-alone', 'The climb alone', 'Notes at 0, 0.9, 1.7, 2.4, 3.0, 3.5 and 4.0 s.'],
   ]],
@@ -59,10 +60,14 @@ const measure = (f) => {
   const r = spawnSync('ffmpeg', ['-nostats', '-hide_banner', '-i', f, '-af', 'ebur128=peak=sample', '-f', 'null', '-'], { encoding: 'utf8' });
   return String(r.stderr || '');
 };
+const old = fs.existsSync(path.join(dir, 'manifest.json')) ? Object.fromEntries(JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')).map((m) => [m.name, m])) : {};
 const manifest = [];
 for (const [, , tracks] of sections) for (const [n] of tracks) {
   const f = path.join(dir, n + '.wav');
-  if (!fs.existsSync(f)) throw Error('Missing recording ' + n);
+  if (!fs.existsSync(f)) {
+    if (old[n] && fs.existsSync(path.join(dir, n + '.' + EXT))) { manifest.push(old[n]); continue; }
+    throw Error('Missing recording ' + n);
+  }
   const b = fs.readFileSync(f);
   const frames = b.readUInt32LE(40) / 2;   // 16-bit mono
   const o = measure(f);

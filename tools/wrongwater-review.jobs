@@ -2,7 +2,7 @@
 ;; Gains are in play: rooms' bed: levels; the drone at its moving level (0.35 of the room's) unless
 ;; still, when the bed source dips 6 dB (0.5) and the drone comes up to the room's level; the bed ducked
 ;; 6 dB under a moment; H7's channel at H7-DIP (0.1) under any moment but rain-rising; cues at their
-;; SPOTS gains; the climb at DRIP-GAIN 0.8 from 1.0 s of stillness.
+;; SPOTS gains; the climb at DRIP-GAIN-SOFT 0.4 from 1.0 s of stillness (door-opens-moment: 0.8).
 ;; Wrongwater rooms (channels 1 air, 2 water, 3 hang, 4-8 drone)
 (job "ww-bed-a-under-the-well" 45 (layer "wrongwater-bed" 1 (2 3 4) ((1 . 0.15) (2 . 0.5) (3 . 0.35) (4 . 0.21) (5 . 0.21) (6 . 0.21) (7 . 0.21) (8 . 0.21))))
 (job "ww-bed-b-hanging-tarn" 45 (layer "wrongwater-bed" 1 (2 3 4) ((1 . 0.15) (2 . 0.3) (3 . 0.6) (4 . 0.21) (5 . 0.21) (6 . 0.21) (7 . 0.21) (8 . 0.21))))
@@ -10,8 +10,9 @@
 (job "ww-bed-c-still-without-h7" 40 (layer "wrongwater-bed" 0.5 (2 3 4) ((1 . 0.15) (2 . 0.3) (3 . 0.6) (4 . 0.6) (5 . 0.6) (6 . 0.6) (7 . 0.6) (8 . 0.6))))
 (job "ww-bed-c-still-with-h7" 40 (layer "wrongwater-bed" 0.5 (2 3 4 7) ((1 . 0.15) (2 . 0.3) (3 . 0.6) (4 . 0.6) (5 . 0.6) (6 . 0.6) (7 . 0.6) (8 . 0.6))))
 ;; the door: the Ice Well's recess (glasswood-bed: wind water chimes drone), the drip's own hum, the climb
-(job "door-opens" 12 (layer "glasswood-bed" 0.5 (2 3 4) ((1 . 0.2) (2 . 0.4) (3 . 0.3) (4 . 0.6) (5 . 0.6) (6 . 0.6) (7 . 0.6) (8 . 0.6))) (layer "tone-h7" 0.3 () ()) (layer "drip-climb" 0.8 () () 1.0) (layer "stone-slide" 0.72 () () 5.0) (layer "drip-fall" 0.5 () () 5.3))
-(job "door-moved-at-3s" 8 (layer "glasswood-bed" 0.5 (2 3 4) ((1 . 0.2) (2 . 0.4) (3 . 0.3) (4 . 0.6) (5 . 0.6) (6 . 0.6) (7 . 0.6) (8 . 0.6))) (layer "tone-h7" 0.25 () ()) (layer "drip-climb" 0.8 () () 1.0 3.0))
+(job "door-opens" 12 (layer "glasswood-bed" 0.5 (2 3 4) ((1 . 0.2) (2 . 0.4) (3 . 0.3) (4 . 0.6) (5 . 0.6) (6 . 0.6) (7 . 0.6) (8 . 0.6))) (layer "tone-h7" 0.3 () ()) (layer "drip-climb" 0.4 () () 1.0) (layer "stone-slide" 0.72 () () 5.0) (layer "drip-fall" 0.5 () () 5.3))
+(job "door-opens-moment" 12 (layer "glasswood-bed" 0.5 (2 3 4) ((1 . 0.2) (2 . 0.4) (3 . 0.3) (4 . 0.6) (5 . 0.6) (6 . 0.6) (7 . 0.6) (8 . 0.6))) (layer "tone-h7" 0.3 () ()) (layer "drip-climb" 0.8 () () 1.0) (layer "stone-slide" 0.72 () () 5.0) (layer "drip-fall" 0.5 () () 5.3))
+(job "door-moved-at-3s" 8 (layer "glasswood-bed" 0.5 (2 3 4) ((1 . 0.2) (2 . 0.4) (3 . 0.3) (4 . 0.6) (5 . 0.6) (6 . 0.6) (7 . 0.6) (8 . 0.6))) (layer "tone-h7" 0.25 () ()) (layer "drip-climb" 0.4 () () 1.0 3.0))
 (job "door-climb-alone" 9 (layer "drip-climb" 1.0 () ()))
 ;; the moment, in E
 (job "moment-e-rain-rising" 34 (layer "wrongwater-bed" 0.5 (2 3 4) ((1 . 0.15) (2 . 0.7) (3 . 0.35) (4 . 0.21) (5 . 0.21) (6 . 0.21) (7 . 0.21) (8 . 0.21))) (layer "rain-rising" 1.0 () () 1.0))
