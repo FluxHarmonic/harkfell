@@ -285,3 +285,44 @@
       (assert-equal 0.45 (attack-of t 23))
       (assert-equal 0.02 (attack-of t 17))
       (assert-equal 0.02 (attack-of t 1)))))
+
+;; --- the adapter: SYSTEMS' stillness stone as the director's drip ---------------------------
+;; The stone fixture world with its ring-stone made a stillness door (as
+;; test-depths-gates does): it listens at (14,8) of stonefen (0,0).
+(import (only (sigil string) string-replace)
+        (engine worldmap)
+        (harkfell source)
+        (harkfell content)
+        (harkfell gates)
+        (harkfell world)
+        (harkfell feel)
+        (only (harkfell audio) world-drip))
+(define DOOR-CT
+  (load-content
+    (map (lambda (e)
+           (cons (car e)
+                 (string-replace (cdr e) "(ring-stone at: (15 8) overtone: 2)"
+                                 "(ring-stone at: (15 8) overtone: 2 still: 5 radius: 2 listen: (stonefen 0 0 14 8))")))
+         (read-world-source "test/fixtures/worlds/stone"))))
+(define (door-world listening state)
+  (let* ((w (world-populate
+              (world-at (content-map DOOR-CT)
+                        (cell-body (worldmap-tiles (content-map DOOR-CT)) HARKFELL-FEEL 12 8))
+              (content-stones DOOR-CT) (content-pickups DOOR-CT) '()))
+         (g (world-gates w)))
+    (world w gates: (gstate g stones: (map (lambda (st) (stone st listening: listening state: state)) (gstate-stones g))))))
+
+(test-group "wrongwater: the adapter"
+  (test "the stillness stone is the drip: shut, at the cell it listens at, its count in seconds"
+    (let ((d (world-drip (door-world 150 'shut))))
+      (display "  drip ") (display d) (newline)
+      ;; (14,8) of room (0,0): 14 * 16 + 8, 8 * 16 + 8
+      (assert-equal (list 'shut 232.0 136.0 2.5) d)))
+  (test "sinking and open are open"
+    (assert-equal 'open (car (world-drip (door-world 300 'sinking))))
+    (assert-equal 'open (car (world-drip (door-world 0 'open)))))
+  (test "a world with no stillness stone has no drip"
+    (let* ((ct (load-content (read-world-source "test/fixtures/worlds/stone")))
+           (w (world-populate (world-at (content-map ct) (cell-body (worldmap-tiles (content-map ct)) HARKFELL-FEEL 12 8))
+                              (content-stones ct) (content-pickups ct) '())))
+      (assert-false (world-drip w)))))
