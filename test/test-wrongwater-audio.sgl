@@ -1,0 +1,294 @@
+;;; Wrongwater's sound through the real director and a headless mixer
+;;; (harkfell-wrongwater-bible, "The sound" and "The door").
+;;;
+;;;   the climb      standing still by the Ice Well's drip, the climb starts at
+;;;                  the door's DRIP-START-S and is heard on the door's own
+;;;                  stillness count, so it lands on H7 (4.0 s into the buffer)
+;;;                  at the door's 5.0 s; knocked off it comes back; moving
+;;;                  before 5 s it falls away over DRIP-FALLBACK-S
+;;;   the buffer     H7 enters the climb at 4.0 s (and not before)
+;;;   the drip       its hum swells with the count; once the door is open it no
+;;;                  longer hums, the crack drips the right way, and the
+;;;                  opening's news plays the drop and the stone
+;;;   the answers    carrying H7, passing an upward thing answers, at most once
+;;;                  every ANSWER-GAP-S, never in a moment, never without H7
+;;;   H7's tone      a finding tone only in Wrongwater (decision 2)
+;;;   the dip        H7's drone channel drops to H7-DIP under any moment but
+;;;                  H7-KEEPS, survives a room change, and comes back
+;;;   the bed        a border opening keeps the short attacks (the drops
+;;;                  played backwards) and quickens the slow ones
+
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (sigil math)
+        (motif tune)
+        (engine mixer)
+        (harkfell tunes)
+        (harkfell sound))
+
+(define RATE 32000)
+(mixer-open-headless! RATE (lambda (id buf n gain) #f))
+(define SAID '())
+(define (said? . words) (and (member words SAID) #t))
+(define (boot!)
+  (sound-boot! '("the-ice-rings" "rain-rising") (lambda parts (set! SAID (cons parts SAID))))
+  (sound-reset!)
+  (sound-set-rng! 7)
+  (set! SAID '()))
+(boot!)
+
+;; The Ice Well (-2,6): its drip at (15,9), absolute pixels
+(define DX (+ (* 400.0 -2) (* 16 15) 8.0))
+(define DY (+ (* 176.0 6) (* 16 9) 8.0))
+(define GW-LEVELS '((wind . 0.2) (water . 0.4) (chimes . 0.3) (drone . 0.6)))
+(define (well held . kw)
+  (apply place key: "glasswood:-2,6" region: 'glasswood bed-tune: "glasswood-bed" groups: '(wind water chimes drone)
+         levels: GW-LEVELS carry: '(2 3 4) tones: '() stones: '()
+         hums: (list (list 7 DX DY)) px: (- DX 20.0) py: DY rx: -2 ry: 6 still: (> held 0.0)
+         drip: (list 'shut DX DY held) kw))
+
+(define T 0.0)
+(define (frame! pl)
+  (set! T (+ T (/ 1.0 30.0)))
+  (sound-frame! T (/ 1.0 30.0) pl)
+  (mixer-pump! T))
+;; stand still for FRAMES frames from HELD0, the door counting as SYSTEMS would
+(define (stand frames held0 . kw)
+  (let loop ((i 0) (held held0))
+    (if (< i frames)
+        (let ((h (+ held (/ 1.0 30.0))))
+          (frame! (apply well h kw))
+          (loop (+ i 1) h))
+        held)))
+(define (until-buffer)
+  (let loop ((k 0))
+    (when (and (< k 6000) (not (sound-loop 'drip-climb)))
+      (frame! (well 0.0))
+      (loop (+ k 1)))))
+(until-buffer)
+
+(define (heard) (car (sound-drip)))
+(define (rms bv from-s to-s)
+  (let ((a (exact (round (* from-s RATE)))) (b (exact (round (* to-s RATE)))))
+    (let loop ((i a) (e 0.0))
+      (if (< i b)
+          (let ((x (bytevector-ieee-single-ref bv (* 4 i) 'little))) (loop (+ i 1) (+ e (* x x))))
+          (sqrt (/ e (- b a)))))))
+(define (goertzel-bv bv from-s to-s f)
+  (let* ((a (exact (round (* from-s RATE)))) (b (exact (round (* to-s RATE))))
+         (w (/ (* 2.0 3.14159265358979 f) RATE)) (k (* 2.0 (cos w))))
+    (let loop ((i a) (s1 0.0) (s2 0.0))
+      (if (< i b)
+          (loop (+ i 1) (+ (bytevector-ieee-single-ref bv (* 4 i) 'little) (- (* k s1) s2)) s1)
+          (/ (sqrt (max 0.0 (- (+ (* s1 s1) (* s2 s2)) (* k s1 s2)))) (- b a))))))
+(define H7-HZ (* 14.0 36.70809598967595))
+
+(test-group "wrongwater: the climb's tune"
+  (test "its notes enter at DRIP-CLIMB-AT, less DRIP-START-S, by its rows (and H7 last, at the landing)"
+    (let* ((t (tune-parsed "drip-climb"))
+           (row-s (/ (* (tune-speed t) 2.5) (tune-tempo t)))
+           (ons (list-sort < (map (lambda (c) (+ DRIP-START-S (* row-s (cell-row c))))
+                                  (filter (lambda (c) (and (number? (cell-note c)) (<= (cell-channel c) 7)))
+                                          (tune-pattern-cells (car (tune-patterns t))))))))
+      (display "  onsets ") (display ons) (newline)
+      (assert-equal (length DRIP-CLIMB-AT) (length ons))
+      (for-each (lambda (a b) (assert-true (< (abs (- a b)) 0.001))) DRIP-CLIMB-AT ons)
+      (assert-true (< (abs (- (car (reverse ons)) DRIP-LAND-S)) 0.001))))
+  (test "the buffer: H7 sounds from 4.0 s, and not in the 0.15 s before"
+    (let* ((bv (sound-loop 'drip-climb))
+           (before (goertzel-bv bv 3.83 3.98 H7-HZ))
+           (after (goertzel-bv bv 4.05 4.2 H7-HZ)))
+      (display "  H7 before ") (display before) (display " after ") (display after) (newline)
+      (assert-true (> after (* 8.0 before))))))
+
+(test-group "wrongwater: the climb on the door's clock"
+  (test "under DRIP-START-S of stillness, nothing"
+    (sound-reset!) (set! SAID '())
+    (stand 27 0.0)
+    (assert-false (sound-drip)))
+  (test "from DRIP-START-S it plays, on the count; at the door's 5.0 s it is heard at 4.0 s (H7)"
+    (sound-reset!) (set! SAID '())
+    (stand 32 0.0)
+    (assert-true (sound-drip))
+    (let ((held (stand 118 (/ 32 30.0))))
+      (display "  held ") (display held) (display " heard ") (display (heard)) (newline)
+      (assert-true (< (abs (- (heard) (- held DRIP-START-S))) 0.04))
+      (assert-true (< (abs (- (heard) 4.0)) 0.05))))
+  (test "knocked 0.4 s off the count (a stall, a sink played out), it comes back"
+    (sound-reset!)
+    (let ((held (stand 60 0.0)))
+      (sound-drip-nudge! 0.4)
+      (let ((held2 (stand 3 held)))
+        (assert-true (< (abs (- (heard) (- held2 DRIP-START-S))) 0.04)))))
+  (test "a climb that starts late (the count already at 3 s) starts where the count is"
+    (sound-reset!)
+    (stand 1 3.0)
+    (assert-true (< (abs (- (heard) (- (+ 3.0 (/ 1.0 30.0)) DRIP-START-S))) 0.04)))
+  (test "moving at 3 s, it falls away over DRIP-FALLBACK-S and is gone"
+    (sound-reset!) (set! SAID '())
+    (let ((held (stand 90 0.0)))
+      (let ((s (sound-drip-source)))
+        (frame! (well 0.0))
+        (assert-true (said? "sound" "drip" "fall-away"))
+        (assert-false (sound-drip))
+        (let loop ((i 0)) (when (< i 16) (frame! (well 0.0)) (loop (+ i 1))))
+        (display "  gain ") (display (source-gain s T)) (newline)
+        (assert-true (< (source-gain s T) 0.05))
+        (let loop ((i 0)) (when (< i 20) (frame! (well 0.0)) (loop (+ i 1))))
+        (assert-false (memq s (mixer-sources))))))
+  (test "the next stillness starts it again from the start"
+    (stand 31 0.0)
+    (assert-true (sound-drip))
+    (assert-true (< (heard) 0.1)))
+  (test "past the landing it plays out free, and the door opening does not cut it"
+    (sound-reset!)
+    (let ((held (stand 152 0.0)))
+      (assert-false (cadr (sound-drip)))
+      (frame! (place (well held) drip: (list 'open DX DY 0.0)))
+      (assert-true (sound-drip))
+      (let loop ((i 0)) (when (< i 30) (frame! (place (well 0.0) drip: (list 'open DX DY 0.0))) (loop (+ i 1))))
+      (assert-true (> (heard) 5.0)))))
+
+(define (hum-gain held)
+  (sound-reset!)
+  (let loop ((i 0)) (when (< i 20) (frame! (well held)) (loop (+ i 1))))
+  (source-gain (sound-voice-source UPWARD-ID) T))
+
+(test-group "wrongwater: the drip"
+  (test "its hum swells with the count (about 6 dB by 5 s)"
+    (let ((g0 (hum-gain 0.0)) (g4 (hum-gain 4.0)))
+      (display "  hum ") (display g0) (display " -> ") (display g4) (newline)
+      (assert-true (> g4 (* 1.6 g0)))))
+  (test "once the door is open it no longer hums, and the crack drips now and then"
+    (sound-reset!) (set! SAID '())
+    (let loop ((i 0)) (when (< i 300) (frame! (place (well 0.0) drip: (list 'open DX DY 0.0))) (loop (+ i 1))))
+    (assert-false (sound-voice-source UPWARD-ID))
+    (assert-true (>= (sound-spots-played) 1)))
+  (test "the opening's news plays the drop and the stone"
+    (sound-reset!) (set! SAID '())
+    (frame! (place (well 5.0) drip: (list 'open DX DY 0.0) news: (list (list 'drip-open DX DY))))
+    (assert-true (or (said? "sound" "cue" "drip-fall") (said? "sound" "cue-waiting" "drip-fall")))
+    (assert-true (or (said? "sound" "cue" "stone-slide") (said? "sound" "cue-waiting" "stone-slide")))))
+
+;; --- the answers --------------------------------------------------------------------------
+;; Behind the Fall (-6,4): the upward icicle at (13,7)
+(define IX -2184.0) (define IY 824.0)
+(define (fall px carry . kw)
+  (apply place key: "glasswood:-6,4" region: 'glasswood bed-tune: #f groups: '() levels: '()
+         carry: carry tones: '() stones: '() hums: (list (list 7 IX IY)) px: px py: IY rx: -6 ry: 4 kw))
+(define (walk carry from to secs . kw)
+  (let ((n (exact (round (* 30 secs)))))
+    (let loop ((i 0))
+      (when (< i n)
+        (frame! (apply fall (+ from (* (- to from) (/ i (* 1.0 n)))) carry kw))
+        (loop (+ i 1))))))
+(define (answered) (length (sound-answers)))
+
+(test-group "wrongwater: the hints answer H7"
+  (test "carrying H7, passing the icicle answers once"
+    (sound-reset!)
+    (walk '(2 3 4 7) (- IX 200.0) (+ IX 200.0) 4.0)
+    (assert-equal 1 (answered)))
+  (test "back past it within 12 s: no second answer; after 12 s: the other answer"
+    (walk '(2 3 4 7) (+ IX 200.0) (- IX 200.0) 4.0)
+    (assert-equal 1 (answered))
+    (walk '(2 3 4 7) (- IX 300.0) (- IX 300.0) 5.0)
+    (walk '(2 3 4 7) (- IX 200.0) (+ IX 200.0) 4.0)
+    (assert-equal 2 (answered))
+    (assert-equal '(answer-h7-b answer-h7-a) (map car (sound-answers))))
+  (test "without H7, never"
+    (sound-reset!)
+    (walk '(2 3 4) (- IX 200.0) (+ IX 200.0) 4.0)
+    (assert-equal 0 (answered)))
+  (test "standing still by it carrying H7, the ears do not point at it (it is no target)"
+    (sound-reset!)
+    (let loop ((i 0)) (when (< i 90) (frame! (fall IX '(2 3 4 7) py: (- IY 100.0) still: #t)) (loop (+ i 1))))
+    (assert-equal 'up (sound-ears))))
+
+;; --- H7's finding tone ---------------------------------------------------------------------
+(define (tone-at region)
+  (sound-reset!)
+  (let loop ((i 0))
+    (when (< i 45)
+      (frame! (place key: "t" region: region bed-tune: #f groups: '() levels: '() carry: '(2 3 4)
+                     tones: (list (list 7 300.0 100.0)) stones: '() px: 100.0 py: 100.0 rx: 0 ry: 0 still: #t))
+      (loop (+ i 1))))
+  (let ((r (list (and (sound-voice-source "tone-h7") #t) (sound-ears))))
+    (display "  tone ") (display region) (display " ") (display r) (newline)
+    r))
+
+(test-group "wrongwater: H7's finding tone only in Wrongwater"
+  (test "in Wrongwater it sounds, and the ears point to it"
+    (assert-equal '(#t right) (tone-at 'wrongwater)))
+  (test "half a room away in the Pipes or the glass caves: silent, the ears not turned"
+    (assert-equal '(#f up) (tone-at 'pipes))
+    (assert-equal '(#f up) (tone-at 'glasswood)))
+  (test "control: H2's tone in the Pipes still sounds"
+    (sound-reset!)
+    (let loop ((i 0))
+      (when (< i 30)
+        (frame! (place key: "t" region: 'pipes bed-tune: #f groups: '() levels: '() carry: '(3)
+                       tones: (list (list 2 300.0 100.0)) stones: '() px: 100.0 py: 100.0 rx: 0 ry: 0 still: #t))
+        (loop (+ i 1))))
+    (assert-true (sound-voice-source "tone-h2"))))
+
+;; --- the dip -------------------------------------------------------------------------------------
+(define (gw key moment carry)
+  (place key: key region: 'glasswood bed-tune: "glasswood-bed" groups: '(wind water chimes drone)
+         levels: GW-LEVELS carry: carry tones: '() stones: '() moment: moment px: 100.0 py: 100.0 rx: 0 ry: 0))
+(define (ch8) (cdr (assv 8 (sound-bed-levels))))
+(define (ch7) (cdr (assv 7 (sound-bed-levels))))
+(define (frames pl n) (let loop ((i 0)) (when (< i n) (frame! pl) (loop (+ i 1)))))
+
+(test-group "wrongwater: H7 dips under other moments"
+  (test "with no moment, H7's channel sits at the drone's level"
+    (boot!)
+    (frames (gw "glasswood:0,0" #f '(2 3 4 5 7)) 30)
+    (assert-true (< (abs (- (ch8) (ch7))) 1e-9)))
+  (test "under the-ice-rings it drops to H7-DIP of the drone, the other drone channels untouched"
+    (sound-preopen! "the-ice-rings")
+    (frames (gw "glasswood:0,1" "the-ice-rings" '(2 3 4 5 7)) 30)
+    (assert-equal "the-ice-rings" (sound-moment-playing))
+    (display "  ch7 ") (display (ch7)) (display " ch8 ") (display (ch8)) (newline)
+    (assert-true (< (abs (- (ch8) (* H7-DIP (ch7)))) 1e-9)))
+  (test "a room change during the moment keeps it dipped"
+    (frames (gw "glasswood:0,2" #f '(2 3 4 5 7)) 30)
+    (assert-equal "the-ice-rings" (sound-moment-playing))
+    (assert-true (< (abs (- (ch8) (* H7-DIP (ch7)))) 1e-9)))
+  (test "standing still during the moment (the drone swells) keeps it dipped"
+    (frames (place (gw "glasswood:0,2" #f '(2 3 4 5 7)) still: #t) 60)
+    (assert-true (< (abs (- (ch8) (* H7-DIP (ch7)))) 1e-9)))
+  (test "when the moment ends it comes back with the bed"
+    (let loop ((k 0))
+      (when (and (< k 3000) (sound-moment-playing))
+        (frame! (gw "glasswood:0,2" #f '(2 3 4 5 7)))
+        (loop (+ k 1))))
+    (assert-false (sound-moment-playing))
+    (assert-true (< (abs (- (ch8) (ch7))) 1e-9)))
+  (test "under rain-rising (one of H7-KEEPS) it does not dip"
+    (boot!)
+    (sound-preopen! "rain-rising")
+    (frames (gw "glasswood:0,1" "rain-rising" '(2 3 4 5 7)) 30)
+    (assert-equal "rain-rising" (sound-moment-playing))
+    (assert-true (< (abs (- (ch8) (ch7))) 1e-9))))
+
+;; --- the bed at a border ---------------------------------------------------------------------------
+(define (attack-of t id)
+  (let* ((i (find (lambda (i) (= (tune-instrument-id i) id)) (tune-instruments t)))
+         (a (assq 'attack (tune-instrument-params i))))
+    (and a (cdr a))))
+
+(test-group "wrongwater: the bed opened at a border"
+  (test "the drops played backwards keep their 0.45 s swell; the slow voices start at once"
+    (boot!)
+    (frames (gw "glasswood:0,0" #f '(2 3 4)) 10)
+    (frames (place key: "wrongwater:-2,7" region: 'wrongwater bed-tune: "wrongwater-bed" groups: '(air water hang drone)
+                   levels: '((air . 0.15) (water . 0.5) (hang . 0.35) (drone . 0.6)) carry: '(2 3 4) tones: '() stones: '()
+                   px: -700.0 py: 1300.0 rx: -2 ry: 7)
+            10)
+    (assert-equal 'wrongwater (sound-region))
+    (let ((t (sound-bed-opened)))
+      (assert-equal 0.45 (attack-of t 23))
+      (assert-equal 0.02 (attack-of t 17))
+      (assert-equal 0.02 (attack-of t 1)))))
