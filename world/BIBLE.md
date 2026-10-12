@@ -168,6 +168,19 @@ control; tools/cloudstair-takeoff.sgl measures them.
 P's middle rest is six tiles, a real run-up. Waits and catches lie outside
 every field. `x` appears only in I and P.
 
+The way home (D50, David after playing the demo: "I can't find my way out
+back to the Hollow ... I don't know what the ring stone is supposed to
+do"). The Windworn Arch's ring holds a rose stone (R 12,7). Carrying H5
+it rings and sinks, the ring shimmers rose, the "windworn-arch" moment
+answers, and the homeward wind blows west through the arch and on over Q
+(`(air-field ... kind: homeward gate: (C R))`, a hold-up and a westward
+push that blow only while the gate cell is open, so carry gates it as it
+gates the stone). It carries a glider to the homeward shaft, columns 1-3
+down through Q, K and E (the one-way K->E), onto E's chute and A, then
+the launch column home. The shaft is there before H5 too, marked by seeds
+drifting down it and a faint light: the way home reads without the wind.
+test/test-cloudstair-homeward.sgl rides it with and without H5.
+
 New room things:
 
 - `(seed at: (C R) count: N)`: small tufted seeds. Near a `^` they ride it

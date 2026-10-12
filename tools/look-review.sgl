@@ -11,7 +11,8 @@
 ;;;                       one room in play: body at cell (C R), carrying
 ;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks;
 ;;;                       MODE down carries the cattail down, glide also holds
-;;;                       jump; TAU0 is where the gust clock starts (default 0)
+;;;                       jump, ride stands 120 ticks then jumps west holding it;
+;;;                       TAU0 is where the gust clock starts (default 0)
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
 ;;;                       the same room on a W x H window (fitted as the web
 ;;;                       fits it), with D47's region name over it at ALPHA
@@ -41,15 +42,20 @@
          ;; down; glide, it carries it and holds jump every tick (a body put
          ;; in the air then glides down).
          (mode (if (> (length parts) 8) (list-ref parts 8) "none"))
-         (down? (member mode '("down" "glide")))
+         (down? (member mode '("down" "glide" "ride")))
          ;; TAU0 (optional 10th field): the gust clock the body starts at
          (tau0 (if (> (length parts) 9) (num (list-ref parts 9)) 0))
          (b (body (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g)) down: (and down? #t) tau: tau0))
-         (in (if (string=? mode "glide") (intent jump: #t) (intent)))
+         ;; ride: stand 120 ticks (a carried harmonic rings its stone open), then
+         ;; jump and glide west, holding jump (D50's homeward wind)
+         (in (lambda (n) (cond ((string=? mode "glide") (intent jump: #t))
+                               ((and (string=? mode "ride") (= n 120)) (intent h: -1 jump: #t press: #t))
+                               ((and (string=? mode "ride") (> n 120)) (intent h: -1 jump: #t))
+                               (else (intent)))))
          (w (world-populate (world-at wm b) (content-stones ct) (content-pickups ct)
                             (carry-of (list-ref parts 6)))))
     (let loop ((w w) (n (num (list-ref parts 7))))
-      (if (= n 0) w (loop (cdr (world-take-news (world-tick w in))) (- n 1))))))
+      (if (= n 0) w (loop (cdr (world-take-news (world-tick w (in (- (num (list-ref parts 7)) n))))) (- n 1))))))
 
 (define (selected) (string-trim (read-file-string CONTROL)))
 

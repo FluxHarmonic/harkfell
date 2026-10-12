@@ -1,4 +1,6 @@
 ;; The ridge rises in low steps; the arch stands on its top, drawn behind.
+;; In its ring a rose stone (12,7): with H5 it rings and sinks, and the
+;; homeward wind blows west through the arch (D50).
 (room
   region: cloudstair
   at: (8 -2)
@@ -15,8 +17,13 @@
    "                         "
    "                         "
    "                         "
-   "         | |  |          "
+   "         | |o |          "
    "         #######         "
    "    |  #############  |  "
    "#########################")
+  things: ((ring-stone at: (12 7) overtone: 5)
+           ;; the homeward wind (D50): with the rose stone open it carries a
+           ;; glider west through the arch, on over Q to the drop home
+           (air-field at: (0 1) size: (15 4) kind: homeward gate: (12 7)))
+  moment: (tune: windworn-arch when: first-visit carrying: 5)
   decor: auto)
