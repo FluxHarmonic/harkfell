@@ -1,6 +1,16 @@
 ;; A sheltered hollow under a stepped roof; a steady lift (columns 4-6)
-;; rises from its floor to Q. West of it the homeward shaft (columns 1-3,
-;; D50) falls from Q through to E: the way home, readable before H5.
+;; rises from its floor to Q. West of it the homeward shaft (D50) comes
+;; down from Q beside the cliff (two tiles thick, columns 0-1) onto a rock
+;; mass that fills the room's west side (columns 0-3, rows 6-9). Under its
+;; thick roof a low alcove is cut, (1,9)-(2,9), and the rose stone stands
+;; as the door at its mouth (3,9), at floor level, like the Hollow's Old
+;; Cut; the hole down to E (1,10) is inside. The way home, readable before
+;; H5 and open with it: a glider lands on the mass, walks off east, comes
+;; down its face to the door and, with H5, in and down. Shut, the stone
+;; seals the alcove: from E the hole leads only into it, so nothing climbs
+;; past it (the reverse route SYSTEMS' replay found when the shaft was
+;; open: wall kicks up E's west wall into the shaft, then the lift).
+;; test-cloudstair-homeward floods it.
 (room
   region: cloudstair
   at: (7 -1)
@@ -10,17 +20,22 @@
   light: 1
   sun: 1
   grid:
-  ("#   ^^^##################"
-   "#   ^^^   ###############"
-   "#   ^^^     #############"
-   "#   ^^^       ###########"
-   "#   ^^^         #########"
-   "#   ^^^           #######"
-   "#   ^^^             #####"
-   "#   ^^^                  "
-   "#   ^^^                  "
-   "#   ^^^ |  ||  |  | |    "
-   "#   #####################")
+  ("##  ^^^##################"
+   "##  ^^^   ###############"
+   "##  ^^^     #############"
+   "##  ^^^       ###########"
+   "##  ^^^         #########"
+   "##  ^^^           #######"
+   "####^^^             #####"
+   "####^^^                  "
+   "####^^^                  "
+   "#  o^^^ |  ||  |  | |    "
+   "# #######################")
   things: ((seed at: (12 9) count: 3)
+           ;; the shaft's rose stone (D50), the door of the alcove: shut,
+           ;; the way home is sealed and nothing climbs up the shaft from E;
+           ;; with H5 it opens as you come to it, and you walk in and drop
+           ;; through the hole inside to E
+           (ring-stone at: (3 9) overtone: 5)
            (seed at: (5 5) count: 2))
   decor: auto)
