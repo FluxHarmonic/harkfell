@@ -23,7 +23,9 @@
 (define CHAMBER
   (load-content
     (map (lambda (e)
-           (cons (car e)
+           (cons (string-replace
+                   (string-replace (car e) "stonefen" "underhum")
+                   "x0y0.room" "x7y5.room")
                  (string-replace
                    (string-replace (string-replace (cdr e) "stonefen" "underhum") "(0 0)" "(7 5)")
                    "things: (" "things: ((gallery-stone at: (3 8)) (listening-place at: (4 8)) ")))
@@ -120,12 +122,24 @@
 (define (saved ended with coda active)
   (save-datum CT BODY FULL (content-stones CT) '() 1.0 #f #f '() ended with coda active))
 
+;; Keep this negative setup independent of which production region tracks
+;; have landed. Their declarations may remain; their room files must not.
+(define (path-prefix? prefix path)
+  (and (>= (string-length path) (string-length prefix))
+       (string=? (substring path 0 (string-length prefix)) prefix)))
+(define ABSENT-CT
+  (load-content
+    (filter (lambda (e)
+              (not (or (path-prefix? "world/rooms/wrongwater/" (car e))
+                       (path-prefix? "world/rooms/underhum/" (car e)))))
+            (read-world-source "world"))))
+
 (test-group "depths: diagnostic setup refuses missing regions"
   (test "absent rooms cannot silently pass a regional check"
     (for-each
       (lambda (region)
         (assert-true (guard (failure (#t #t))
-                       (depths-region-content CT region)
+                       (depths-region-content ABSENT-CT region)
                        #f)))
       '(underhum wrongwater))))
 
