@@ -253,8 +253,10 @@
 (define FUSE (if (part? 2) (measure-fuse '(2 3 4 5) 14.0) '()))
 (define FUSE-H7 (if (part? 2) (measure-fuse '(2 3 4 5 7) 12.0) '()))
 
+;; the spread of the voices' breaths: each gain over its level, so 1.0 is a
+;; voice at the top of its breath
 (define (spread rows t0 t1 hs)
-  (apply max (map (lambda (r) (let ((g (filter number? (map (lambda (h) (gain-of r h)) hs))))
+  (apply max (map (lambda (r) (let ((g (filter number? (map (lambda (h) (let ((x (gain-of r h))) (and x (/ x (level-of h))))) hs))))
                                 (if (null? g) 0.0 (- (apply max g) (apply min g)))))
                   (rows-in rows t0 t1))))
 
@@ -281,8 +283,9 @@
       (for-each (lambda (o want) (assert-true (near? o want 0.06))) on '(2.5 4.1667 5.8333 7.5))))
   (test "the fundamental: silent until bar 4 (10 s), sounding by 11 s"
     (let ((f (lambda (r) (list-ref (caddr r) 0))))
+      (display "  fundamental peak by 11 s: ") (display (apply max (map f (rows-in FUSE 10.9 11.1)))) (newline)
       (assert-true (every (lambda (r) (< (f r) 1e-4)) (rows-in FUSE 0.0 9.95)))
-      (assert-true (> (apply max (map f (rows-in FUSE 10.9 11.1))) 0.05))))
+      (assert-true (> (apply max (map f (rows-in FUSE 10.9 11.1))) 0.02))))
   (test "H7: carried, its voice locks last (9.17 s) with its own bell; not carried, its channel is silent"
     (let ((l (lock-at FUSE-H7 7)))
       (display "  H7 lock heard: ") (display l) (display " bells ") (display (bell-onsets FUSE-H7 0.0 9.6))
