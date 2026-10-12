@@ -32,7 +32,8 @@
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
-          audio-carry! audio-tone-room! audio-lines world-place world-drip room-moment-name room-moment-names room-moment-now
+          audio-carry! audio-tone-room! audio-lines world-place world-drip room-listen-spot
+          room-moment-name room-moment-names room-moment-now
           audio-pause! audio-resume! audio-paused? audio-set-wall-clock! audio-cue-words
           audio-sound-door! frame-event! save-extras restore-extras!)
 
@@ -408,6 +409,7 @@
                            gaps: (if (eq? (room-region rm) 'cloudstair) (room-gap-cells rm) '())
                            seeds: (room-seed-spots rm)
                            gliding: (body-gliding b)
+                           listen: (room-listen-spot rm)
                            ;; A4: the movement sounds read the body and the tile under its feet
                            mode: (body-mode b)
                            vx: (body-vx b)
@@ -421,6 +423,19 @@
     (define (room-abs-x rm c) (+ (* 400.0 (room-x rm)) (* TILE c)))
     (define (room-abs-y rm r) (+ (* 176.0 (room-y rm)) (* TILE r)))
     (define (room-thing-list rm) (let ((ts (room-things rm))) (if (list? ts) ts '())))
+
+    ;; SOUND's listening invitation, centred on the authored tile. This is
+    ;; independent of the chamber's anywhere-stillness trigger.
+    (define (room-listen-spot rm)
+      (let ((thing (find (lambda (t)
+                           (and (pair? t) (eq? (car t) 'listening-place)
+                                (pair? (kw-ref (cdr t) "at"))))
+                         (room-thing-list rm))))
+        (and thing
+             (let ((at (kw-ref (cdr thing) "at")))
+               (list (+ (room-abs-x rm (car at)) 8.0)
+                     (+ (room-abs-y rm (cadr at)) 8.0))))))
+
     (define (room-gusts rm)
       (filter-map (lambda (t)
                     (and (pair? t) (eq? (car t) 'air-field)

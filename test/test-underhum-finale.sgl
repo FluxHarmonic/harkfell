@@ -10,10 +10,14 @@
         (harkfell depths reach)
         (harkfell feel)
         (harkfell world)
+        (harkfell audio)
+        (harkfell sound)
+        (harkfell shell)
         (engine worldmap)
         (engine reach))
 
 (define FULL '(2 3 4 5))
+(shell-test-room!)
 (define (wait f ticks still? . carry)
   (if (= ticks 0)
       f
@@ -47,11 +51,25 @@
       (assert-equal 'play (world-phase after))
       (assert-equal '(fuse)
         (map cadr (filter (lambda (item) (eq? (car item) 'finale)) (world-news after))))
+      (assert-equal '(4)
+        (map length (filter (lambda (item) (eq? (car item) 'finale)) (world-news after))))
       (assert-equal '() (filter (lambda (item) (eq? (car item) 'chord)) (world-news after)))
       (let ((lit (world-finale-mark after 'fundamental)))
         (assert-true (finale-lit (world-ending lit)))
         (assert-true (pair? (filter (lambda (item) (eq? (car item) 'chord))
-                                    (world-news (world-wait lit 1)))))))))
+                                    (world-news (world-wait lit 1))))))))
+  (test "the listening invitation uses absolute pixels and does not move the fuse clock"
+    (let* ((tm (worldmap-tiles (content-map CHAMBER)))
+           (w (world-populate
+                (world-at (content-map CHAMBER) (cell-body tm HARKFELL-FEEL 2 8))
+                (content-stones CHAMBER) (content-pickups CHAMBER) FULL))
+           (pl (world-place w CHAMBER)))
+      (assert-equal '(2872.0 1016.0) (place-listen pl))
+      (assert-equal FULL (place-carry pl))
+      (assert-false (world-ended w))
+      (assert-false (world-ended (world-wait w 119)))
+      (assert-true (world-ended (world-wait w 120)))
+      (assert-false (room-listen-spot (content-room (load-content (read-world-source "world")) 9 3))))))
 
 (test-group "Underhum: chamber trigger paths"
   (test "119 still ticks do not trigger; 120 do"

@@ -406,7 +406,7 @@
         (world w finale: f
                news: (append (world-news w)
                        (map (lambda (ev)
-                              (list 'finale ev (world-carry w) (car c) (cdr c)))
+                              (list 'finale ev (car c) (cdr c)))
                             (finale-events f))))))
 
     (define (world-tick-body w in)
