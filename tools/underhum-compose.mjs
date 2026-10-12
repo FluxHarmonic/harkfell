@@ -288,9 +288,11 @@ function score(h7) {
   {
     const s = new Section("pipes", 5); S.push(s);
     const hook = "A3:8 A4:8 G4:4 F4:4 E4:8 C4:16 Bb3:8 C4:8 D4:16";
-    s.line(4, 0, h7c(h7, 27, 28), 32, hook, { offAtEnd: false });
-    s.line(2, 0, h7c(h7, 29, 30), 22, hook, { offAtEnd: false });
-    s.line(8, 0, h7c(h7, 31, 32), 14, hook.replace(/([A-G]b?)(\d)/g, (m, n, o) => n + (Number(o) + 1)), { offAtEnd: false });
+    // 2.5 dB under the first take (measured: the verse at -19.0 LUFS against
+    // the old quote's -22.5; it stays the song's quietest passage)
+    s.line(4, 0, h7c(h7, 27, 28), 24, hook, { offAtEnd: false });
+    s.line(2, 0, h7c(h7, 29, 30), 16, hook, { offAtEnd: false });
+    s.line(8, 0, h7c(h7, 31, 32), 10, hook.replace(/([A-G]b?)(\d)/g, (m, n, o) => n + (Number(o) + 1)), { offAtEnd: false });
     s.put(9, 3, "C6", h7 ? 26 : 19, 22);
     s.put(45, 3, "A5", 19, 20);
     s.put(70, 3, "D6", 19, 16);
