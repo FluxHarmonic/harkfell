@@ -857,11 +857,12 @@
     ;; pixels. A3: the place's (the world's pickups); without them, A2's one
     ;; placeholder, H2 at the centre of *tone-room*.
     (define (tone-spots pl)
-      (or (place-tones pl)
+      (filter (lambda (t) (or (not (= (car t) 7)) (eq? (place-region pl) 'wrongwater)))
+        (or (place-tones pl)
           (if (memv 2 *carry*)
               '()
               (list (list 2 (+ (* ROOM-W (car *tone-room*)) (/ ROOM-W 2.0))
-                          (+ (* ROOM-H (cdr *tone-room*)) (/ ROOM-H 2.0)))))))
+                          (+ (* ROOM-H (cdr *tone-room*)) (/ ROOM-H 2.0))))))))
 
     ;; (dx dy d) in rooms from the body to (x, y).
     (define (geometry-to pl x y)
@@ -1027,7 +1028,16 @@
 
     ;; ((overtone x y) ...): for each carried harmonic, its nearest shut stone.
     (define (call-spots pl)
-      (let loop ((ss (place-stones pl)) (best '()))   ; ((n d x y) ...)
+      (let loop ((ss (apply append
+                      (map (lambda (st)
+                             (if (> (length st) 4)
+                                 (let ((keys (list-ref st 4)))
+                                   (if (every (lambda (h) (memv h *carry*)) keys)
+                                       (map (lambda (h) (cons h (cdr st))) keys)
+                                       '()))
+                                 (list st)))
+                           (place-stones pl))))
+                 (best '()))   ; ((n d x y) ...)
         (if (null? ss)
             (map (lambda (b) (list (car b) (caddr b) (cadddr b))) best)
             (let* ((st (car ss)) (n (car st)) (x (caddr st)) (y (cadddr st))

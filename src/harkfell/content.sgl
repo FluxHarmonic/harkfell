@@ -75,6 +75,7 @@
           region-map region-map? region-map-region region-map-rooms region-map-origin
           region-rooms
           thing-kw thing-at room-things-of grid-standable?
+          stone-thing-keys stone-thing-open?
           static-placement-problems
           icicle-floor-row icicle-placement-problems
           room-thin-ice thin-ice-placement-problems room-dark? room-has-drawn-moths?
@@ -406,6 +407,15 @@
     ;; The room's things of one kind.
     (define (room-things-of rm kind)
       (filter (lambda (t) (and (pair? t) (eq? (car t) kind))) (room-things rm)))
+
+    ;; A set-key stone requires every voice. Stillness doors have no key;
+    ;; the reach abstraction opens them just as it opens keyed stones.
+    (define (stone-thing-keys t)
+      (or (thing-kw t "keys") (list (thing-kw t "overtone"))))
+
+    (define (stone-thing-open? t carry)
+      (or (thing-kw t "still")
+          (every (lambda (h) (and (memv h carry) #t)) (stone-thing-keys t))))
 
     (define (ends-with? s suffix)
       (let ((n (string-length s)) (m (string-length suffix)))
@@ -767,7 +777,30 @@
                             (unless (and (int-pair? a) (member a o-cells))
                               (add! (string-append "things: ring-stone at: " (datum->string a) " is not on an o in the grid") "things"))
                             (unless (and (integer? o) (<= 2 o 7))
-                              (add! (string-append "things: ring-stone at: " (datum->string a) " has no overtone: 2 to 7") "things"))))
+                              (add! (string-append "things: ring-stone at: " (datum->string a) " has no overtone: 2 to 7") "things"))
+                            (let ((keys (kw t "keys"))
+                                  (still (kw t "still"))
+                                  (listen (kw t "listen"))
+                                  (radius (kw t "radius")))
+                              (when (and keys
+                                         (not (and (list? keys) (pair? keys)
+                                                   (every (lambda (h) (and (integer? h) (<= 2 h 7))) keys)
+                                                   (every (lambda (h)
+                                                            (= 1 (length (filter (lambda (k) (= h k)) keys))))
+                                                          keys))))
+                                (add! "things: ring-stone keys: needs distinct harmonics, 2 to 7" "things"))
+                              (when (and still
+                                         (not (and (number? still) (> still 0) (not keys))))
+                                (add! "things: ring-stone still: needs positive seconds and no keys:" "things"))
+                              (when (and radius (not (and (number? radius) (> radius 0))))
+                                (add! "things: ring-stone radius: needs positive tiles" "things"))
+                              (when (and listen
+                                         (not (and still (list? listen) (= (length listen) 5)
+                                                   (symbol? (car listen))
+                                                   (every integer? (cdr listen))
+                                                   (< -1 (list-ref listen 3) ROOM-COLS)
+                                                   (< -1 (list-ref listen 4) ROOM-ROWS))))
+                                (add! "things: ring-stone listen: needs (REGION X Y C R) and still:" "things")))))
                         stones)
               (for-each (lambda (cell)
                           (unless (find (lambda (t) (equal? (kw t "at") cell)) stones)

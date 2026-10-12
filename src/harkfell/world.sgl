@@ -82,6 +82,7 @@
       (returns default: 0)
       (entered default: 0)
       (chord-wait default: 0)
+      (hint-wait default: 0)
       (aurora default: #f)         ; the third-homecoming has happened in this save
       (aurora-at default: #f)      ; tick of this session's one showing
       (ground default: #f)          ; the last body that stood on ground
@@ -204,7 +205,10 @@
                    (g2 (gates-step (gstate g tiles: (world-tiles w) news: '())
                                    (body-center b f)
                                    (list (body-x b) (body-y b) (feel-box-w f) (feel-box-h f))
-                                   (eq? (world-phase w) 'play)))
+                                   (eq? (world-phase w) 'play)
+                                   (and (eq? (body-mode b) 'ground)
+                                        (< (abs (body-vx b)) 0.01)
+                                        (< (abs (body-vy b)) 0.01))))
                    (tm (if (eq? (gstate-tiles g2) (world-tiles w))
                            (gstate-tiles g2)
                            (passage-tiles (world-wm w) (gstate-tiles g2)
@@ -329,10 +333,41 @@
                      news: (append (world-news w) (list (list 'down (car c) (cdr c))))))
             w)))
 
+    ;; The three violet hints answer locally after H7, never as targets.
+    ;; One shared cooldown also prevents a seam crossing from retriggering.
+    (define (hint-answer-tick w)
+      (let* ((wait (max 0 (- (world-hint-wait w) 1)))
+             (w (world w hint-wait: wait))
+             (p (world-room w))
+             (rm (and p (placed-data p))))
+        (if (and rm (= wait 0) (memv 7 (world-carry w))
+                 (eq? (world-phase w) 'play)
+                 (member (list (room-region rm) (room-x rm) (room-y rm))
+                         '((glasswood -6 4) (glasswood -2 6) (pipes 1 8))))
+            (let* ((o (world-origin w))
+                   (b (body-center (world-body w) HARKFELL-FEEL))
+                   (hint (find
+                           (lambda (t)
+                             (let* ((a (thing-at t))
+                                    (dx (- (+ (car o) (* 16 (car a)) 8) (car b)))
+                                    (dy (- (+ (cdr o) (* 16 (cdr a)) 8) (cdr b))))
+                               (<= (+ (* dx dx) (* dy dy)) (* 64 64))))
+                           (append (room-things-of rm 'upward-icicle)
+                                   (room-things-of rm 'upward-drip)))))
+              (if hint
+                  (let ((a (thing-at hint)))
+                    (world w hint-wait: 720
+                           news: (append (world-news w)
+                                   (list (list 'hint-answer 7
+                                               (+ (car o) (* 16 (car a)) 8)
+                                               (+ (cdr o) (* 16 (cdr a)) 8))))))
+                  w))
+            w)))
+
     (define (world-tick w in)
-      (homecoming-tick
+      (hint-answer-tick (homecoming-tick
         (standing-chord-tick
-          (ice-tick (critters-tick (still-tick (down-tick (gates-tick (world-tick-body w in)))) w) w))))
+          (ice-tick (critters-tick (still-tick (down-tick (gates-tick (world-tick-body w in)))) w) w)))))
 
     (define (world-tick-body w in)
       (let ((w (world w ticks: (+ (world-ticks w) 1))))

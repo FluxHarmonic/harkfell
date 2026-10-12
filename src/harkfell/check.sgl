@@ -180,15 +180,24 @@
 
     ;; The world's tilemap with the stones keyed to carry open (air).
     (define (tiles-carrying ct carry)
-      (let loop ((ss (content-stone-cells ct)) (tm (worldmap-tiles (content-map ct))))
+      (let* ((open-cells
+               (apply append
+                 (map (lambda (p)
+                        (let ((rm (placed-data p)))
+                          (filter-map
+                            (lambda (t)
+                              (and (stone-thing-open? t carry)
+                                   (let ((a (thing-at t)))
+                                     (local->global ct rm (car a) (cdr a)))))
+                            (room-things-of rm 'ring-stone))))
+                      (content-rooms ct)))))
+        (let loop ((ss open-cells) (tm (worldmap-tiles (content-map ct))))
         (cond ((null? ss)
                (passage-tiles (content-map ct) tm
                  (lambda (cell)
-                   (find (lambda (s) (and (equal? (cdr s) cell) (memv (car s) carry)))
-                         (content-stone-cells ct)))))
-              ((memv (car (car ss)) carry)
-               (loop (cdr ss) (tilemap-set tm (car (cdr (car ss))) (cdr (cdr (car ss))) 'air)))
-              (else (loop (cdr ss) tm)))))
+                   (member cell open-cells))))
+              (else
+               (loop (cdr ss) (tilemap-set tm (caar ss) (cdar ss) 'air)))))))
 
     (define (carry-label carry)
       (if (null? carry)

@@ -1,0 +1,127 @@
+;;; Actual opening transitions, checker tilemaps and persisted door/pickup
+;;; state. The short-key and short-wait sabotages are driven separately by
+;;; scripts/gate-depths-sabotage on the runner.
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine tilemap)
+        (engine worldmap)
+        (harkfell source)
+        (harkfell content)
+        (harkfell check)
+        (harkfell gates)
+        (harkfell save)
+        (harkfell world)
+        (harkfell feel))
+
+(define SOURCE (read-world-source "test/fixtures/worlds/stone"))
+(define (with-stone suffix)
+  (load-content
+    (map (lambda (e)
+           (cons (car e)
+                 (string-replace (cdr e)
+                                 "(ring-stone at: (15 8) overtone: 2)"
+                                 (string-append "(ring-stone at: (15 8) overtone: 2 " suffix ")"))))
+         SOURCE)))
+(define HEART (with-stone "keys: (2 3 4 5)"))
+(define DOOR (with-stone "still: 5 radius: 2 listen: (stonefen 0 0 14 8)"))
+(define TM (worldmap-tiles (content-map HEART)))
+(define CELL (stone-cell (car (content-stones HEART))))
+(define CENTRE (cell-centre TM CELL))
+
+(define (subsets hs)
+  (if (null? hs)
+      (list '())
+      (let ((rest (subsets (cdr hs))))
+        (append rest (map (lambda (s) (cons (car hs) s)) rest)))))
+
+(define (advance g count still? . at)
+  (if (= count 0)
+      g
+      (advance
+        (gates-step g (if (pair? at) (car at) CENTRE) '(0 0 8 12) #t still?)
+        (- count 1) still? (if (pair? at) (car at) CENTRE))))
+(define (initial ct carry)
+  (gstate stones: (content-stones ct) carry: carry tiles: TM))
+(define (state g) (stone-state (car (gstate-stones g))))
+(define (kinds g) (map car (gstate-news g)))
+
+(test-group "depths: all four heart keys"
+  (test "content is valid"
+    (assert-equal '() (content-problems HEART))
+    (assert-equal '() (content-problems DOOR)))
+  (test "each of the fifteen incomplete sets stays solid in play and reach"
+    (for-each
+      (lambda (carry)
+        (unless (= (length carry) 4)
+          (assert-equal 'shut (state (advance (initial HEART carry) 100 #t)))
+          (assert-equal 'solid (tilemap-ref (tiles-carrying HEART carry) (car CELL) (cdr CELL)))))
+      (subsets '(2 3 4 5))))
+  (test "the full set rings for 40 ticks and sinks for 48"
+    (let* ((ring (advance (initial HEART '(2 3 4 5)) 1 #t))
+           (sink (advance ring 40 #t))
+           (open (advance sink 48 #t)))
+      (assert-equal 'ringing (state ring))
+      (assert-equal 'sinking (state sink))
+      (assert-equal 'open (state open))
+      (assert-equal '(ring sink open) (kinds open))
+      (assert-equal 'air (tilemap-ref (gstate-tiles open) (car CELL) (cdr CELL)))
+      (assert-equal 'air (tilemap-ref (tiles-carrying HEART '(2 3 4 5 7)) (car CELL) (cdr CELL))))))
+
+(test-group "depths: proximity stillness"
+  (test "the cue starts at 1 second; 4.9 seconds is still shut"
+    (assert-equal '() (kinds (advance (initial DOOR '()) 59 #t)))
+    (assert-equal '(drip-build) (kinds (advance (initial DOOR '()) 60 #t)))
+    (assert-equal 'shut (state (advance (initial DOOR '()) 294 #t))))
+  (test "five seconds lands on H7 and starts the sink without a harmonic key"
+    (let* ((sink (advance (initial DOOR '()) 300 #t))
+           (open (advance sink 48 #t)))
+      (assert-equal 'sinking (state sink))
+      (assert-equal '(drip-build drip-fall sink open) (kinds open))
+      (assert-equal 'open (state open))))
+  (test "moving cancels the build and a new wait starts from zero"
+    (let* ((waiting (advance (initial DOOR '()) 294 #t))
+           (cancel (advance waiting 1 #f)))
+      (assert-equal 0 (stone-listening (car (gstate-stones cancel))))
+      (assert-true (memq 'drip-cancel (kinds cancel)))
+      (assert-equal 'shut (state (advance cancel 294 #t)))
+      (assert-equal 'sinking (state (advance cancel 300 #t)))))
+  (test "waiting out of range cannot open it"
+    (assert-equal 'shut (state (advance (initial DOOR '()) 600 #t '(1000 . 1000)))))
+  (test "dark frames cannot accumulate a wait"
+    (let ((g (gates-step (initial DOOR '()) CENTRE '(0 0 8 12) #f #t)))
+      (assert-equal 0 (stone-listening (car (gstate-stones g))))))
+  (test "the checker models a keyless stillness door open for every carry"
+    (for-each
+      (lambda (carry)
+        (assert-equal 'air (tilemap-ref (tiles-carrying DOOR carry) (car CELL) (cdr CELL))))
+      (subsets '(2 3 4 5 7)))))
+
+(test-group "depths: saves and content reds"
+  (test "the open stillness door survives a datum round trip"
+    (let* ((g (advance (initial DOOR '()) 348 #t))
+           (b (cell-body TM HARKFELL-FEEL 2 8))
+           (d (save-datum DOOR b '() (gstate-stones g) '() 1.0))
+           (r (save-restore DOOR d)))
+      (assert-equal (list (cons CELL 2)) (restored-stones r))))
+  (test "H7 is taken once and remains in a save"
+    (let* ((ct (load-content
+                 (map (lambda (e) (cons (car e) (string-replace (cdr e) "overtone 2" "overtone 7")))
+                      (map (lambda (e) (cons (car e) (string-replace (cdr e) "overtone: 2" "overtone: 7"))) SOURCE))))
+           (tm (worldmap-tiles (content-map ct)))
+           (p (car (content-pickups ct)))
+           (c (cell-centre tm (pickup-cell p)))
+           (g (gstate pickups: (list p) stones: (content-stones ct) tiles: tm))
+           (taken (gates-step g c (list (- (car c) 4) (- (cdr c) 6) 8 12) #t))
+           (d (save-datum ct (cell-body tm HARKFELL-FEEL 2 8) (gstate-carry taken)
+                          (gstate-stones taken) '() 1.0)))
+      (assert-equal '(7) (gstate-carry taken))
+      (assert-equal '() (gstate-pickups taken))
+      (assert-equal '(pickup) (kinds taken))
+      (assert-equal '(7) (restored-carry (save-restore ct d)))))
+  (test "malformed keys, waits and locations fail content validation"
+    (for-each
+      (lambda (options)
+        (assert-true (pair? (content-problems (with-stone options)))))
+      '("keys: ()" "keys: (2 2)" "keys: (2 9)" "still: -5"
+        "still: 5 keys: (2)" "still: 5 radius: -1" "listen: (stonefen 0 0 14 8)"))))
