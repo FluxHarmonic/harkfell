@@ -18,6 +18,7 @@
    "###                      "
    "#########################"
    "#########################")
+  start: (8 8)
   decor: auto)
 ;; Two low lakes, each walled on both sides, bottoms two rows over the floor
 ;; (standing row 8): west (3-5) and east (18-20), rows 5-6. Swim up either

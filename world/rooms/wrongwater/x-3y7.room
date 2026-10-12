@@ -19,6 +19,7 @@
    "#########%  %############"
    "#########%  %############")
   things: ((mural at: (9 0) image: wrongwater))
+  start: (15 8)
   decor: auto)
 ;; The column (6-7, rows 3-6, 8 cells) is walled on both sides: col 5 hangs
 ;; from the roof and col 8 is the nook block's west face. Its bottom is two
