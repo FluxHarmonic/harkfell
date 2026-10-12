@@ -1,4 +1,4 @@
-;; Isolated 15-cell tarn: sides are walls; shelf is one row above its surface.
+;; Exact dry control for the 15-cell tarn; the same roof closes its chimney.
 (fixture
   name: "hanging-dry"
   expect: unreachable
@@ -8,7 +8,7 @@
   grid:
   ("#########################"
    "#                       #"
-   "#        #     #######  #"
+   "#        #     ##########"
    "#        #     #        #"
    "#        #     #        #"
    "#        #     #        #"

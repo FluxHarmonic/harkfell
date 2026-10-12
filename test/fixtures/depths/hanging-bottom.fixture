@@ -1,4 +1,5 @@
-;; Isolated 15-cell tarn: sides are walls; shelf is one row above its surface.
+;; Isolated 15-cell tarn: walls on both sides; shelf above the surface.
+;; The shelf reaches the outer wall, closing a dry wall-jump chimney.
 (fixture
   name: "hanging-bottom"
   expect: reachable
@@ -8,7 +9,7 @@
   grid:
   ("#########################"
    "#                       #"
-   "#        #     #######  #"
+   "#        #     ##########"
    "#        #~~~~~#        #"
    "#        #~~~~~#        #"
    "#        #~~~~~#        #"
