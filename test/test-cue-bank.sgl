@@ -28,6 +28,10 @@
 (define (said? word) (any (lambda (p) (and (pair? (cdr p)) (equal? (cadr p) word))) SAID))
 
 (mixer-open-headless! RATE #f)
+;; Test files share the director: begin with nothing playing and frame work
+;; enabled, even if an earlier room test left a moment running.
+(sound-reset!)
+(sound-set-work-in-frame! #t)
 (sound-boot! '() say)
 
 ;; --- held: frames with no place, counting frames until each cue is ready ---
