@@ -61,7 +61,7 @@ for (const [, , tracks] of sections) for (const [n] of tracks) {
   const f = path.join(dir, n + '.wav');
   if (!fs.existsSync(f)) throw Error('Missing recording ' + n);
   const b = fs.readFileSync(f);
-  const frames = b.readUInt32LE(40) / 8;
+  const frames = b.readUInt32LE(40) / 2;   // 16-bit mono
   const o = measure(f);
   const I = (o.match(/I:\s+(-?[\d.]+) LUFS/g) || []).pop();
   const P = (o.match(/Peak:\s+(-?[\d.]+) dBFS/g) || []).pop();
