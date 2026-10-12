@@ -135,11 +135,12 @@ case "$JOB" in
     step build-release scripts/dev sigil build --config release && \
       step gate-a3 env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3 ;;
   review)
-    step build-dev scripts/dev sigil build && \
+    # the test binary (harkfell-test) is built by sigil test, not sigil build
+    step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl && \
       step render env JOBS=tools/wrongwater-review.jobs OUT=../out/wrongwater-listening \
         scripts/dev build/dev/bin/harkfell-test --no-strict tools/wrongwater-render.sgl ;;
   sabotage)
-    if step build-dev scripts/dev sigil build; then
+    if step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl; then
       for lib in engine harkfell; do rm -rf "build/dev/lib/$lib" && ln -s "$PWD/src/$lib" "build/dev/lib/$lib"; done
       step sabotage node tools/wrongwater-sabotage.mjs build/dev/bin/harkfell-test
       cp build/sabotage-*.log ../out/ 2>/dev/null || true
