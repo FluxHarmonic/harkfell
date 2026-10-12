@@ -80,9 +80,12 @@
                          (else f)))
           ((close) (if (eq? (finale-phase f) 'home) (enter f 'close) f))
           ((dawn) (if (memq (finale-phase f) '(home close)) (enter f 'dawn) f))
-          ((done) (if (eq? (finale-phase f) 'coda)
+          ;; SOUND sends dawn before done. Once its playback has finished,
+          ;; the save must stop recording an active piece immediately, even
+          ;; if the provisional dawn counter has not reached its timeout.
+          ((done) (if (memq (finale-phase f) '(home close dawn coda))
                       (enter f 'done)
-                      (if (memq (finale-phase f) '(home close)) (enter f 'dawn) f)))
+                      f))
           (else f))))
 
     ;; Only Hollow's environment uses this night shift; glyph colours keep
