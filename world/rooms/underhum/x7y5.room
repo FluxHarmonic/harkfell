@@ -2,7 +2,9 @@
 ;; great stone stands on it in the middle, scenery drawn behind the body,
 ;; and the listening place sparkles at its foot. The lift (columns 21-23,
 ;; steady ^) rises at the east wall into D; release jump in it to come
-;; back down onto this floor.
+;; back down onto this floor. East of the stone, a low dais of rough-cut
+;; stone (16-19) holds the grate (=, 17-18): drop through it (down and
+;; jump) into K and the cistern; climb back up the rough sides.
 (room
   region: underhum
   at: (7 5)
@@ -20,8 +22,8 @@
    "##                   ^^^#"
    "#                    ^^^#"
    "                     ^^^#"
-   "                     ^^^#"
-   "#########################")
+   "                %==% ^^^#"
+   "################%  %#####")
   things: ((great-stone at: (12 9))
            (listening-place at: (12 9)))
   decor: none)

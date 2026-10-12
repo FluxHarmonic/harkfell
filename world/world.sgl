@@ -243,8 +243,9 @@
 ;; Seeds: small tufted seeds that drift in the lifts, rise with the gust and
 ;; settle in shelter. Never a platform, never harmful.
 (creature seed behaviour: drift)
-;; The Underhum (stage 2, topics/harkfell-underhum-bible and -map): eight
-;; rooms under the bowl, x4..7 at y4..5, reached only through the heart in
+;; The Underhum (stage 2, topics/harkfell-underhum-bible and -map): thirteen
+;; rooms under the bowl, x4..7 at y4..5 and, below the chamber, x7..8 at
+;; y5..7 (Revision 1: the cistern climb), reached only through the heart in
 ;; the bowl's floor, keyed to all four harmonics. Dark, no moths: the light
 ;; is the carried harmonics' orbs. Bounds overlap the Pipes' rectangle; a
 ;; room is checked against its own region's bounds, and every slot here is
@@ -253,10 +254,11 @@
 ;; finale is triggered by SYSTEMS's news, so there are no moments here.
 (region underhum
   name: "The Underhum"
-  bounds: ((4 4) (7 5))
+  bounds: ((4 4) (8 7))
   bed: "underhum-bed"
   bed-channels: (hum air water drone)
   mode: ionian
+  hazard: gap
   palette: (und-far-1 und-far-2 und-far-3 und-far-4
             und-rock-1 und-rock-2 und-rock-3 und-rock-4
             und-cut-1 und-cut-2 und-cut-3 und-drip und-ochre fur-1 fur-2 ink)

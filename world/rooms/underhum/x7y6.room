@@ -1,0 +1,29 @@
+;; K, Under the Stone. The grate in H's floor (columns 17-18) drops onto
+;; the rim (row 5); the rough pillars (16, 19) climb back up through it.
+;; The cistern's upper half: from the rim's west edge, two glide hops west
+;; over the fissure (4-tile gaps, 2 rows down), from the rim's worn lip (15,
+;; brittle: take off at a run, never stop on it) to the ledge (9-10) and the
+;; lower ledge (3-4), then down the chute (1-2) into L.
+;; East, the rim goes on into J, the Bearers' Rest (rows 4-5).
+(room
+  region: underhum
+  at: (7 6)
+  title: "Under the Stone"
+  intent: "beneath the chamber's floor the great stone's root goes down into an old cistern, and the hum is strongest of anywhere"
+  bed: (hum 1.0 air 0.6 water 0)
+  light: 0.2
+  grid:
+  ("################%  %#####"
+   "#               %  %    #"
+   "#               %  %    #"
+   "#               %  %    #"
+   "#                        "
+   "#                        "
+   "#              ##########"
+   "#               #########"
+   "#        ##     #########"
+   "#               #########"
+   "#  ##xxxxxxxxxxx#########")
+  things: ((root at: (12 1))
+           (thin-ice at: (15 6)))
+  decor: none)

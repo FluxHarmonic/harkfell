@@ -4,7 +4,8 @@
 ;; (the bowl room's air-field); the rough pillar at column 13 is the climb
 ;; back without the down, continuing as % at bowl (13,9..10). West, the
 ;; shaft (columns 3-5) drops to E, its east wall rough (column 6) for the
-;; climb back. East, the landing runs on into B (rows 4-5).
+;; climb back. East, the landing runs on into B (rows 4-5). Across the
+;; shaft to the west, a false wall (2, rows 4-5) hides the first carving.
 (room
   region: underhum
   at: (4 4)
@@ -17,8 +18,8 @@
    "############^%###########"
    "####### #   ^%  ## ######"
    "###         ^%      ## ##"
-   "###         ^%           "
-   "###         ^            "
+   "# +         ^%           "
+   "# +         ^            "
    "###   %##################"
    "###   %##################"
    "###   %##################"
