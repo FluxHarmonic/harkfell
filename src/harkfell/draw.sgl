@@ -50,6 +50,7 @@
           (harkfell atlas)
           (harkfell pipes look)
           (harkfell cloudstair look)
+          (harkfell underhum look)
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
@@ -83,7 +84,7 @@
                         (list 'water "#3d6690") (list 'accent "#7a3530")
                         (list 'fur-1 "#ebe0cc") (list 'fur-2 "#b8ab95") (list 'ink "#1f1f24")
                         (list 'h2 "#e8a84c") (list 'h3 "#b4dc9a") (list 'h4 "#8fb4e6") (list 'h5 "#e6a0b4")
-                        (list 'h7 "#a47ce0") (list 'black "#000000")))
+                        (list 'h7 "#a47ce0") (list 'black "#000000") (list 'fund "#f4ecdc")))
         v))
 
     (define (region-colours name) (region-rgb name))
@@ -115,7 +116,10 @@
     ;; colours brought up to date once after the content changes.
     (define (use-region! name)
       (let ((e (assq name *strip-texs*))
-            (dark (if (eq? name 'pipes) PIPES-DARK (region-dark-lookup name))))
+            (dark (case name
+                    ((pipes) PIPES-DARK)
+                    ((underhum) UNDERHUM-DARK)
+                    (else (region-dark-lookup name)))))
         (cond ((not e)
                (set! *strip-texs* (cons (cons name (make-strips (region-rgb name) dark)) *strip-texs*)))
               ((memq name *strips-stale*)
@@ -433,8 +437,10 @@
         (if e
             (cdr e)
             (let ((t (make-texture-from-pixels VIEW-W VIEW-H
-                                               (if (cloudstair-backdrop-key? key)
-                                                   (cloudstair-backdrop-bytes key)
+                                               (cond
+                                                 ((cloudstair-backdrop-key? key) (cloudstair-backdrop-bytes key))
+                                                 ((underhum-backdrop-key? key) (underhum-backdrop-bytes key))
+                                                 (else
                                                (case key
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
@@ -448,7 +454,7 @@
                                                  ((glasswood-sun-3) (glasswood-bytes 0.75))
                                                  ((glasswood-sun-4) (glasswood-bytes 1.0))
                                                  ((reedfen) (reedfen-bytes))
-                                                 (else (backdrop-bytes key))))
+                                                 (else (backdrop-bytes key)))))
                                                'nearest)))
               (set! *backdrops* (cons (cons key t) *backdrops*))
               t))))
@@ -486,6 +492,7 @@
     (define (draw-backdrop! rm)
       (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
                                  ((cloudstair? rm) (cloudstair-backdrop-key rm))
+                                 ((underhum? rm) (underhum-backdrop-key rm))
                                  ((and (not (under? rm)) (glasswood-sheet? rm))
                                   ;; Glasswood's sky by the room's sun, in quarters
                                   (vector-ref (vector (quote glasswood-sun-0) (quote glasswood-sun-1) (quote glasswood-sun-2) (quote glasswood-sun-3) (quote glasswood-sun-4))
@@ -553,6 +560,7 @@
         (each-tile rm (cond ((eq? (room-region rm) 'pipes)
                              (lambda (m) (memq m (list 'ledge 'hazard))))
                             ((cloudstair? rm) (lambda (m) #f))   ; all painted ((harkfell cloudstair look))
+                            ((underhum? rm) (lambda (m) #f))     ; all painted ((harkfell underhum look))
                             (else solid-mat?))
                    (lambda (mat x y m gc gr)
                      (let ((m (if (and (not (mask-has? m MASK-UP)) (eq? (material-at gc (- gr 1)) 'water))
@@ -679,8 +687,14 @@
     (define (bowl? rm)
       (and (eq? (room-region rm) 'hollow) (= (room-x rm) 4) (= (room-y rm) 3)))
 
+    ;; STUB(systems): the heart is the bowl's stone at (12,9) until SYSTEMS gives
+    ;; it a kind of its own; (harkfell underhum look) draws it.
+    (define (heart-stone? rm st)
+      (and (bowl? rm) (equal? (stone-cell st) (global-tile rm 12 9))))
+
     (define (stone-visible? rm st)
-      (not (and (bowl? rm) (= (stone-overtone st) 5) (null? *passage-air*))))
+      (or (heart-stone? rm st)
+          (not (and (bowl? rm) (= (stone-overtone st) 5) (null? *passage-air*)))))
 
     (define (revealed-cells rm tm)
       (if (not tm)
@@ -717,6 +731,12 @@
                 (draw-cloudstair-solids! rm
                                          (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
                                          (* S (car g)) (* S (cdr g)))))
+            ;; the Underhum's rock likewise ((harkfell underhum look))
+            (when (underhum? rm)
+              (let ((g (global-tile rm 0 0)))
+                (draw-underhum-solids! rm
+                                       (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
+                                       (* S (car g)) (* S (cdr g)))))
             (draw-solids! rm)
             (draw-drifts! rm)
             (draw-sun-on-branches! rm)
@@ -1485,24 +1505,31 @@
                           (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                  (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
                             (when (and (stone-visible? rm st) (in-room? x y))
+                              (if (heart-stone? rm st)
+                                  ;; STUB(systems): the heart, until it has a kind of its own
+                                  (draw-heart! x y t (world-carry w) (stone-state st) (stone-t st))
                               (if (eq? (room-region rm) 'pipes)
                                   (draw-stone st x y t (world-carry w) (stone-slot rm) "pipes" #t)
                                   ;; the bowl's rose stone keeps its glyph after its reveal
                                   (if (and (bowl? rm) (= (stone-overtone st) 5))
                                       (draw-stone st x y t (world-carry w) (stone-slot rm) #f #t)
-                                      (draw-stone st x y t (world-carry w) (stone-slot rm)))))))
+                                      (draw-stone st x y t (world-carry w) (stone-slot rm))))))))
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
               (draw-reedfen-water-haze! rm t)
               (draw-pipes-panels! rm)
+              (draw-underhum-scenery! rm t (underhum-phase) (world-carry w))
               ;; Cloudstair's lifts, gusts and seeds, on the shared air clock;
               ;; elsewhere a lift column's seeds (the Hollow's launch lift)
               (if (cloudstair? rm)
                   (let ((c (body-center b HARKFELL-FEEL)))
                     (draw-cloudstair-air! rm t (world-tau w))
                     (draw-cloudstair-seeds! rm t (world-tau w) (- (car c) ox) (- (cdr c) oy) (world-carry w)))
-                  (draw-lift-seeds! rm t (world-tau w)))
+                  ;; the Underhum's columns draw their own motes; the bowl's field
+                  ;; over the heart shows nothing until you rise through it
+                  (unless (or (underhum? rm) (bowl? rm))
+                    (draw-lift-seeds! rm t (world-tau w))))
               ;; the authored down gift, until it is yours
               (unless (world-down w)
                 (for-each (lambda (d)
@@ -1527,6 +1554,7 @@
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (when (body-down b)
                 (draw-down-tuft! b (- (body-x b) ox) (- (body-y b) oy) t))
+              (draw-underhum-sprites! rm b (world-carry w) t (underhum-phase) ox oy)
               (draw-water! rm)
               (cover-thin-water! w ox oy)
               (draw-crusts!)
@@ -1548,8 +1576,11 @@
                               (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                      (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
                                 (when (and (stone-visible? rm st) (in-room? x y))
-                                  (draw-stone-light st x y t slot))))
+                                  (if (heart-stone? rm st)
+                                      (draw-heart-light! x y t (world-carry w) (stone-state st) (stone-t st))
+                                      (draw-stone-light st x y t slot)))))
                             (world-stones w))
+                  (draw-underhum-lights! rm b (world-carry w) t (underhum-phase) ox oy)
                   (for-each (lambda (pk)
                               (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
                                 (when (in-room? x y) (draw-pickup-light (pickup-overtone pk) x y t))))
@@ -1600,6 +1631,10 @@
           (set-blend-mode 'normal)
           (after)
           (draw-strips! *strips*))
+        ;; the Underhum's orbs, for the resolve's colours
+        (set-orb-lights! (if rm (underhum-orb-lights rm (world-body w) (world-carry w) (world-ticks w)
+                                                     (underhum-phase) (car (world-origin w)) (cdr (world-origin w)))
+                             '()))
         (resolve! (world-ticks w)
                   (max (world-dim w) (if (pair? black) (car black) 0.0))
                   (if rm (room-hue w) (slot-of 'h2))
@@ -1607,7 +1642,9 @@
                   (if rm
                       (let ((c (body-center (world-body w) HARKFELL-FEEL))
                             (cs (world-critters w)))
-                        (room-dark-extra rm (moth-arrival (if cs (critters-list cs) '()) (car c) (cdr c))))
+                        (if (underhum? rm)
+                            (underhum-dark-extra rm (underhum-phase))
+                            (room-dark-extra rm (moth-arrival (if cs (critters-list cs) '()) (car c) (cdr c)))))
                       0.0)
                   (and rm (room-daylight-pools? rm)))))
 
@@ -1664,6 +1701,7 @@
         (draw-cloudstair-air! rm 0 0)
         (draw-cloudstair-seeds! rm 0 0 -1000.0 -1000.0))
       (draw-pipes-panels! rm)
+      (draw-underhum-scenery! rm 0 #f)
       (draw-pipes-cues! rm 0)
       (draw-upward-drips! rm 0)
       (with-additive-blend

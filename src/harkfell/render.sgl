@@ -51,7 +51,7 @@
           paint-slot! paint-slot-a! paint-water! paint-light!
           strip-bytes make-strips strips-update! draw-strips!
           ensure-render! room-index-rt room-color-rt
-          resolve! set-cloud-shade! dark-steps DARK-GAIN LIGHT-POOL-REACH LIGHT-POOL-EDGE
+          resolve! set-cloud-shade! set-orb-lights! dark-steps DARK-GAIN LIGHT-POOL-REACH LIGHT-POOL-EDGE
           sway-composite! sway-offset draw-texture-scattered! draw-texture-dissolved!
           GLSL-PREFIX VERT-SOURCE)
 
@@ -205,6 +205,7 @@
        "uniform float u_shade;\n"
        "uniform float u_shade_x;\n"
        "uniform float u_shade_w;\n"
+       "uniform vec4 u_orbs[6];\n"
        "float daylightPool(int x, int y) {\n"
        "    if (u_pool < 0.5) return 0.0;\n"
        "    float nearest = 100000.0;\n"
@@ -287,10 +288,24 @@
        "        else if (dk > 1.0 + th) c = strip(7, ds);\n"
        "        else if (dk > th) c = strip(6, ds);\n"
        "    }\n"
+       ;; the Underhum's orbs (u_orbs: view x, y, pool radius, slot; radius 0
+       ;; unused): where light falls inside an orb's pool on rock or scenery
+       ;; (slots 4-12, never the far dark or the body), a sparse dither of that
+       ;; orb's own colour, densest at the orb,
+       ;; the nearest orb winning where pools overlap; its colour is the core's too
+       "    int oslot = -1; float ow = 0.0;\n"
+       "    for (int i = 0; i < 6; i++) {\n"
+       "        vec4 o = u_orbs[i];\n"
+       "        if (o.z > 0.0) {\n"
+       "            float w = 1.0 - length(vec2(float(x) - o.x, float(y) - o.y)) / o.z;\n"
+       "            if (w > ow) { ow = w; oslot = int(o.w + 0.5); }\n"
+       "        }\n"
+       "    }\n"
+       "    if (oslot >= 0 && slot >= 4 && slot <= 12 && s.b > 0.0 && dk < 0.5 && bayer(x + 2, y + 1) < ow * ow * 0.3) c = strip(0, oslot);\n"
        "    L = L - u_dark / 5.0;\n"
        ;; light: B against the threshold: lit, lit twice, the light's colour
        "    if (L > 0.0) {\n"
-       "        if (L > 0.72 + th * 0.28) c = strip(0, (slot >= 16 && slot <= 20) ? slot : int(u_hue));\n"
+       "        if (L > 0.72 + th * 0.28) c = strip(0, ((slot >= 16 && slot <= 20) || slot == 22) ? slot : (oslot >= 0 ? oslot : int(u_hue)));\n"
        "        else if (L > 0.36 + th * 0.36) c = strip(5, lslot);\n"
        "        else if (L > th * 0.36) c = strip(4, lslot);\n"
        "    }\n"
@@ -463,6 +478,17 @@
     ;; A cloud's shadow for the next resolves: STRENGTH (0 is none, 1 a whole
     ;; DARK step) over a band centred at view column X, W px either side. The
     ;; next resolve! uses it and clears it, so it is set each frame it is wanted.
+    ;; The Underhum's orbs for the next resolve: up to six (x y radius slot),
+    ;; view pixels; like the shade, used once and cleared.
+    (define *orbs* '())
+    (define (set-orb-lights! orbs) (set! *orbs* orbs))
+    (define (orb-floats)
+      (let loop ((os *orbs*) (k 0) (acc '()))
+        (if (= k 6)
+            (reverse acc)
+            (let ((o (if (pair? os) (car os) (list 0.0 0.0 0.0 0.0))))
+              (loop (if (pair? os) (cdr os) os) (+ k 1)
+                    (append (reverse (map inexact o)) acc))))))
     (define *shade* (vector 0.0 0.0 0.0))
     (define (set-cloud-shade! strength x w)
       (set! *shade* (vector strength x w)))
@@ -499,7 +525,9 @@
       (set-shader-uniform *resolve* 'u_shade_x (inexact (vector-ref *shade* 1)))
       (set-shader-uniform *resolve* 'u_shade_w (inexact (vector-ref *shade* 2)))
       ;; set for one resolve only: the title, the card and the overview get none
+      (set-shader-uniform *resolve* 'u_orbs (orb-floats))
       (set! *shade* (vector 0.0 0.0 0.0))
+      (set! *orbs* '())
       (with-render-target *color-rt*
         (set-blend-mode 'none)
         (set-color 1.0 1.0 1.0 1.0)

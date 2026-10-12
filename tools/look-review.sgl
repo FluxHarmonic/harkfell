@@ -12,6 +12,8 @@
 ;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks;
 ;;;                       MODE down carries the cattail down, glide also holds
 ;;;                       jump; TAU0 is where the gust clock starts (default 0)
+;;;   room:...:MODE:TAU0:PHASE  the Underhum's finale state for the frame: none,
+;;;                       listening or fused (the look's review override)
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
 ;;;                       the same room on a W x H window (fitted as the web
 ;;;                       fits it), with D47's region name over it at ALPHA
@@ -25,7 +27,8 @@
         (substratic view present)
         (harkfell content) (harkfell source) (harkfell draw) (harkfell render)
         (harkfell view) (harkfell title)
-        (harkfell world) (harkfell gates) (harkfell check) (harkfell feel))
+        (harkfell world) (harkfell gates) (harkfell check) (harkfell feel)
+        (harkfell underhum look))
 
 (define CONTROL (getenv "PIPES_LOOK_CONTROL"))
 (define (load-review) (load-content (read-world-source "world")))
@@ -44,6 +47,9 @@
          (down? (member mode '("down" "glide")))
          ;; TAU0 (optional 10th field): the gust clock the body starts at
          (tau0 (if (> (length parts) 9) (num (list-ref parts 9)) 0))
+         (_ (set-underhum-review-phase!
+              (let ((p (and (> (length parts) 10) (list-ref parts 10))))
+                (and p (not (string=? p "none")) (string->symbol p)))))
          (b (body (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g)) down: (and down? #t) tau: tau0))
          (in (if (string=? mode "glide") (intent jump: #t) (intent)))
          (w (world-populate (world-at wm b) (content-stones ct) (content-pickups ct)

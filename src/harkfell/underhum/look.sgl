@@ -1,0 +1,714 @@
+;;; (harkfell underhum look) - The Underhum's pictures (the bible's "The
+;;; look"): the dark rock under the bowl, the old people's cut work, the
+;;; niches, the gallery's stones, the slab, the great stone and its
+;;; listening place, the rising columns, and the orbs: one small light per
+;;; carried harmonic, swirling round you, each lighting the rock in its own
+;;; colour and breathing at its own drone voice's rate.
+;;;
+;;; Everything is palette slots (harkfell render). The stone is painted from
+;;; global pixels, so a seam between two rooms shows one rock. The rooms are
+;;; black but for light: (harkfell draw) asks underhum-dark-extra for a third
+;;; step of dark, and every picture here that should be seen brings its own
+;;; light (B). The orbs' colours reach the resolve as u_orbs (set-orb-lights!
+;;; in (harkfell render)): inside an orb's pool the lit rock takes a sparse
+;;; dither of that orb's colour, so overlapping pools show overlapping colours.
+;;;
+;;;   (underhum? rm)                                  a room of the region
+;;;   UNDERHUM-DARK                                   its dark lookup
+;;;   (underhum-backdrop-key rm) / (underhum-backdrop-bytes key)
+;;;   (draw-underhum-solids! rm kind-at gx0 gy0)      baked with the room
+;;;   (draw-underhum-scenery! rm t ph)                the niches, stones, slab
+;;;   (draw-underhum-sprites! rm b carry t ph ox oy)  orbs, motes, after the body
+;;;   (draw-underhum-lights! rm b carry t ph ox oy)   their light (B, additive)
+;;;   (underhum-orb-lights rm b carry t ph ox oy)     the resolve's u_orbs list
+;;;   (underhum-dark-extra rm ph)                     the extra step of dark
+;;;   (underhum-phase) / (set-underhum-review-phase! ph)
+;;;   (draw-heart! x y t carry) (draw-heart-light! x y t carry)   the bowl's heart
+;;;
+;;; ph, the finale's state: #f before the fundamental, listening while the
+;;; body keeps still at the listening place, fused once the fundamental has
+;;; sounded. STUB(systems): (underhum-phase) answers the review override only
+;;; until SYSTEMS provides the real state ([[tasks/harkfell-depths-systems]]).
+(define-library (harkfell underhum look)
+  (import (sigil math)
+          (sigil list)
+          (sigil string)
+          (sigil graphics)
+          (engine body)
+          (harkfell feel)
+          (harkfell content)
+          (harkfell palette)
+          (harkfell render))
+
+  (export underhum? UNDERHUM-DARK underhum-backdrop-key underhum-backdrop-key?
+          underhum-backdrop-bytes draw-underhum-solids! draw-underhum-scenery!
+          draw-underhum-sprites! draw-underhum-lights! underhum-orb-lights
+          underhum-orbs underhum-dark-extra underhum-phase set-underhum-review-phase!
+          draw-heart! draw-heart-light! underhum-stone-bytes)
+
+  (begin
+    (define S 16)
+    (define TAU (* 2.0 3.141592653589793))
+
+    (define (underhum? rm) (and rm (eq? (room-region rm) 'underhum)))
+
+    (define (pixel x) (exact (floor x)))
+
+    (define BAYER4 (vector 0 8 2 10 12 4 14 6 3 11 1 9 15 7 13 5))
+    (define (bayer x y)
+      (/ (+ 0.5 (vector-ref BAYER4 (+ (* 4 (modulo y 4)) (modulo x 4)))) 16.0))
+
+    ;; A small deterministic hash of two integers and a salt: 0..65520.
+    (define (hash3 a b k)
+      (let* ((h (modulo (+ (* (modulo a 65521) 7919) (* (modulo b 65521) 104729)
+                           (* k 31337) 17)
+                        65521))
+             (h (modulo (+ (* h h) 12345) 65521)))
+        (modulo (+ (* h 40503) k) 65521)))
+
+    (define (rect! s x y w h)
+      (paint-slot! (slot-of s))
+      (draw-filled-rect x y w h))
+
+    ;; --- the finale's state (STUB(systems)) ----------------------------------
+
+    (define *review-phase* #f)
+    (define (set-underhum-review-phase! ph) (set! *review-phase* ph))
+    (define (underhum-phase) *review-phase*)
+
+    ;; --- the dark ----------------------------------------------------------
+    ;; A step down each ramp toward the far dark; the cut stone goes over to
+    ;; the rock's shadow, the ochre and the drip's wet stone go out first.
+    ;; The harmonic colours are not listed, so they keep themselves.
+    (define UNDERHUM-DARK
+      (list (cons 'sky-2 'sky-1) (cons 'sky-3 'sky-2) (cons 'sky-4 'sky-3)
+            (cons 'ground-1 'sky-1) (cons 'ground-2 'ground-1) (cons 'ground-3 'ground-2) (cons 'ground-4 'ground-3)
+            (cons 'leaf-1 'ground-1) (cons 'leaf-2 'ground-2) (cons 'leaf-3 'ground-3)
+            (cons 'water 'ground-1) (cons 'accent 'ground-2)
+            (cons 'fur-1 'fur-2) (cons 'fur-2 'ground-2)))
+
+    ;; A third step: black wherever no light falls. After the fundamental the
+    ;; chamber's own white light shows its walls, so the extra step lifts there.
+    (define (underhum-dark-extra rm ph)
+      (if (and (eq? ph 'fused) (chamber? rm)) 0.0 1.0))
+
+    (define (chamber? rm) (and (underhum? rm) (= (room-x rm) 7) (= (room-y rm) 5)))
+
+    ;; --- the stone texture -----------------------------------------------------
+    ;; One texture for the region (the Pipes' lesson: one per room exhausts
+    ;; the sampler pool). Bands of BAND rows, each repeating every PERIOD-X
+    ;; by PERIOD-Y, with 16 px of wrap margin.
+    (define PERIOD-X 320)
+    (define PERIOD-Y 160)
+    (define TEX-W (+ PERIOD-X S))
+    (define BAND (+ PERIOD-Y S))
+    (define ROCK-Y 0)
+    (define DEEP-Y BAND)
+    (define ROUGH-Y (* 2 BAND))
+    (define CUT-Y (* 3 BAND))
+    (define TEX-H (* 4 BAND))
+
+    ;; value noise on an 8 px lattice, periodic, 0..1
+    (define (lattice i j k)
+      (/ (hash3 (modulo i (quotient PERIOD-X 8)) (modulo j (quotient PERIOD-Y 8)) k) 65521.0))
+    (define (smooth f) (* f f (- 3.0 (* 2.0 f))))
+    (define (noise x y k)
+      (let* ((i (quotient x 8)) (j (quotient y 8))
+             (fx (smooth (/ (modulo x 8) 8.0))) (fy (smooth (/ (modulo y 8) 8.0)))
+             (a (lattice i j k)) (b (lattice (+ i 1) j k))
+             (c (lattice i (+ j 1) k)) (d (lattice (+ i 1) (+ j 1) k)))
+        (+ (* (- 1.0 fy) (+ (* (- 1.0 fx) a) (* fx b)))
+           (* fy (+ (* (- 1.0 fx) c) (* fx d))))))
+
+    ;; Natural rock: massive, warm and dark; broad patches a step lighter,
+    ;; fissures that wander, a few lit grains. 1..4 are ground-1..4.
+    (define (rock-tone x y)
+      (let* ((xx (modulo x PERIOD-X)) (yy (modulo y PERIOD-Y))
+             (v (+ (* 0.65 (noise xx yy 1)) (* 0.35 (noise (modulo (* 2 xx) PERIOD-X) (modulo (* 2 yy) PERIOD-Y) 2))))
+             (b (bayer x y))
+             ;; fissures: two wandering families, broken
+             (f1 (abs (sin (+ (* xx 0.0785398) (* 1.7 (sin (* yy 0.0785398)))))))
+             (f2 (abs (sin (- (* yy 0.1178097) (* 1.2 (sin (* xx 0.0392699)))))))
+             (broken (< (noise xx yy 7) 0.55)))
+        (cond ((and broken (< f1 0.035)) 1)
+              ((and broken (< f2 0.03)) 1)
+              ((and broken (< f1 0.09) (< b 0.5)) 2)
+              ((= 0 (modulo (hash3 (quotient xx 2) (quotient yy 2) 9) 61)) 3)
+              ((> v 0.66) (if (< b (* 3.0 (- v 0.62))) 3 2))
+              ((< v 0.3) (if (< b 0.4) 1 2))
+              (else 2))))
+
+    ;; Fractured rough rock: irregular blocks broken along jittered lines
+    ;; (each pixel's nearest and second-nearest of a jittered lattice of
+    ;; seeds, 16 by 12 px, periodic), dark joints between them (the holds),
+    ;; each block lit along its upper-left edges and shaded along its lower
+    ;; right, a few wet blocks.
+    (define RX 16)
+    (define RY 12)
+    (define (seed-of i j)
+      (let* ((i (modulo i (quotient PERIOD-X RX))) (j (modulo j (quotient PERIOD-Y RY)))
+             (h (hash3 i j 29)))
+        (cons (+ (* i RX) 2 (modulo h (- RX 4))) (+ (* j RY) 2 (modulo (quotient h 16) (- RY 4))))))
+    (define (rough-tone x y)
+      (let* ((xx (modulo x PERIOD-X)) (yy (modulo y PERIOD-Y))
+             (i0 (quotient xx RX)) (j0 (quotient yy RY)))
+        (let loop ((di -1) (dj -1) (d1 1e9) (d2 1e9) (s1 #f) (s2 #f) (id1 #f))
+          (if (> dj 1)
+              (let* ((gap (- (sqrt d2) (sqrt d1)))
+                     (up-left (< (+ (- (car s2) xx) (- (cdr s2) yy)) 0))
+                     (b (bayer x y))
+                     (wet (= 0 (modulo (hash3 (car id1) (cdr id1) 5) 7))))
+                (cond ((< gap 1.1) 1)
+                      ((< gap 2.2) (if up-left 4 2))
+                      ((and (< gap 3.2) (not up-left) (< b 0.5)) 2)
+                      (wet (if (< b 0.55) 2 3))
+                      ((< (noise xx yy 4) 0.32) (if (< b 0.45) 2 3))
+                      (else 3)))
+              (let* ((i (+ i0 di)) (j (+ j0 dj))
+                     (s (seed-of i j))
+                     ;; the seed in this pixel's own wrap
+                     (sx (+ (car s) (* RX (- i (modulo i (quotient PERIOD-X RX))))))
+                     (sy (+ (cdr s) (* RY (- j (modulo j (quotient PERIOD-Y RY))))))
+                     (dx (- xx sx)) (dy (- yy sy))
+                     (d (+ (* dx dx) (* dy dy)))
+                     (next-di (if (= di 1) -1 (+ di 1)))
+                     (next-dj (if (= di 1) (+ dj 1) dj)))
+                (cond ((< d d1) (loop next-di next-dj d d1 (cons sx sy) s1 (cons i j)))
+                      ((< d d2) (loop next-di next-dj d1 d s1 (cons sx sy) id1))
+                      (else (loop next-di next-dj d1 d2 s1 s2 id1))))))))
+
+    ;; Cut stone: squared blocks 16 px long in courses of 8, every second
+    ;; course offset half a block, joints dark, a worn lit edge on top of each
+    ;; block, chisel marks, the old ochre here and there. 1..3 are leaf-1..3,
+    ;; 5 the accent, 6 ground-2.
+    (define (cut-tone x y)
+      (let* ((xx (modulo x PERIOD-X)) (yy (modulo y PERIOD-Y))
+             (course (quotient yy 8)) (cy (modulo yy 8))
+             (u (modulo (+ xx (if (odd? course) 8 0)) PERIOD-X))
+             (bx (modulo u 16)) (bi (quotient u 16))
+             (b (bayer x y))
+             (h (hash3 bi course 13)))
+        (cond ((= cy 7) 1)
+              ((= bx 15) 1)
+              ((= cy 0) (if (< b 0.7) 3 2))
+              ((= bx 0) 3)
+              ((and (= cy 3) (= 0 (modulo (+ bx (modulo h 5)) 5))) 1)
+              ((and (= 0 (modulo h 11)) (> cy 3) (< b 0.4)) 5)
+              ((and (> cy 4) (< b 0.25)) 6)
+              (else 2))))
+
+    (define (underhum-stone-bytes)
+      (let* ((bv (make-bytevector (* 4 TEX-W TEX-H) 0))
+             (g (vector 0 (slot-of 'ground-1) (slot-of 'ground-2) (slot-of 'ground-3) (slot-of 'ground-4)))
+             (cut (vector 0 (slot-of 'leaf-1) (slot-of 'leaf-2) (slot-of 'leaf-3) 0 (slot-of 'accent) (slot-of 'ground-2)))
+             (set (lambda (x y s)
+                    (let ((o (* 4 (+ x (* y TEX-W)))))
+                      (bytevector-u8-set! bv o s)
+                      (bytevector-u8-set! bv (+ o 3) 255)))))
+        (let rows ((y 0))
+          (when (< y BAND)
+            (let cols ((x 0))
+              (when (< x TEX-W)
+                (let ((tone (rock-tone x y)))
+                  (set x (+ ROCK-Y y) (vector-ref g tone))
+                  ;; buried rock: quieter, no lit grains
+                  (set x (+ DEEP-Y y) (vector-ref g (if (= tone 3) 2 tone))))
+                (set x (+ ROUGH-Y y) (vector-ref g (rough-tone x y)))
+                (set x (+ CUT-Y y) (vector-ref cut (cut-tone x y)))
+                (cols (+ x 1))))
+            (rows (+ y 1))))
+        bv))
+
+    (define *stone* #f)
+    (define (stone-texture)
+      (unless *stone*
+        (set! *stone* (make-texture-from-pixels TEX-W TEX-H (underhum-stone-bytes) 'nearest)))
+      *stone*)
+
+    ;; The rooms whose floors are the old people's work: the shelf, the
+    ;; gallery, the stair, the roots' steps and the low door.
+    (define (cut-floors? rm)
+      (member (cons (room-x rm) (room-y rm)) '((5 . 4) (6 . 4) (7 . 4) (4 . 5) (5 . 5))))
+
+    ;; Draw the room's rock into the current (slot) target. KIND-AT: local
+    ;; (c r), -1..25 and -1..11, to the material there; GX0, GY0: the room's
+    ;; top-left global pixel. Like cells merge into runs: one texture window
+    ;; per run of a row, a few rects per edge (the vertex budget, the Pipes'
+    ;; note).
+    (define (draw-underhum-solids! rm kind-at gx0 gy0)
+      (let* ((tex (stone-texture))
+             (solid? (lambda (c r) (memq (kind-at c r) '(rock rough))))
+             (open? (lambda (c r) (not (memq (kind-at c r) '(rock rough ledge hazard stone)))))
+             (cutf (cut-floors? rm))
+             (cut? (lambda (c r) (and cutf (eq? (kind-at c r) 'rock) (open? c (- r 1)) (> r 0))))
+             (strip! (lambda (x y w h sx sy)
+                       (let loop ((x x) (w w) (sx sx))
+                         (when (> w 0)
+                           (let ((seg (min w (- TEX-W sx))))
+                             (set-color 1.0 1.0 1.0 1.0)
+                             (draw-texture-region tex x y seg h sx sy seg h)
+                             (loop (+ x seg) (- w seg) (modulo (+ sx seg) PERIOD-X)))))))
+             (runs (lambda (n key emit)
+                     (let loop ((i 0) (start #f) (k #f))
+                       (let ((ki (and (< i n) (key i))))
+                         (if (and start (equal? ki k))
+                             (loop (+ i 1) start k)
+                             (begin
+                               (when start (emit start (- i 1) k))
+                               (when (< i n) (loop (+ i 1) (and ki i) ki)))))))))
+        (set-blend-mode 'normal)
+        ;; the stone, row by row
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (let* ((y (* S r))
+                   (py (modulo (+ gy0 y) PERIOD-Y)))
+              (runs ROOM-COLS
+                    (lambda (c)
+                      (let ((k (kind-at c r)))
+                        (cond ((eq? k 'rough) ROUGH-Y)
+                              ((not (eq? k 'rock)) #f)
+                              ((cut? c r) CUT-Y)
+                              ((and (solid? (- c 1) r) (solid? (+ c 1) r)
+                                    (solid? c (- r 1)) (solid? c (+ r 1))
+                                    (solid? (- c 1) (- r 1)) (solid? (+ c 1) (- r 1))
+                                    (solid? (- c 1) (+ r 1)) (solid? (+ c 1) (+ r 1)))
+                               DEEP-Y)
+                              (else ROCK-Y))))
+                    (lambda (c0 c1 band)
+                      (strip! (* S c0) y (* S (+ 1 (- c1 c0))) S
+                              (modulo (+ gx0 (* S c0)) PERIOD-X) (+ band py)))))
+            (rows (+ r 1))))
+        ;; shadow under each exposed underside; the dark side of each face
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (and (solid? c r) (open? c (+ r 1))))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (rect! 'ground-1 x (+ y 14) w 2)
+                      (rect! 'sky-1 x (+ y 15) w 1))))
+            (rows (+ r 1))))
+        (let cl ((c 0))
+          (when (< c ROOM-COLS)
+            (runs ROOM-ROWS
+                  (lambda (r) (and (solid? c r) (open? (+ c 1) r)))
+                  (lambda (r0 r1 k)
+                    (rect! 'ground-1 (+ (* S c) 14) (* S r0) 2 (* S (+ 1 (- r1 r0))))))
+            (runs ROOM-ROWS
+                  (lambda (r) (and (solid? c r) (open? (- c 1) r)))
+                  (lambda (r0 r1 k)
+                    (rect! 'ground-3 (* S c) (* S r0) 1 (* S (+ 1 (- r1 r0))))))
+            (cl (+ c 1))))
+        ;; every top open above: a worn lip, natural or cut
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (and (solid? c r) (open? c (- r 1)) (if (cut? c r) 'cut 'rock)))
+                  (lambda (c0 c1 k)
+                    (let ((x (* S c0)) (w (* S (+ 1 (- c1 c0)))) (y (* S r)))
+                      (if (eq? k 'cut)
+                          (begin (rect! 'leaf-3 x y w 1) (rect! 'leaf-2 x (+ y 1) w 1))
+                          (begin (rect! 'ground-4 x y w 1) (rect! 'ground-3 x (+ y 1) w 1))))))
+            (rows (+ r 1))))))
+
+    ;; --- the backdrop -----------------------------------------------------------
+    ;; The far dark, never sky: rock receding in the four far slots, a few
+    ;; hanging curtains of old flowstone and, in the chamber, the great wall's
+    ;; ribs, which only the fundamental's light reaches. Two keys: the
+    ;; passages and the chamber.
+    (define (underhum-backdrop-key rm) (if (chamber? rm) 'underhum-chamber 'underhum-far))
+    (define (underhum-backdrop-key? key) (memq key '(underhum-chamber underhum-far)))
+
+    (define (underhum-backdrop-bytes key)
+      (let ((bv (make-bytevector (* 4 VIEW-W VIEW-H) 0))
+            (ribs (eq? key 'underhum-chamber)))
+        (let cols ((x 0))
+          (when (< x VIEW-W)
+            (let* ((curtain (and (= 0 (modulo (hash3 (quotient x 6) 3 17) 5))
+                                 (+ 20 (modulo (hash3 (quotient x 6) 4 19) 70))))
+                   (rib (and ribs (< (abs (sin (* x 0.0471239))) 0.22))))
+              (let rows ((y 0))
+                (when (< y VIEW-H)
+                  (let* ((b (bayer x y))
+                         (v (noise (modulo x PERIOD-X) (modulo (* 2 y) PERIOD-Y) 21))
+                         (s (cond ((and curtain (< y curtain) (< b (- 1.0 (/ y (* 1.0 curtain))))) 'sky-2)
+                                  ((and rib (> y 20) (< b (* 0.35 (- 1.0 (/ y 200.0))))) 'sky-2)
+                                  ((> v 0.72) (if (< b 0.5) 'sky-2 'sky-1))
+                                  ((and (> v 0.6) (< b 0.25)) 'sky-2)
+                                  (else 'sky-1)))
+                         (o (* 4 (+ x (* y VIEW-W)))))
+                    (bytevector-u8-set! bv o (slot-of s))
+                    (bytevector-u8-set! bv (+ o 3) 255))
+                  (rows (+ y 1)))))
+            (cols (+ x 1))))
+        bv))
+
+    ;; --- the orbs ---------------------------------------------------------------
+    ;; One per carried harmonic (H7 too), each on its own orbit at its own
+    ;; radius and speed, out of step the way the drone's voices are. Moving,
+    ;; they trail behind and spread; standing still they draw in. Listening,
+    ;; they slow and close in; fused, they settle into one ring and pulse
+    ;; together, and a pale white orb (the fundamental's) joins them.
+    ;; Breath rates are the drone voices' (assets/tunes/hollow-bed.cts), Hz.
+    (define ORBS
+      ;; (overtone role radius turns-per-second phase breath-hz)
+      (list (list 2 'h2 15.0 0.29 0.0 0.0213)
+            (list 3 'h3 19.0 -0.23 1.9 0.0323)
+            (list 4 'h4 23.0 0.19 3.7 0.0189)
+            (list 5 'h5 17.0 -0.26 5.1 0.027)
+            (list 7 'h7 21.0 0.21 2.6 0.0244)))
+
+    ;; The orbs as ((x y role breath) ...) in map pixels. b: the body; carry:
+    ;; the carried overtones; t: world ticks; ph: the finale's state.
+    (define (underhum-orbs b carry t ph)
+      (let* ((c (body-center b HARKFELL-FEEL))
+             (vx (body-vx b)) (vy (body-vy b))
+             (m (min 1.0 (/ (+ (abs vx) (* 0.4 (abs vy))) 1.4)))
+             (s (/ t 60.0))
+             (fused (eq? ph 'fused))
+             (listening (eq? ph 'listening))
+             ;; the centre the orbs circle: trailing behind a moving body
+             (cx (- (car c) (* 9.0 (max -1.0 (min 1.0 (/ vx 1.4))))))
+             (cy (- (cdr c) 2.0 (* 3.0 (max -1.0 (min 1.0 (/ vy 3.0))))))
+             (spread (cond (fused 0.8) (listening 0.7) (else (+ 0.75 (* 0.55 m)))))
+             (mine (filter (lambda (o) (memv (car o) carry)) ORBS))
+             (n (length mine)))
+        (append
+          (let loop ((os mine) (k 0) (acc '()))
+            (if (null? os)
+                (reverse acc)
+                (let* ((o (car os))
+                       (r (* spread (if fused 16.0 (list-ref o 2))))
+                       (turns (cond (fused 0.18) (listening (* 0.4 (list-ref o 3))) (else (list-ref o 3))))
+                       (a (if fused
+                              (+ (* TAU turns s) (/ (* TAU k) (max 1 n)))
+                              (+ (list-ref o 4) (* TAU turns s))))
+                       (breath (if fused
+                                   (+ 0.5 (* 0.5 (sin (* TAU 0.4 s))))
+                                   (+ 0.5 (* 0.5 (sin (+ (list-ref o 4) (* TAU (list-ref o 5) s)))))))
+                       (x (+ cx (* r (cos a))))
+                       (y (+ cy (* 0.6 r (sin a)) (* 1.5 (sin (+ (* s 2.1) k))))))
+                  (loop (cdr os) (+ k 1) (cons (list x y (list-ref o 1) breath) acc)))))
+          (if fused
+              (list (list (+ (car c) 10.0) (- (cdr c) 20.0 (* 2.0 (sin (* s 1.3)))) 'fund 1.0))
+              '()))))
+
+    ;; For the resolve: ((view-x view-y radius slot) ...), at most six.
+    (define ORB-POOL 30.0)
+    (define (underhum-orb-lights rm b carry t ph ox oy)
+      (if (underhum? rm)
+          (map (lambda (o) (list (- (car o) ox) (- (cadr o) oy) ORB-POOL (slot-of (caddr o))))
+               (underhum-orbs b carry t ph))
+          '()))
+
+    ;; --- pictures in the index pass ---------------------------------------------
+
+    (define (things rm kind) (room-things-of rm kind))
+
+    ;; A niche: an arched recess in the back wall, framed in cut stone, a sill
+    ;; under it. at: the cell its foot is in.
+    (define (draw-niche! x y)
+      ;; x y: the recess's top-left; 12 x 16
+      (rect! 'leaf-2 (- x 2) (- y 2) 16 20)
+      (rect! 'leaf-3 (- x 2) (- y 2) 16 1)
+      (rect! 'leaf-1 (+ x 13) (- y 1) 1 19)
+      (rect! 'sky-1 x (+ y 2) 12 14)
+      (rect! 'sky-1 (+ x 2) y 8 2)
+      (rect! 'sky-1 (+ x 1) (+ y 1) 10 1)
+      (rect! 'leaf-3 (- x 3) (+ y 16) 18 1)
+      (rect! 'leaf-2 (- x 3) (+ y 17) 18 2)
+      (rect! 'leaf-1 (- x 3) (+ y 19) 18 1))
+
+    ;; An old standing stone of the gallery: rough-dressed, taller than you,
+    ;; a faint ring cut near its top. at: the floor cell it stands in.
+    (define (draw-gallery-stone! x foot)
+      (let ((top (- foot 30)))
+        (rect! 'ground-2 (- x 6) (+ top 3) 12 27)
+        (rect! 'ground-2 (- x 5) (+ top 1) 10 2)
+        (rect! 'ground-3 (- x 4) top 7 1)
+        (rect! 'ground-3 (- x 6) (+ top 3) 1 27)
+        (rect! 'ground-1 (+ x 5) (+ top 3) 1 27)
+        (rect! 'ground-3 (- x 5) (+ top 2) 1 1)
+        ;; the ring
+        (rect! 'ground-1 (- x 2) (+ top 7) 4 1)
+        (rect! 'ground-1 (- x 3) (+ top 8) 1 3)
+        (rect! 'ground-1 (+ x 2) (+ top 8) 1 3)
+        (rect! 'ground-1 (- x 2) (+ top 11) 4 1)
+        ;; weathering
+        (rect! 'ground-1 (- x 1) (+ top 17) 1 4)
+        (rect! 'ground-3 (+ x 1) (+ top 22) 2 1)))
+
+    ;; The sealing slab, fallen against the west wall: a great dressed stone
+    ;; leaning, its face cut with the heart's four notches round a dark ring.
+    ;; at: the floor cell at its foot. Drawn row by row as a leaning block.
+    (define (draw-slab! x0 foot)
+      (let loop ((y (- foot 70)))
+        (when (< y foot)
+          (let* ((d (- foot y))                  ; height above the floor
+                 (lean (quotient (* d 3) 10))    ; leans toward the wall (west)
+                 (l (- x0 lean))
+                 (w 46))
+            (rect! 'leaf-2 l y w 1)
+            (rect! 'leaf-3 l y 1 1)
+            (rect! 'leaf-1 (+ l w -1) y 1 1)
+            (when (= y (- foot 70)) (rect! 'leaf-3 l y w 1))
+            ;; the incised ring and notches, centred on the face
+            (let* ((cx (+ l 23)) (cy (- foot 38))
+                   (dy (- y cy)))
+              (when (< (abs dy) 13)
+                (let* ((hw (pixel (sqrt (max 0.0 (- 169.0 (* dy dy))))))
+                       (iw (pixel (sqrt (max 0.0 (- 81.0 (* dy dy)))))))
+                  (rect! 'leaf-1 (- cx hw) y 1 1)
+                  (rect! 'leaf-1 (+ cx hw) y 1 1)
+                  (when (< (abs dy) 9)
+                    (rect! 'ground-1 (- cx iw) y (+ 1 (* 2 iw)) 1)))))
+            (loop (+ y 1)))))
+      ;; its shadow on the floor
+      (rect! 'ground-1 (- x0 20) (- foot 2) 70 2))
+
+    ;; The great stone: round and dark, as wide as four tiles, with four
+    ;; notches over its middle. at: the floor cell under its middle.
+    (define GREAT-R 30)
+    (define (great-centre x foot) (cons x (- foot 30)))
+    (define NOTCHES '((h2 -15 -6) (h3 -5 -11) (h4 5 -11) (h5 15 -6) (h7 0 -18)))
+    (define (draw-great-stone! x foot ph carry)
+      (let* ((c (great-centre x foot)) (cx (car c)) (cy (cdr c)))
+        (let loop ((dy (- GREAT-R)))
+          (when (<= (+ cy dy) foot)
+            (let* ((hw (pixel (* 1.08 (sqrt (max 0.0 (- (* GREAT-R GREAT-R) (* dy dy)))))))
+                   (y (+ cy dy)))
+              (rect! 'ground-2 (- cx hw) y (+ 1 (* 2 hw)) 1)
+              ;; lit from the upper left, the rim dark on the right
+              (rect! 'ground-3 (- cx hw) y (max 1 (quotient hw 4)) 1)
+              (rect! 'ground-1 (- (+ cx hw) (max 1 (quotient hw 5))) y (max 1 (quotient hw 5)) 1)
+              (when (= dy (- GREAT-R)) (rect! 'ground-3 (- cx hw) y (+ 1 (* 2 hw)) 1))
+              (loop (+ dy 1)))))
+        ;; the notches: dark until fused, then each in its colour
+        (for-each (lambda (n)
+                    (let ((role (car n)) (nx (+ cx (cadr n))) (ny (+ cy (caddr n))))
+                      (unless (and (eq? role 'h7) (not (memv 7 carry)))
+                        (rect! 'ground-1 (- nx 1) (- ny 2) 3 5)
+                        (when (eq? ph 'fused) (rect! role nx (- ny 1) 1 3)))))
+                  NOTCHES)
+        ;; the stone's foot on the floor
+        (rect! 'ground-1 (- cx 28) (- foot 1) 57 1)))
+
+    (define (draw-underhum-scenery! rm t ph . carry-opt)
+      (when (underhum? rm)
+        (let ((carry (if (pair? carry-opt) (car carry-opt) '())))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (draw-niche! (+ (* S (car a)) 2) (- (* S (cdr a)) 2))))
+                    (things rm 'niche))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (draw-gallery-stone! (+ (* S (car a)) 8) (* S (+ 1 (cdr a))))))
+                    (things rm 'gallery-stone))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (draw-slab! (+ (* S (car a)) 4) (* S (+ 1 (cdr a))))))
+                    (things rm 'slab))
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (draw-great-stone! (+ (* S (car a)) 8) (* S (+ 1 (cdr a))) ph carry)))
+                    (things rm 'great-stone)))))
+
+    ;; The motes of the listening place: threads leaving the great stone's
+    ;; four notches, drifting down and circling the tile just above the
+    ;; floor. ((x y role glow) ...) in room pixels.
+    (define (listening-motes rm t ph)
+      (let ((stone (find (lambda (th) #t) (things rm 'great-stone)))
+            (place (find (lambda (th) #t) (things rm 'listening-place))))
+        (if (not (and stone place (not (eq? ph 'fused))))
+            '()
+            (let* ((sa (thing-at stone)) (pa (thing-at place))
+                   (sc (great-centre (+ (* S (car sa)) 8) (* S (+ 1 (cdr sa)))))
+                   (px (+ (* S (car pa)) 8.0)) (py (- (* S (+ 1 (cdr pa))) 5.0))
+                   (slow (if (eq? ph 'listening) 0.6 1.0)))
+              (let loop ((m 0) (acc '()))
+                (if (= m 12)
+                    acc
+                    (let* ((n (list-ref NOTCHES (modulo m 4)))
+                           (nx (+ (car sc) (cadr n))) (ny (+ (cdr sc) (caddr n)))
+                           (period 420)
+                           (u (/ (modulo (+ (* slow t) (* m 35)) period) (* 1.0 period)))
+                           (spin (+ (* m 0.52) (* TAU 0.35 (/ t 60.0))))
+                           (cr 7.0)
+                           (tx (+ px (* cr (cos spin)))) (ty (+ py (* 0.35 cr (sin spin))))
+                           (x (if (< u 0.35)
+                                  (let ((f (smooth (/ u 0.35)))) (+ nx (* f (- tx nx)) (* 4.0 (sin (* f 3.0)))))
+                                  tx))
+                           (y (if (< u 0.35)
+                                  (let ((f (/ u 0.35))) (+ ny (* f (- ty ny))))
+                                  ty))
+                           (glow (cond ((< u 0.05) (/ u 0.05)) ((> u 0.92) (/ (- 1.0 u) 0.08)) (else 1.0))))
+                      (loop (+ m 1) (cons (list x y (car n) glow) acc)))))))))
+
+    ;; The rising motes of a lift column: A's from the start (the way back
+    ;; up, shown), the chamber's and the stair's only after the fundamental.
+    (define (column-motes rm t ph)
+      (let* ((cells (let loop ((r 0) (acc '()))
+                      (if (= r ROOM-ROWS) acc
+                          (loop (+ r 1)
+                                (let cl ((c 0) (acc acc))
+                                  (if (= c ROOM-COLS) acc
+                                      (cl (+ c 1) (if (char=? (room-char rm c r) #\^) (cons (cons c r) acc) acc))))))))
+             (shown (or (eq? ph 'fused) (and (= (room-x rm) 4) (= (room-y rm) 4))))
+             (role (if (eq? ph 'fused) 'fund 'sky-4)))
+        (if (not shown)
+            '()
+            (filter-map
+              (lambda (cell)
+                (let* ((h (hash3 (car cell) (cdr cell) 23))
+                       (speed (+ 0.4 (/ (modulo h 5) 10.0)))
+                       (y (- (* S (+ 1 (cdr cell))) (modulo (+ (* speed t) (modulo h 16)) 16.0))))
+                  (and (= 0 (modulo h 2))
+                       (list (+ (* S (car cell)) 3 (modulo (quotient h 7) 10)) y role))))
+              cells))))
+
+    ;; Niches you have passed, this visit: ((room-key . cell) ...). Cosmetic.
+    (define *lit-niches* '())
+    (define *niche-room* #f)
+    (define (niche-lit? rm a bx by carry o)
+      (unless (equal? *niche-room* (cons (room-x rm) (room-y rm)))
+        (set! *niche-room* (cons (room-x rm) (room-y rm)))
+        (set! *lit-niches* '()))
+      (when (and (memv o carry) (< (abs (- bx (+ (* S (car a)) 8))) 40) (not (member a *lit-niches*)))
+        (set! *lit-niches* (cons a *lit-niches*)))
+      (and (member a *lit-niches*) #t))
+    (define (overtone-role o) (case o ((2) 'h2) ((3) 'h3) ((4) 'h4) ((5) 'h5) (else 'h7)))
+
+    ;; After the body: the orbs, the listening motes, the niches' lights and
+    ;; the columns' motes, each a pixel or two of its own colour (the light
+    ;; pass gives them their glow; a harmonic slot keeps its colour there).
+    (define (draw-underhum-sprites! rm b carry t ph ox oy)
+      (when (underhum? rm)
+        (let ((c (body-center b HARKFELL-FEEL)))
+          (for-each (lambda (o)
+                      (let ((x (pixel (- (car o) ox))) (y (pixel (- (cadr o) oy))))
+                        (rect! (caddr o) (- x 1) y 3 1)
+                        (rect! (caddr o) x (- y 1) 1 3)))
+                    (underhum-orbs b carry t ph))
+          (for-each (lambda (m)
+                      (when (> (cadddr m) 0.3)
+                        (rect! (caddr m) (pixel (car m)) (pixel (cadr m)) 1 1)))
+                    (listening-motes rm t ph))
+          (for-each (lambda (th)
+                      (let* ((a (thing-at th)) (o (thing-kw th "overtone")))
+                        (when (niche-lit? rm a (- (car c) ox) (- (cdr c) oy) carry o)
+                          (let ((x (+ (* S (car a)) 8)) (y (+ (* S (cdr a)) 6)))
+                            (rect! (overtone-role o) (- x 1) y 2 3)
+                            (rect! (overtone-role o) x (- y 2) 1 2)))))
+                    (things rm 'niche))
+          (for-each (lambda (m) (rect! (caddr m) (pixel (car m)) (pixel (cadr m)) 1 2))
+                    (column-motes rm t ph)))))
+
+    ;; Their light, additive into B. The dark here is three steps (two from
+    ;; light:, one extra), cancelled at DARK-GAIN steps per unit: 0.6 lifts
+    ;; it all. Each orb lights a pool in three rings that add to half of
+    ;; that at its middle, so four orbs round the body light it
+    ;; nearly to daylight and their pools fade out apart; a core disc of a
+    ;; pixel or two lights the orb itself past the dark to its own colour.
+    (define ORB-RINGS (list (list 34.0 0.10) (list 24.0 0.10) (list 14.0 0.10)))
+    (define (disc! cx cy r a)
+      (when (> a 0.0)
+        (paint-light! a)
+        (let* ((x0 (pixel cx)) (y0 (pixel cy)) (ri (pixel r)))
+          (let loop ((dy (- ri)))
+            (when (<= dy ri)
+              (let ((hw (pixel (sqrt (max 0.0 (- (* r r) (* dy dy)))))))
+                (draw-filled-rect (- x0 hw) (+ y0 dy) (+ 1 (* 2 hw)) 1))
+              (loop (+ dy 1)))))))
+
+    (define (draw-underhum-lights! rm b carry t ph ox oy)
+      (when (underhum? rm)
+        (let ((c (body-center b HARKFELL-FEEL)))
+          ;; the body keeps a faint light of its own, so you see yourself
+          (disc! (- (car c) ox) (- (cdr c) oy) 8.0 0.25)
+          (for-each (lambda (o)
+                      (let ((x (- (car o) ox)) (y (- (cadr o) oy)) (k (+ 0.7 (* 0.3 (cadddr o)))))
+                        (for-each (lambda (ring) (disc! x y (car ring) (* k (cadr ring)))) ORB-RINGS)
+                        (disc! x y 1.5 1.6)))
+                    (underhum-orbs b carry t ph))
+          (for-each (lambda (m)
+                      (let ((g (cadddr m)))
+                        (disc! (car m) (cadr m) 4.0 (* 0.12 g))
+                        (disc! (car m) (cadr m) 0.6 (* 1.6 g))))
+                    (listening-motes rm t ph))
+          ;; the listening tile itself glints faintly, seen from the entrance
+          (for-each (lambda (th)
+                      (let ((a (thing-at th)))
+                        (unless (eq? ph 'fused)
+                          (disc! (+ (* S (car a)) 8) (- (* S (+ 1 (cdr a))) 2) 12.0
+                                 (+ 0.3 (* 0.08 (sin (/ t 23.0))))))))
+                    (things rm 'listening-place))
+          (for-each (lambda (th)
+                      (let* ((a (thing-at th)) (o (thing-kw th "overtone")))
+                        (when (member a *lit-niches*)
+                          (let ((x (+ (* S (car a)) 8)) (y (+ (* S (cdr a)) 7)))
+                            (disc! x y 12.0 (+ 0.3 (* 0.04 (sin (+ (/ t 17.0) o)))))
+                            (disc! x y 1.0 1.6)))))
+                    (things rm 'niche))
+          (for-each (lambda (m)
+                      (disc! (car m) (cadr m) 2.5 (if (eq? (caddr m) 'fund) 0.5 0.28))
+                      (disc! (car m) (cadr m) 0.5 (if (eq? (caddr m) 'fund) 1.6 0.9)))
+                    (column-motes rm t ph))
+          ;; fused: the great stone lights from inside, white, and its notches
+          (when (eq? ph 'fused)
+            (for-each (lambda (th)
+                        (let* ((a (thing-at th))
+                               (sc (great-centre (+ (* S (car a)) 8) (* S (+ 1 (cdr a))))))
+                          (disc! (car sc) (cdr sc) 110.0 0.12)
+                          (disc! (car sc) (cdr sc) 60.0 0.25)
+                          (disc! (car sc) (cdr sc) 28.0 0.6)
+                          (disc! (car sc) (cdr sc) 18.0 1.2)
+                          (for-each (lambda (n)
+                                      (unless (and (eq? (car n) 'h7) (not (memv 7 carry)))
+                                        (disc! (+ (car sc) (cadr n)) (+ (cdr sc) (caddr n)) 1.5 2.0)))
+                                    NOTCHES)))
+                      (things rm 'great-stone))))))
+
+    ;; --- the heart, in the bowl -------------------------------------------------
+    ;; STUB(systems): drawn for the bowl's (12,9) stone until SYSTEMS gives
+    ;; the heart a kind of its own. A round dark stone in the floor, humming,
+    ;; with four notches that light as you carry each harmonic.
+    (define HEART-NOTCHES '((h2 3 5) (h3 6 3) (h4 9 3) (h5 12 5)))
+    (define (notch-overtone role) (case role ((h2) 2) ((h3) 3) ((h4) 4) (else 5)))
+    (define SINK-TICKS 48)
+    ;; The throat under the heart: the cell below it always, the heart's own
+    ;; cell once it has sunk, dark going to black, never the bowl's sky.
+    (define (draw-throat! x y rows)
+      (let loop ((d 0))
+        (when (< d (* 16 rows))
+          (let ((yy (+ y d)))
+            (rect! 'ground-1 x yy 16 1)
+            (rect! 'black (+ x 3) yy 10 1)
+            (when (< (bayer x yy) 0.5) (rect! 'black (+ x 2) yy 1 1) (rect! 'black (+ x 13) yy 1 1)))
+          (loop (+ d 1)))))
+    ;; x y: the heart's cell, view pixels; state and st-t: the stone's.
+    (define (draw-heart! x y t carry state st-t)
+      (draw-throat! x (+ y 16) 1)
+      (when (memq state '(open sinking)) (draw-throat! x y 1))
+      (unless (eq? state 'open)
+          (let ((y (+ y (if (eq? state 'sinking) (pixel (* 16.0 (/ st-t SINK-TICKS))) 0))))
+            (rect! 'ground-2 (+ x 1) y 14 16)
+            (rect! 'ground-2 x (+ y 2) 16 12)
+            (rect! 'ground-3 (+ x 2) y 12 1)
+            (rect! 'ground-3 x (+ y 2) 1 10)
+            (rect! 'ground-1 (+ x 15) (+ y 3) 1 11)
+            (rect! 'ground-1 (+ x 5) (+ y 8) 6 4)
+            (for-each (lambda (n)
+                        (rect! (if (memv (notch-overtone (car n)) carry) (car n) 'ground-1)
+                               (+ x (cadr n)) (+ y (caddr n)) 2 2))
+                      HEART-NOTCHES))))
+    (define (draw-heart-light! x y t carry state st-t)
+      (unless (eq? state 'open)
+        (let ((y (+ y (if (eq? state 'sinking) (pixel (* 16.0 (/ st-t SINK-TICKS))) 0)))
+              (all (every (lambda (o) (memv o carry)) '(2 3 4 5))))
+          (for-each (lambda (n)
+                      (when (memv (notch-overtone (car n)) carry)
+                        (disc! (+ x (cadr n) 1) (+ y (caddr n) 1) 1.2 1.2)))
+                    HEART-NOTCHES)
+          ;; all four carried: it glows, faintly, the call made visible
+          (when all
+            (disc! (+ x 8) (+ y 6) (+ 9.0 (* 2.0 (sin (/ t 20.0)))) 0.08)))))))
