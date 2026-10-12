@@ -1605,6 +1605,11 @@
                        (when (spot-ref c)
                          (gate-cue! c (* 0.3 (spot-gain c)) (caddr item) pl))))
                    (cadr item))))
+            ;; the Bearers' Rest: a bench lights as you pass it carrying its
+            ;; harmonic (after the ending), and answers with that harmonic's
+            ;; ring, softly
+            ((bench) (let ((c (harmonic-cue "ring-h" (cadr item))))
+                       (when (spot-ref c) (gate-cue! c (* BENCH-GAIN (spot-gain c)) (caddr item) pl))))
             ((sink) (let ((c (if (or (heart-stone? (cadr item)) (heart-at? (caddr item) (cadddr item))) 'heart-sink 'stone-slide))) (gate-cue! c (spot-gain c) (caddr item) pl)))
             ;; the Underhum's ending ((harkfell world)'s news: (finale WHAT x y))
             ((finale) (case (cadr item)
@@ -1628,6 +1633,7 @@
         (place-news pl)))
 
     (define (spot-ref name) (assq name SPOTS))
+    (define BENCH-GAIN 0.35)
 
     ;; Every tune the director renders as a cue (the gates check each exists).
     (define (sound-cue-tunes) (map cadr SPOTS))
@@ -2287,12 +2293,22 @@
     (define (sound-finale-rise!) (finale-want! 'rise))
     (define (sound-finale-home!) (finale-want! 'home))
 
-    ;; The fallbacks: a room entered after the fuse.
+    ;; The fallbacks: a room entered after the fuse. The climb is a room ABOVE
+    ;; the chamber's row (the Ringing Stair, the gallery, the Throat: row 4):
+    ;; Revision 1 of the rooms (13) adds rooms beside and below it (I, J, K,
+    ;; L, M), and going down into them is not the climb.
+    (define CHAMBER-ROW 5)
+    (define (key-row k)
+      (and (string? k)
+           (let loop ((i (- (string-length k) 1)))
+             (cond ((< i 0) #f)
+                   ((char=? (string-ref k i) #\,) (string->number (substring k (+ i 1) (string-length k))))
+                   (else (loop (- i 1)))))))
     (define (finale-room! pl)
       (when *fin*
-        (let ((k (place-key pl)))
+        (let* ((k (place-key pl)) (row (key-row k)))
           (cond ((equal? k BOWL-KEY) (finale-want! 'home))
-                ((and (eq? (place-region pl) 'underhum) (not (equal? k CHAMBER-KEY))) (finale-want! 'rise))
+                ((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) (finale-want! 'rise))
                 (else #f)))))
 
     (define (leave-end h7?)
