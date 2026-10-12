@@ -387,6 +387,7 @@
     ;; over 24 px. Under every underside (rock or a hanging lake) the light
     ;; that came up through the water ripples: caustics, moving.
     (define GLOW 40)
+    (define GLOW-BAND 4)
     (define (draw-wrongwater-light! rm t)
       (let rows ((r 0))
         (when (< r ROOM-ROWS)
@@ -399,11 +400,14 @@
                                  (solid-char? (room-char rm c (+ r 1)))))
                 (lambda (c0 c1)
                   (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))) (fy (* 16 (+ r 1))))
+                    ;; in bands of GLOW-BAND px (10 rects a floor run, not 40),
+                    ;; and caustics one rect per bright stretch, not per pixel:
+                    ;; the overview bakes eight rooms in one frame
                     (let up ((k 0))
                       (when (< k GLOW)
-                        (let ((u (- 1.0 (/ k (inexact GLOW)))))
-                          (light-rect! (* 0.44 u u) x (- fy 1 k) w 1))
-                        (up (+ k 1)))))))
+                        (let ((u (- 1.0 (/ (+ k (/ GLOW-BAND 2.0)) GLOW))))
+                          (light-rect! (* 0.44 u u) x (- fy k GLOW-BAND) w GLOW-BAND))
+                        (up (+ k GLOW-BAND)))))))
           ;; a hanging lake's underside is its surface (the resolve draws the
           ;; skin there): light it, so it reads at the region's dark step
           (runs ROOM-COLS
@@ -419,16 +423,19 @@
                                  (or (memv (room-char rm c r) '(#\# #\%))
                                      (water-char? (room-char rm c r)))))
                 (lambda (c0 c1)
-                  (let ((y (+ 15 (* 16 r))))
-                    (let across ((x (* 16 c0)))
-                      (when (< x (* 16 (+ c1 1)))
-                        (let ((v (+ (sin (+ (* x 0.37) (* t 0.052) r))
-                                    (sin (- (* x 0.13) (* t 0.031))))))
-                          (when (> v 1.05)
-                            (light-rect! 0.42 x y 1 1)
-                            (light-rect! 0.24 x (- y 1) 1 1)
-                            (when (> v 1.5) (light-rect! 0.2 x (+ y 1) 1 1))))
-                        (across (+ x 1)))))))
+                  ;; each bright stretch (v > 1.05) is one rect per row, not
+                  ;; one per pixel
+                  (let* ((y (+ 15 (* 16 r)))
+                         (x0 (* 16 c0)) (x1 (* 16 (+ c1 1)))
+                         (v (lambda (x) (+ (sin (+ (* x 0.37) (* t 0.052) r))
+                                           (sin (- (* x 0.13) (* t 0.031)))))))
+                    (runs (- x1 x0)
+                          (lambda (i) (> (v (+ x0 i)) 1.05))
+                          (lambda (i0 i1)
+                            (let ((x (+ x0 i0)) (w (+ 1 (- i1 i0))))
+                              (light-rect! 0.42 x y w 1)
+                              (light-rect! 0.24 x (- y 1) w 1)
+                              (when (> w 2) (light-rect! 0.2 (+ x 1) (+ y 1) (- w 2) 1))))))))
           (rows (+ r 1)))))
 
     ;; --- the drip door's build (the Ice Well's recess) ----------------------------------
