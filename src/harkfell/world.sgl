@@ -362,7 +362,7 @@
                                     (let ((at (thing-at thing)))
                                       (list 'bench (thing-kw thing "overtone")
                                             (+ (car origin) (* 16 (car at)) 8.0)
-                                            (+ (cdr origin) (* 16 (cadr at)) 8.0))))
+                                            (+ (cdr origin) (* 16 (cdr at)) 8.0))))
                                   new))))
             w)))
 
