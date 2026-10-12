@@ -1,9 +1,9 @@
 (tune version: 1 name: "ring-heart" tempo: 120 speed: 4 channels: 7
   (bus reverb: zitarev size: 0.95 damp: 0.5 mix: 0.42)
   (instruments
-    (instrument id: 1 name: "the heart, sounding" patch: (drone-fm level: 1.0 index: 2.0 index-wander: 0 mod: 1.41 breath-lo: 1 attack: 0.2 release: 4.5) volume: 50 gain: 0.6 send: 0.6)
+    (instrument id: 1 name: "the heart, sounding" patch: (drone-fm level: 1.0 index: 3.4 index-wander: 0 mod: 1.41 breath-lo: 1 attack: 0.2 release: 4.5) volume: 50 gain: 0.6 send: 0.6)
     (instrument id: 2 name: "H3" patch: (drone-fm cents: 1.955 level: 1.0 index: 1.4 index-wander: 0 mod: 1.41 breath-lo: 1 attack: 0.25 release: 4) volume: 40 gain: 0.6 send: 0.6)
-    (instrument id: 3 name: "H4" patch: (drone-fm level: 1.0 index: 1.3 index-wander: 0 mod: 1.41 breath-lo: 1 attack: 0.25 release: 4) volume: 36 gain: 0.6 send: 0.6)
+    (instrument id: 3 name: "H4" patch: (drone-fm level: 1.0 index: 2.2 index-wander: 0 mod: 1.41 breath-lo: 1 attack: 0.25 release: 4) volume: 36 gain: 0.6 send: 0.6)
     (instrument id: 4 name: "H5" patch: (drone-fm cents: -13.686 level: 1.0 index: 1.2 index-wander: 0 mod: 1.41 breath-lo: 1 attack: 0.25 release: 4) volume: 34 gain: 0.6 send: 0.6)
     (instrument id: 5 name: "the stones answer" patch: (fm4-bell index: 1.0 amp-decay: 3.5 amp-release: 1.5 vel-depth: 0.5) volume: 40 gain: 0.6 send: 0.5)
     (instrument id: 6 name: "the stones answer, H5" patch: (drone-fm cents: -13.686 level: 0.3 index: 1.4 index-wander: 0 mod: 3.5 breath-lo: 1 attack: 0.004 release: 2.6) volume: 34 gain: 0.6 send: 0.5))

@@ -1,0 +1,49 @@
+;;; Each channel's share of energy above 300 Hz (design D10, the speaker rule
+;;; scripts/gate-a4-sound checks), measured as the gate measures it: the
+;;; channel soloed, SECONDS (default 30) at 44100, mono, and the sketchbook's
+;;; own (sketchbook analysis) energy-share-above (a Welch spectrum; a partial
+;;; within two bins of 300 Hz counts as below). For tuning a tune without
+;;; building the sketchbook tool:
+;;;   TUNES=ring-heart,heart-sink \
+;;;     scripts/dev build/audio-harness/bin/harkfell-test --no-strict tools/speaker-share.sgl
+;;; The harness's lib/ needs sketchbook linked to sketchbook/src/sketchbook.
+;;; The gate (on its own tool) has the last word.
+(import (sigil test) (sigil process) (sigil string) (sigil list)
+        (motif tune) (motif tune player) (harkfell tunes) (sketchbook analysis))
+
+(define RATE 44100)
+(define SECS (let ((e (getenv "SECONDS"))) (or (and e (string->number e)) 30)))
+(define NAMES (string-split (or (getenv "TUNES") "") ","))
+
+(define (samples name ch)
+  (let* ((p (open-tune-player (tune-parsed name) RATE loop: #t))
+         (n (* SECS RATE)) (v (make-vector n 0.0)) (buf (make-bytevector (* 8 1024) 0)))
+    (player-solo! p ch)
+    (let loop ((i 0))
+      (if (or (>= i n) (not (player-pull! p buf 0 1024)))
+          (begin (player-close! p) (if (< i n) (vector-copy v 0 i) v))
+          (begin
+            (let fill ((k 0))
+              (when (and (< k 1024) (< (+ i k) n))
+                (vector-set! v (+ i k) (* 0.5 (+ (bytevector-ieee-single-ref buf (* 8 k) 'little)
+                                                 (bytevector-ieee-single-ref buf (+ 4 (* 8 k)) 'little))))
+                (fill (+ k 1))))
+            (loop (+ i 1024)))))))
+
+(test-group "speaker share"
+  (test "measure"
+    (for-each
+      (lambda (name)
+        (let ((t (tune-parsed name)))
+          (let loop ((ch 1))
+            (when (<= ch (tune-channels t))
+              (let* ((v (samples name ch)) (db (rms-db v)))
+                (display "SHARE ") (display name) (display " ch") (display ch) (display " ")
+                (if (> db -70.0)
+                    (let ((s (energy-share-above v RATE 300.0)))
+                      (display (/ (round (* 1000.0 s)) 1000.0)) (when (< s 0.3) (display "  LOW")))
+                    (display "silent"))
+                (newline))
+              (loop (+ ch 1))))))
+      NAMES)
+    (assert-true #t)))

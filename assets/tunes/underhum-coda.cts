@@ -8,9 +8,9 @@
     (instrument id: 5 name: "stone bell, far" patch: (fm4-bell index: 0.8 amp-decay: 3 amp-release: 1.5 vel-depth: 0.5) volume: 26 gain: 0.5 send: 0.6)
     (instrument id: 6 name: "stone bell, H5" patch: (drone-fm level: 0.3 index: 1.4 index-wander: 0 mod: 3.5 breath-lo: 1 attack: 0.004 release: 2.6 cents: -13.686) volume: 34 gain: 0.5 send: 0.5)
     (instrument id: 7 name: "stone bell, H7" patch: (drone-fm level: 0.3 index: 1.4 index-wander: 0 mod: 3.5 breath-lo: 1 attack: 0.004 release: 2.6 cents: -31.174) volume: 34 gain: 0.5 send: 0.55)
-    (instrument id: 8 name: "the pad" patch: (drone-fm level: 0.3 index: 0.55 index-wander: 0.2 index-rate: 0.1 mod: 2 breath-lo: 1 attack: 1.6 release: 3) volume: 22 gain: 0.5 send: 0.45)
-    (instrument id: 9 name: "the pad, its F# H5" patch: (drone-fm level: 0.3 index: 0.55 index-wander: 0.2 index-rate: 0.1 mod: 2 breath-lo: 1 attack: 1.6 release: 3 cents: -13.686) volume: 22 gain: 0.5 send: 0.45)
-    (instrument id: 11 name: "the pad, its C H7" patch: (drone-fm level: 0.3 index: 0.55 index-wander: 0.2 index-rate: 0.1 mod: 2 breath-lo: 1 attack: 1.6 release: 3 cents: -31.174) volume: 22 gain: 0.5 send: 0.45)
+    (instrument id: 8 name: "the pad" patch: (drone-fm level: 0.3 index: 1.4 index-wander: 0.2 index-rate: 0.1 mod: 1 breath-lo: 1 attack: 1.6 release: 3) volume: 22 gain: 0.5 send: 0.45)
+    (instrument id: 9 name: "the pad, its F# H5" patch: (drone-fm level: 0.3 index: 1.4 index-wander: 0.2 index-rate: 0.1 mod: 1 breath-lo: 1 attack: 1.6 release: 3 cents: -13.686) volume: 22 gain: 0.5 send: 0.45)
+    (instrument id: 11 name: "the pad, its C H7" patch: (drone-fm level: 0.3 index: 1.4 index-wander: 0.2 index-rate: 0.1 mod: 1 breath-lo: 1 attack: 1.6 release: 3 cents: -31.174) volume: 22 gain: 0.5 send: 0.45)
     (instrument id: 12 name: "low line" patch: (drone-saw level: 0.3 bright: 14 detune: 3 excite: 0.5 excite-freq: 350 excite-drive: 4 breath-lo: 1 attack: 0.8 release: 2.5 seed: 11) volume: 30 gain: 0.5 send: 0.3))
   (patterns
     (pattern id: 0 rows: 64

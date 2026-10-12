@@ -43,7 +43,7 @@ const CHECK = process.argv.includes("--check");
 // --- instruments -------------------------------------------------------------
 const FM_FLUTE = "drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 0.7";
 const FM_BELL = "drone-fm level: 0.3 index: 1.4 index-wander: 0 mod: 3.5 breath-lo: 1 attack: 0.004 release: 2.6";
-const FM_PAD = "drone-fm level: 0.3 index: 0.55 index-wander: 0.2 index-rate: 0.1 mod: 2 breath-lo: 1 attack: 1.6 release: 3";
+const FM_PAD = "drone-fm level: 0.3 index: 1.4 index-wander: 0.2 index-rate: 0.1 mod: 1 breath-lo: 1 attack: 1.6 release: 3";
 const LOW = "drone-saw level: 0.3 bright: 14 detune: 3 excite: 0.5 excite-freq: 350 excite-drive: 4 breath-lo: 1 attack: 0.8 release: 2.5 seed: 11";
 const H5C = "cents: -13.686", C15 = "cents: -11.731", H7C = "cents: -31.174";
 
