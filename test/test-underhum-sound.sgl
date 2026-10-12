@@ -298,12 +298,16 @@
 ;; plan: (t) -> place; events: ((t . thunk) ...) run once at t. Records the
 ;; heard sections as ((section . t) ...), whether a bed sounded each frame,
 ;; and the finale's own lines.
+(define TOLD '())   ; ((what . t) ...), newest first, the last run
 (define (run-ending! t-end plan events)
   (fresh!)
   (set! H5-LEVELS '())
+  (set! TOLD '())
+  (sound-set-finale-listener! (lambda (what) (set! TOLD (cons (cons what *frame-t*) TOLD))))
   (let ((heard '()) (bed '()) (evs events))
     (frames! 0.0 t-end plan
              (lambda (t)
+               (set! *frame-t* t)
                (let ((due (filter (lambda (e) (<= (car e) t)) evs)))
                  (set! evs (filter (lambda (e) (> (car e) t)) evs))
                  (for-each (lambda (e) ((cdr e))) due))
@@ -318,7 +322,8 @@
 (define (heard-at seq s) (let ((e (assq s seq))) (and e (cdr e))))
 (define (bed-during bed t0 t1) (map cdr (filter (lambda (b) (and (>= (car b) t0) (< (car b) t1))) bed)))
 
-(define H5-LEVELS '())   ; ((t . H5's drone channel peak since the last frame) ...), the last run
+(define H5-LEVELS '())
+(define *frame-t* 0.0)   ; ((t . H5's drone channel peak since the last frame) ...), the last run
 ;; A: the fuse at 1 s; the climb asked during the theme (the news, at 40 s);
 ;; the sky verse played twice over; home (the news) at 160 s.
 (define A-HOME-T 160.0)
@@ -329,6 +334,7 @@
                      (cons 40.0 (lambda () (sound-frame! 40.0 DT (room CHAMBER 'news '((finale rise 1 1))))))
                      (cons A-HOME-T (lambda () (sound-finale-home!)))))))
 (define A-SEQ (car A))
+(define A-TOLD (reverse TOLD))
 (define A-H5 H5-LEVELS)
 (define (h5-in t0 t1) (map cdr (filter (lambda (e) (and (>= (car e) t0) (< (car e) t1))) A-H5)))
 (define A-BED (cadr A))
@@ -367,6 +373,11 @@
       (assert-true (> theme 0.01))
       (assert-true (< rise (* 0.01 theme)))
       (assert-true (> glass (* 0.5 theme)))))
+  (test "the listener is told what is heard, once each, in order: the fundamental 10 s into the fuse"
+    (display "  told: ") (display A-TOLD) (newline)
+    (assert-equal '(fuse fundamental theme rise glass pipes sky home close dawn done) (map car A-TOLD))
+    (assert-true (near? (- (cdr (assq 'fundamental A-TOLD)) (cdr (assq 'fuse A-TOLD))) FINALE-FUNDAMENTAL-S 0.05))
+    (assert-true (near? (cdr (assq 'dawn A-TOLD)) (heard-at A-SEQ 'dawn) 0.05)))
   (test "the ending ends, is saved, and never plays again"
     (assert-false A-ACTIVE)
     (assert-equal '(#t (2 3 4 5) #f) A-FLAGS)

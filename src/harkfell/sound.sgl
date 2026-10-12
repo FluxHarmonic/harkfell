@@ -70,7 +70,7 @@
           ;; the Underhum's ending (harkfell-underhum-bible; (harkfell finale))
           sound-finale-fuse! sound-finale-rise! sound-finale-home! sound-coda! sound-finale-section sound-finale-time
           sound-finale-active? sound-finale-sounding sound-finale-flags sound-finale-restore! sound-finale-walk
-          sound-finale-players sound-bed-name
+          sound-finale-players sound-bed-name sound-set-finale-listener!
           place-listen FINALE-ID FINALE-DRONE-ID FINALE-TUNE FINALE-TUNE-H7 CODA-TUNE AFTER-BED CHAMBER-KEY BOWL-KEY
           LISTEN-ID heart-stone? FUSE-BED-OUT-S DAWN-IN-S FINALE-LEVELS
           sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
@@ -2000,6 +2000,7 @@
       (close-t mutable: #t)                  ; the drone's clock when the walk entered close, or #f
       (dawn mutable: #t)                     ; when the dawn began, or #f
       (quiet) (ended)                        ; flags: the piece gone quiet; its source ended
+      (told mutable: #t)                     ; the marks the listener has been told, newest first
       (thin))                                ; the pipes verse's factor per channel, eased
 
     (define *fin* #f)
@@ -2010,6 +2011,21 @@
     (define *finale-ahead* '())      ; ((name . player-or-#f) ...) opened ahead in the Underhum
 
     (define (sound-finale-active?) (and *fin* #t))
+
+    ;; WHAT IS HEARD, TOLD. SYSTEMS' light, credits, night and dawn follow the
+    ;; music as heard, not a clock of their own (the leader's plan for
+    ;; depths/systems: shell-finale-mark!). The listener is called once for
+    ;; each, as it is heard: fuse, fundamental (the low D arrives:
+    ;; FINALE-FUNDAMENTAL-S into the fuse, on the drone's clock), each section
+    ;; (theme hold rise glass pipes sky home close; hold or sky once however
+    ;; often they loop), dawn, and done.
+    (define *finale-listener* (lambda (what) #f))
+    (define (sound-set-finale-listener! proc) (set! *finale-listener* (or proc (lambda (what) #f))))
+    (define (tell! st what)
+      (unless (memq what (fin-told st))
+        (set-fin-told! st (cons what (fin-told st)))
+        (*say* "sound" "finale" "heard" (symbol->string what))
+        (*finale-listener* what)))
     ;; The ending holds the beds back until its dawn, and the moments, spot
     ;; sounds and the cue bank's work until it is over, as a moment does: its
     ;; close still plays after the dawn (a Hollow wandering moment drawn then
@@ -2093,7 +2109,7 @@
     (define (finale-start! piece drone h7? now)
       (let ((st (fin piece: piece drone: drone h7: h7? marks: (tune-marks (player-tune piece))
                      rise: #f home: #f homing: #f walk: 'calm play: 'calm heard: 'calm heard-at: now
-                     close-t: #f dawn: #f quiet: (vector #f) ended: (vector #f) thin: (make-vector 7 1.0))))
+                     close-t: #f dawn: #f told: '() quiet: (vector #f) ended: (vector #f) thin: (make-vector 7 1.0))))
         (set! *fin* st)
         (set! *ended* #t)
         ;; players opened ahead for the other version (H7 found meanwhile)
@@ -2232,11 +2248,15 @@
             (unless (eq? heard (fin-heard st))
               (set-fin-heard! st heard) (set-fin-heard-at! st now)
               (*say* "sound" "finale" "section" (symbol->string heard)))
+            (tell! st (if (eq? heard 'calm) 'fuse heard))
+            (let ((ft (sound-finale-time)))
+              (when (and ft (>= ft FINALE-FUNDAMENTAL-S)) (tell! st 'fundamental)))
             (when (and (eq? play 'close) (not (fin-close-t st)))
               (set-fin-close-t! st (drone-t st)))
             (let ((c (fin-close-t st)))
               (when (and c (not (fin-dawn st)) (>= (drone-t st) (+ c (finale-dawn-s (fin-h7 st)))))
                 (set-fin-dawn! st now)
+                (tell! st 'dawn)
                 (finale-dawn! now))
               (when (and c (vector-ref (fin-quiet st) 0) (>= (drone-t st) (+ c (leave-end (fin-h7 st)))))
                 (finale-end! st now)))))))
@@ -2257,7 +2277,8 @@
         (let ((s (mixer-find FINALE-ID)))
           (source-factor! s 'fade 0.0 1.0 now)
           (mixer-at! (+ now 1.0) (lambda () (when (eq? (mixer-find FINALE-ID) s) (mixer-remove! FINALE-ID)) (player-close! (fin-piece st))))))
-      (unless (fin-dawn st) (finale-dawn! now))
+      (unless (fin-dawn st) (tell! st 'dawn) (finale-dawn! now))
+      (tell! st 'done)
       (set! *fin* #f)
       (set! *hush* (hush-ended *hush*))
       (*say* "sound" "finale" "end"))
