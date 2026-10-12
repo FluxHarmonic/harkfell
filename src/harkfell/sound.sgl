@@ -1940,6 +1940,10 @@
 
     (define (sound-boot! moments say)
       (set! *say* say)
+      ;; a moment whose source the mixer no longer has is over
+      (when (and *moment* (not (mixer-find MOMENT-ID)))
+        (set! *moment* #f)
+        (set! *moment-key* #f))
       (set! *to-open* moments)
       ;; a boot renders every cue afresh (a second boot, a world reloaded, starts
       ;; from nothing: the late-cue gate relies on it)
@@ -2102,7 +2106,10 @@
         (pending-cues-frame!)
         (spots-frame! pl now)))
 
-    (define (moment-busy?) (and *moment* #t))
+    ;; A moment is busy only while the mixer still has its source: a mixer
+    ;; reopened under a playing moment (a test file after one that left a
+    ;; moment playing; a world reload) must not leave the bank paused for good.
+    (define (moment-busy?) (and *moment* (mixer-find MOMENT-ID) #t))
 
     (define TEXT-WAIT-S 3.0)
     (define *waiting* #f)          ; (key . since): a room entry waiting for its texts
