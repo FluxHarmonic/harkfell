@@ -3,6 +3,7 @@
 ;; real world, the real physics and gates (topics/harkfell-wrongwater-rooms).
 (import (sigil test)
         (sigil list)
+        (sigil math)
         (engine worldmap)
         (engine body)
         (harkfell world)
