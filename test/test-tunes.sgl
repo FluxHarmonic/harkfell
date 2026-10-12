@@ -90,7 +90,8 @@
 ;; silent in play.
 ;; Wrongwater: a pickup needs its tone and its pickup cue only. Its ring and
 ;; near miss belong to a stone keyed to it, which the second list asks for:
-;; H7 has a pickup and no stone, so ring-h7 and miss-h7 would never play.
+;; H7 has a pickup and only a stillness door, so ring-h7 and miss-h7 would
+;; never play.
 (define (a3-tunes ct)
   (append (sound-cue-tunes)
           (apply append
@@ -102,7 +103,9 @@
                    (map (lambda (n)
                           (map (lambda (base) (string-append base (number->string n)))
                                (list "tone-h" "ring-h" "miss-h")))
-                        (map stone-overtone (content-stones ct)))))))
+                        ;; a stillness door (still:, the Ice Well's) never rings
+                        ;; or near-misses: it opens to standing still
+                        (map stone-overtone (filter (lambda (s) (not (stone-still s))) (content-stones ct))))))))
 
 (define (unreadable names)
   (filter (lambda (n) (not (and (tune-exists? n) (guard (x (#t #f)) (read-tune-string (tune-text n))))))

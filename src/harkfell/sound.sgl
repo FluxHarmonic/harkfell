@@ -1304,13 +1304,17 @@
              (held (if shut? (max 0.0 (cadddr d)) 0.0))
              (buf (sound-loop 'drip-climb))
              (src (sound-drip-source)))
-        (when (and d (not buf)) (want-loop! 'drip-climb))
+        ;; wanted only near the drip, where a climb could start (review: the
+        ;; door is in every place, so this pulled 7.6 s of render to the head
+        ;; of the queue in every room from boot)
+        (when (and d (not buf) (< (local-distance pl (cadr d) (caddr d)) UPWARD-R)) (want-loop! 'drip-climb))
         (when (and *drip* (not src)) (set! *drip* #f))   ; it played out
         (cond
           ;; following the door's clock
           ((and *drip* (vector-ref *drip* 5))
-           (cond ((or (not d) (not shut?) (>= held DRIP-LAND-S))
-                  ;; landed, or the door opened, or we left: it plays out free
+           (cond ((not d) (drip-fall-away! now))      ; the door is gone (a world swap)
+                 ((or (not shut?) (>= held DRIP-LAND-S))
+                  ;; landed, or the door opened: it plays out free
                   (vector-set! *drip* 5 #f))
                  ((< held DRIP-START-S) (drip-fall-away! now))
                  (else
@@ -1829,7 +1833,12 @@
       (list 'ice-crack 'ice-fall 'ice-shatter
             'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4
             'pickup-h5 'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
-            'gust-lift 'gust-east))
+            'gust-lift 'gust-east
+            ;; Wrongwater: heard only at the Ice Well and after; the climb is
+            ;; pulled forward near the drip (want-loop!), the drop and the
+            ;; answers by gate-cue! when asked. pickup-h7 is not here: it is a
+            ;; gate cue (cdf652c renders those eagerly).
+            'drip-climb 'drip-fall 'answer-h7-a 'answer-h7-b))
     (define *late-cues* '())
     (define (bank-order)
       (append (filter spot-ref MOVING-CUES)

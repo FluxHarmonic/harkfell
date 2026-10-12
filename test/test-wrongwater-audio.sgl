@@ -96,12 +96,16 @@
       (assert-equal (length DRIP-CLIMB-AT) (length ons))
       (for-each (lambda (a b) (assert-true (< (abs (- a b)) 0.001))) DRIP-CLIMB-AT ons)
       (assert-true (< (abs (- (car (reverse ons)) DRIP-LAND-S)) 0.001))))
-  (test "the buffer: H7 sounds from 4.0 s, and not in the 0.15 s before"
+  (test "the buffer: H7 sounds from 4.0 s, and not in the 0.1 s before"
     (let* ((bv (sound-loop 'drip-climb))
-           (before (goertzel-bv bv 3.83 3.98 H7-HZ))
-           (after (goertzel-bv bv 4.05 4.2 H7-HZ)))
+           (before (goertzel-bv bv 3.9 3.99 H7-HZ))
+           (after (goertzel-bv bv 4.0 4.05 H7-HZ))
+           (late (goertzel-bv bv 4.1 4.2 H7-HZ)))
       (display "  H7 before ") (display before) (display " after ") (display after) (newline)
-      (assert-true (> after (* 8.0 before))))))
+      (display " late ") (display late) (newline)
+      (assert-true (> after (* 4.0 before)))
+      ;; and it has arrived by 4.05 s: within a third of where it settles
+      (assert-true (> after (* 0.33 late))))))
 
 (test-group "wrongwater: the climb on the door's clock"
   (test "under DRIP-START-S of stillness, nothing"
@@ -138,6 +142,13 @@
         (assert-true (< (source-gain s T) 0.05))
         (let loop ((i 0)) (when (< i 20) (frame! (well 0.0)) (loop (+ i 1))))
         (assert-false (memq s (mixer-sources))))))
+  (test "a door that vanishes mid-climb (a world swap) takes the climb with it"
+    (sound-reset!) (set! SAID (quote ()))
+    (stand 60 0.0)
+    (assert-true (sound-drip))
+    (frame! (place (well 0.0) drip: #f))
+    (assert-true (said? "sound" "drip" "fall-away"))
+    (assert-false (sound-drip)))
   (test "the next stillness starts it again from the start"
     (stand 31 0.0)
     (assert-true (sound-drip))
@@ -163,9 +174,15 @@
       (assert-true (> g4 (* 1.6 g0)))))
   (test "once the door is open it no longer hums, and the crack drips now and then"
     (sound-reset!) (set! SAID '())
-    (let loop ((i 0)) (when (< i 300) (frame! (place (well 0.0) drip: (list 'open DX DY 0.0))) (loop (+ i 1))))
+    ;; no water: the only spot sound a dry room can play here is the crack's drip
+    (let loop ((i 0)) (when (< i 300) (frame! (place (well 0.0) drip: (list 'open DX DY 0.0) levels: (list (cons 'water 0.0) (cons 'reeds 0.0)))) (loop (+ i 1))))
     (assert-false (sound-voice-source UPWARD-ID))
-    (assert-true (>= (sound-spots-played) 1)))
+    (display "  open-crack drips in 10 s: ") (display (sound-spots-played)) (newline)
+    (assert-true (>= (sound-spots-played) 2)))
+  (test "control: shut, the same 10 s and the same dry room, no drip"
+    (sound-reset!)
+    (let loop ((i 0)) (when (< i 300) (frame! (place (well 0.0) levels: (list (cons 'water 0.0) (cons 'reeds 0.0)))) (loop (+ i 1))))
+    (assert-equal 0 (sound-spots-played)))
   (test "the opening's news (drip-fall and sink, SYSTEMS') plays the drop and the stone"
     (sound-reset!) (set! SAID '())
     (frame! (place (well 5.0) drip: (list 'open DX DY 0.0) news: (list (list 'drip-fall 7 DX DY) (list 'sink 7 DX DY))))
@@ -233,6 +250,13 @@
          levels: GW-LEVELS carry: carry tones: '() stones: '() moment: moment px: 100.0 py: 100.0 rx: 0 ry: 0))
 (define (ch8) (cdr (assv 8 (sound-bed-levels))))
 (define (ch7) (cdr (assv 7 (sound-bed-levels))))
+;; dipped: channel 8 at most a fifth of the other drone channels, and 0.1 by
+;; the bible (literals, not H7-DIP: a plant on the constant must not move the
+;; expectation with it)
+(define (assert-dipped)
+  (assert-true (> (ch7) 0.05))
+  (assert-true (< (ch8) (* 0.2 (ch7))))
+  (assert-true (< (abs (- (ch8) (* 0.1 (ch7)))) 1e-9)))
 
 (test-group "wrongwater: H7 dips under other moments"
   (test "with no moment, H7's channel sits at the drone's level"
@@ -244,14 +268,14 @@
     (frames (gw "glasswood:0,1" "the-ice-rings" '(2 3 4 5 7)) 30)
     (assert-equal "the-ice-rings" (sound-moment-playing))
     (display "  ch7 ") (display (ch7)) (display " ch8 ") (display (ch8)) (newline)
-    (assert-true (< (abs (- (ch8) (* H7-DIP (ch7)))) 1e-9)))
+    (assert-dipped))
   (test "a room change during the moment keeps it dipped"
     (frames (gw "glasswood:0,2" #f '(2 3 4 5 7)) 30)
     (assert-equal "the-ice-rings" (sound-moment-playing))
-    (assert-true (< (abs (- (ch8) (* H7-DIP (ch7)))) 1e-9)))
+    (assert-dipped))
   (test "standing still during the moment (the drone swells) keeps it dipped"
     (frames (place (gw "glasswood:0,2" #f '(2 3 4 5 7)) still: #t) 60)
-    (assert-true (< (abs (- (ch8) (* H7-DIP (ch7)))) 1e-9)))
+    (assert-dipped))
   (test "when the moment ends it comes back with the bed"
     (let loop ((k 0))
       (when (and (< k 3000) (sound-moment-playing))
@@ -296,6 +320,7 @@
         (harkfell gates)
         (harkfell world)
         (harkfell feel)
+        (only (harkfell check) room-start-cell)
         (only (harkfell audio) world-drip))
 (define DOOR-CT
   (load-content
@@ -326,3 +351,26 @@
            (w (world-populate (world-at (content-map ct) (cell-body (worldmap-tiles (content-map ct)) HARKFELL-FEEL 12 8))
                               (content-stones ct) (content-pickups ct) '())))
       (assert-false (world-drip w)))))
+
+;; The real world, whose map starts at negative rooms (sx sy not 0), with the
+;; Ice Well's own blue stone made a stillness door listening at its drip
+;; (15,9): the drip in absolute pixels, -2 * 400 + 15 * 16 + 8 and
+;; 6 * 176 + 9 * 16 + 8.
+(define WELL-CT
+  (load-content
+    (map (lambda (e)
+           (if (string-contains? (car e) "glasswood/x-2y6.room")
+               (cons (car e) (string-replace (cdr e) "(ring-stone at: (11 9) overtone: 4)"
+                                             "(ring-stone at: (11 9) overtone: 4 still: 5 radius: 2 listen: (glasswood -2 6 15 9))"))
+               e))
+         (read-world-source "world"))))
+(test-group "wrongwater: the adapter in the real world"
+  (test "the drip is where the Ice Well's drip is, in absolute pixels"
+    (let* ((rm (content-room WELL-CT -2 6))
+           (cell (room-start-cell WELL-CT rm))
+           (w (world-populate (world-at (content-map WELL-CT)
+                                        (cell-body (worldmap-tiles (content-map WELL-CT)) HARKFELL-FEEL (car cell) (cdr cell)))
+                              (content-stones WELL-CT) (content-pickups WELL-CT) '()))
+           (d (world-drip w)))
+      (display "  drip ") (display d) (newline)
+      (assert-equal (list 'shut -552.0 1208.0 0.0) d))))

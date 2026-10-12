@@ -32,6 +32,10 @@ const LEGS = [
   ['climb-never-falls-away', [[SOUND, '((< held DRIP-START-S) (drip-fall-away! now))', '((< held -1.0) (drip-fall-away! now))']], AUDIO_T,
     'moving at 3 s, it falls away over DRIP-FALLBACK-S and is gone'],
   // the drip
+  ['vanished-door-plays-on', [[SOUND, '(cond ((not d) (drip-fall-away! now))', '(cond ((not d) (vector-set! *drip* 5 #f))']], AUDIO_T,
+    'a door that vanishes mid-climb (a world swap) takes the climb with it'],
+  ['open-crack-silent', [[SOUND, "(due? 'open-drip now DRIP-OPEN-LO DRIP-OPEN-HI))", "#f)"]], AUDIO_T,
+    'once the door is open it no longer hums, and the crack drips now and then'],
   ['open-crack-still-hums', [[SOUND, "(if (and d (eq? (car d) 'open))\n            (filter", "(if (and d (eq? (car d) 'never))\n            (filter"]], AUDIO_T,
     'once the door is open it no longer hums, and the crack drips now and then'],
   ['no-swell', [[SOUND, '(define DRIP-SWELL 2.0)', '(define DRIP-SWELL 1.0)']], AUDIO_T,
@@ -79,7 +83,12 @@ const run = (file) => {
 const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
 if (!fs.existsSync(H)) { console.log('SETUP-FAILED: no harness at', H); process.exit(2); }
-if (spawnSync('git', ['diff', '--quiet']).status !== 0) { console.log('SETUP-FAILED: the tree has changes; commit first (a restore is a checkout of HEAD)'); process.exit(2); }
+// clean against HEAD, staged or not, untracked files included (a restore is
+// a checkout of HEAD, so every planted file must be committed as it stands)
+const dirty = spawnSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).stdout.split('\n')
+  .filter((l) => l && !l.startsWith('?? build/'));
+if (dirty.length) { console.log('SETUP-FAILED: the tree is not clean against HEAD; commit first:\n' + dirty.slice(0, 5).join('\n')); process.exit(2); }
+fs.mkdirSync('build', { recursive: true });
 
 let bad = 0;
 for (const [name, plants, testFile, mustFail] of LEGS) {
@@ -87,6 +96,8 @@ for (const [name, plants, testFile, mustFail] of LEGS) {
   const files = [...new Set(plants.map((p) => p[0]))];
   const before = Object.fromEntries(files.map((f) => [f, sha(f)]));
   let landed = true;
+  let verdict = 'SETUP-FAILED';
+  try {
   for (const [f, from, to] of plants) {
     const s = fs.readFileSync(f, 'utf8');
     if (count(s, from) !== 1) { console.log(`SETUP-FAILED ${name}: "${from.slice(0, 60)}" occurs ${count(s, from)} times in ${f}`); landed = false; break; }
@@ -94,7 +105,6 @@ for (const [name, plants, testFile, mustFail] of LEGS) {
     if (!fs.readFileSync(f, 'utf8').includes(to)) { landed = false; break; }
   }
   for (const f of files) if (landed && sha(f) === before[f]) { console.log(`SETUP-FAILED ${name}: ${f} unchanged`); landed = false; }
-  let verdict = 'SETUP-FAILED';
   if (landed) {
     const out = strip(run(testFile));
     const failed = out.includes(`✗ ${mustFail}`);
@@ -102,7 +112,10 @@ for (const [name, plants, testFile, mustFail] of LEGS) {
     verdict = !loaded ? 'SETUP-FAILED (did not load)' : failed ? 'RED' : 'NOT RED';
     fs.writeFileSync(`build/sabotage-${name}.log`, out);
   }
-  spawnSync('git', ['checkout', '--', ...files]);
+  } finally {
+    // the plant leaves whatever happened (an exception, a failed write)
+    spawnSync('git', ['checkout', 'HEAD', '--', ...files]);
+  }
   const restored = files.every((f) => sha(f) === before[f]);
   if (!restored) { console.log(`RESTORE-FAILED ${name}`); process.exit(3); }
   if (verdict !== 'RED') bad++;
