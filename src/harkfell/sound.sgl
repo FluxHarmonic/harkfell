@@ -1751,6 +1751,9 @@
             (list 'snail-h4 "snail-h4" 0.0 0.0 0.18)
             (list 'miss-h5 "miss-h5" 0.0 0.0 0.29)
             (list 'ring-h5 "ring-h5" 0.0 0.0 0.5)
+            ;; H7's ring: no stone rings it (H7's door is a stillness door), but
+            ;; the Underhum's fifth bench answers with it after the ending
+            (list 'ring-h7 "ring-h7" 0.0 0.0 0.46)
             (list 'moth-h3 "moth-h3" 0.0 0.0 0.12)
             (list 'owl-h3 "owl-h3" 0.0 0.0 0.44)
             (list 'vole "vole" 0.0 0.0 0.34)

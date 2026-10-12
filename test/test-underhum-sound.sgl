@@ -551,6 +551,9 @@
     (frames! 0.0 30.0 (lambda (t) #f))
     (frames! 30.0 30.1 (lambda (t) (room "underhum:8,6" 'bed #f 'news '((bench 3 3300.0 1100.0)))))
     (assert-true (said? "sound" "cue" "ring-h3"))
+    ;; the fifth bench, behind the false wall: H7's ring (Depths SYSTEMS' integration found none)
+    (frames! 30.1 30.15 (lambda (t) (room "underhum:8,6" 'bed #f 'carry '(2 3 4 5 7) 'news '((bench 7 3240.0 1192.0)))))
+    (assert-true (said? "sound" "cue" "ring-h7"))
     ;; the worn treads: stone in the Underhum, ice elsewhere
     (frames! 30.1 30.2 (lambda (t) (room "underhum:7,7" 'bed #f 'news '((ice creak 2000.0 1300.0) (ice crack 2000.0 1300.0)))))
     (assert-true (said? "sound" "ice-cue" "tread-creak"))
