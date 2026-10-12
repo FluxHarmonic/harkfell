@@ -1,0 +1,30 @@
+;; world/rooms/wrongwater/x-1y9.room
+(room
+  region: wrongwater
+  at: (-1 9)
+  title: "The Drowned Grove"
+  intent: "icicles grow up out of a dark pool under a lake that hangs over it, and you swim between them"
+  bed: (air 0.15 water 0.6 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "######~~~~~~~~~~~~#######"
+   "####  ~~~~~~~~~~~~  #####"
+   "###                   ###"
+   "##                     ##"
+   "                         "
+   "                         "
+   "                         "
+   "#######~~~#~~#~~#########"
+   "#######~~~#~~#~~#########"
+   "#########################")
+  things: ((upward-icicle at: (4 7))
+           (upward-icicle at: (10 7))
+           (upward-icicle at: (13 7))
+           (upward-icicle at: (19 7)))
+  decor: auto)
+;; A floor pool two rows deep (7-9, 11-12, 14-15; 14 cells) between banks
+;; (standing row 7), split by two stone islands each holding an upward
+;; icicle; two more grow on the banks. A lake (6-17, rows 1-2) hangs over
+;; it, its underside more than a held jump over every floor: a picture.
+;; West to Under the Grove, east to the Climb Back (rows 5-7).
