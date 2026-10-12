@@ -348,6 +348,7 @@ if (LEGS.includes("samplers")) {
     const detail = `rooms ${doors.length}, regions ${regions.length}, doors visited ${coverage.size}/${doors.length * 2}; peak-samplers ${stats?.peak}, live ${stats?.live}, created ${stats?.created}, deleted ${stats?.deleted}`;
     if (!routeFailed && coverage.size === doors.length * 2 && errors.length === 0) pass("samplers", detail);
     else {
+      if (!routeFailed) fail("samplers", `incomplete coverage or graphics errors: ${detail}`);
       console.log(`SAMPLERS partial ${detail}`);
       if (errors.some(error => /SAMPLER_POOL_EXHAUSTED/i.test(error))) {
         console.log("BLOCKED-ON t-253c7c: preserve authored art; sampler pool exhausted before the graphics fix");
