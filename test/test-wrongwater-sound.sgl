@@ -1,0 +1,279 @@
+;;; Wrongwater SOUND, the contract (harkfell-wrongwater-bible, "The sound").
+;;;
+;;;   the tunes      every Wrongwater tune reads
+;;;   the series     every pitched note in Wrongwater's tunes is a partial of
+;;;                  D (n times D-1, within half a cent) whose odd part is one
+;;;                  of the series' degrees, 8 to 16 (1 3 5 7 9 11 13 15);
+;;;                  pickup-h7 is H7's own partials (any integer n)
+;;;   the kinds      an instrument whose kind ignores cents: (motif's bell,
+;;;                  flute and the other synth kinds) plays only D, A or E,
+;;;                  the degrees equal temperament gets right
+;;;   the render     every off-ET instrument, rendered, sounds at the computed
+;;;                  frequency (within 2 cents); a bell given the same cents
+;;;                  is measured at its equal-tempered pitch instead (the
+;;;                  control: the check can tell the two apart)
+
+(import (sigil test)
+        (sigil math)
+        (sigil fs)
+        (sigil list)
+        (sigil string)
+        (motif tune)
+        (motif tune player)
+        (harkfell tunes))
+
+(define SERIES-TUNES '("wrongwater-bed" "drip-climb" "drip-fall" "rain-rising" "answer-h7-a" "answer-h7-b"))
+(define H7-TUNES '("pickup-h7"))
+(define ALL (append SERIES-TUNES H7-TUNES))
+;; the bed kinds take cents: ((motif patches beds), every kind there)
+(define CENTS-KINDS '(drone-saw drone-fm finding-tone pipe-breath drip noise-bed))
+(define D-1 (* 440.0 (expt 2.0 (/ (- 2 69) 12.0))))   ; 9.177 Hz, MIDI 2
+(define SERIES-ODD '(1 3 5 7 9 11 13 15))
+(define RATE 32000)
+(define (keep-map f l)
+  (let loop ((l l) (acc (quote ())))
+    (if (null? l) (reverse acc) (let ((v (f (car l)))) (loop (cdr l) (if v (cons v acc) acc))))))
+
+(define (param inst key)
+  (let ((e (assq key (tune-instrument-params inst)))) (and e (cdr e))))
+(define (cents-of inst) (or (param inst 'cents) 0.0))
+(define (inst-of t id) (find (lambda (i) (= (tune-instrument-id i) id)) (tune-instruments t)))
+(define (freq midi cents) (* 440.0 (expt 2.0 (+ (/ (- midi 69) 12.0) (/ cents 1200.0)))))
+(define (log2 x) (/ (log x) (log 2.0)))
+(define (odd-part n) (if (and (> n 0) (even? n)) (odd-part (quotient n 2)) n))
+
+;; every (note . instrument) a tune plays, pitched notes only
+(define (played t)
+  (apply append
+         (map (lambda (p)
+                (keep-map (lambda (c)
+                              (and (number? (cell-note c)) (> (cell-inst c) 0)
+                                   (let ((i (inst-of t (cell-inst c))))
+                                     (and i (cons (cell-note c) i)))))
+                            (tune-pattern-cells p)))
+              (tune-patterns t))))
+
+(define (pitched? inst)
+  (not (and (eq? (tune-instrument-kind inst) 'noise-bed) (not (param inst 'track)))))
+
+;; the partial number a note sounds, and how far off an integer it is in cents
+(define (partial-of note inst)
+  (let* ((n (/ (freq note (cents-of inst)) D-1)) (k (exact (round n))))
+    (cons k (* 1200.0 (abs (log2 (/ n k)))))))
+
+(define (series-faults name odd-ok?)
+  (let ((t (tune-parsed name)))
+    (keep-map (lambda (e)
+                  (let* ((note (car e)) (inst (cdr e)))
+                    (and (pitched? inst)
+                         (memq (tune-instrument-kind inst) CENTS-KINDS)
+                         (let ((pk (partial-of note inst)))
+                           (and (or (> (cdr pk) 0.5) (not (odd-ok? (odd-part (car pk)))))
+                                (string-append name ": " (midi->note-name note) " on "
+                                               (tune-instrument-name inst) " is "
+                                               (number->string (car pk)) " times D-1, off by "
+                                               (number->string (cdr pk)) " cents"))))))
+                (played t))))
+
+(define (kind-faults name)
+  (let ((t (tune-parsed name)))
+    (keep-map (lambda (e)
+                  (let ((note (car e)) (inst (cdr e)))
+                    (and (not (memq (tune-instrument-kind inst) CENTS-KINDS))
+                         (not (memv (modulo note 12) '(2 9 4)))
+                         (string-append name ": " (symbol->string (tune-instrument-kind inst))
+                                        " ignores cents: and plays " (midi->note-name note)))))
+                (played t))))
+
+(test-group "wrongwater sound: the tunes"
+  (test "every Wrongwater tune reads"
+    (for-each (lambda (n) (display "  ") (display n) (newline) (assert-true (tune-parsed n))) ALL)))
+
+(test-group "wrongwater sound: the series"
+  (test "every pitched note in Wrongwater's tunes is a series degree of D"
+    (let ((faults (apply append (map (lambda (n) (series-faults n (lambda (o) (memv o SERIES-ODD)))) SERIES-TUNES))))
+      (for-each (lambda (f) (display "  ") (display f) (newline)) faults)
+      (assert-equal '() faults)))
+  (test "pickup-h7 sounds H7's own partials (7 14 21 28 35 42 times D2)"
+    (assert-equal '() (apply append (map (lambda (n) (series-faults n (lambda (o) (memv o '(7 21 35))))) H7-TUNES))))
+  (test "control: E4 on a cents: 0 drone voice is off the series (the check can fail)"
+    (let ((i (tune-instrument id: 1 kind: 'drone-fm params: '((cents . 0.0)))))
+      (assert-true (> (cdr (partial-of 64 i)) 0.5)))))
+
+(test-group "wrongwater sound: the kinds"
+  (test "an instrument that ignores cents: plays only D, A or E"
+    (let ((faults (apply append (map kind-faults ALL))))
+      (for-each (lambda (f) (display "  ") (display f) (newline)) faults)
+      (assert-equal '() faults))))
+
+;; --- the render ------------------------------------------------------------------
+;; One note of one instrument, alone: the tune's own instrument list, one cell.
+;; Its breathing is held still (breath-lo 1): the pitch is under test, and a
+;; drone's slow random gain moves a short window's peak by a few cents. A
+;; drone-saw's two saws are spread symmetrically about the tuned pitch
+;; (detune, default 4 cents apart), held together here for the same reason.
+(define (still inst)
+  (tune-instrument inst params: (append (list (cons 'breath-lo 1.0) (cons 'detune 0.0))
+                                      (filter (lambda (kv) (not (memq (car kv) '(breath-lo detune)))) (tune-instrument-params inst)))))
+(define (solo-tune t inst note)
+  (let ((p (car (tune-patterns t))))
+    (tune-with-order
+      (tune-with-patterns (tune-with-instruments t (map still (tune-instruments t)))
+                          (list (tune-pattern id: 0 rows: (max 16 (tune-pattern-rows p))
+                                              cells: (list (make-cell 0 1 note (tune-instrument-id inst) 40 "000")))))
+      '(0))))
+
+;; mono samples from FROM-S for SECS
+(define (render t from-s secs)
+  (let* ((p (open-tune-player t RATE))
+         (skip (exact (round (* from-s RATE))))
+         (n (exact (round (* secs RATE))))
+         (buf (make-bytevector (* 8 (+ skip n)) 0)))
+    (player-pull! p buf 0 (+ skip n))
+    (player-close! p)
+    (let ((v (make-vector n 0.0)))
+      (let loop ((i 0))
+        (when (< i n)
+          (let ((o (* 8 (+ skip i))))
+            (vector-set! v i (* 0.5 (+ (bytevector-ieee-single-ref buf o 'little)
+                                       (bytevector-ieee-single-ref buf (+ o 4) 'little)))))
+          (loop (+ i 1))))
+      v)))
+
+(define (goertzel v f)
+  (let* ((w (/ (* 2.0 3.14159265358979 f) RATE)) (k (* 2.0 (cos w))) (n (vector-length v)))
+    (let loop ((i 0) (s1 0.0) (s2 0.0))
+      (if (< i n)
+          (loop (+ i 1) (+ (vector-ref v i) (- (* k s1) s2)) s1)
+          (- (+ (* s1 s1) (* s2 s2)) (* k s1 s2))))))
+
+;; the strongest frequency within 60 cents of f0: a 4-cent scan, then a
+;; parabola through the best three
+(define (peak-near v f0)
+  (let* ((cs (iota 31 -60 4))
+         (ps (map (lambda (c) (goertzel v (* f0 (expt 2.0 (/ c 1200.0))))) cs))
+         (best (let loop ((i 0) (b 0)) (if (< i (length ps)) (loop (+ i 1) (if (> (list-ref ps i) (list-ref ps b)) i b)) b))))
+    (if (or (= best 0) (= best (- (length ps) 1)))
+        (* f0 (expt 2.0 (/ (list-ref cs best) 1200.0)))
+        (let* ((a (list-ref ps (- best 1))) (b (list-ref ps best)) (c (list-ref ps (+ best 1)))
+               (d (/ (* 0.5 (- a c)) (+ (- a (* 2.0 b)) c))))
+          (* f0 (expt 2.0 (/ (+ (list-ref cs best) (* 4.0 d)) 1200.0)))))))
+
+;; cents from the computed frequency to the rendered one
+(define (rendered-off t inst note)
+  (let* ((want (freq note (cents-of inst)))
+         ;; drone-saw: two saws 4 cents apart and a slow attack, so a long
+         ;; window after the attack (0.5 s resolves about 9 cents at 370 Hz)
+         (v (if (eq? (tune-instrument-kind inst) (quote drone-saw))
+                (render (solo-tune t inst note) 4.0 2.0)
+                (render (solo-tune t inst note) 0.25 0.5))))
+    (* 1200.0 (log2 (/ (peak-near v want) want)))))
+
+;; every off-ET instrument of the series tunes, with a note it plays
+(define (off-et-instruments)
+  (apply append
+         (map (lambda (name)
+                (let ((t (tune-parsed name)) (seen '()))
+                  (keep-map (lambda (e)
+                                (let ((inst (cdr e)))
+                                  (and (not (= 0.0 (cents-of inst)))
+                                       (not (memv (tune-instrument-id inst) seen))
+                                       (not (eq? (tune-instrument-kind inst) 'drip))
+                                       (begin (set! seen (cons (tune-instrument-id inst) seen))
+                                              (list name t inst (car e))))))
+                              (played t))))
+              (append SERIES-TUNES H7-TUNES))))
+
+(test-group "wrongwater sound: the render"
+  (test "every off-ET instrument sounds at n times D, within 2 cents"
+    (let ((bad (keep-map (lambda (x)
+                             (let ((off (rendered-off (cadr x) (caddr x) (cadddr x))))
+                               (display "  ") (display (car x)) (display " ") (display (tune-instrument-name (caddr x)))
+                               (display " ") (display (/ (round (* 10.0 off)) 10.0)) (display " c") (newline)
+                               (and (> (abs off) 2.0) (car x))))
+                           (off-et-instruments))))
+      (assert-true (> (length (off-et-instruments)) 20))
+      (assert-equal '() bad)))
+  (test "control: a bell given H7's cents sounds at plain C5 (31 cents off), so the check fails it"
+    (let* ((t (tune-parsed "drip-climb"))
+           (bell (tune-instrument id: 9 name: "bell" kind: 'bell
+                                  params: '((fm-index . 1.2) (fm-mod . 2.0) (attack . 0.01) (decay . 2.6) (sustain . 0.0) (release . 1.2) (cents . -31.174))
+                                  volume: 44 gain: 0.6 send: 0.0))
+           (t2 (tune-with-instruments t (cons bell (tune-instruments t))))
+           (off (rendered-off t2 bell 72)))
+      (display "  bell off by ") (display off) (display " c") (newline)
+      (assert-true (> off 25.0)))))
+
+;; --- H7 in every bed (the bible, "H7 in the drone everywhere"; the shared line
+;; agreed with the Underhum's sound) ------------------------------------------------
+;; Every region's bed sounds H7 on channel 8 with ONE instrument, and the
+;; note that plays it at one volume. The line itself answers David's ruling
+;; 5: a breath floor at 0.15 or lower, a slower cycle than H5's, a step below
+;; H5, and darker (fewer upper partials) than H5's voice.
+(define (string-suffix=? s suf)
+  (and (>= (string-length s) (string-length suf))
+       (string=? (substring s (- (string-length s) (string-length suf)) (string-length s)) suf)))
+(define BEDS
+  (list-sort string<?
+             (keep-map (lambda (f) (and (string-suffix=? f "-bed.cts") (substring f 0 (- (string-length f) 4))))
+                       (directory-list "assets/tunes"))))
+;; the instrument and the cell volume a bed's channel CH plays
+(define (channel-voice t ch)
+  (let ((c (find (lambda (c) (and (= (cell-channel c) ch) (number? (cell-note c))))
+                 (apply append (map tune-pattern-cells (tune-patterns t))))))
+    (and c (cons (inst-of t (cell-inst c)) (cell-vol c)))))
+(define (voice-key v)
+  (let ((i (car v)))
+    (list (tune-instrument-kind i) (tune-instrument-params i) (tune-instrument-volume i)
+          (tune-instrument-gain i) (tune-instrument-send i) (cdr v))))
+
+(test-group "wrongwater sound: H7 in every bed"
+  (test "the beds found include the six regions'"
+    (display "  beds ") (display BEDS) (newline)
+    (for-each (lambda (b) (assert-true (member b BEDS)))
+              '("hollow-bed" "reedfen-bed" "glasswood-bed" "pipes-bed" "cloudstair-bed" "wrongwater-bed")))
+  (test "every bed's channel 8 is the same H7 voice, at the same note volume"
+    (let ((keys (map (lambda (b) (voice-key (channel-voice (tune-parsed b) 8))) BEDS)))
+      (for-each (lambda (b k) (unless (equal? k (car keys)) (display "  differs: ") (display b) (newline))) BEDS keys)
+      (assert-true (every (lambda (k) (equal? k (car keys))) keys))))
+  (test "the line: H7's cents, a breath floor at 0.15 or lower, slower and quieter and darker than H5's"
+    (for-each
+      (lambda (b)
+        (let* ((t (tune-parsed b)) (h7 (channel-voice t 8)) (h5 (channel-voice t 7)))
+          (assert-equal -31.174 (param (car h7) 'cents))
+          (assert-true (<= (param (car h7) 'breath-lo) 0.15))
+          (assert-true (< (param (car h7) 'breath-rate) (param (car h5) 'breath-rate)))
+          (assert-true (< (cdr h7) (cdr h5)))
+          (assert-true (< (tune-instrument-volume (car h7)) (tune-instrument-volume (car h5))))
+          (assert-true (< (param (car h7) 'bright) (param (car h5) 'bright)))
+          (assert-false (param (car h7) 'excite))))
+      BEDS)))
+
+;; THE MEASURED GUARD (requirement 6): render each bed's H5 and H7 channels
+;; alone, breathing as they do in play, and require H7's level under H5's.
+;; It cannot judge dissonance (David's ear does); it stops the balance
+;; drifting back once the ear has passed it.
+(define (channel-tune t ch)
+  (tune-with-patterns t
+    (map (lambda (p) (tune-pattern p cells: (filter (lambda (c) (= (cell-channel c) ch)) (tune-pattern-cells p))))
+         (tune-patterns t))))
+(define (channel-rms t ch from-s secs)
+  (let* ((v (render (channel-tune t ch) from-s secs)) (n (vector-length v)))
+    (let loop ((i 0) (e 0.0))
+      (if (< i n) (loop (+ i 1) (+ e (* (vector-ref v i) (vector-ref v i)))) (sqrt (/ e n))))))
+(define (db x) (* 20.0 (/ (log (max x 1e-12)) (log 10.0))))
+(define GUARD-FROM-S 6.0)
+(define GUARD-SECS 60.0)
+
+(test-group "wrongwater sound: the H7 level guard"
+  (test "in every bed, over a minute of breathing, H7 sits under H5"
+    (let ((bad (keep-map
+                 (lambda (b)
+                   (let* ((t (tune-parsed b))
+                          (h5 (channel-rms t 7 GUARD-FROM-S GUARD-SECS))
+                          (h7 (channel-rms t 8 GUARD-FROM-S GUARD-SECS)))
+                     (display "  ") (display b) (display " H5 ") (display (/ (round (* 10 (db h5))) 10.0))
+                     (display " dB, H7 ") (display (/ (round (* 10 (db h7))) 10.0)) (display " dB") (newline)
+                     (and (not (< h7 h5)) b)))
+                 BEDS)))
+      (assert-equal '() bad))))
