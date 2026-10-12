@@ -47,6 +47,7 @@
           (harkfell feel)
           (harkfell palette)
           (harkfell render)
+          (harkfell haze)
           (harkfell atlas)
           (harkfell pipes look)
           (harkfell cloudstair look)
@@ -463,26 +464,37 @@
     (define (under? rm) (and (not (cloudstair? rm)) (room-under? rm)))
     (define (cloudstair? rm) (eq? (room-region rm) 'cloudstair))
 
-    ;; The focus pull (D16, section 7's depth): while a music moment plays the
-    ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
-    ;; easing in over about a second and out again after; the room itself
-    ;; stays sharp. *focus* is 0..1, stepped once a drawn frame.
-    (define FOCUS-R 2.2)
+    ;; The haze step (D51, replacing D16's focus pull): while a moment's
+    ;; music sounds the far sky goes one palette step toward the region's
+    ;; haze (sky-4), band by band from the horizon up, and back once it
+    ;; stops; the room itself is as it was. Whole bands change slot, so no
+    ;; pixel moves and no seam breaks (D16 first scattered the backdrop's
+    ;; pixels, and at the game's whole scale every band seam grew zigzag
+    ;; teeth). (harkfell haze) holds the rule and the ease, by the clock;
+    ;; *focus* is 0..1, stepped once a drawn frame. The Pipes' backdrop (its
+    ;; sky slots are cave walls) is left as it is.
     (define *focus* 0.0)
+    (define *focus-at* #f)          ; the clock (s) at the last step
     (define *moment* #f)
+    (define *look-now* #f)
     (define *bed-wind* 0.5)
 
-    ;; From the shell, each frame: whether a moment plays, and the bed's wind
-    ;; level now (0..1; the reeds bend with what you hear).
-    (define (set-look-sound! moment wind)
+    ;; From the shell, each frame: whether a moment's music sounds (its rows
+    ;; still playing: sound-moment-sounding), the bed's wind level now (0..1;
+    ;; the reeds bend with what you hear), and the clock in seconds.
+    (define (set-look-sound! moment wind . now)
       (set! *moment* (and moment #t))
-      (set! *bed-wind* (if (number? wind) wind 0.5)))
+      (set! *bed-wind* (if (number? wind) wind 0.5))
+      (set! *look-now* (and (pair? now) (number? (car now)) (car now))))
 
+    ;; dt from the shell's clock; a frame without one counts as 1/60 s
     (define (step-focus!)
-      (set! *focus* (if *moment* (min 1.0 (+ *focus* 0.018)) (max 0.0 (- *focus* 0.012)))))
+      (let ((dt (if (and *look-now* *focus-at*) (min 0.25 (max 0.0 (- *look-now* *focus-at*))) (/ 1.0 60.0))))
+        (set! *focus-at* *look-now*)
+        (set! *focus* (haze-focus-next *focus* *moment* dt))))
 
     ;; The room's backdrop: its region's sky, or earth when it lies under
-    ;; another room; scattered by the focus pull.
+    ;; another room; stepped into the haze while a moment's music sounds.
     (define (draw-backdrop! rm)
       (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
                                  ((cloudstair? rm) (cloudstair-backdrop-key rm))
@@ -493,11 +505,11 @@
                                  ((not (under? rm)) (room-region rm))
                                  ((eq? (room-region rm) (quote glasswood)) (quote glasswood-under))
                                  (else (quote under)))))
-            (r (* FOCUS-R *focus* *focus*)))
-        (if (> r 0.3)
-            (draw-texture-scattered! tex VIEW-W VIEW-H r)
-            (with-blend-mode (quote none)
-              (set-color 1.0 1.0 1.0 1.0)
+            (bands (haze-bands *focus*)))
+        (with-blend-mode (quote none)
+          (set-color 1.0 1.0 1.0 1.0)
+          (if (and (> bands 0) (not (eq? (room-region rm) 'pipes)))
+              (draw-texture-hazed! tex VIEW-W VIEW-H (map (lambda (s) (haze-slot s bands)) (list 0 1 2)))
               (draw-texture tex 0 0 VIEW-W VIEW-H)))))
     ;; The sky's slow movers: three clouds over a room open to the sky, a
     ;; pixel every two seconds (section 7), each at its own height, coming

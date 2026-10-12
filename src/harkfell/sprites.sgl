@@ -26,6 +26,7 @@
 ;;;   (draw-flash n x y age slot)         a harmonic just taken (age in ticks)
 ;;;   (draw-flash-light x y age)          its light
 ;;;   (harmonic-role n)                   the slot name of a harmonic's colour
+;;;   (stone-glyph-rects n)               a stone glyph's rects (x y w h) in its cell
 
 (define-library (harkfell sprites)
   (import (sigil math)
@@ -39,7 +40,8 @@
           (harkfell creatures))
 
   (export draw-critter draw-critter-glow draw-stone draw-stone-light draw-pickup draw-pickup-light
-          draw-flash draw-flash-light harmonic-role firefly-halo-pixels)
+          draw-flash draw-flash-light harmonic-role firefly-halo-pixels
+          stone-glyph-rects)
 
   (begin
     (define (harmonic-role n)
@@ -184,16 +186,25 @@
     ;; burns and the stone glows. Sinking: it goes down into the floor (the
     ;; floor, drawn after, covers it). Open: its top lies flush with the
     ;; floor, the glyph glowing, and it glows again each time it rings.
+    ;; The glyph as rects (x y w h) in the stone's 16x16 cell, whose body is
+    ;; centred on x 8 (columns 1-14): the ring (columns 5-10), and below it
+    ;; n-1 notches a pixel wide with a pixel between, the row centred on the
+    ;; ring. A row of 1-pixel notches is an odd number of pixels wide, so it
+    ;; sits half a pixel left of x 8 for every n (n-1 notches start at
+    ;; column 8-(n-1)); the H5's four take columns 4-10, clear of the
+    ;; body's shading (column 2, columns 12-13).
+    (define (stone-glyph-rects n)
+      (let ((m (max 0 (- n 1))))
+        (append (list (list 6 4 4 1) (list 6 9 4 1) (list 5 5 1 4) (list 10 5 1 4))
+                (let loop ((k 0))
+                  (if (< k m)
+                      (cons (list (+ (- 8 m) (* 2 k)) 11 1 2) (loop (+ k 1)))
+                      '())))))
+
     (define (glyph! x y n s)
       (paint-slot! s)
-      (draw-filled-rect (+ x 6) (+ y 4) 4 1)
-      (draw-filled-rect (+ x 6) (+ y 9) 4 1)
-      (draw-filled-rect (+ x 5) (+ y 5) 1 4)
-      (draw-filled-rect (+ x 10) (+ y 5) 1 4)
-      (let loop ((k 0))
-        (when (< k (- n 1))
-          (draw-filled-rect (+ x 7 (* 2 k)) (+ y 11) 1 2)
-          (loop (+ k 1)))))
+      (for-each (lambda (r) (draw-filled-rect (+ x (car r)) (+ y (cadr r)) (caddr r) (cadddr r)))
+                (stone-glyph-rects n)))
 
     (define (stone-body! x y slot)
       (paint-slot! (slot 'ground-3))

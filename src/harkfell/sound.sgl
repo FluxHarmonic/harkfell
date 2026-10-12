@@ -52,6 +52,9 @@
 ;;;   (sound-ears)                   #f, or up | left | right | below: the ears' point
 ;;;   (sound-lines)                  the readout's lines
 ;;;   (sound-hush) (sound-bed-levels) (sound-moment-playing)   for the gates
+;;;   (sound-moment-sounding)   the playing moment while its tune's rows still play
+;;;                             (its music heard), #f once they end, ahead of its
+;;;                             quiet tail: the look's haze step (D51) follows it
 
 (define-library (harkfell sound)
   (import (sigil math)
@@ -66,7 +69,7 @@
           (harkfell hush))
 
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
-          sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
+          sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-moment-sounding sound-reset!
           sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING sound-bed-notes sound-region sound-cue-tunes sound-voice-source HUM-ID CALL-GAIN call-id
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
@@ -192,6 +195,11 @@
                                     (list spent (if (pair? wander) (car wander) '())))))
     (define (sound-region) *region*)
     (define (sound-moment-playing) (and *moment* (car *moment*)))
+    ;; The moment's music: its rows still playing. A moment is over only once
+    ;; its tail falls under QUIET-OVER (high-fell: rows end at 22 s, over at
+    ;; 29 s); the haze step (D51) leaves with the music, not the tail.
+    (define (sound-moment-sounding)
+      (and *moment* (not (player-ended? (cdr *moment*))) (car *moment*)))
     ;; D35: seconds since the playing moment's start was HEARD (its sink
     ;; holds DEPTH-S), or #f. Content times the wordmark's reveal by it.
     (define *moment-t0* 0.0)
