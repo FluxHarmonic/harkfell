@@ -660,6 +660,31 @@
                         (bn (+ i 1)))))))
           (panel (+ k 1)))))
 
+    ;; The alcoves' small carvings (the cell's top-left at x y), cut in the
+    ;; rock behind them: in A four lights going down a stair, the first
+    ;; thing the old people show you; in E a ring with a drop falling into
+    ;; it, the drip's source; on F's seat the heart's ring and its notches.
+    (define (draw-carving! image x y)
+      (case image
+        ((four-lights)
+         (let st ((i 0))
+           (when (< i 4)
+             (rect! 'ground-1 (+ x 2 (* i 3)) (+ y 3 (* i 3)) 4 1)
+             (rect! (list-ref '(h2 h3 h4 h5) i) (+ x 3 (* i 3)) (+ y 1 (* i 3)) 1 1)
+             (st (+ i 1)))))
+        ((drip-ring)
+         (rect! 'ground-1 (+ x 4) (+ y 9) 8 1) (rect! 'ground-1 (+ x 3) (+ y 6) 1 3)
+         (rect! 'ground-1 (+ x 12) (+ y 6) 1 3) (rect! 'ground-1 (+ x 4) (+ y 5) 8 1)
+         (rect! 'water (+ x 7) (+ y 1) 2 2) (rect! 'water (+ x 7) (+ y 7) 2 1))
+        ((heart-ring)
+         (rect! 'leaf-1 (+ x 9) (+ y 3) 14 1) (rect! 'leaf-1 (+ x 9) (+ y 9) 14 1)
+         (rect! 'leaf-1 (+ x 8) (+ y 4) 1 5) (rect! 'leaf-1 (+ x 23) (+ y 4) 1 5)
+         (let nt ((i 0))
+           (when (< i 4)
+             (rect! 'leaf-1 (+ x 11 (* i 3)) (+ y 5) 1 2)
+             (nt (+ i 1)))))
+        (else #f)))
+
     ;; The crack in Behind the Wall's west wall: a jagged dark line; once the
     ;; fundamental has sounded, the chamber's white light shows through it.
     (define CRACK '((0 0) (1 5) (0 10) (2 16) (1 22) (0 28) (2 34) (1 40) (0 46) (1 52) (2 58) (1 64)))
@@ -695,12 +720,13 @@
                     (things rm 'bench))
           (for-each (lambda (th)
                       (let ((a (thing-at th)))
-                        (when (eq? (thing-kw th "image") 'bearers-story)
-                          (draw-bearers-mural! (* S (car a)) (* S (cdr a))))))
+                        (case (thing-kw th "image")
+                          ((bearers-story) (draw-bearers-mural! (* S (car a)) (* S (cdr a))))
+                          (else (draw-carving! (thing-kw th "image") (* S (car a)) (* S (cdr a)))))))
                     (things rm 'mural))
           (for-each (lambda (th)
                       (let ((a (thing-at th)))
-                        (draw-crack! (* S (car a)) (- (* S (cdr a)) 24) ph)))
+                        (draw-crack! (- (* S (car a)) 4) (- (* S (cdr a)) 24) ph)))
                     (things rm 'crack)))))
 
     ;; The motes of the listening place: threads leaving the great stone's
@@ -942,7 +968,6 @@
     ;; root's white glow carried down from the stone, the mural lit by it.
     (define (draw-underhum-extra-lights! rm b carry t ph ox oy)
       (when (underhum? rm)
-        (for-each (lambda (m) (disc! (car m) (cadr m) 3.0 0.12) (disc! (car m) (cadr m) 0.5 0.9)) (tell-motes rm t))
         (for-each (lambda (th)
                     (let ((a (thing-at th)))
                       (when (member a *lit-benches*)
@@ -953,7 +978,7 @@
             (begin
               (for-each (lambda (th)
                           (let ((a (thing-at th)))
-                            (for-each (lambda (p) (disc! (+ (* S (car a)) (car p) 1) (+ (- (* S (cdr a)) 24) (cadr p) 3) 3.0 0.3)) CRACK)
+                            (for-each (lambda (p) (disc! (+ (* S (car a)) (car p) -3) (+ (- (* S (cdr a)) 24) (cadr p) 3) 3.0 0.3)) CRACK)
                             (disc! (+ (* S (car a)) 1) (* S (cdr a)) 40.0 0.18)))
                         (things rm 'crack))
               (for-each (lambda (th)
