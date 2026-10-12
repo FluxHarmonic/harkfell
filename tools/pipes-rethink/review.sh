@@ -15,7 +15,7 @@ H=${3:-build/audio-harness/bin/harkfell-test}
 [ -x "$H" ] || { echo "SETUP-FAILED: no harness at $H"; exit 2; }
 mkdir -p "$OUT"
 # old WAVs must not stand in for a job that no longer renders
-rm -f "$OUT"/*.wav "$OUT"/render.log
+rm -f "${OUT:?}"/*.wav "${OUT:?}"/render.log
 node tools/pipes-rethink/compose.mjs > /dev/null
 copied=""
 cleanup() { for f in $copied; do rm -f "assets/tunes/$f"; done; }

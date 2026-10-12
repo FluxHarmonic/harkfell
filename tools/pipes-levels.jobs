@@ -1,0 +1,15 @@
+;; tools/pipes-levels.jobs: what scripts/gate-pipes-sound measures (tools/cloudstair-render.sgl).
+;; moment-*: each Pipes moment alone at gain 1 (its loudness against the other regions' moments).
+;; bed-b: the bed in B, Wind's Mouth, its loudest room (wind .5 water .1 pipes .9, the drone at
+;; DRONE-MOVING 0.35 x .3), carrying H2. r-tone / r-notone: the Long Pipe in R over its ducked bed,
+;; with and without H4's finding tone one room away (tone-gain 0.50), looping as the game opens it.
+(job "moment-wind-in-stone" 42 (layer "wind-in-stone" 1.0 () ()))
+(job "moment-three-echoes" 42 (layer "three-echoes" 1.0 () ()))
+(job "moment-the-pipes-breathe" 44 (layer "the-pipes-breathe" 1.0 () ()))
+(job "moment-air-below" 42 (layer "air-below" 1.0 () ()))
+(job "moment-seep-song" 38 (layer "seep-song" 1.0 () ()))
+(job "moment-hollow-octave" 42 (layer "hollow-octave" 1.0 () ()))
+(job "bed-b" 40 (layer "pipes-bed" 1 (2) ((1 . 0.5) (2 . 0.1) (3 . 0.9) (4 . 0.105) (5 . 0.105) (6 . 0.105) (7 . 0.105) (8 . 0.105)) 0 #t))
+(job "r-tone" 44 (layer "pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.2) (3 . 0.8) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245)) 0 #t) (layer "tone-h4" 0.5 () () 0 #t) (layer "the-pipes-breathe" 1.0 () () 1.0))
+(job "r-notone" 44 (layer "pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.2) (3 . 0.8) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245)) 0 #t) (layer "the-pipes-breathe" 1.0 () () 1.0))
+(job "cue-pickup-h4" 6 (layer "pickup-h4" 1.0 () ()))

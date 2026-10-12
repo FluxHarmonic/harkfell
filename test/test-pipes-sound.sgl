@@ -33,9 +33,9 @@
                 (assert-true (tune-exists? n))
                 (assert-equal '() (tune-errors (tune-parsed n))))
               NEW-TUNES))
-  (test "ambient pipes use only A3 E4 C4 and occasional F4, never D4"
+  (test "the bed's stone rank holds A3 F3 C4 E4 G3, never D4 (D53)"
     (let ((ns (map (lambda (c) (midi->note-name (cell-note c))) (notes BED 3))))
-      (assert-equal '("A-3" "E-4" "C-4" "F-4" "A-3") ns)))
+      (assert-equal '("A-3" "F-3" "C-4" "E-4" "G-3") ns)))
   (test "H4 is silent before pickup and present with H2/H4 or all three"
     (assert-equal '() (notes (strip-uncarried BED '(2 3)) 6))
     (assert-equal '("D-4") (map (lambda (c) (midi->note-name (cell-note c))) (notes (strip-uncarried BED '(2 4)) 6)))
@@ -109,3 +109,87 @@
     (let ((n (sound-spots-played)))
       (sound-set-work-in-frame! #t)
       (assert-equal 0 n))))
+
+;; D53, the stone organ. The Pipes' tune leaps A3 to A4 and falls to C4, a step
+;; under D4 (H4's note); nothing heard before H4 is carried sounds a D4. The
+;; homecoming makes the leap on D and lands. tools/pipes-compose.mjs writes the
+;; moments and checks the same rules as it writes; these check the files.
+(define (sounding t) (filter (lambda (c) (number? (cell-note c))) (cells t)))
+(define (names cs) (map (lambda (c) (midi->note-name (cell-note c))) cs))
+(define (instrument t id) (find (lambda (i) (= (tune-instrument-id i) id)) (tune-instruments t)))
+(define (param i key) (let ((e (assq key (tune-instrument-params i)))) (and e (cdr e))))
+(define (cents-of t c) (let ((v (param (instrument t (cell-inst c)) 'cents))) (if v (inexact v) 0.0)))
+(define (near? a b) (< (abs (- a b)) 0.001))
+(define (line-of t ch) (names (notes t ch)))
+(define D4 62)
+(define BEFORE-H4 '("wind-in-stone" "three-echoes" "the-pipes-breathe" "air-below" "seep-song"))
+(define THEME '("A-3" "A-4" "G-4" "F-4" "E-4" "C-4"))
+(define (prefix? p l) (or (null? p) (and (pair? l) (equal? (car p) (car l)) (prefix? (cdr p) (cdr l)))))
+(define (patch-of i) (cons (tune-instrument-kind i) (tune-instrument-params i)))
+;; cells by row (a small insertion sort: no sort procedure is bound in the harness)
+(define (by-row cs)
+  (let ins ((cs cs) (out '()))
+    (if (null? cs) out
+        (ins (cdr cs)
+             (let put ((c (car cs)) (l out))
+               (cond ((null? l) (list c))
+                     ((< (cell-row c) (cell-row (car l))) (cons c l))
+                     (else (cons (car l) (put c (cdr l))))))))))
+;; the cells in the order they play: patterns in (tune-order), rows within each
+(define (played t)
+  (apply append (map (lambda (id) (let ((cs (tune-pattern-cells (tune-find-pattern t id))))
+                                    (by-row cs)))
+                     (tune-order t))))
+(define SUSTAINING '(drone-fm drone-saw pipe-breath noise-bed))
+;; channels whose last event in play is a sustaining voice's note (never released)
+(define (hanging t)
+  (let loop ((cs (played t)) (last '()))
+    (if (null? cs)
+        (filter (lambda (e)
+                  (and (number? (cell-note (cdr e)))
+                       (memq (tune-instrument-kind (instrument t (cell-inst (cdr e)))) SUSTAINING)))
+                last)
+        (let ((c (car cs)))
+          (loop (cdr cs)
+                (if (or (number? (cell-note c)) (eq? 'off (cell-note c)))   ; a note or a note-off; #f is an empty cell
+                    (cons (cons (cell-channel c) c) (filter (lambda (e) (not (= (car e) (cell-channel c)))) last))
+                    last))))))
+
+(test-group "pipes: the stone organ (D53)"
+  (test "nothing heard in the Pipes before H4 sounds a D4, in any voice"
+    (for-each (lambda (n)
+                (assert-equal (list n '()) (list n (filter (lambda (c) (= D4 (cell-note c))) (sounding (tune-parsed n))))))
+              BEFORE-H4)
+    (assert-equal '() (filter (lambda (c) (and (<= (cell-channel c) 3) (= D4 (cell-note c)))) (sounding BED))))
+  (test "no moment instrument is one of the bed's (an identical patch; the drops and the ranks are deliberately kin)"
+    (let ((bed (map patch-of (tune-instruments BED))))
+      (for-each (lambda (n)
+                  (for-each (lambda (i) (assert-equal (list n (tune-instrument-name i) #f)
+                                                      (list n (tune-instrument-name i) (and (member (patch-of i) bed) #t))))
+                            (tune-instruments (tune-parsed n))))
+                BEFORE-H4)))
+  (test "the Long Pipe and Wind's Mouth state the tune: the leap A3 A4, falling to C4"
+    (assert-true (prefix? THEME (line-of (tune-parsed "the-pipes-breathe") 1)))
+    (assert-true (prefix? THEME (line-of (tune-parsed "wind-in-stone") 1))))
+  (test "the Long Pipe ends on C4 over C major: the finding tone's D4 is what it waits for"
+    (let* ((t (tune-parsed "the-pipes-breathe")) (l (line-of t 1)))
+      (assert-equal "C-4" (list-ref l (- (length l) 1)))
+      (assert-equal '("G-3" "C-4" "E-4" "C-3")
+                    (map (lambda (ch) (let ((xs (line-of t ch))) (list-ref xs (- (length xs) 1)))) '(4 5 6 7)))))
+  (test "the homecoming makes the leap on D and lands on D4, with no A (no H3 reward) and no F# (no H5)"
+    (let* ((t (tune-parsed "hollow-octave")) (l (line-of t 1)))
+      (assert-equal '("D-3" "D-4") (list (car l) (cadr l)))
+      (assert-equal "D-4" (list-ref l (- (length l) 1)))
+      (assert-equal '() (filter (lambda (c) (memv (modulo (cell-note c) 12) '(9 6))) (sounding t)))))
+  (test "pickup-h4 speaks H4's partials 4 8 12 16 20 24, each at its just tuning on a voice that takes cents:"
+    (let* ((t (tune-parsed "pickup-h4"))
+           (ranks (filter (lambda (c) (eq? 'drone-fm (tune-instrument-kind (instrument t (cell-inst c))))) (sounding t))))
+      (assert-equal '("D-4" "D-5" "A-5" "D-6" "F#6" "A-6") (names ranks))
+      (for-each (lambda (c want) (assert-true (near? want (cents-of t c))))
+                ranks '(0.0 0.0 1.955 0.0 -13.686 1.955))))
+  (test "every moment releases its held voices, then plays a silent pattern for its tail (a hanging note keeps the sky hazed, D51)"
+    (for-each (lambda (n)
+                (let* ((t (tune-parsed n)) (o (tune-order t)) (last (tune-find-pattern t (list-ref o (- (length o) 1)))))
+                  (assert-equal (list n '()) (list n (tune-pattern-cells last)))
+                  (assert-equal (list n '()) (list n (map car (hanging t))))))
+              (cons "hollow-octave" BEFORE-H4))))
