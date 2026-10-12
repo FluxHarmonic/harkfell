@@ -900,6 +900,29 @@
            (filter air-thing-valid? (room-things-of rm 'air-field))))
 
     ;; A room's tilemap and its placed form (the grid must be whole).
+    ;; The room as the seam and border checks see it: a stillness door's cell
+    ;; (a ring-stone with still:) is open. Such a door has no key, the reach
+    ;; checker treats it as open in every carry set (stone-thing-open?), and
+    ;; it may sit on an edge: Wrongwater's drip door is Under the Well's
+    ;; (15,0), the floor of a one-cell pit in the Ice Well's recess, so a body
+    ;; standing on it stays in the Ice Well. Physics never sees this copy.
+    (define (room-seam-view rm)
+      (let ((doors (map thing-at (filter (lambda (t) (thing-kw t "still"))
+                                         (room-things-of rm 'ring-stone)))))
+        (if (null? doors)
+            rm
+            (room rm grid: (let rows ((g (room-grid rm)) (r 0) (acc '()))
+                             (if (null? g)
+                                 (reverse acc)
+                                 (rows (cdr g) (+ r 1)
+                                       (cons (list->string
+                                               (let cols ((cs (string->list (car g))) (c 0) (out '()))
+                                                 (if (null? cs)
+                                                     (reverse out)
+                                                     (cols (cdr cs) (+ c 1)
+                                                           (cons (if (member (cons c r) doors) #\space (car cs)) out)))))
+                                             acc))))))))
+
     (define (room-placed rm)
       (let* ((tm (make-tilemap ROOM-COLS ROOM-ROWS TILE))
              (cells (vector-copy (tilemap-cells tm))))
@@ -1173,14 +1196,17 @@
              (wm (make-worldmap placed-rooms ROOM-COLS ROOM-ROWS TILE))
              (broken (map (lambda (rm) (cons (room-x rm) (room-y rm)))
                           (filter (lambda (rm) (not (grid-whole? rm))) rooms)))
-             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems wm kind-open? broken (sky-slot? regions)))))
+             ;; seams and borders read stillness doors as open (room-seam-view)
+             (seam-wm (make-worldmap (map (lambda (rm) (room-placed (room-seam-view rm))) whole)
+                                     ROOM-COLS ROOM-ROWS TILE))
+             (ps (append ps (map (lambda (s) (pb "world/rooms" #f s)) (seam-problems seam-wm kind-open? broken (sky-slot? regions)))))
              (map-reads (map (lambda (e) (read-map-source (car e) (cdr e)))
                              (filter (lambda (e) (and (starts-with? (car e) "world/regions/") (ends-with? (car e) ".map")))
                                      source)))
              (maps (map car map-reads))
              (ps (append ps
                          (apply append (map cdr map-reads))
-                         (apply append (map (lambda (m) (if (region-map-region m) (check-map m rooms wm) '())) maps))))
+                         (apply append (map (lambda (m) (if (region-map-region m) (check-map m rooms seam-wm) '())) maps))))
              (ps (append ps
                          (if (and start (not (find-region regions (car start))))
                              (list (pb "world/world.sgl" #f "start: names no region"))

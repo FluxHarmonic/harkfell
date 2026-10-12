@@ -1,0 +1,77 @@
+;; Wrongwater's drip door as built: Under the Well's (15,0), the floor of a
+;; one-cell pit (the Ice Well's (15,10)) under the rising drip (15,9). The
+;; real world, the real physics and gates (topics/harkfell-wrongwater-rooms).
+(import (sigil test)
+        (sigil list)
+        (engine worldmap)
+        (engine body)
+        (harkfell world)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell feel)
+        (harkfell gates))
+
+(define CT (load-content (read-world-source "world")))
+(define TM (worldmap-tiles (content-map CT)))
+(define WELL (content-room CT -2 6))
+(define LISTEN (cell-centre TM (local->global CT WELL 15 9)))
+(define DOOR-CELL (local->global CT (content-room CT -2 7) 15 0))
+
+(define NOTHING (intent h: 0 v: 0 jump: #f press: #f))
+(define RIGHT (intent h: 1 v: 0 jump: #f press: #f))
+
+;; carrying H2 H3 H4, the body placed standing in a cell of the Ice Well
+(define (in-well c r)
+  (let ((g (local->global CT WELL c r)))
+    (world-populate (world-at (content-map CT) (cell-body TM HARKFELL-FEEL (car g) (cdr g)))
+                    (content-stones CT) (content-pickups CT) '(2 3 4))))
+(define (run w in n) (if (= n 0) w (run (cdr (world-take-news (world-tick w in))) in (- n 1))))
+;; the room the view follows: the room under the body's centre
+(define (room-of w)
+  (let* ((c (body-center (world-body w) HARKFELL-FEEL))
+         (p (worldmap-room-at-px (world-map w) (car c) (cdr c))))
+    (list (placed-x p) (placed-y p))))
+(define (entry-room w)
+  (let* ((c (body-center (world-entry w) HARKFELL-FEEL))
+         (p (worldmap-room-at-px (world-map w) (car c) (cdr c))))
+    (list (placed-x p) (placed-y p))))
+(define (door w) (find (lambda (s) (equal? (stone-cell s) DOOR-CELL)) (world-stones w)))
+(define (listen-dist w)
+  (let ((c (body-center (world-body w) HARKFELL-FEEL)))
+    (sqrt (+ (expt (- (car c) (car LISTEN)) 2) (expt (- (cdr c) (cdr LISTEN)) 2)))))
+
+(test-group "Wrongwater: the drip door on the seam"
+  (test "the world loads clean with a stillness door on the Ice Well's seam"
+    (assert-equal '() (content-problems CT))
+    (assert-true (door (in-well 14 9)))
+    (assert-equal 5 (stone-still (door (in-well 14 9)))))
+  (test "standing on the shut door: in the Ice Well, inside the door's radius, the entry too"
+    (let ((w (run (in-well 15 10) NOTHING 60)))
+      (assert-equal '(-2 6) (room-of w))
+      (assert-equal '(-2 6) (entry-room w))
+      (assert-equal 'shut (stone-state (door w)))
+      (assert-true (<= (listen-dist w) (stone-radius (door w))))
+      (assert-true (> (stone-listening (door w)) 0))))
+  (test "five seconds still there opens it, and the body falls into Under the Well"
+    (let* ((w (run (in-well 15 10) NOTHING 330))
+           (later (run w NOTHING 120)))
+      (assert-true (memq (stone-state (door w)) '(sinking open)))
+      (assert-equal '(-2 7) (room-of later))))
+  (test "walking across the recess: into the pit, never into Wrongwater, and out again"
+    (let loop ((w (in-well 13 9)) (n 0))
+      (when (< n 120)
+        (assert-equal '(-2 6) (room-of w))
+        (loop (cdr (world-take-news (world-tick w RIGHT))) (+ n 1))))
+    (let* ((walked (run (in-well 13 9) RIGHT 120))
+           (in-pit (run walked NOTHING 30))
+           (out (run (cdr (world-take-news (world-tick in-pit (intent h: 1 v: 0 jump: #t press: #t))))
+                     (intent h: 1 v: 0 jump: #t press: #f) 40))
+           (rest (run out NOTHING 30)))
+      (assert-equal '(-2 6) (room-of in-pit))
+      (assert-equal 'shut (stone-state (door in-pit)))
+      (assert-equal '(-2 6) (room-of rest))
+      (assert-equal 'ground (body-mode (world-body rest)))
+      ;; standing on the recess floor (row 9), not in the pit (row 10)
+      (assert-true (< (cdr (body-center (world-body rest) HARKFELL-FEEL))
+                      (cdr (body-center (world-body in-pit) HARKFELL-FEEL)))))))
