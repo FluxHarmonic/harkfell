@@ -2008,10 +2008,12 @@
     (define *finale-ahead* '())      ; ((name . player-or-#f) ...) opened ahead in the Underhum
 
     (define (sound-finale-active?) (and *fin* #t))
-    ;; the ending holds the beds back until its dawn, and the moments, spot
-    ;; sounds and the cue bank's work as a moment does
+    ;; The ending holds the beds back until its dawn, and the moments, spot
+    ;; sounds and the cue bank's work until it is over, as a moment does: its
+    ;; close still plays after the dawn (a Hollow wandering moment drawn then
+    ;; would start over the credits' music).
     (define (finale-holds-bed?) (and *fin* (not (fin-dawn *fin*))))
-    (define (finale-busy?) (finale-holds-bed?))
+    (define (finale-busy?) (and *fin* #t))
     ;; the Underhum's bed after the ending: its drone breathing as one
     (define (bed-for name) (if (and *ended* (equal? name UNDERHUM-BED)) AFTER-BED name))
 
