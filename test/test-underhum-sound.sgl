@@ -156,19 +156,20 @@
       (display "  tuning: ") (display checked) (display " notes checked, wrong: ") (display bad) (newline)
       (assert-true (> checked 100))
       (assert-equal '() bad)))
-  (test "the credits: option B's nine cards on the climb's clock; the last waits for the dawn"
-    (assert-equal 9 (length CREDITS))
+  (test "the credits: David's seven cards (D52) on the climb's clock; the last waits for the dawn"
+    (assert-equal 7 (length CREDITS))
     (assert-equal '("Harkfell") (car CREDITS))
-    (assert-equal '("Thanks for playing!") (car (reverse CREDITS)))
+    (assert-equal '("Built with Sigil") (list-ref CREDITS 3))
+    (assert-equal '("Thank you for listening.") (car (reverse CREDITS)))
     (assert-false (credits-at #f #f))
     (assert-equal 0 (car (credits-at 5.0 #f)))
     (assert-true (near? (cdr (credits-at 0.75 #f)) 0.5 1e-9))
-    (assert-false (credits-at 13.0 #f))
-    (assert-equal 7 (car (credits-at 117.0 #f)))
-    ;; the clock reaches the last card at 128 s; with the dawn at 200 s it waits
-    (assert-false (credits-at 130.0 200.0))
-    (assert-equal 8 (car (credits-at 201.0 200.0)))
-    (assert-equal 8 (car (credits-at 130.0 #f)))
+    (assert-false (credits-at 15.0 #f))
+    (assert-equal 5 (car (credits-at 105.0 #f)))
+    ;; the clock reaches the last card at 120 s; with the dawn at 200 s it waits
+    (assert-false (credits-at 125.0 200.0))
+    (assert-equal 6 (car (credits-at 201.0 200.0)))
+    (assert-equal 6 (car (credits-at 125.0 #f)))
     (assert-false (credits-at 215.0 200.0)))))
 
 ;; --- 2. the fuse, heard -------------------------------------------------------------------------
@@ -395,10 +396,10 @@
                     (cond ((null? cs) (reverse acc))
                           ((and (pair? acc) (= (car acc) (cadr (car cs)))) (loop (cdr cs) acc))
                           (else (loop (cdr cs) (cons (cadr (car cs)) acc))))))
-           (last-at (car (find (lambda (c) (= (cadr c) 8)) A-CARDS))))
+           (last-at (car (find (lambda (c) (= (cadr c) 6)) A-CARDS))))
       (display "  cards shown: ") (display shown) (display " first at ") (display (car first))
       (display " last at ") (display last-at) (newline)
-      (assert-equal '(0 1 2 3 4 5 6 7 8) shown)
+      (assert-equal '(0 1 2 3 4 5 6) shown)
       (assert-true (near? (car first) (heard-at A-SEQ 'rise) 0.1))
       (assert-true (>= last-at (- (heard-at A-SEQ 'dawn) 0.05)))))
   (test "the ending ends, is saved, and never plays again"

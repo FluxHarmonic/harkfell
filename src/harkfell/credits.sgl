@@ -2,19 +2,19 @@
 ;;; Pure; LOOK draws them over the world in IM Fell (D34, D35: no pause, no
 ;;; letterbox, input never stops).
 ;;;
-;;; The text is the bible's option B, "How it was made" (recommended;
-;;; harkfell-underhum-bible, "The credits: three options for David"). David's
-;;; rulings do not choose among A, B and C, and the wording choices listed
-;;; there are his; A and C are in tasks/harkfell-underhum-sound for him.
+;;; The text is David's choice (D52 in harkfell-design, 2026-10-12): the
+;;; bible's option A ("Short and plain"), with a Knytt card, and "Built
+;;; with Sigil". Seven cards.
 ;;;
 ;;; WHEN (the bible: "They begin as you start to climb, with the first verse,
 ;;; and run through home and close"). The cards are on a clock that starts
 ;;; when the climb's music does: the first of rise or home HEARD
 ;;; ((harkfell sound) sound-finale-section), so a fast climber whose piece
 ;;; jumps straight to home still gets every card. Card k shows from
-;;; k x CARD-EVERY-S for CARD-S, fading in and out over CARD-FADE-S. The last
-;;; card ("Thanks for playing!") waits for the dawn if the clock gets there
-;;; first, so it is the last thing over the brightening Hollow.
+;;; k x CARD-EVERY-S for CARD-S, fading in and out over CARD-FADE-S: six cards
+;;; over the climb, rise to home (about two minutes on the map's route). The
+;;; last card ("Thank you for listening.") waits for the dawn, so it is the
+;;; last thing over the brightening Hollow.
 ;;;
 ;;;   CREDITS                         the cards: lists of lines
 ;;;   (credits-at t dawn)             t seconds since the clock started (or #f),
@@ -27,17 +27,15 @@
   (begin
     (define CREDITS
       '(("Harkfell")
-        ("A game by David Wilson")
-        ("I made it with two AI models." "Claude wrote the rooms, the art, the music" "and the first code with me.")
-        ("Codex built many of the later systems.")
-        ("I played every room, listened to every sound," "and decided what stayed.")
-        ("Built in Sigil and motif, which I make")
+        ("Made by David Wilson")
+        ("With Claude and Codex")
+        ("Built with Sigil")
         ("Inspired by Knytt, by Nifflas")
         ("IM Fell types by Igino Marini")
-        ("Thanks for playing!")))
+        ("Thank you for listening.")))
 
-    (define CARD-EVERY-S 16.0)     ; nine cards over about two and a half minutes
-    (define CARD-S 10.0)           ; each held long enough to read twice
+    (define CARD-EVERY-S 20.0)     ; six cards over the climb's two minutes
+    (define CARD-S 12.0)           ; each held long enough to read twice
     (define CARD-FADE-S 1.5)
 
     ;; When the last card starts: its turn on the clock, or the dawn if later.
