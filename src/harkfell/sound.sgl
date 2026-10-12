@@ -126,7 +126,8 @@
     ;;            as sound-set-carry! set it (A2's tests)
     ;;   tones    ((overtone x y) ...): each unfound harmonic where it lies, in
     ;;            absolute world pixels; #f: A2's one placeholder tone (tests)
-    ;;   stones   ((overtone state x y) ...): the ring-stones, absolute pixels
+    ;;   stones   ((key state x y) ...): absolute pixels; key is an integer,
+    ;;            heart for the full (2 3 4 5) gate, or another explicit key list
     ;;   news     what happened this frame ((harkfell gates), (harkfell
     ;;            creatures)), positions absolute: (pickup N x y) (ring N x y)
     ;;            (sink N x y) (open N x y) (near-miss N x y) (call KIND x y)
@@ -1034,8 +1035,8 @@
     (define (call-spots pl)
       (let loop ((ss (apply append
                       (map (lambda (st)
-                             (if (or (eq? (car st) 'heart) (> (length st) 4))
-                                 (let ((keys (if (eq? (car st) 'heart) '(2 3 4 5) (list-ref st 4))))
+                             (if (or (eq? (car st) 'heart) (list? (car st)))
+                                 (let ((keys (if (eq? (car st) 'heart) '(2 3 4 5) (car st))))
                                    (if (every (lambda (h) (memv h *carry*)) keys)
                                        (map (lambda (h) (cons h (cdr st))) keys)
                                        '()))
@@ -1565,6 +1566,7 @@
                                     (spot-gain c))
                                 (caddr item) pl))))
                (cond ((eq? (cadr item) 'heart) '(2 3 4 5))
+                     ((list? (cadr item)) (cadr item))
                      ((eq? (car item) 'chord) (cadr item))
                      (else (list (cadr item))))))
             ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
