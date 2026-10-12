@@ -42,8 +42,8 @@
 //              Chrome delivers CDP touches ~90 ms late, so the latency legs
 //              prove the readout works, not what a phone measures)
 //   world      (A1) the page hands over the baked world and it loads clean:
-//              "harkfell: world 62 files, 0 problems" (58 rooms, three maps
-//              and world.sgl: WORLD_FILES), and a plain boot enters the world's start
+//              the file count matches the world baked into the served page,
+//              with zero problems, and a plain boot enters the world's start
 //              (hollow:4,3)
 //   door       (A1) ?room=reedfen:10,4 boots into that room ("harkfell: room
 //              reedfen:10,4") with the body inside the room's slot; a room that
@@ -51,7 +51,7 @@
 //              body in cell (4,7) of the Reed Bridge, and &at=4,9 (rock) is
 //              refused
 //   atlas      (A1) ?atlas shows every room at quarter scale ("harkfell: view
-//              atlas 1940 186": x -1..17, y 2..5, ATLAS); a click on the Drowned Channel's picture enters
+//              its dimensions match the baked world's room bounds; a click on the Drowned Channel's picture enters
 //              it ("harkfell: room reedfen:9,4") and play resumes
 //   atlas2     (A1) the atlas at devicePixelRatio 2 on a 200x150 CSS viewport
 //              (a 400x300 canvas): the fit is not a whole scale ('sharp'), and a
@@ -106,19 +106,43 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-// The written world's span in rooms: the legs below place rooms by it. A4's
-// world started at x 1; Glasswood (0.2, x -6..0) moves it west, and its
-// rooms reach x -6 (Snow Hollow, at y 5)
-// and y 6 (the Ice Well).
-const X0 = -6, X1 = 17, Y0 = 2, Y1 = 6;
-const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
-const WORLD_FILES = 58 + 3 + 1;   // rooms, maps, world.sgl (58: the Hollow 14, Reedfen 22, Glasswood 22)
-const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`;   // rooms at 1/4, a 2 px gap
 const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "cues", "startup", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
-const stamp = (fs.readFileSync(path.join(ROOT, "index.html"), "utf8").match(/version: "([^"]*)"/) || [])[1];
+const page = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+// package.sgl embeds JSON, not executable metadata. Use the served subject,
+// so a newer working tree cannot change expectations for an older build.
+let bakedWorld;
+try {
+  const assignment = page.match(/window\.HARKFELL_WORLD\s*=\s*(\[[\s\S]*?\]);\s*<\/script>/);
+  if (!assignment) throw new Error("baked HARKFELL_WORLD JSON is missing");
+  bakedWorld = JSON.parse(assignment[1]);
+  if (!Array.isArray(bakedWorld) || !bakedWorld.every(f => Array.isArray(f)
+      && f.length === 2 && f.every(value => typeof value === "string"))) {
+    throw new Error("baked world must contain [path, text] pairs");
+  }
+  if (!bakedWorld.some(([file]) => file === "world/world.sgl")) {
+    throw new Error("baked world/world.sgl is missing");
+  }
+} catch (error) {
+  console.log(`SETUP-FAILED: ${error.message}`);
+  process.exit(2);
+}
+const rooms = bakedWorld.flatMap(([file]) => {
+  const match = file.match(/^world\/rooms\/[^/]+\/x(-?\d+)y(-?\d+)\.room$/);
+  return match ? [[Number(match[1]), Number(match[2])]] : [];
+});
+if (!rooms.length || rooms.some(room => room.some(n => !Number.isSafeInteger(n)))) {
+  console.log("SETUP-FAILED: baked world has no valid room coordinates");
+  process.exit(2);
+}
+const X0 = Math.min(...rooms.map(room => room[0])), X1 = Math.max(...rooms.map(room => room[0]));
+const Y0 = Math.min(...rooms.map(room => room[1])), Y1 = Math.max(...rooms.map(room => room[1]));
+const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
+const WORLD_FILES = bakedWorld.length;
+const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`; // 1/4 scale, 2 px gaps
+const stamp = (page.match(/version: "([^"]*)"/) || [])[1];
 const wasmStat = fs.statSync(path.join(ROOT, "harkfell.wasm"));
 console.log(`subject: ${ROOT} version ${stamp} harkfell.wasm ${wasmStat.size} bytes mtime ${wasmStat.mtime.toISOString()}`);
 
