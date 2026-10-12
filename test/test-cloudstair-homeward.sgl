@@ -8,6 +8,7 @@
 ;;; rooms-reach.sgl, carry with and without H5).
 (import (sigil test)
         (sigil list)
+        (sigil string)
         (engine body)
         (engine air)
         (engine tilemap)
@@ -65,19 +66,48 @@
 ;; The shaft is one way (SYSTEMS' complete-world replay on 505f690: from E
 ;; local (1,7), carrying H2 H4 with the down, wall kicks up E's west wall
 ;; crossed into K at tick 53 and K's lift carried the body to Q by tick
-;; 422, no H5). A rose stone (H5) just above K's floor at (1,9) now seals the
-;; shaft: without H5 no column is open from E's top row up through K's floor
-;; and the stone's row, so nothing climbs from E into K, and the replayed
-;; witness stays out of K and Q.
-(define (border-open carry)
-  ;; the columns where a body could pass from E's top row up through K's
-  ;; bottom two rows (the stone stands just above K's floor, at (1,9))
-  (let ((tm (tiles-carrying CT carry)))
-    (filter (lambda (c)
-              (and (not (kind-solid? (tilemap-ref tm (gcol 7 c) (grow 0 0))))
-                   (not (kind-solid? (tilemap-ref tm (gcol 7 c) (grow -1 10))))
-                   (not (kind-solid? (tilemap-ref tm (gcol 7 c) (grow -1 9))))))
-            (iota 25))))
+;; 422, no H5). Any wall beside the shaft can be kicked up, so the way up
+;; must be shut, not merely hard: a rock shelf jutting from K's west wall
+;; at row 9 holds a rose stone (H5) like a trapdoor at (1,9), with two
+;; tiles of lip, (2,9) and (3,9); open sky beyond. Under it the gap down
+;; into E is one tile high and closed to the east by K's floor (4,10).
+;;
+;; The check is spatial and so holds for any input: flood K's passable
+;; cells from the bottom-row cells that open down into E. Without H5 the
+;; flood must stay in that bottom row (the only way up is the stone's own
+;; cell); with H5 it rises through the open stone. Two planted shelves
+;; must leak, so the check can see a gap: the lip one tile short, and K's
+;; floor opened under the lift.
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a) (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+(define SRC (read-world-source "world"))
+(define (with-k old new)
+  (map (lambda (e) (if (string-contains? (car e) "cloudstair/x7y-1.room") (cons (car e) (swap (cdr e) old new)) e)) SRC))
+;; does the flood from E's openings rise above K's bottom row?
+(define (rises? ct carry)
+  (let* ((wm (content-map ct))
+         (tm (tiles-carrying ct carry))
+         (gx (lambda (c) (+ c (* 25 (- 7 (worldmap-x0 wm))))))
+         (gy (lambda (ry r) (+ r (* 11 (- ry (worldmap-y0 wm))))))
+         (open? (lambda (c r) (not (kind-solid? (tilemap-ref tm (gx c) (gy -1 r))))))
+         (seeds (filter (lambda (c) (and (open? c 10) (not (kind-solid? (tilemap-ref tm (gx c) (gy 0 0))))))
+                        (iota 25))))
+    (let loop ((todo (map (lambda (c) (cons c 10)) seeds)) (seen '()))
+      (cond ((null? todo) #f)
+            ((member (car todo) seen) (loop (cdr todo) seen))
+            ((< (cdr (car todo)) 10) #t)
+            (else
+             (let* ((c (car (car todo))) (r (cdr (car todo)))
+                    (next (filter (lambda (p) (and (<= 0 (car p) 24) (<= 0 (cdr p) 10) (open? (car p) (cdr p))))
+                                  (list (cons (+ c 1) r) (cons (- c 1) r) (cons c (- r 1)) (cons c (+ r 1))))))
+               (loop (append (cdr todo) next) (cons (car todo) seen))))))))
+(define SHELF "\"#o##^^^ |  ||  |  | |    \"")
+(define SHORT-LIP (load-content (with-k SHELF "\"#o# ^^^ |  ||  |  | |    \"")))
+(define OPEN-FLOOR (load-content (with-k "\"#   #####################\")" "\"#    ####################\")")))
 
 ;; SYSTEMS' witness, its 17 input groups: (ticks h v jump press)
 (define WITNESS
@@ -88,16 +118,26 @@
   (apply append (map (lambda (g) (map (lambda (k) (intent h: (list-ref g 1) v: (list-ref g 2) jump: (list-ref g 3) press: (list-ref g 4)))
                                (iota (car g))))
               WITNESS)))
-(define WITNESS-ROOMS
-  (let* ((start (car (cloudstair-entry-phases CT (local->global CT (content-room CT 7 0) 1 7) '(2 4) #t)))
-         (trace (timed-run (cloudstair-stepper CT) start WITNESS-SCRIPT)))
-    (map (lambda (n) (room-of (timed-node-body n))) trace)))
+(define WITNESS-BODIES
+  (let ((start (car (cloudstair-entry-phases CT (local->global CT (content-room CT 7 0) 1 7) '(2 4) #t))))
+    (map timed-node-body (timed-run (cloudstair-stepper CT) start WITNESS-SCRIPT))))
+(define WITNESS-ROOMS (map room-of WITNESS-BODIES))
+;; the highest the body's centre gets, and the top of K's bottom row (the
+;; gap under the shelf: K's grid, so a centre in it counts as room K)
+(define WITNESS-TOP (apply min (map (lambda (b) (cdr (body-center b F))) WITNESS-BODIES)))
+(define K-BOTTOM-TOP (* 16 (grow -1 10)))
+
 
 (test-group "D50: the homeward shaft is one way"
-  (test "without H5 no column is open from E up through K's floor and the stone's row"
-    (assert-equal '() (border-open '(2 4))))
-  (test "with H5 the shaft's stone is open: column 1 falls through"
-    (assert-equal '(1) (border-open '(2 4 5))))
-  (test "SYSTEMS' reverse witness (422 ticks from E local 1,7, H2 H4 and the down) never enters K or Q"
+  (test "without H5 nothing rises from E past K's bottom row: the shelf and its stone shut it"
+    (assert-equal #f (rises? CT '(2 4))))
+  (test "with H5 the stone is open: the way rises through it"
+    (assert-equal #t (rises? CT '(2 4 5))))
+  (test "the check sees a gap: a lip one tile short leaks without H5"
+    (assert-equal #t (rises? SHORT-LIP '(2 4))))
+  (test "and so does K's floor opened under the lift"
+    (assert-equal #t (rises? OPEN-FLOOR '(2 4))))
+  (test "SYSTEMS' reverse witness (422 ticks from E local 1,7, H2 H4 and the down) never rises past the gap under the shelf, nor reaches Q"
     (assert-equal 422 (length WITNESS-SCRIPT))
-    (assert-equal #f (and (or (member '(7 . -1) WITNESS-ROOMS) (member '(7 . -2) WITNESS-ROOMS)) #t))))
+    (assert-equal #t (>= WITNESS-TOP K-BOTTOM-TOP))
+    (assert-equal #f (and (member '(7 . -2) WITNESS-ROOMS) #t))))

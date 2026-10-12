@@ -172,14 +172,18 @@ answers, and the homeward wind blows west through the arch and on over Q
 (`(air-field ... kind: homeward gate: (C R))`, a hold-up and a westward
 push that blow only while the gate cell is open, so carry gates it as it
 gates the stone). It carries a glider to the homeward shaft, columns 1-3
-down through Q and K to a second rose stone just above K's floor (1,9),
-which opens as you come down onto it, then through a one-tile hole into E
-and onto E's chute and A, then the launch column home. The shaft is there
-before H5 too, marked by seeds drifting down it and a faint light (the
-way home reads without the wind), but the shut stone seals it: no wall
-kick climbs it from E (SYSTEMS' replay found that reverse route, E->K->Q
-without H5, when the shaft was open). test/test-cloudstair-homeward.sgl
-rides it with and without H5, and replays that reverse route.
+down through Q and K onto a small rock shelf jutting from K's west wall
+(row 9), a second rose stone set in it like a trapdoor (1,9) with two
+tiles of lip and open sky beyond. The stone opens as you come down onto
+it, and you drop through the gap under the shelf into E and onto E's
+chute and A, then the launch column home. The shaft is there before H5
+too, marked by seeds drifting down it and a faint light (the way home
+reads without the wind), but the shut stone seals it: the gap under the
+shelf is one tile high and closed to the east, so no wall kick climbs it
+from E (SYSTEMS' replay found that reverse route, E->K->Q without H5,
+when the shaft was open; David asked for the stone to sit in rock rather
+than float). test/test-cloudstair-homeward.sgl rides it with and without
+H5, floods the shelf, and replays that reverse route.
 
 New room things:
 
