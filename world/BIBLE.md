@@ -176,10 +176,20 @@ answers, and the homeward wind blows west through the arch and on over Q
 (`(air-field ... kind: homeward gate: (C R))`, a hold-up and a westward
 push that blow only while the gate cell is open, so carry gates it as it
 gates the stone). It carries a glider to the homeward shaft, columns 1-3
-down through Q, K and E (the one-way K->E), onto E's chute and A, then
-the launch column home. The shaft is there before H5 too, marked by seeds
-drifting down it and a faint light: the way home reads without the wind.
-test/test-cloudstair-homeward.sgl rides it with and without H5.
+down through Q and K beside the cliff, here two tiles thick, onto a rock
+mass that fills K's west side. Under its thick roof a low alcove is cut,
+and a second rose stone stands as the door at its mouth, at floor level,
+a covered entrance like the Hollow's Old Cut, its alcove in shadow. You
+land on the mass, walk off, come down to the door, it opens, and you
+walk in and fall through the hole inside into E and onto E's chute and
+A, then the launch column home. The shaft is there before H5 too, marked
+by seeds drifting down it and a faint light (the way home reads without
+the wind), but the shut door seals it: from E the hole leads only into
+the alcove, so no wall kick climbs past it (SYSTEMS' replay found that
+reverse route, E->K->Q without H5, when the shaft was open; David chose
+this door over a niche in the cliff and a shelf).
+test/test-cloudstair-homeward.sgl rides it with and without H5, floods
+the alcove, and replays that reverse route.
 
 New room things:
 
