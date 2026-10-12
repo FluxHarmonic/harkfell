@@ -1895,8 +1895,15 @@
       (for-each (lambda (st)
                   (when (and (eq? (cadr st) 'shut)
                              (< (caddr (geometry-to pl (caddr st) (cadddr st))) TONE-OPEN-ROOMS))
-                    (want-cue! (harmonic-cue "ring-h" (car st)))
-                    (want-cue! (harmonic-cue "miss-h" (car st)))))
+                    ;; SYSTEMS' 09f0032 tags the Underhum's heart stone 'heart, not
+                    ;; an overtone: it rings H2 to H5 together and has no near
+                    ;; miss of its own (news-frame! plays it so), so no
+                    ;; harmonic-cue of a symbol (number->string raised here)
+                    (if (eq? (car st) 'heart)
+                        (for-each (lambda (n) (want-cue! (harmonic-cue "ring-h" n))) '(2 3 4 5))
+                        (begin
+                          (want-cue! (harmonic-cue "ring-h" (car st)))
+                          (want-cue! (harmonic-cue "miss-h" (car st)))))))
                 (place-stones pl))
       ;; Wrongwater (the review of 813718e: the same gap as H5's late pickup):
       ;; within a finding tone's range of the Ice Well's drip, the door's climb
