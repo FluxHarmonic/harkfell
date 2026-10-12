@@ -99,7 +99,7 @@
 (region hollow
   name: "The Hollow (look fixture)"
   bounds: ((0 0) (1 0))
-  bed: "bed-hollow"
+  bed: "hollow-bed"
   bed-channels: (wind water texture drone)
   palette: (hol-sky-1 hol-sky-2 hol-sky-3 hol-sky-4 hol-stone-1 hol-stone-2 hol-stone-3 hol-stone-4
             hol-turf-1 hol-turf-2 hol-turf-3 hol-tarn hol-bracken fur-1 fur-2 ink)
@@ -115,7 +115,7 @@
 (region glasswood
   name: "Glasswood (look fixture)"
   bounds: ((2 0) (4 0))
-  bed: "bed-hollow"
+  bed: "glasswood-bed"
   bed-channels: (wind water texture drone)
   palette: (glw-sky-1 glw-sky-2 glw-sky-3 glw-sky-4 glw-ice-1 glw-ice-2 glw-ice-3 glw-ice-4
             glw-birch-1 glw-birch-2 glw-birch-3 glw-melt glw-copper fur-1 fur-2 ink)
