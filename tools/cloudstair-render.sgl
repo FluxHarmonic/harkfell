@@ -4,10 +4,11 @@
 ;;; JOBS is a file of jobs, one s-expression each (default
 ;;; tools/cloudstair-review.jobs); OUT the directory (default
 ;;; build/cloudstair-listening-opus). A job:
-;;;   (job "out-name" SECONDS (layer "tune" GAIN (CARRY ...) ((CH . VOL) ...) [START-S]) ...)
+;;;   (job "out-name" SECONDS (layer "tune" GAIN (CARRY ...) ((CH . VOL) ...) [START-S [LOOP]]) ...)
 ;;; Layers are mixed at their gains; CARRY strips uncarried drone notes as
 ;;; the director does (strip-uncarried); VOL sets channel volumes as a
-;;; room's bed: levels would; START-S delays a layer. Every file is
+;;; room's bed: levels would; START-S delays a layer; LOOP #t loops it as
+;;; the game loops a bed or a finding tone (default #f). Every file is
 ;;; written mono (L = R = the mid), 32 kHz float, with a 0.3 s fade at its
 ;;; end, as the Pipes review did. Nothing is published.
 (import (sigil test) (sigil process)
@@ -52,9 +53,10 @@
   (let* ((name (list-ref spec 1)) (gain (list-ref spec 2))
          (carry (list-ref spec 3)) (vols (list-ref spec 4))
          (start (if (> (length spec) 5) (list-ref spec 5) 0))
+         (loop? (and (> (length spec) 6) (list-ref spec 6)))
          (t (tune-parsed name)))
     (unless t (error "no tune" name))
-    (let ((p (open-tune-player (if (pair? carry) (strip-uncarried t carry) t) RATE loop: #f)))
+    (let ((p (open-tune-player (if (pair? carry) (strip-uncarried t carry) t) RATE loop: loop?)))
       (for-each (lambda (e) (player-set-channel-volume! p (car e) (inexact (cdr e)))) vols)
       (vector p (inexact gain) (exact (round (* start RATE))) (make-bytevector (* 8 BLOCK) 0) #f))))
 
