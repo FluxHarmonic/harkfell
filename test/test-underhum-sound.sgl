@@ -550,7 +550,15 @@
     (fresh!)
     (frames! 0.0 30.0 (lambda (t) #f))
     (frames! 30.0 30.1 (lambda (t) (room "underhum:8,6" 'bed #f 'news '((bench 3 3300.0 1100.0)))))
-    (assert-true (said? "sound" "cue" "ring-h3")))
+    (assert-true (said? "sound" "cue" "ring-h3"))
+    ;; the worn treads: stone in the Underhum, ice elsewhere
+    (frames! 30.1 30.2 (lambda (t) (room "underhum:7,7" 'bed #f 'news '((ice creak 2000.0 1300.0) (ice crack 2000.0 1300.0)))))
+    (assert-true (said? "sound" "ice-cue" "tread-creak"))
+    (assert-true (said? "sound" "ice-cue" "tread-crack"))
+    (assert-true (and (sound-cue 'tread-crack) (sound-cue 'tread-creak) #t))
+    (frames! 30.2 30.3 (lambda (t) (place key: "glasswood:1,1" region: 'glasswood bed-tune: #f tones: '() carry: '() px: 500.0 py: 300.0 rx: 1 ry: 1
+                                           news: '((ice crack 500.0 300.0)))))
+    (assert-true (said? "sound" "ice-cue" "ice-crack")))
   (test "the coda: once, for H7 found after the ending, and only then"
     (fresh!)
     (sound-finale-restore! #t '(2 3 4 5) #f)

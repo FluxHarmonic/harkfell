@@ -1490,6 +1490,9 @@
             (list 'ring-heart "ring-heart" 0.0 0.0 0.6)
             (list 'miss-heart "miss-heart" 0.0 0.0 0.32)
             (list 'heart-sink "heart-sink" 0.0 0.0 0.75)
+            ;; Revision 1's worn treads: a warning (as thin ice creaks) and the crack
+            (list 'tread-creak "tread-creak" 0.0 0.0 0.5)
+            (list 'tread-crack "tread-crack" 0.0 0.0 0.4)
             ;; Glasswood's falling ice: the tell first (the only warning in the
             ;; dark), then the fall and the shatter; thin ice's creak and crack
             (list 'ice-tell "ice-tell" 0.0 0.0 0.29)
@@ -1617,8 +1620,14 @@
             ;; the icicle's tell and thin ice's creak are warnings, so they sound
             ;; even under a moment; the fall, the shatter and the crack are spot
             ;; sounds. Cues ice-tell ice-fall ice-shatter ice-creak ice-crack.
-            ((ice) (let ((c (string->symbol (string-append "ice-" (symbol->string (cadr item))))))
+            ;; the Underhum's worn treads are stone, not ice (Revision 1: thin-ice
+            ;; things in K and L; Underhum ROOMS asked): their creak and crack
+            ;; are tread-creak and tread-crack there
+            ((ice) (let ((c (if (and (eq? (place-region pl) 'underhum) (memq (cadr item) '(creak crack)))
+                                (string->symbol (string-append "tread-" (symbol->string (cadr item))))
+                                (string->symbol (string-append "ice-" (symbol->string (cadr item)))))))
                      (*say* "sound" "ice" (symbol->string (cadr item)))
+                     (*say* "sound" "ice-cue" (symbol->string c))
                      (when (or (memq (cadr item) '(tell creak)) (not (or *moment* (finale-busy?))))
                        (cue-at! c (spot-gain c) (caddr item) pl))))
             (else #f)))
