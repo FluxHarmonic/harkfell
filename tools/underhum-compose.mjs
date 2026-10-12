@@ -77,6 +77,14 @@ const INSTRUMENTS = [
   // just-tuned voices for sustained notes the kinds above cannot tune
   [23, "glass flute, its C# (15 x D2)", `${FM_FLUTE} ${C15}`, 38, 0.5, 0.4],
   [24, "low line, its C H7", `${LOW} ${H7C}`, 30, 0.5, 0.3],
+  // the Pipes' stone organ (David's pick, the Pipes rethink's direction B):
+  // the long rank, the wind on its lip doubling it, the octave rank above
+  [27, "the long rank", "drone-fm level: 0.3 index: 0.55 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2", 30, 0.6, 0.5],
+  [28, "the long rank, its C H7", "drone-fm level: 0.3 index: 0.55 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2 cents: -31.174", 30, 0.6, 0.5],
+  [29, "wind on its lip", "pipe-breath level: 0.4 width: 0.05 octave: 0.5 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23", 20, 0.9, 0.5],
+  [30, "wind on its lip, its C H7", "pipe-breath level: 0.4 width: 0.05 octave: 0.5 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23 cents: -31.174", 20, 0.9, 0.5],
+  [31, "the octave rank", "drone-fm level: 0.3 index: 0.4 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.3 release: 1.2", 14, 0.6, 0.6],
+  [32, "the octave rank, its C H7", "drone-fm level: 0.3 index: 0.4 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.3 release: 1.2 cents: -31.174", 14, 0.6, 0.6],
   [26, "drop with two soft returns, its C H7", "drip level: 0.6 rise: 0.9 sweep: 0.035 decay: 0.07 echo: 0.31 feedback: 0.55 echo-mix: 0.55 hp: 400 seed: 15 cents: -31.174", 30, 0.55, 0.25],
   [25, "wind in a carved mouth, its C H7", "pipe-breath level: 0.5 width: 0.07 octave: 0.3 tone: 0.07 swell: 0.7 swell-rate: 0.09 attack: 1.5 release: 2.5 seed: 21 cents: -31.174", 30, 0.6, 0.4],
 ];
@@ -270,20 +278,26 @@ function score(h7) {
   }
 
   // PIPES: verse 3, D Aeolian, 5 bars, 16.7 s: the song's one dark turn, and
-  // its quietest. The falling breath through a carved mouth (the-pipes-breathe
-  // ch1, E4 C4 A3) and a drip with two soft returns, B-flat in the pad; the
-  // director thins the drone to H4 and the fundamental. No low line.
-  // (The Pipes moments are being rewritten in refinement pass 3; if that
-  // lands first, this verse quotes the new hook instead.)
+  // its quietest. The Pipes' stone organ (David's pick of the Pipes rethink,
+  // direction B): its hook, an octave leap that falls back and stops on C4, a
+  // step under D (the Pipes' own tune never lands), on the long rank, the wind
+  // on its lip doubling it and the octave rank above, over Dm, C, F/A; then,
+  // here at last, it rises through Bb and C and lands on D4, into the
+  // Cloudstair verse's D. A drip with two soft returns. The director thins the
+  // drone to H4 and the fundamental. No low line.
   {
     const s = new Section("pipes", 5); S.push(s);
-    s.off(0, 8);
-    s.line(2, 0, h7c(h7, 18, 25), 28, "E4:14 r:6 C4:14 r:6 A3:16 r:8 D4:16");
+    const hook = "A3:8 A4:8 G4:4 F4:4 E4:8 C4:16 Bb3:8 C4:8 D4:16";
+    s.line(4, 0, h7c(h7, 27, 28), 32, hook, { offAtEnd: false });
+    s.line(2, 0, h7c(h7, 29, 30), 22, hook, { offAtEnd: false });
+    s.line(8, 0, h7c(h7, 31, 32), 14, hook.replace(/([A-G]b?)(\d)/g, (m, n, o) => n + (Number(o) + 1)), { offAtEnd: false });
     s.put(9, 3, "C6", h7 ? 26 : 19, 22);
     s.put(45, 3, "A5", 19, 20);
     s.put(70, 3, "D6", 19, 16);
     s.chord(0, ["D4", "F4", "A4"], h7, 16);
-    s.chord(32, ["D4", "F4", "Bb4"], h7, 16);
+    s.chord(16, ["C4", "E4", "G4"], h7, 16);
+    s.chord(32, ["C4", "F4", "A4"], h7, 16);
+    s.chord(48, ["D4", "F4", "Bb4"], h7, 16);
     s.chord(64, ["D4", "E4", "A4"], h7, 16);
   }
 
@@ -350,7 +364,7 @@ function score(h7) {
     ["D5", "B5", "G5", "B5"].forEach((n, i) => s.put(8 + i * 4, 3, n, 14, 22));
     ["D6", "F#6", "A6", "C#7", "A6", "F#6", "E6", "A6"].forEach((n, i) => s.put(24 + i * 2, 3, n, 16, 18));
     ["B4", "F#5", "B5", "D6", "B5", "F#5", "B4", "G5", "B5", "D6", "B5", "G5"].forEach((n, i) => s.put(40 + i * 2, 3, n, 20, 18));
-    s.line(2, 8, 18, 22, "A3:16 D4:24 r:2 A3:14");
+    s.line(2, 8, 29, 20, "A3:16 D4:24 r:2 A3:14");
     s.strike(24, 4, "A4", 4, 26);
     s.strike(40, 4, "F#5", 6, 28);
     s.strike(56, 4, "A5", 4, 28);
