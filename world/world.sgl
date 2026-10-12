@@ -223,3 +223,22 @@
 ;; Seeds: small tufted seeds that drift in the lifts, rise with the gust and
 ;; settle in shelter. Never a platform, never harmful.
 (creature seed behaviour: drift)
+
+;; Wrongwater (0.5, topics/harkfell-wrongwater-bible and -map, approved
+;; 2026-10-11): six rooms under the Ice Well, x-2..0 at y7..8, where the
+;; ground is dry and the lakes hang overhead. In through the drip door at
+;; the bottom of the well's recess; out one way east into the Pipes' Against
+;; the Drip. H7 lies in the Seventh. No creatures, no hazards. The bed,
+;; moments and wander lines are SOUND's (wrongwater/sound); the palette and
+;; tiles are LOOK's (placeholders: the Pipes' until the look commit).
+(region wrongwater
+  name: "Wrongwater"
+  bounds: ((-2 7) (0 8))
+  overtone: 7
+  bed-channels: (air water hang drone)
+  palette: (pip-wall-1 pip-wall-2 pip-wall-3 pip-wall-4
+            pip-stone-1 pip-stone-2 pip-stone-3 pip-stone-4
+            pip-curtain-1 pip-curtain-2 pip-curtain-3 pip-seep pip-ochre fur-1 fur-2 ink)
+  tiles: pipes
+  roster: ()
+  gives: ((overtone 7)))

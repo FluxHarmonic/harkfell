@@ -1,0 +1,26 @@
+;; world/rooms/wrongwater/x0y8.room
+(room
+  region: wrongwater
+  at: (0 8)
+  title: "The Way Out"
+  intent: "a passage runs east into the dark, toward a curtain of stone and a picture you may already know"
+  bed: (air 0.15 water 0.3 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("#############       #####"
+   "#####               #####"
+   "###                  ####"
+   "##                    ###"
+   "#                        "
+   "#                   #####"
+   "                    #####"
+   "                  #######"
+   "                  #######"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The Seventh's shaft (13-19) lands here. Two steps east (standing rows 6
+;; and 4) climb to a low crawl (22-23, row 4) and the one-row passage at
+;; column 24, which runs on through the Pipes' Against the Drip (its row 4,
+;; columns 0-8) and ends at a lip four rows over that room's floor: one way.
+;; West to Rain Rising (rows 6-8).

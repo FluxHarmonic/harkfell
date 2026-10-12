@@ -1,0 +1,32 @@
+;; world/rooms/wrongwater/x-2y7.room
+(room
+  region: wrongwater
+  at: (-2 7)
+  title: "Under the Well"
+  intent: "you drop onto dry ground, and the water you came through hangs overhead with its surface facing down: a breath"
+  bed: (air 0.15 water 0.5 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("############### #########"
+   "###############+#~~~~~###"
+   "####    ####    #~~~~~# #"
+   "###                     #"
+   "##                      #"
+   "#                       #"
+   "#                       #"
+   "#                        "
+   "#                        "
+   "##%  %###################"
+   "##%  %###################")
+  decor: auto)
+;; The crack under the Ice Well's rising drip comes in at (15,0), one cell
+;; wide. The drip door sits at its foot, (15,1), inside this room, off the
+;; seam (a shut door is solid; a solid cell against an open one fails the
+;; seam check). STUB until SYSTEMS lands the stillness door
+;; (tasks/harkfell-depths-systems): (15,1) is a + (air drawn as rock), so the
+;; door is open in every carry set, which is what the checker assumes for
+;; the real door. The landing (row 8) is seven rows under the door: the
+;; crack cannot be reached again from here. A small lake hangs in a ceiling
+;; pocket east of the crack (17-21, rows 1-2), out of every jump's reach: a
+;; picture. East to the Hanging Tarn (rows 7-8); down the rough shaft (3-4)
+;; to the Upward Grove, whose rough walls are the climb back.

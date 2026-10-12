@@ -1,0 +1,28 @@
+;; world/rooms/wrongwater/x0y7.room
+(room
+  region: wrongwater
+  at: (0 7)
+  title: "The Seventh"
+  intent: "above the highest water, on a dry shelf, a violet note waits that no stone has ever answered"
+  bed: (air 0.15 water 0.3 hang 0.6 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "########         ########"
+   "                 ########"
+   "          #         #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####")
+  things: ((harmonic at: (10 2) overtone: 7))
+  decor: auto)
+;; The shelf from the tarn (standing row 3) runs east under a raised roof
+;; to H7 on a one-step pedestal (10,2), then ends at a lip over a shaft
+;; seven wide (13-19) that drops through the whole room into the Way Out:
+;; one way, too wide to kick up and with no rough rock. Back west, the
+;; shelf leads to the tarn's top: drop in and sink out of its bottom. No
+;; moment: H7 enters the drone in ambience.

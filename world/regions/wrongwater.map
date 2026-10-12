@@ -1,0 +1,19 @@
+;;; world/regions/wrongwater.map - Wrongwater's six rooms under the Ice
+;;; Well (topics/harkfell-wrongwater-map, approved by David 2026-10-11).
+;;; In through the drip door at the Ice Well's crack (A north); out one way
+;;; east, through Against the Drip's west wall (F east). C to F is a drop.
+(map
+  region: wrongwater
+  origin: (-2 7)
+  layout:
+  ("A-B-C"
+   "|   |"
+   "D-E-F")
+  rooms:
+  ((A "Under the Well" "you drop onto dry ground, and the water you came through hangs overhead with its surface facing down: a breath")
+   (B "The Hanging Tarn" "a tarn hangs above a dry floor, and the only way higher is up through it")
+   (C "The Seventh" "above the highest water, on a dry shelf, a violet note waits that no stone has ever answered")
+   (D "The Upward Grove" "icicles grow up from the floor toward a lake above them, each humming faintly: a breath")
+   (E "Rain Rising" "rain rises from puddles into the water overhead, and if you wait it starts to play")
+   (F "The Way Out" "a passage runs east into the dark, toward a curtain of stone and a picture you may already know"))
+  borders: ((A north) (F east)))

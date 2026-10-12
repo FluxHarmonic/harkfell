@@ -1,0 +1,26 @@
+;; world/rooms/wrongwater/x-1y8.room
+(room
+  region: wrongwater
+  at: (-1 8)
+  title: "Rain Rising"
+  intent: "rain rises from puddles into the water overhead, and if you wait it starts to play"
+  bed: (air 0.15 water 0.7 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "#########################"
+   "########~~~~~~###########"
+   "####    ~~~~~~    ####  #"
+   "###                     #"
+   "##                      #"
+   "                         "
+   "                         "
+   "                         "
+   "######~~###~~~####~~#####"
+   "#########################")
+  decor: auto)
+;; Three shallow puddles in the floor (6-7, 11-13, 18-19) under a lake hung
+;; in the ceiling (8-13, rows 2-3, 12 cells), out of reach. The rain rises
+;; from the puddles into it. The room's fixed moment (still: 6) is SOUND's
+;; line, added with its tune. West to the Upward Grove, east to the Way Out
+;; (rows 6-8).
