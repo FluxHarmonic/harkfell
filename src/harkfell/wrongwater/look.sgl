@@ -31,7 +31,7 @@
           wrongwater-backdrop-bytes draw-wrongwater-solids! hanging-water?
           draw-wrongwater-surfaces! draw-rising-rain! draw-wrongwater-light!
           DRIP-CLIMB-AT door-drip? drip-state draw-drip-build! draw-drip-build-light!
-          draw-violet-well-answer!)
+          draw-violet-well-answer! seventh-level draw-seventh-pool! draw-seventh-pool-light!)
 
   (begin
     (define (pixel x) (exact (floor x)))
@@ -538,6 +538,60 @@
                 (light-rect! a (+ x 17) (+ y 14) 3 7)
                 (light-rect! a (+ x 44) (+ y 14) 3 7))))
           (room-things-of rm 'mural))))
+
+    ;; --- the Seventh's Rest (David: "the pool lighting violet, with some music
+    ;; too") ------------------------------------------------------------------
+    ;; In the room whose mural is the seventh, the hanging pool's underside
+    ;; goes violet while you carry H7: faintly at rest, then with SOUND's
+    ;; moment (seventh-rest), by its seconds AS HEARD, up to full when the
+    ;; seven-harmonic chord is complete (5.45 s heard: row 24 of the tune at
+    ;; 0.2273 s a row, SOUND's figure). The hush can hold the moment back,
+    ;; so the light follows the moment, not your arrival.
+    (define SEVENTH-FULL-S 5.45)
+    ;; an ordered threshold along one pixel row: eight steps, so a level of
+    ;; 0.25 lights one pixel in four (a Bayer row's lowest is 0.28)
+    (define (dither8 x) (/ (+ 0.5 (modulo (* x 5) 8)) 8.0))
+    (define SEVENTH-REST 0.25)
+
+    (define (seventh-room? rm)
+      (find (lambda (t) (eq? (thing-kw t "image") 'seventh)) (room-things-of rm 'mural)))
+
+    (define (seventh-level rm carry moment heard)
+      (cond ((not (and (seventh-room? rm) (memv 7 carry))) 0.0)
+            ((and moment (number? heard)
+                  (equal? (if (symbol? moment) (symbol->string moment) moment) "seventh-rest"))
+             (+ SEVENTH-REST (* (- 1.0 SEVENTH-REST) (min 1.0 (/ heard SEVENTH-FULL-S)))))
+            (else SEVENTH-REST)))
+
+    ;; Slot pass, after the water: violet pixels along each hanging pool's
+    ;; underside (dithered by LEVEL), a second row from half way.
+    (define (draw-seventh-pool! rm level)
+      (when (> level 0.0)
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (hanging-water-bottom? rm c r))
+                  (lambda (c0 c1)
+                    (let ((y (* 16 r)))
+                      (let across ((x (* 16 c0)))
+                        (when (< x (* 16 (+ c1 1)))
+                          (when (< (dither8 x) level) (slot-rect! 'h7 x (+ y 15) 1 1))
+                          (when (< (dither8 (+ x 3)) (- (* 2.0 level) 1.0)) (slot-rect! 'h7 x (+ y 14) 1 1))
+                          (across (+ x 1)))))))
+            (rows (+ r 1))))))
+
+    ;; Additive pass: the violet's light, falling from the underside.
+    (define (draw-seventh-pool-light! rm level)
+      (when (> level 0.0)
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (runs ROOM-COLS
+                  (lambda (c) (hanging-water-bottom? rm c r))
+                  (lambda (c0 c1)
+                    (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))) (y (+ 16 (* 16 r))))
+                      (light-rect! (* 0.6 level) x y w 4)
+                      (light-rect! (* 0.3 level) x (+ y 4) w 8))))
+            (rows (+ r 1))))))
 
     ;; Additive pass: the drop's own violet glow, brighter while it hangs.
     ;; Rising, it keeps the glow every upward drip has ((harkfell pipes

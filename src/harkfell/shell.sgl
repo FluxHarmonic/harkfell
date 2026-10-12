@@ -977,8 +977,10 @@
         ;; in the fur-1 slot
         ;; the look follows the sound: the bed's wind bends the reeds, a
         ;; moment pulls the focus
+        ;; (and the moment's heard seconds: the Seventh's Rest lights with it)
         (set-look-sound! (sound-moment-playing)
-                         (let ((e (assq 'wind (sound-bed-levels)))) (and e (cdr e))))
+                         (let ((e (assq 'wind (sound-bed-levels)))) (and e (cdr e)))
+                         (sound-moment-time))
         ;; D15: the creature curled asleep until the first input
         (set-look-waking! *waking*)
         ;; the dawn (D15), the world coming in from black by the dither, in

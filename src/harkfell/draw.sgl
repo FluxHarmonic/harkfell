@@ -482,8 +482,14 @@
 
     ;; From the shell, each frame: whether a moment plays, and the bed's wind
     ;; level now (0..1; the reeds bend with what you hear).
-    (define (set-look-sound! moment wind)
+    ;; heard (optional): the playing moment's seconds as heard
+    ;; ((harkfell sound) sound-moment-time), or #f
+    (define *moment-name* #f)
+    (define *moment-heard* #f)
+    (define (set-look-sound! moment wind . heard)
       (set! *moment* (and moment #t))
+      (set! *moment-name* moment)
+      (set! *moment-heard* (and (pair? heard) (number? (car heard)) (car heard)))
       (set! *bed-wind* (if (number? wind) wind 0.5)))
 
     (define (step-focus!)
@@ -1598,7 +1604,8 @@
               (draw-water! rm)
               (when (wrongwater? rm)
                 (draw-wrongwater-surfaces! rm t)
-                (draw-rising-rain! rm t))
+                (draw-rising-rain! rm t)
+                (draw-seventh-pool! rm (seventh-level rm (world-carry w) *moment-name* *moment-heard*)))
               (cover-thin-water! w ox oy)
               (draw-crusts!)
               (draw-snow! rm t)
@@ -1641,7 +1648,9 @@
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
                   (draw-pipes-lights! rm t)
-                  (when (wrongwater? rm) (draw-wrongwater-light! rm t))
+                  (when (wrongwater? rm)
+                    (draw-wrongwater-light! rm t)
+                    (draw-seventh-pool-light! rm (seventh-level rm (world-carry w) *moment-name* *moment-heard*)))
                   (draw-violet-well-answer! rm t (world-carry w))
                   (for-each (lambda (d) (draw-drip-build-light! (car d) (cadr d) t (caddr d) (cadddr d)))
                             (door-drips w rm ox oy))

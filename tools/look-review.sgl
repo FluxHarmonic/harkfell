@@ -12,7 +12,9 @@
 ;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks;
 ;;;                       MODE down carries the cattail down, glide also holds
 ;;;                       jump; fidgetK steps right and back until the last K ticks,
-;;;                       then stands still (prints "LOOK still N");
+;;;                       then stands still (prints "LOOK still N"); heardS
+;;;                       draws as if the Seventh's Rest moment had been
+;;;                       heard S seconds;
 ;;;                       TAU0 is where the gust clock starts (default 0)
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
 ;;;                       the same room on a W x H window (fitted as the web
@@ -63,7 +65,14 @@
                             (carry-of (list-ref parts 6)))))
     (let loop ((w w) (n (num (list-ref parts 7))))
       (if (= n 0)
-          (begin (when hop-k (display "LOOK still ") (display (world-still w)) (newline)) w)
+          (begin
+            (when hop-k (display "LOOK still ") (display (world-still w)) (newline))
+            ;; heardS: as if the Seventh's Rest moment had been heard S
+            ;; seconds (the harness plays no sound); otherwise none
+            (let ((s (and (> (string-length mode) 5) (string=? (substring mode 0 5) "heard")
+                          (string->number (substring mode 5 (string-length mode))))))
+              (set-look-sound! (and s "seventh-rest") #f s))
+            w)
           (loop (cdr (world-take-news (world-tick w (input n)))) (- n 1))))))
 
 (define (selected) (string-trim (read-file-string CONTROL)))

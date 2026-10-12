@@ -491,6 +491,19 @@
                  (slot-rect! 'h7 (+ x 18) (+ y 12) 28 1)
                  (slot-rect! 'h7 (+ x 18) (+ y 12) 1 9)
                  (slot-rect! 'h7 (+ x 45) (+ y 12) 1 9))
+                ;; Wrongwater's Seventh's Rest: the harmonic series as a
+                ;; string in 1..6 segments (the art), and the seventh, in
+                ;; seven, in H7's violet (the art's formula, row 21)
+                ((seventh)
+                 (paint-slot! (slot-of 'h7))
+                 (let along ((px 6))
+                   (when (<= px 57)
+                     (let* ((p (/ (* 7.0 (- px 6)) 51.0))
+                            (s (exact (floor p)))
+                            (d (exact (floor (+ 0.5 (sin (* 3.14159265 (- p s)))))))
+                            (d (if (odd? s) (- d) d)))
+                       (draw-filled-rect (+ x px) (+ y (- 21 d)) 1 1))
+                     (along (+ px 1)))))
                 (else #f)))))
         (room-things-of rm 'mural)))
 
