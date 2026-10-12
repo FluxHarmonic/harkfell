@@ -25,16 +25,16 @@
    "##  ^^^       ###########"
    "##  ^^^         #########"
    "##  ^^^           #######"
-   "##  ^^^             #####"
-   "#   ^^^                  "
-   "#   ^^^                  "
-   "#o##^^^ |  ||  |  | |    "
+   "####^^^             #####"
+   "####^^^                  "
+   "####^^^                  "
+   "#  o^^^ |  ||  |  | |    "
    "# #######################")
   things: ((seed at: (12 9) count: 3)
            ;; the shaft's rose stone (D50), the floor of the niche: shut,
            ;; the way home is sealed and nothing climbs up the shaft from E;
            ;; with H5 it opens as you step onto it, and you drop through
            ;; the hole under it to E
-           (ring-stone at: (1 9) overtone: 5)
+           (ring-stone at: (3 9) overtone: 5)
            (seed at: (5 5) count: 2))
   decor: auto)

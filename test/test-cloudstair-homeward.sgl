@@ -37,11 +37,14 @@
 ;; walks on west, onto the open stone and down. (body-at-tick-120 . end)
 (define (ride carry)
   (let* ((tm (tiles-carrying CT carry))
-         (b0 (body (stand-body tm F (gcol 8 13) (grow -2 7)) down: #t)))
+         (b0 (body (stand-body tm F (gcol 8 13) (grow -2 7)) down: #t))
+         ;; standing on top of a rock mass in K (above row 8): walk east off it
+         (on-top? (lambda (b) (and (eq? (body-mode b) 'ground) (equal? (room-of b) '(7 . -1))
+                                   (< (modulo (exact (floor (cdr (body-center b F)))) 176) 128)))))
     (let loop ((b (body-step b0 (intent h: -1 jump: #t press: #t) tm F)) (n 1) (at120 #f))
       (if (and (< n 900)
-               (or (< n 300) (not (and (eq? (body-mode b) 'ground) (= (body-vx b) 0) (= (body-vy b) 0)))))
-          (loop (body-step b (intent h: -1 jump: #t) tm F) (+ n 1) (if (= n 120) b at120))
+               (or (< n 300) (on-top? b) (not (and (eq? (body-mode b) 'ground) (= (body-vx b) 0) (= (body-vy b) 0)))))
+          (loop (body-step b (intent h: (if (on-top? b) 1 -1) jump: (not (equal? (room-of b) (quote (7 . -1))))) tm F) (+ n 1) (if (= n 120) b at120))
           (cons at120 b)))))
 
 (define WITH (ride '(2 4 5)))
@@ -107,15 +110,20 @@
     (let loop ((todo (map (lambda (c) (cons c 10)) seeds)) (seen '()))
       (cond ((null? todo) #f)
             ((member (car todo) seen) (loop (cdr todo) seen))
-            ((< (cdr (car todo)) 10) #t)
+            ((>= (car (car todo)) 4) #t)
             (else
              (let* ((c (car (car todo))) (r (cdr (car todo)))
                     (next (filter (lambda (p) (and (<= 0 (car p) 24) (<= 0 (cdr p) 10) (open? (car p) (cdr p))))
                                   (list (cons (+ c 1) r) (cons (- c 1) r) (cons c (- r 1)) (cons c (+ r 1))))))
                (loop (append (cdr todo) next) (cons (car todo) seen))))))))
-(define SHELF "\"#o##^^^ |  ||  |  | |    \"")
-(define NO-STONE (load-content (with-k SHELF "\"# ##^^^ |  ||  |  | |    \"")))
-(define OPEN-SILL (load-content (with-k* (list (cons SHELF "\"#o #^^^ |  ||  |  | |    \"") (cons "\"# #######################\")" "\"#  ######################\")")))))
+;; the stone taken out: its grid row with the o made air
+(define STONE-ROW
+  (let* ((src (cdr (find (lambda (e) (string-contains? (car e) "cloudstair/x7y-1.room")) SRC)))
+         (row (find (lambda (l) (and (string-contains? l "\"#") (string-contains? l "o"))) (string-split src "\n"))))
+    (let ((a (+ 1 (let q ((i 0)) (if (char=? (string-ref row i) #\") i (q (+ i 1)))))))
+      (substring row a (+ a 25)))))
+(define NO-STONE
+  (load-content (with-k STONE-ROW (list->string (map (lambda (c) (if (char=? c #\o) #\space c)) (string->list STONE-ROW))))))
 
 ;; SYSTEMS' witness, its 17 input groups: (ticks h v jump press)
 (define WITNESS
@@ -130,22 +138,24 @@
   (let ((start (car (cloudstair-entry-phases CT (local->global CT (content-room CT 7 0) 1 7) '(2 4) #t))))
     (map timed-node-body (timed-run (cloudstair-stepper CT) start WITNESS-SCRIPT))))
 (define WITNESS-ROOMS (map room-of WITNESS-BODIES))
-;; the highest the body's centre gets, and the top of K's bottom row (the
-;; hole under the stone: K's grid, so a centre in it counts as room K)
-(define WITNESS-TOP (apply min (map (lambda (b) (cdr (body-center b F))) WITNESS-BODIES)))
-(define K-BOTTOM-TOP (* 16 (grow -1 10)))
+;; does the body ever reach K beyond the stone's pocket (column 4 on: the
+;; lift and the floor)? K's hole and the stone's alcove are K's grid, so a
+;; centre in them counts as room K without leaving the pocket.
+(define WITNESS-OUT
+  (and (find (lambda (b) (and (equal? (room-of b) '(7 . -1))
+                              (>= (modulo (exact (floor (car (body-center b F)))) 400) 64)))
+             WITNESS-BODIES)
+       #t))
 
 
 (test-group "D50: the homeward shaft is one way"
-  (test "without H5 nothing rises from E past K's bottom row: the stone in its niche shuts it"
+  (test "without H5 nothing from E reaches K beyond the stone (its lift and floor, column 4 on)"
     (assert-equal #f (rises? CT '(2 4))))
-  (test "with H5 the stone is open: the way rises through it"
+  (test "with H5 the stone is open: the way leads out through it"
     (assert-equal #t (rises? CT '(2 4 5))))
-  (test "the check sees a gap: with the stone taken out, the way rises without H5"
+  (test "the check sees a gap: with the stone taken out, the way leads out without H5"
     (assert-equal #t (rises? NO-STONE '(2 4))))
-  (test "and with the sill beside it and the floor under the sill opened"
-    (assert-equal #t (rises? OPEN-SILL '(2 4))))
-  (test "SYSTEMS' reverse witness (422 ticks from E local 1,7, H2 H4 and the down) never rises past the hole under the stone, nor reaches Q"
+  (test "SYSTEMS' reverse witness (422 ticks from E local 1,7, H2 H4 and the down) never gets past the stone into K, nor reaches Q"
     (assert-equal 422 (length WITNESS-SCRIPT))
-    (assert-equal #t (>= WITNESS-TOP K-BOTTOM-TOP))
+    (assert-equal #f WITNESS-OUT)
     (assert-equal #f (and (member '(7 . -2) WITNESS-ROOMS) #t))))
