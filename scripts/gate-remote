@@ -2,6 +2,7 @@
 # Run one gate job on HEAD on an azoth runner, and fetch its logs.
 #
 #   scripts/gate-remote suite       dev build, then the whole suite in one call
+#   scripts/gate-remote depths-tests dev build, focused systems tests and sabotage
 #   scripts/gate-remote release     release build (its --replay trace kept as
 #                                   out/replay-native.txt); gate-replay, gate-sound,
 #                                   gate-a4-sound, gate-look, the reach
@@ -29,7 +30,7 @@ cd "$(dirname "$0")/.."
 say() { printf 'gate-remote: %s\n' "$*" >&2; }
 
 JOB=${1:-}
-case "$JOB" in suite|release|reach|web|depths) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths"; exit 125 ;; esac
+case "$JOB" in suite|release|reach|web|depths|depths-tests) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests"; exit 125 ;; esac
 
 REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
 [ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
@@ -87,19 +88,20 @@ step() {
   return $r
 }
 case "$JOB" in
-  depths)
+  depths|depths-tests)
     # All SYSTEMS validation on one lease. No production rooms/assets are
     # fabricated to make the final obligations appear green.
     if step build-dev scripts/dev sigil build; then
-      step depths-tests scripts/dev sigil test --report test/test-depths-gates.sgl test/test-depths-discovery.sgl test/test-underhum-finale.sgl test/test-save.sgl test/test-gates.sgl test/test-calls.sgl test/test-place.sgl
+      step depths-tests scripts/dev sigil test --report ../out/depths-tests.json test/test-depths-gates.sgl test/test-depths-discovery.sgl test/test-underhum-finale.sgl test/test-save.sgl test/test-gates.sgl test/test-calls.sgl test/test-place.sgl
       step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
       for d in /tmp/harkfell-depths-red-*; do
         [ -d "$d" ] || continue
         mkdir -p ../out/depths-red
         cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+        cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
       done
     fi
-    if step build-release scripts/dev sigil build --config release; then
+    if [ "$JOB" = depths ] && step build-release scripts/dev sigil build --config release; then
       step parse-seams scripts/dev ./build/release/bin/harkfell --room-check --parse-only
       step depths-water scripts/dev sigil -L src -L build/release/lib eval -f tools/depths-water.sgl
       step depths-water-reach scripts/dev ./build/release/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
@@ -156,7 +158,12 @@ say "remote job $JOB rc=$rc in $(( $(date +%s) - T0 ))s"
 if [ -d "$STAGE/fetched" ]; then
   LOGS="build/remote-$JOB-$SHA.logs"
   rm -rf "$LOGS"; mkdir -p "$LOGS"
-  find "$STAGE/fetched" -maxdepth 1 -type f -exec cp {} "$LOGS/" \;
+  # Retain nested assertion reports too; fetched web artifacts move below.
+  for item in "$STAGE/fetched"/*; do
+    [ -e "$item" ] || continue
+    [ "$(basename "$item")" = web ] && continue
+    cp -a "$item" "$LOGS/"
+  done
   if [ "$JOB" = web ] && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
     STAMP=$(grep -o 'version: "[^"]*"' "$STAGE/fetched/web/index.html" | head -1 | cut -d'"' -f2)
     if [ "$STAMP" = "$SHA" ] && [ ! -e "build/remote-web-$SHA" ]; then
