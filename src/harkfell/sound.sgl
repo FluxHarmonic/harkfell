@@ -75,7 +75,7 @@
           place-drip
           place-wander place-moment-carrying place-moment-still place-moment-key place-hums place-exits place-static UPWARD-ID
           place-tau place-gusts place-gaps place-seeds place-gliding
-          H7-KEEPS H7-DIP DRIP-CLIMB-AT DRIP-START-S DRIP-LAND-S DRIP-FALLBACK-S DRIP-ID ANSWER-GAP-S ANSWER-R
+          H7-KEEPS H7-DIP DRIP-CLIMB-AT DRIP-START-S DRIP-LAND-S DRIP-FALLBACK-S DRIP-ID
           sound-drip sound-drip-source sound-drip-nudge! sound-answers CLOCK-CUES sound-bed-opened
           sound-gust sound-gust-source sound-gust-nudge! sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-FREEZE-S GUST-MOMENT-DIP GAP-GAIN GAP-R
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
@@ -256,7 +256,7 @@
       (set! *moment-quiet* #f) (set! *opening-quiet* #f)
       (set! *gust* #f) (set! *gust-dip* #f) (set! *gliding* #f) (set! *glide-at* -100.0) (set! *seed-answer-at* -100.0)
       (set! *seed-calls* (quote ()))
-      (set! *drip* #f) (set! *answer-at* -100.0) (set! *answer-near* #f) (set! *answer-b* #f) (set! *answers* '()))
+      (set! *drip* #f) (set! *answer-b* #f) (set! *answers* '()))
 
     ;; --- A4: the border, and what a save keeps ---------------------------------------
     ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
@@ -1172,7 +1172,6 @@
             (filter (lambda (h) (not (door-drip-hum? pl h))) (place-hums pl))
             (place-hums pl))))
     (define (upward-frame! pl now)
-      (answer-frame! pl now)
       (let* ((near (let loop ((hs (live-hums pl)) (best #f) (bd UPWARD-R))
                      (if (null? hs)
                          best
@@ -1189,29 +1188,21 @@
             (voice-set! UPWARD-ID (* UPWARD-GAIN (drip-swell pl h) (- 1.0 (/ d UPWARD-R))) (clamp (- MAX-PAN) MAX-PAN dx) #f now)))
         (set! *upward-n* n)))
 
-    ;; THE HINTS ANSWER H7 (the bible's decision 5): carrying H7, passing an
-    ;; upward thing (an icicle growing up, a drip rising: the place's hums)
-    ;; plays a short local phrase from it, answer-h7-a or -b in turn, when
-    ;; you come within ANSWER-R of it, at most once every ANSWER-GAP-S (the
-    ;; standing stones' rule, world/BIBLE.md), never during a moment (like
-    ;; every call), and never a finding target: it is a cue, not a voice.
-    (define ANSWER-R 64.0)          ; px: 4 tiles
-    (define ANSWER-GAP-S 12.0)
-    (define *answer-at* -100.0)
-    (define *answer-near* #f)       ; the hum the body was near last frame, or #f
+    ;; THE HINTS ANSWER H7 (the bible's decision 5): carrying H7, near one of
+    ;; the three hints (the upward icicle behind the fall, the Pipes' rising
+    ;; drip, the Ice Well's), a short local phrase sounds from it, answer-h7-a
+    ;; and -b in turn. WHEN is SYSTEMS' rule, the world's (hint-answer 7 x y)
+    ;; news: within 4 tiles, at most once every 12 s (the standing stones'
+    ;; rule, world/BIBLE.md). Like the stones' chord it answers what you did,
+    ;; so it plays under a moment too; it is a cue, never a finding target.
     (define *answer-b* #f)
     (define *answers* '())          ; ((name . t) ...), newest first (the gates)
     (define (sound-answers) *answers*)
-    (define (answer-frame! pl now)
-      (let ((h (find (lambda (h) (< (local-distance pl (cadr h) (caddr h)) ANSWER-R)) (live-hums pl))))
-        (when (and h (not (equal? h *answer-near*)) (memv 7 *carry*) (not *moment*)
-                   (>= (- now *answer-at*) ANSWER-GAP-S))
-          (let ((name (if *answer-b* 'answer-h7-b 'answer-h7-a)))
-            (set! *answer-b* (not *answer-b*))
-            (set! *answer-at* now)
-            (set! *answers* (cons (cons name now) *answers*))
-            (gate-cue! name (spot-gain name) (cadr h) pl)))
-        (set! *answer-near* h)))
+    (define (answer! x pl)
+      (let ((name (if *answer-b* 'answer-h7-b 'answer-h7-a)))
+        (set! *answer-b* (not *answer-b*))
+        (set! *answers* (cons (cons name *now*) *answers*))
+        (gate-cue! name (spot-gain name) x pl)))
 
     ;; --- Wrongwater: the drip door's climb, on the door's clock ---------------------------
     ;; David's ruling 1: "it needs to change in some way to make them
@@ -1781,12 +1772,16 @@
                      (gate-cue! c (* 0.3 (spot-gain c)) (caddr item) pl))))
                (cadr item)))
             ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
-            ;; Wrongwater: the Ice Well door opens ((drip-open x y), SYSTEMS'):
-            ;; the drop falls the right way with one plain drip, and the door
-            ;; sinks with the stone's usual sound
-            ((drip-open)
-             (gate-cue! 'drip-fall (spot-gain 'drip-fall) (cadr item) pl)
-             (gate-cue! 'stone-slide (spot-gain 'stone-slide) (cadr item) pl))
+            ;; Wrongwater: the Ice Well door opens ((drip-fall 7 x y), SYSTEMS',
+            ;; with (sink 7 x y) beside it, which plays the stone's usual
+            ;; sound above): the drop falls the right way with one plain drip.
+            ;; drip-build and drip-cancel need nothing here: the climb follows
+            ;; the door's count itself (drip-frame!).
+            ((drip-fall) (gate-cue! 'drip-fall (spot-gain 'drip-fall) (caddr item) pl))
+            ;; the hints answering a carried H7 ((hint-answer 7 x y), SYSTEMS'
+            ;; rule: within 4 tiles of one of the three hints, at most once
+            ;; every 12 s)
+            ((hint-answer) (answer! (caddr item) pl))
             ;; the cattail down settles on you ((harkfell world) down-tick: (down x y))
             ((down) (gate-cue! 'down-settles (spot-gain 'down-settles) (cadr item) pl))
             ((call) (unless *moment* (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))

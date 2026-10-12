@@ -53,6 +53,7 @@
   (set! T (+ T (/ 1.0 30.0)))
   (sound-frame! T (/ 1.0 30.0) pl)
   (mixer-pump! T))
+(define (frames pl n) (let loop ((i 0)) (when (< i n) (frame! pl) (loop (+ i 1)))))
 ;; stand still for FRAMES frames from HELD0, the door counting as SYSTEMS would
 (define (stand frames held0 . kw)
   (let loop ((i 0) (held held0))
@@ -165,9 +166,9 @@
     (let loop ((i 0)) (when (< i 300) (frame! (place (well 0.0) drip: (list 'open DX DY 0.0))) (loop (+ i 1))))
     (assert-false (sound-voice-source UPWARD-ID))
     (assert-true (>= (sound-spots-played) 1)))
-  (test "the opening's news plays the drop and the stone"
+  (test "the opening's news (drip-fall and sink, SYSTEMS') plays the drop and the stone"
     (sound-reset!) (set! SAID '())
-    (frame! (place (well 5.0) drip: (list 'open DX DY 0.0) news: (list (list 'drip-open DX DY))))
+    (frame! (place (well 5.0) drip: (list 'open DX DY 0.0) news: (list (list 'drip-fall 7 DX DY) (list 'sink 7 DX DY))))
     (assert-true (or (said? "sound" "cue" "drip-fall") (said? "sound" "cue-waiting" "drip-fall")))
     (assert-true (or (said? "sound" "cue" "stone-slide") (said? "sound" "cue-waiting" "stone-slide")))))
 
@@ -177,29 +178,22 @@
 (define (fall px carry . kw)
   (apply place key: "glasswood:-6,4" region: 'glasswood bed-tune: #f groups: '() levels: '()
          carry: carry tones: '() stones: '() hums: (list (list 7 IX IY)) px: px py: IY rx: -6 ry: 4 kw))
-(define (walk carry from to secs . kw)
-  (let ((n (exact (round (* 30 secs)))))
-    (let loop ((i 0))
-      (when (< i n)
-        (frame! (apply fall (+ from (* (- to from) (/ i (* 1.0 n)))) carry kw))
-        (loop (+ i 1))))))
 (define (answered) (length (sound-answers)))
 
+;; WHEN a hint answers is SYSTEMS' rule (the world's (hint-answer 7 x y) news,
+;; test-depths-gates); the director plays what it is told, in turn.
 (test-group "wrongwater: the hints answer H7"
-  (test "carrying H7, passing the icicle answers once"
+  (test "each (hint-answer 7 x y) plays an answer from the hint, a then b"
+    (sound-reset!) (set! SAID '())
+    (frame! (fall (- IX 40.0) '(2 3 4 7) news: (list (list 'hint-answer 7 IX IY))))
+    (frames (fall (- IX 40.0) '(2 3 4 7)) 10)
+    (frame! (fall (- IX 40.0) '(2 3 4 7) news: (list (list 'hint-answer 7 IX IY))))
+    (assert-equal '(answer-h7-b answer-h7-a) (map car (sound-answers)))
+    (assert-true (or (said? "sound" "cue" "answer-h7-a") (said? "sound" "cue-waiting" "answer-h7-a")
+                     (said? "sound" "cue-late" "answer-h7-a"))))
+  (test "no news, no answer: passing the icicle alone does nothing (one rule, SYSTEMS')"
     (sound-reset!)
-    (walk '(2 3 4 7) (- IX 200.0) (+ IX 200.0) 4.0)
-    (assert-equal 1 (answered)))
-  (test "back past it within 12 s: no second answer; after 12 s: the other answer"
-    (walk '(2 3 4 7) (+ IX 200.0) (- IX 200.0) 4.0)
-    (assert-equal 1 (answered))
-    (walk '(2 3 4 7) (- IX 300.0) (- IX 300.0) 5.0)
-    (walk '(2 3 4 7) (- IX 200.0) (+ IX 200.0) 4.0)
-    (assert-equal 2 (answered))
-    (assert-equal '(answer-h7-b answer-h7-a) (map car (sound-answers))))
-  (test "without H7, never"
-    (sound-reset!)
-    (walk '(2 3 4) (- IX 200.0) (+ IX 200.0) 4.0)
+    (let loop ((i 0)) (when (< i 120) (frame! (fall (+ (- IX 200.0) (* 3.3 i)) '(2 3 4 7))) (loop (+ i 1))))
     (assert-equal 0 (answered)))
   (test "standing still by it carrying H7, the ears do not point at it (it is no target)"
     (sound-reset!)
@@ -239,7 +233,6 @@
          levels: GW-LEVELS carry: carry tones: '() stones: '() moment: moment px: 100.0 py: 100.0 rx: 0 ry: 0))
 (define (ch8) (cdr (assv 8 (sound-bed-levels))))
 (define (ch7) (cdr (assv 7 (sound-bed-levels))))
-(define (frames pl n) (let loop ((i 0)) (when (< i n) (frame! pl) (loop (+ i 1)))))
 
 (test-group "wrongwater: H7 dips under other moments"
   (test "with no moment, H7's channel sits at the drone's level"
