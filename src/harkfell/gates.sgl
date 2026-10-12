@@ -43,7 +43,7 @@
           (harkfell check))
 
   (export RADIUS LEAVE RING-TICKS SINK-TICKS TOUCH
-          stone stone? stone-cell stone-overtone stone-state stone-t stone-near stone-shiver
+          stone stone? stone-cell stone-overtone stone-state stone-t stone-near stone-shiver stone-heart?
           pickup pickup? pickup-cell pickup-overtone
           gstate gstate? gstate-stones gstate-pickups gstate-carry gstate-tiles gstate-news
           content-stones content-pickups
@@ -124,6 +124,15 @@
                                  radius: (* 16.0 (or (thing-kw t "radius") 2)))))
                       (room-things-of rm 'ring-stone))))
              (content-rooms ct))))
+
+    ;; Keep the numeric overtone used by rendering and saves. SOUND names
+    ;; this full-set gate "heart" only in its place and news protocol.
+    (define (stone-heart? s)
+      (let ((keys (stone-keys s)))
+        (and (not (stone-still s))
+             keys
+             (= (length keys) 4)
+             (every (lambda (h) (memv h keys)) '(2 3 4 5)))))
 
     (define (stone-keyed? s carry)
       (and (not (stone-still s))

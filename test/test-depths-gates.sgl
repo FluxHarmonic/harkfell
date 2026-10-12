@@ -101,6 +101,25 @@
       (subsets '(2 3 4 5 7)))))
 
 (test-group "depths: saves and content reds"
+  (test "the heart retains its numeric save key and all four keys after reload"
+    (let* ((g (advance (initial HEART '(2 3 4 5)) 89 #t))
+           (d (save-datum HEART (cell-body TM HARKFELL-FEEL 2 8) '(2 3 4 5)
+                          (gstate-stones g) '() 1.0))
+           (r (save-restore HEART d))
+           (w (world-populate
+                (world-at (content-map HEART) (cell-body TM HARKFELL-FEEL 2 8))
+                (map (lambda (s)
+                       (if (member (cons (stone-cell s) (stone-overtone s)) (restored-stones r))
+                           (stone s state: 'open)
+                           s))
+                     (content-stones HEART))
+                '() (restored-carry r)))
+           (s (car (world-stones w))))
+      (assert-equal (list (cons CELL 2)) (restored-stones r))
+      (assert-equal 2 (stone-overtone s))
+      (assert-equal '(2 3 4 5) (stone-keys s))
+      (assert-true (stone-heart? s))
+      (assert-true (stone-open? s))))
   (test "the open stillness door survives a datum round trip"
     (let* ((g (advance (initial DOOR '()) 348 #t))
            (b (cell-body TM HARKFELL-FEEL 2 8))

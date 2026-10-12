@@ -252,6 +252,32 @@
 
     (define (list-head* l n) (if (or (= n 0) (null? l)) '() (cons (car l) (list-head* (cdr l) (- n 1)))))
 
+    ;; Match the event's position as well as its key: gallery chords and
+    ;; ordinary H2 stones must retain their existing notifications.
+    (define (heart-news w news)
+      (let ((tm (world-tiles w))
+            (hearts (filter stone-heart? (world-stones w))))
+        (map
+          (lambda (item)
+            (let ((heart
+                    (and (= (length item) 4)
+                         (memq (car item) '(chord ring near-miss sink open))
+                         (find
+                           (lambda (st)
+                             (let ((c (cell-centre tm (stone-cell st))))
+                               (and (= (caddr item) (car c))
+                                    (= (cadddr item) (cdr c))
+                                    (equal? (cadr item)
+                                            (if (eq? (car item) 'chord)
+                                                (stone-keys st)
+                                                (stone-overtone st))))))
+                           hearts))))
+              (if heart
+                  (list (if (eq? (car item) 'chord) 'ring (car item))
+                        'heart (caddr item) (cadddr item))
+                  item)))
+          news)))
+
     ;; The nearest stillness door, at its listening source rather than its
     ;; floor stone. The sole clock is gates' counter, in 60 Hz ticks.
     ;; "open" means the five-second decision has started the stone sinking;
@@ -299,11 +325,13 @@
                                          (let ((c (cell-centre tm (stone-cell st)))
                                                (keys (stone-keys st)))
                                            (append
-                                             (list (stone-overtone st) (stone-state st)
+                                             (list (if (stone-heart? st) 'heart (stone-overtone st)) (stone-state st)
                                                    (+ sx (car c)) (+ sy (cdr c)))
-                                             (if (and keys (> (length keys) 1)) (list keys) '()))))
+                                             (if (and keys (> (length keys) 1) (not (stone-heart? st)))
+                                                 (list keys)
+                                                 '()))))
                                        (filter (lambda (st) (not (stone-still st))) (world-stones w)))
-                          news: (abs-news (if (pair? news) (car news) '()) sx sy)))
+                          news: (abs-news (heart-news w (if (pair? news) (car news) '())) sx sy)))
                  pl))))
 
     (define (world-place-a2 w ct)
