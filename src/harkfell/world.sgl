@@ -86,6 +86,8 @@
       (entered default: 0)
       (chord-wait default: 0)
       (hint-wait default: 0)
+      (bench-visit default: -1)
+      (lit-benches default: '())
       (finale default: #f)
       (aurora default: #f)         ; the third-homecoming has happened in this save
       (aurora-at default: #f)      ; tick of this session's one showing
@@ -334,6 +336,36 @@
                   w))
             w)))
 
+    ;; The look remembers a bench for this room visit after its fundamental
+    ;; has arrived. Mirror its horizontal radius; height is not a condition.
+    (define (bench-tick w)
+      (let* ((visit (world-entered w))
+             (w (if (= visit (world-bench-visit w))
+                    w
+                    (world w bench-visit: visit lit-benches: '())))
+             (p (world-room w))
+             (rm (and p (placed-data p))))
+        (if (and rm (eq? (room-region rm) 'underhum)
+                 (eq? (world-phase w) 'play) (finale-lit (world-ending w)))
+            (let* ((origin (world-origin w))
+                   (bx (car (body-center (world-body w) HARKFELL-FEEL)))
+                   (new (filter
+                          (lambda (thing)
+                            (let ((at (thing-at thing)))
+                              (and (not (member at (world-lit-benches w)))
+                                   (memv (thing-kw thing "overtone") (world-carry w))
+                                   (< (abs (- bx (+ (car origin) (* 16 (car at)) 8.0))) 32))))
+                          (room-things-of rm 'bench))))
+              (world w lit-benches: (append (map thing-at new) (world-lit-benches w))
+                     news: (append (world-news w)
+                             (map (lambda (thing)
+                                    (let ((at (thing-at thing)))
+                                      (list 'bench (thing-kw thing "overtone")
+                                            (+ (car origin) (* 16 (car at)) 8.0)
+                                            (+ (cdr origin) (* 16 (cadr at)) 8.0))))
+                                  new))))
+            w)))
+
     (define (down-tick w)
       (let* ((p (world-room w))
              (rm (and p (placed-data p)))
@@ -378,9 +410,18 @@
             w)))
 
     (define (world-tick w in)
-      (finale-tick (hint-answer-tick (homecoming-tick
-        (standing-chord-tick
-          (ice-tick (critters-tick (still-tick (down-tick (gates-tick (world-tick-body w in)))) w) w))))))
+      (let* ((before w)
+             (w (world-tick-body w in))
+             (w (gates-tick w))
+             (w (down-tick w))
+             (w (still-tick w))
+             (w (critters-tick w before))
+             (w (ice-tick w before))
+             (w (standing-chord-tick w))
+             (w (homecoming-tick w))
+             (w (hint-answer-tick w))
+             (w (finale-tick w)))
+        (bench-tick w)))
 
     (define (finale-tick w)
       (let* ((p (world-room w))

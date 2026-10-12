@@ -185,3 +185,65 @@
       (assert-false (restored-ended r))
       (assert-equal '() (restored-ended-with r))
       (assert-false (restored-coda r)))))
+
+(define BENCH-CT
+  (load-content
+    (map (lambda (e)
+           (cons (string-replace
+                   (string-replace (car e) "stonefen" "underhum")
+                   "x0y0.room" "x8y6.room")
+                 (string-replace
+                   (string-replace
+                     (string-replace (cdr e) "stonefen" "underhum")
+                     "(0 0)" "(8 6)")
+                   "things: (" "things: ((bench at: (2 8) overtone: 2) (bench at: (7 8) overtone: 7) ")))
+         (read-world-source "test/fixtures/worlds/stone"))))
+
+;; A second review-door room exercises actual follow-room transitions,
+;; without claiming a traversal proof through the closed fixture wall.
+(define BENCH-ROOMS
+  (let* ((first (car (content-rooms BENCH-CT)))
+         (next (placed first x: 9
+                       data: (room (placed-data first) x: 9 things: '()))))
+    (content BENCH-CT rooms: (list first next)
+             wmap: (make-worldmap (list first next) 25 11 16))))
+(define (bench-world carry column lit?)
+  (let* ((tm (worldmap-tiles (content-map BENCH-ROOMS)))
+         (w (world-populate
+              (world-at (content-map BENCH-ROOMS) (cell-body tm HARKFELL-FEEL column 8))
+              (content-stones BENCH-ROOMS) '() carry)))
+    (world w finale: (finale ended: #t ended-with: FULL phase: 'fuse lit: lit?))))
+(define (bench-news w)
+  (filter (lambda (item) (eq? (car item) 'bench)) (world-news w)))
+(define (at-bench-door w x)
+  (let* ((rm (content-room BENCH-ROOMS x 6))
+         (at (local->global BENCH-ROOMS rm 2 8)))
+    (world w body: (cell-body (world-tiles w) HARKFELL-FEEL (car at) (cdr at)))))
+
+(test-group "Underhum: benches answer their light once per visit"
+  (test "spent ending alone is mute; the fundamental acknowledgment enables the light"
+    (assert-equal '() (content-problems BENCH-CT))
+    (let ((w (world-wait (bench-world FULL 2 #f) 1)))
+      (assert-equal '() (bench-news w))
+      (assert-equal '(2) (map cadr (bench-news (world-wait (world-finale-mark w 'fundamental) 1))))))
+  (test "the look's strict horizontal radius and carried note are required"
+    (assert-equal '() (bench-news (world-wait (bench-world '(3 4 5) 2 #t) 1)))
+    (assert-equal '() (bench-news (world-wait (bench-world FULL 4 #t) 1)))
+    (assert-equal '(2) (map cadr (bench-news (world-wait (bench-world FULL 3 #t) 1)))))
+  (test "the fifth bench waits for H7 and answers once after it is acquired"
+    (let* ((w (world-wait (bench-world FULL 7 #t) 1))
+           (with (world-populate w (world-stones w) '() '(2 3 4 5 7))))
+      (assert-equal '() (bench-news w))
+      (assert-equal '(7) (map cadr (bench-news (world-wait with 60))))))
+  (test "lingering cannot repeat the cue; leaving and entering renews the visit"
+    (let* ((first (world-wait (bench-world FULL 2 #t) 60))
+           (out (world-wait (at-bench-door first 9) 1))
+           (back (world-wait (at-bench-door out 8) 1)))
+      (assert-equal '(2) (map cadr (bench-news first)))
+      (assert-equal '(2) (map cadr (bench-news out)))
+      (assert-equal '(2 2) (map cadr (bench-news back)))))
+  (test "the real adapter supplies the bench centre in absolute pixels"
+    (let* ((w (world-wait (bench-world FULL 2 #t) 1))
+           (pl (world-place w BENCH-ROOMS (world-news w))))
+      (assert-equal '((bench 2 3240.0 1192.0))
+        (filter (lambda (item) (eq? (car item) 'bench)) (place-news pl))))))

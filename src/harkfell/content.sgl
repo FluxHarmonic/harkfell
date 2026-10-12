@@ -623,7 +623,7 @@
                                  (add! (string-append "things: harmonic overtone: " (number->string o) " is not one "
                                                       (symbol->string region-sym) " gives: (gives: in world/world.sgl)")
                                        "things"))))
-                            ((memq (car t) '(niche gallery-stone great-stone listening-place slab))
+                            ((memq (car t) '(niche gallery-stone great-stone listening-place slab bench))
                              (let ((a (thing-at t)))
                                (unless (and (eq? region-sym 'underhum) a
                                             (< -1 (car a) ROOM-COLS) (< -1 (cdr a) ROOM-ROWS))
@@ -633,7 +633,10 @@
                                  (add! "things: listening-place must be on safe standing ground" "things"))
                                (when (and (eq? (car t) 'niche)
                                           (not (memv (thing-kw t "overtone") '(2 3 4 5))))
-                                 (add! "things: niche needs overtone: 2, 3, 4 or 5" "things"))))
+                                 (add! "things: niche needs overtone: 2, 3, 4 or 5" "things"))
+                               (when (and (eq? (car t) 'bench)
+                                          (not (memv (thing-kw t "overtone") '(2 3 4 5 7))))
+                                 (add! "things: bench needs overtone: 2, 3, 4, 5 or 7" "things"))))
                             ((memq (car t) '(mural upward-drip standing-stone stone-passage))
                              (let ((a (thing-at t)))
                                (unless (and a (< -1 (car a) ROOM-COLS) (< -1 (cdr a) ROOM-ROWS))
