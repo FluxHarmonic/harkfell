@@ -22,5 +22,8 @@
            (upward-drip at: (15 9))
            (lantern-moth at: (6 3) count: 3 drawn: 3))
   decor: auto)
-;; The blue door opens a sealed standing recess. Its rising drip hums H7
-;; locally; the existing water shaft and west air rest remain the way home.
+;; The blue door opens the recess. Its rising drip hums H7 locally and rises
+;; out of a crack one cell wide at (15,10), Wrongwater's way in: the drip
+;; door at the crack's foot is inside Under the Well, (15,1) there
+;; (topics/harkfell-wrongwater-bible). The existing water shaft and west air
+;; rest remain the way home.

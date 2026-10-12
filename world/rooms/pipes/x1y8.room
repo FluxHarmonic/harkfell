@@ -1,5 +1,8 @@
-;; A local hint only: no pickup and no seam to future content. One drop
-;; rises from the small pool (11-13) toward its stain.
+;; A local hint, and Wrongwater's way out: its one-row passage comes through
+;; this room's west wall on row 4 (columns 0-8) and ends at a lip four rows
+;; over the floor, so nothing here climbs back to it. Keep the row-3 roof
+;; over columns 9-10. One drop rises from the small pool (11-13) toward its
+;; stain.
 (room
   region: pipes
   at: (1 8)
