@@ -1,0 +1,27 @@
+(tune version: 1 name: "listening-chimes" tempo: 60 speed: 6 channels: 2
+  (bus reverb: zitarev size: 0.9 damp: 0.4 mix: 0.4)
+  (instruments
+    (instrument id: 1 name: "a mote" patch: (drone-fm level: 0.3 index: 0.5 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.004 release: 0.9) volume: 22 send: 0.6)
+    (instrument id: 2 name: "a mote, H5" patch: (drone-fm cents: -13.686 level: 0.3 index: 0.5 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.004 release: 0.9) volume: 22 send: 0.6)
+    (instrument id: 3 name: "a mote, H3" patch: (drone-fm cents: 1.955 level: 0.3 index: 0.5 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.004 release: 0.9) volume: 20 send: 0.6))
+  (patterns
+    (pattern id: 0 rows: 120
+      (row 0 (1 "D-7" 1 20 "000"))
+      (row 1 (1 "===" 0 0 "000"))
+      (row 17 (2 "A-6" 3 18 "000"))
+      (row 18 (2 "===" 0 0 "000"))
+      (row 31 (1 "F#7" 2 16 "000"))
+      (row 32 (1 "===" 0 0 "000"))
+      (row 52 (2 "D-6" 1 20 "000"))
+      (row 53 (2 "===" 0 0 "000"))
+      (row 66 (1 "A-6" 3 16 "000"))
+      (row 67 (1 "===" 0 0 "000"))
+      (row 73 (2 "D-7" 1 14 "000"))
+      (row 74 (2 "===" 0 0 "000"))
+      (row 95 (1 "F#7" 2 18 "000"))
+      (row 96 (1 "===" 0 0 "000"))
+      (row 108 (2 "A-6" 3 14 "000"))
+      (row 109 (2 "===" 0 0 "000"))
+      (row 119 (1 "..." 0 0 "B00"))))
+  (order 0)
+  (history ("claude" "2026-10-12" "Underhum SOUND: the listening place (David's ruling 3: a sparkle that draws you to stop). Its motes chime the four drone notes high and sparse, the way the moths chime in the Blue Hall, but at the drone's own pitches and tunings: D, A (H3), D and F# (H5) three octaves up, eight in a 12 s loop.")))

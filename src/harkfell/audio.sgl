@@ -165,13 +165,31 @@
     ;; wandering moments heard, in the save's one list of strings (a wandering
     ;; one as "wander:NAME"), and the time played.
     (define WANDER-PREFIX "wander:")
+    ;; The Underhum's ending rides in the same list: "finale:ended",
+    ;; "finale:with:2,3,4,5[,7]", "finale:coda". An older save has none, and
+    ;; restores as not ended (the save's forgiving restore).
+    (define FINALE-PREFIX "finale:")
+    (define (finale-strings)
+      (let ((f (sound-finale-flags)))
+        (append (if (car f) (list "finale:ended") '())
+                (if (pair? (cadr f))
+                    (list (string-append "finale:with:" (string-join (map number->string (cadr f)) ",")))
+                    '())
+                (if (caddr f) (list "finale:coda") '()))))
     (define (save-extras)
       (let ((h (sound-hush)))
-        (list (append (hush-spent h) (map (lambda (n) (string-append WANDER-PREFIX n)) (hush-wander-spent h)))
+        (list (append (hush-spent h) (map (lambda (n) (string-append WANDER-PREFIX n)) (hush-wander-spent h))
+                      (finale-strings))
               (hush-played h))))
-    (define (wander-key? k) (and (string? k) (>= (string-length k) 7) (string=? (substring k 0 7) WANDER-PREFIX)))
+    (define (prefix? k pre) (and (string? k) (>= (string-length k) (string-length pre)) (string=? (substring k 0 (string-length pre)) pre)))
+    (define (wander-key? k) (prefix? k WANDER-PREFIX))
+    (define (finale-key? k) (prefix? k FINALE-PREFIX))
     (define (restore-extras! moments played)
-      (sound-restore-hush! (filter (lambda (k) (not (wander-key? k))) moments)
+      (let ((with (find (lambda (k) (prefix? k "finale:with:")) moments)))
+        (sound-finale-restore! (and (member "finale:ended" moments) #t)
+                               (if with (numbers (substring with 12 (string-length with))) '())
+                               (and (member "finale:coda" moments) #t)))
+      (sound-restore-hush! (filter (lambda (k) (not (or (wander-key? k) (finale-key? k)))) moments)
                            played
                            (map (lambda (k) (substring k 7 (string-length k))) (filter wander-key? moments))))
 
@@ -339,6 +357,8 @@
                            gusts: (room-gusts rm)
                            gaps: (if (eq? (room-region rm) 'cloudstair) (room-gap-cells rm) '())
                            seeds: (room-seed-spots rm)
+                           ;; the Underhum: the chamber's listening place, (listening-place at: (C R))
+                           listen: (room-listen-spot rm)
                            gliding: (body-gliding b)
                            ;; A4: the movement sounds read the body and the tile under its feet
                            mode: (body-mode b)
@@ -380,6 +400,13 @@
                          (let ((at (kw-ref (cdr t) "at")))
                            (and (pair? at) (list (+ (room-abs-x rm (car at)) 8.0) (+ (room-abs-y rm (cadr at)) 8.0))))))
                   (room-thing-list rm)))
+
+    ;; The listening place's middle, (x y) in absolute world pixels, or #f.
+    (define (room-listen-spot rm)
+      (let ((t (find (lambda (t) (and (pair? t) (eq? (car t) 'listening-place) (pair? (kw-ref (cdr t) "at"))))
+                     (room-thing-list rm))))
+        (and t (let ((at (kw-ref (cdr t) "at")))
+                 (list (+ (room-abs-x rm (car at)) 8.0) (+ (room-abs-y rm (cadr at)) 8.0))))))
 
     ;; The tile kind just under the body's feet (its box: 8 by 14 px,
     ;; HARKFELL-FEEL), or #f off the map.
