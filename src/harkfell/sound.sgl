@@ -1205,12 +1205,13 @@
     ;; rule, world/BIBLE.md). Like the stones' chord it answers what you did,
     ;; so it plays under a moment too; it is a cue, never a finding target.
     (define *answer-b* #f)
-    (define *answers* '())          ; ((name . t) ...), newest first (the gates)
+    (define *answers* '())          ; ((name . t) ...), newest first, at most 50 (the gates)
+    (define (take* l n) (if (or (= n 0) (null? l)) '() (cons (car l) (take* (cdr l) (- n 1)))))
     (define (sound-answers) *answers*)
     (define (answer! x pl)
       (let ((name (if *answer-b* 'answer-h7-b 'answer-h7-a)))
         (set! *answer-b* (not *answer-b*))
-        (set! *answers* (cons (cons name *now*) *answers*))
+        (set! *answers* (let ((l (cons (cons name *now*) *answers*))) (if (> (length l) 50) (take* l 50) l)))
         (gate-cue! name (spot-gain name) x pl)))
 
     ;; --- Wrongwater: the drip door's climb, on the door's clock ---------------------------
@@ -1888,7 +1889,20 @@
                              (< (caddr (geometry-to pl (caddr st) (cadddr st))) TONE-OPEN-ROOMS))
                     (want-cue! (harmonic-cue "ring-h" (car st)))
                     (want-cue! (harmonic-cue "miss-h" (car st)))))
-                (place-stones pl)))
+                (place-stones pl))
+      ;; Wrongwater (the review of 813718e: the same gap as H5's late pickup):
+      ;; within a finding tone's range of the Ice Well's drip, the door's climb
+      ;; and its drop; carrying H7 within it of an upward thing, the answers.
+      ;; So the climb is ready by the time you have walked into the recess and
+      ;; stood a second, and the drop and an answer land on their frame.
+      (let ((d (place-drip pl)))
+        (when (and d (eq? (car d) 'shut) (< (caddr (geometry-to pl (cadr d) (caddr d))) TONE-OPEN-ROOMS))
+          (unless (sound-loop 'drip-climb) (want-loop! 'drip-climb))
+          (want-cue! 'drip-fall)))
+      (when (and (memv 7 *carry*)
+                 (any (lambda (h) (< (caddr (geometry-to pl (cadr h) (caddr h))) TONE-OPEN-ROOMS)) (place-hums pl)))
+        (want-cue! 'answer-h7-a)
+        (want-cue! 'answer-h7-b)))
     (define (bank-order)
       (let ((gates (gate-cue-names)))
         (append (filter spot-ref MOVING-CUES)

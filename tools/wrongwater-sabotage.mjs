@@ -44,6 +44,17 @@ const LEGS = [
     "the opening's news (drip-fall and sink, SYSTEMS') plays the drop and the stone"],
   ['adapter-ticks-not-seconds', [['src/harkfell/audio.sgl', '(/ (stone-listening st) 60.0)', '(* 1.0 (stone-listening st))']], AUDIO_T,
     'the stillness stone is the drip: shut, at the cell it listens at, its count in seconds'],
+  // prepared on approach, and the merge with integration (the review of 813718e)
+  ['climb-not-prepared', [[SOUND, "          (unless (sound-loop 'drip-climb) (want-loop! 'drip-climb))\n", "          #f\n"]], AUDIO_T,
+    'walking in under a moment, the climb is ready: standing still, it starts from its beginning'],
+  ['drop-not-prepared', [[SOUND, "          (want-cue! 'drip-fall)))", "          #f))"]], AUDIO_T,
+    'the door\'s drop plays on its frame, under a moment'],
+  ['answers-not-prepared', [[SOUND, "        (want-cue! 'answer-h7-a)\n        (want-cue! 'answer-h7-b)))", "        #f))"]], AUDIO_T,
+    'carrying H7, a hint\'s answer plays on its frame, under a moment'],
+  ['merge-took-loop-ref', [[SOUND, '(or (buffer-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)', '(or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)']], AUDIO_T,
+    'walking in under a moment, the climb is ready: standing still, it starts from its beginning'],
+  ['merge-dropped-drip-frame', [[SOUND, '        (gate-proximity-frame! pl)\n        (drip-frame! pl now)\n', '        (gate-proximity-frame! pl)\n']], AUDIO_T,
+    'from DRIP-START-S it plays, on the count; at the door\'s 5.0 s it is heard at 4.0 s (H7)'],
   // the answers and H7's tone
   ['answers-unrouted', [[SOUND, '((hint-answer) (answer! (caddr item) pl))', '((hint-answer-x) (answer! (caddr item) pl))']], AUDIO_T,
     'each (hint-answer 7 x y) plays an answer from the hint, a then b'],

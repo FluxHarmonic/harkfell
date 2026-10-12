@@ -383,3 +383,44 @@
            (d (world-drip w)))
       (display "  drip ") (display d) (newline)
       (assert-equal (list 'shut -552.0 1208.0 0.0) d))))
+
+;; --- prepared on approach (the review of 813718e; cdf652c's want-cue!) -------------------------
+;; A fresh boot with a moment playing (the bank does only urgent work then),
+;; and the body walking in from 1.5 rooms away for 3 s: by the time it stands
+;; at the drip the climb is ready, and the drop and an answer play on their
+;; own frame ("cue", never "cue-waiting"). The test's budget is 4 blocks a
+;; frame; the game's is time-based.
+(define (approach! pl secs)
+  (let loop ((i 0)) (when (< i (exact (round (* 30 secs)))) (frame! pl) (loop (+ i 1)))))
+(define (fresh-under-a-moment!)
+  (boot!)
+  (sound-audition! "the-ice-rings")
+  (assert-equal "the-ice-rings" (sound-moment-playing)))
+
+(test-group "wrongwater: prepared on approach"
+  (test "walking in under a moment, the climb is ready: standing still, it starts from its beginning"
+    (fresh-under-a-moment!)
+    (approach! (place (well 0.0) px: (- DX 600.0)) 3.0)
+    (assert-true (sound-loop 'drip-climb))
+    (stand 31 0.0)
+    (assert-true (sound-drip))
+    (display "  heard at start ") (display (heard)) (newline)
+    (assert-true (< (heard) 0.1)))
+  (test "the door's drop plays on its frame, under a moment"
+    (fresh-under-a-moment!)
+    (approach! (place (well 0.0) px: (- DX 600.0)) 3.0)
+    (set! SAID '())
+    (frame! (place (well 5.0) drip: (list 'open DX DY 0.0) news: (list (list 'drip-fall 7 DX DY))))
+    (assert-true (said? "sound" "cue" "drip-fall"))
+    (assert-false (said? "sound" "cue-waiting" "drip-fall")))
+  (test "carrying H7, a hint's answer plays on its frame, under a moment"
+    (fresh-under-a-moment!)
+    (approach! (fall (- IX 400.0) '(2 3 4 7)) 3.0)
+    (set! SAID '())
+    (frame! (fall (- IX 40.0) '(2 3 4 7) news: (list (list 'hint-answer 7 IX IY))))
+    (assert-true (said? "sound" "cue" "answer-h7-a"))
+    (assert-false (said? "sound" "cue-waiting" "answer-h7-a")))
+  (test "control: without H7 the answers are not wanted (nothing pulls them forward)"
+    (fresh-under-a-moment!)
+    (approach! (fall (- IX 400.0) '(2 3 4)) 3.0)
+    (assert-false (sound-cue 'answer-h7-a))))
