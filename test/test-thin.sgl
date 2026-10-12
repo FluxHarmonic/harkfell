@@ -237,7 +237,14 @@
   (test "under rock (not a floor): red, and only that"
     (let ((ps (thin-ice-placement-problems GRID 5 3)))
       (assert-equal 1 (length ps))
-      (assert-true (says? ps "no open cell above")))))
+      (assert-true (says? ps "no open cell above"))))
+  ;; The Underhum's worn treads may sit over air or its fissure (x); thin
+  ;; ice anywhere else still needs meltwater under it
+  (test "over air: red outside the Underhum, a worn tread inside it"
+    (let ((g (list "   " " # " "   ")))
+      (assert-true (says? (thin-ice-placement-problems g 1 1) "is not over ~"))
+      (assert-true (says? (thin-ice-placement-problems g 1 1 (quote glasswood)) "is not over ~"))
+      (assert-equal (quote ()) (thin-ice-placement-problems g 1 1 (quote underhum))))))
 
 ;; The door (?room=...&at=C,R, shell-goto!): a cell in rock, or over thin ice,
 ;; is refused; the rock beside the ice is taken. (The review's fix; its first

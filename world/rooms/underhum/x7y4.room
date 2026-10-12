@@ -1,0 +1,24 @@
+;; D, the Ringing Stair. H's lift comes up columns 21-23 to the roof (row
+;; 1); step west off it onto the sheltered rest (16-20, row 3), the top of
+;; the old steps, which go down west to the gallery floor and C (rows 4-5).
+;; Release jump in the column to sink back to H.
+(room
+  region: underhum
+  at: (7 4)
+  title: "The Ringing Stair"
+  intent: "the rising light from below sets you down on old steps at the top of the chamber's wall"
+  bed: (hum 0.7 air 0.6 water 0)
+  light: 0.2
+  grid:
+  ("#########################"
+   "#######              ^^^#"
+   "####                 ^^^#"
+   "#                    ^^^#"
+   "                #####^^^#"
+   "            #########^^^#"
+   "#####################^^^#"
+   "#####################^^^#"
+   "#####################^^^#"
+   "#####################^^^#"
+   "#####################^^^#")
+  decor: none)

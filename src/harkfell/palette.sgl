@@ -21,6 +21,8 @@
 ;;;
 ;;;   16-20 h2 h3 h4 h5 h7   the harmonics, one colour each (section 3)
 ;;;   21    black      fades
+;;;   22    fund       the fundamental's pale warm white (the Underhum's
+;;;                    great stone, its columns after the chord, the heart)
 ;;;
 ;;; Nothing that matters is carried by colour alone (Crash 0.1.2's
 ;;; lesson): a climbable wall differs from a smooth one by its texture, a
@@ -54,10 +56,10 @@
             'leaf-1 'leaf-2 'leaf-3
             'water 'accent
             'fur-1 'fur-2 'ink
-            'h2 'h3 'h4 'h5 'h7 'black))
+            'h2 'h3 'h4 'h5 'h7 'black 'fund))
 
     (define REGION-SLOT-COUNT 16)
-    (define SLOT-COUNT 22)
+    (define SLOT-COUNT 23)
 
     ;; Palette effects use sparse whole-slot coverage, never blended indices.
     (define BAYER (vector 0 8 2 10 12 4 14 6 3 11 1 9 15 7 13 5))
@@ -65,7 +67,7 @@
       (/ (+ 0.5 (vector-ref BAYER (+ (* 4 (modulo y 4)) (modulo x 4)))) 16.0))
 
     ;; The world-wide slots: the role of the same name in the world palette.
-    (define WORLD-SLOTS (list 'h2 'h3 'h4 'h5 'h7 'black))
+    (define WORLD-SLOTS (list 'h2 'h3 'h4 'h5 'h7 'black 'fund))
 
     (define (index-of x l)
       (let loop ((l l) (i 0))

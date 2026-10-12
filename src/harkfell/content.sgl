@@ -285,7 +285,8 @@
     ;; standable?), so a way over it must be crossed in one go. Placement, a
     ;; problem each when it fails:
     ;;   ice      its cell is # (glass ice), in the grid
-    ;;   over     the cell under it is ~ (meltwater: what you fall into)
+    ;;   over     the cell under it is ~ (meltwater: what you fall into); in the
+    ;;            Underhum (its worn treads) open air or the fissure (x) too
     ;;   a floor  the cell above it is open (air, reeds or a false wall), so it
     ;;            is walked on
 
@@ -332,7 +333,7 @@
                    (map (lambda (t) (thing-kw t "at"))
                         (filter (lambda (t) (and (pair? t) (eq? (car t) 'thin-ice))) (room-things rm))))))
 
-    (define (thin-ice-placement-problems grid c r)
+    (define (thin-ice-placement-problems grid c r . region)
       (let* ((here (grid-char grid c r))
              (below (grid-char grid c (+ r 1)))
              (above (grid-char grid c (- r 1)))
@@ -340,8 +341,10 @@
         (append
           (if (and here (char=? here #\#)) '()
               (list (string-append "thin-ice at: " at " is not on # (ice: its own cell must be glass ice)")))
-          (if (and below (char=? below #\~)) '()
-              (list (string-append "thin-ice at: " at " is not over ~ (over: the cell under it must be meltwater)")))
+          ;; over meltwater (Glasswood), or open air or the fissure (the Underhum's
+          ;; worn treads, which crumble into the cistern's dark)
+          (if (and below (memv below (if (equal? region (list (quote underhum))) (list #\~ #\space #\x) (list #\~)))) (quote ())
+              (list (string-append "thin-ice at: " at " is not over ~, air or x (over: the cell under it must be meltwater, air or a fissure)")))
           (if (and above (or (ice-air? above) (char=? above #\+))) '()
               (list (string-append "thin-ice at: " at " has no open cell above it (a floor: it is walked on)"))))))
 
@@ -623,17 +626,19 @@
                                  (add! (string-append "things: harmonic overtone: " (number->string o) " is not one "
                                                       (symbol->string region-sym) " gives: (gives: in world/world.sgl)")
                                        "things"))))
-                            ((memq (car t) '(niche gallery-stone great-stone listening-place slab bench))
+                            ((memq (car t) '(niche gallery-stone great-stone listening-place slab root bench crack))
                              (let ((a (thing-at t)))
                                (unless (and (eq? region-sym 'underhum) a
                                             (< -1 (car a) ROOM-COLS) (< -1 (cdr a) ROOM-ROWS))
                                  (add! "things: Underhum feature needs an in-room at: in underhum" "things"))
-                               (when (and a (eq? (car t) 'listening-place)
+                               ;; the listening place, and the stones that stand on the floor
+                               (when (and a (memq (car t) (quote (listening-place gallery-stone great-stone)))
                                           (not (grid-standable? (roomfile-grid rf) (car a) (cdr a))))
-                                 (add! "things: listening-place must be on safe standing ground" "things"))
+                                 (add! (string-append "things: " (symbol->string (car t)) " must be on safe standing ground") "things"))
                                (when (and (eq? (car t) 'niche)
                                           (not (memv (thing-kw t "overtone") '(2 3 4 5))))
                                  (add! "things: niche needs overtone: 2, 3, 4 or 5" "things"))
+                               ;; the Bearers' benches: one per harmonic, the fifth H7's
                                (when (and (eq? (car t) 'bench)
                                           (not (memv (thing-kw t "overtone") '(2 3 4 5 7))))
                                  (add! "things: bench needs overtone: 2, 3, 4, 5 or 7" "things"))))
@@ -678,7 +683,7 @@
                                (if (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
                                    (add! (string-append "things: thin-ice at: " (datum->string a) " is not a cell of the grid") "things")
                                    (for-each (lambda (m) (add! (string-append "things: " m) "things"))
-                                             (thin-ice-placement-problems (roomfile-grid rf) (car a) (cadr a))))))
+                                             (thin-ice-placement-problems (roomfile-grid rf) (car a) (cadr a) region-sym)))))
                             ((and reg (not (memq (car t) (or (region-field reg 'roster) '()))))
                              (add! (string-append "things: " (symbol->string (car t)) " is not on "
                                                   (symbol->string region-sym) "'s roster")

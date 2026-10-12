@@ -95,6 +95,23 @@
   (cld-grass-3 "#c6bb8b" "lit grass heads, the seeds' cream")
   (cld-cloud "#b0bfce" "the slow cloud below the crags")
   (cld-sun "#dcae5c" "Cloudstair's one warm accent: sunlight on the grass")
+  ;; The Underhum: the rock under the bowl, the Hollow's stone ramp taken
+  ;; darker and warmer; the old people's cut work a little paler than the
+  ;; natural rock. Slots 0..3 are the far dark of the hollows, never sky.
+  ;; No harmonic colour in the rock; the orbs bring the colour.
+  (und-far-1 "#0c0a0a" "the far dark")
+  (und-far-2 "#171312" "far rock, barely there")
+  (und-far-3 "#241e1b" "far rock in a little light")
+  (und-far-4 "#383029" "far rock lit; motes")
+  (und-rock-1 "#141110" "shadow in the rock")
+  (und-rock-2 "#2e2724" "rock in shade")
+  (und-rock-3 "#544a42" "rock")
+  (und-rock-4 "#857868" "rock lit, warm")
+  (und-cut-1 "#25201d" "the joints of cut stone")
+  (und-cut-2 "#4a423b" "cut stone in shade")
+  (und-cut-3 "#a0937f" "chisel edges and worn treads")
+  (und-drip "#2c3337" "the one drip's wet stone")
+  (und-ochre "#8e5a36" "the Underhum's one warm accent: old ochre in the cut work")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")
@@ -107,6 +124,9 @@
   (h4 "#8fb4e6" "H4, cold blue")
   (h5 "#e6a0b4" "H5, rose")
   (h7 "#a47ce0" "H7, a violet no region uses")
+  ;; the fundamental: the four colours together, which no harmonic has; the
+  ;; Underhum only (the great stone, the columns after the chord, the heart)
+  (fund "#f4ecdc" "the fundamental, a pale warm white")
   (black "#000000" "fades"))
 
 ;; The Hollow (A4): the start, a bowl on the fell above the fen; seven rooms
@@ -223,3 +243,27 @@
 ;; Seeds: small tufted seeds that drift in the lifts, rise with the gust and
 ;; settle in shelter. Never a platform, never harmful.
 (creature seed behaviour: drift)
+;; The Underhum (stage 2, topics/harkfell-underhum-bible and -map): thirteen
+;; rooms under the bowl, x4..7 at y4..5 and, below the chamber, x7..8 at
+;; y5..7 (Revision 1: the cistern climb), reached only through the heart in
+;; the bowl's floor, keyed to all four harmonics. Dark, no moths: the light
+;; is the carried harmonics' orbs. Bounds overlap the Pipes' rectangle; a
+;; room is checked against its own region's bounds, and every slot here is
+;; filled (by the Pipes' rooms, Reedfen's x8y4 and its own). The bed and its channels are SOUND's (underhum-bed: the
+;; fundamental, the chamber's resonance, the one drip, the drone); the
+;; finale is triggered by SYSTEMS's news, so there are no moments here.
+(region underhum
+  name: "The Underhum"
+  bounds: ((4 4) (8 7))
+  bed: "underhum-bed"
+  bed-channels: (hum air water drone)
+  mode: ionian
+  hazard: gap
+  palette: (und-far-1 und-far-2 und-far-3 und-far-4
+            und-rock-1 und-rock-2 und-rock-3 und-rock-4
+            und-cut-1 und-cut-2 und-cut-3 und-drip und-ochre fur-1 fur-2 ink)
+  tiles: hollow
+  roster: ()
+  moments: ()
+  wander: ()
+  gives: ())

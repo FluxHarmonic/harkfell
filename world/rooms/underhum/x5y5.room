@@ -1,0 +1,25 @@
+;; F, the Low Door. The slab leans against the west wall; the hollow in the
+;; roof is the place it once closed. Easy floor, E to G (rows 7-8). Over
+;; the floor (11-12, row 6), the slab's old seat, a held jump up.
+(room
+  region: underhum
+  at: (5 5)
+  title: "The Low Door"
+  intent: "a great slab leans against the wall where it once closed the bowl, and you walk under its place: a breath"
+  bed: (hum 0.6 air 0.4 water 0.1)
+  light: 0.2
+  grid:
+  ("#########################"
+   "##########    ###########"
+   "########       ##########"
+   "######           ########"
+   "####                #####"
+   "##                    ###"
+   "#          ##           #"
+   "                         "
+   "                         "
+   "#########################"
+   "#########################")
+  things: ((slab at: (4 8))
+           (mural at: (11 6) image: heart-ring))
+  decor: none)
