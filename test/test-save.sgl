@@ -101,7 +101,7 @@
       (assert-true (pair? (restored-notes r)))))
   (test "a stone that is not there, and a harmonic the world lacks: dropped, said"
     (let ((r (save-restore CT (with-field (with-field SAVED "stones" (list (list 'reedfen 9 3 4 7 2)))
-                                          "carry" (list 2 7)))))
+                                          "carry" (list 2 6)))))   ; H6: future content
       (assert-equal '() (restored-stones r))
       (assert-equal '(2) (restored-carry r))
       (assert-equal 2 (length (restored-notes r))))))
