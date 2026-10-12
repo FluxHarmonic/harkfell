@@ -1693,17 +1693,85 @@
                 ((and (= (room-x (car rs)) rx) (= (room-y (car rs)) ry)) (car rs))
                 (else (find (cdr rs)))))))
 
-    ;; Cache rooms in pages of up to eight full-size images. Individual
-    ;; room targets would also exhaust sokol's sampler pool at 82 rooms.
-    ;; Each page is composed in one pass, then kept until content changes.
+    ;; Cache rooms in pages of PAGE-ROOMS full-size images, PAGE-COLS a row.
+    ;; Every texture and render target holds one of sokol's 64 samplers, and
+    ;; a texture cannot be freed: individual room targets ran out at 82
+    ;; rooms, and a page per eight rooms ran out at 150 (110 fitted, measured
+    ;; 2026-10-12, scripts/gate-atlas). A pass clears its target, so a page
+    ;; grows by copying: each frame bakes up to OVERVIEW-BATCH rooms and
+    ;; draws the open page and them into a new page target, then frees the
+    ;; old one. A frame holds at most the two pages and the batch's targets.
     (define *room-colors* '())     ; ((room . (page-texture . index)) ...)
     (define *overview-pages* '())  ; render targets owning those textures
+    (define *open-page* #f)        ; (target texture rooms-in-it) while one fills
     (define OVERVIEW-BATCH 8)
+    (define PAGE-COLS 8)
+    (define PAGE-ROWS 4)
+    (define PAGE-ROOMS (* PAGE-COLS PAGE-ROWS))
+
+    ;; The rooms' coordinate labels are cached the same way. Drawn live, a
+    ;; label costs a rect per glyph pixel row, and one frame's vertex buffer
+    ;; (sokol_gp's, shared by every pass in the frame) cannot hold them all:
+    ;; at 110 rooms the atlas aborted with VALIDATE_APPENDBUF_SIZE (measured
+    ;; 2026-10-12; 104 rooms fitted). Each label is drawn once into a page of
+    ;; LABEL-BATCH, one page a frame after the rooms' pages, and the overview
+    ;; draws it as one textured quad. A pass clears its target, so a page is
+    ;; written whole in one frame.
+    (define *room-labels* '())     ; ((room . (page-texture . index)) ...)
+    (define *label-pages* '())
+    ;; A page is LABEL-COLS labels across and LABEL-ROWS down, 384 x 64: a
+    ;; 48 x 512 page came out empty and a 48 x 64 one did not (measured in
+    ;; the look harness; cause not found). 64 labels a page, one page a
+    ;; frame, stays under the 104 that one frame drew live.
+    (define LABEL-W 48)
+    (define LABEL-H 8)
+    (define LABEL-COLS 8)
+    (define LABEL-ROWS 8)
+    (define LABEL-BATCH (* LABEL-COLS LABEL-ROWS))
 
     (define (drop-overview!)
       (for-each render-target-free! *overview-pages*)
+      (for-each render-target-free! *label-pages*)
       (set! *overview-pages* '())
-      (set! *room-colors* '()))
+      (set! *open-page* #f)
+      (set! *label-pages* '())
+      (set! *room-colors* '())
+      (set! *room-labels* '()))
+
+    (define (room-label rm)
+      (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm))))
+
+    ;; One page of labels for the rooms not yet labelled (up to LABEL-BATCH),
+    ;; LABEL-COLS a row: the dark band (written as is, so it keeps its
+    ;; alpha of 0.6) and the text over it. Outside any pass.
+    (define (prepare-labels! rooms)
+      (let ((batch
+              (let next ((pending rooms) (n 0) (acc '()))
+                (cond
+                  ((or (null? pending) (= n LABEL-BATCH)) (reverse acc))
+                  ((assq (car pending) *room-labels*) (next (cdr pending) n acc))
+                  (else (next (cdr pending) (+ n 1) (cons (car pending) acc)))))))
+        (unless (null? batch)
+          (let ((page (make-render-target (* LABEL-W LABEL-COLS) (* LABEL-H LABEL-ROWS) 'nearest)))
+            (with-render-target page
+              (let draw ((rs batch) (i 0))
+                (unless (null? rs)
+                  (let ((label (room-label (car rs)))
+                        (x (* LABEL-W (modulo i LABEL-COLS))) (y (* LABEL-H (quotient i LABEL-COLS))))
+                    (with-blend-mode 'none
+                      (set-color 0.0 0.0 0.0 0.6)
+                      (draw-filled-rect x y (+ 2 (text-width-mini label 1)) 7))
+                    (set-blend-mode 'normal)
+                    (set-color 0.95 0.95 0.9)
+                    (draw-text-mini label (+ x 1) (+ y 1) 1))
+                  (draw (cdr rs) (+ i 1)))))
+            (set! *label-pages* (cons page *label-pages*))
+            (let ((texture (render-target->texture page)))
+              (let cache ((rs batch) (i 0))
+                (unless (null? rs)
+                  (set! *room-labels* (cons (cons (car rs) (cons texture i)) *room-labels*))
+                  (cache (cdr rs) (+ i 1)))))))
+        (every (lambda (rm) (assq rm *room-labels*)) rooms)))
 
     ;; A room as it stands in the overview: backdrop, foliage (still),
     ;; stones shut, solids, water.
@@ -1740,33 +1808,54 @@
     ;; Call once each frame until this returns #t (all rooms are cached).
     (define (prepare-overview! rooms)
       (ensure-render!)
-      (let ((batch
+      (let* ((have (if *open-page* (caddr *open-page*) 0))
+             (room-for (min OVERVIEW-BATCH (- PAGE-ROOMS have)))
+             (batch
               (let next ((pending rooms) (n 0) (acc '()))
                 (cond
-                  ((or (null? pending) (= n OVERVIEW-BATCH)) (reverse acc))
+                  ((or (null? pending) (= n room-for)) (reverse acc))
                   ((assq (car pending) *room-colors*) (next (cdr pending) n acc))
                   (else (next (cdr pending) (+ n 1) (cons (car pending) acc)))))))
         (unless (null? batch)
           (let* ((targets (map bake-overview-room! batch))
-                 (page (make-render-target (* VIEW-W (length batch)) VIEW-H 'nearest)))
+                 (old (and *open-page* (car *open-page*)))
+                 (old-texture (and *open-page* (cadr *open-page*)))
+                 (pw (* PAGE-COLS VIEW-W)) (ph (* PAGE-ROWS VIEW-H))
+                 (page (make-render-target pw ph 'nearest)))
             (with-render-target page
               (with-blend-mode 'none
                 (set-color 1.0 1.0 1.0 1.0)
-                (let copy ((ts targets) (i 0))
+                (when old
+                  (draw-render-target old 0.0 0.0 (inexact pw) (inexact ph)))
+                (let copy ((ts targets) (i have))
                   (unless (null? ts)
-                    (draw-render-target (car ts) (inexact (* i VIEW-W)) 0.0
+                    (draw-render-target (car ts)
+                                        (inexact (* VIEW-W (modulo i PAGE-COLS)))
+                                        (inexact (* VIEW-H (quotient i PAGE-COLS)))
                                         (inexact VIEW-W) (inexact VIEW-H))
                     (copy (cdr ts) (+ i 1))))))
-            ;; The page pass has consumed the temporary room targets.
+            ;; The page pass has consumed the temporary room targets and the
+            ;; old page; the rooms that were on it now point at the new one.
             (for-each render-target-free! targets)
-            (set! *overview-pages* (cons page *overview-pages*))
-            (let ((texture (render-target->texture page)))
-              (let cache ((rs batch) (i 0))
+            (let ((texture (render-target->texture page))
+                  (n (+ have (length batch))))
+              (when old
+                (render-target-free! old)
+                (set! *overview-pages* (filter (lambda (p) (not (eq? p old))) *overview-pages*))
+                (set! *room-colors*
+                      (map (lambda (e) (if (eq? (cadr e) old-texture) (cons (car e) (cons texture (cddr e))) e))
+                           *room-colors*)))
+              (set! *overview-pages* (cons page *overview-pages*))
+              (set! *open-page* (and (< n PAGE-ROOMS) (list page texture n)))
+              (let cache ((rs batch) (i have))
                 (unless (null? rs)
                   (set! *room-colors*
                         (cons (cons (car rs) (cons texture i)) *room-colors*))
                   (cache (cdr rs) (+ i 1)))))))
-        (every (lambda (rm) (assq rm *room-colors*)) rooms)))
+        ;; the labels after the rooms, never in the same frame as a room batch
+        (and (null? batch)
+             (every (lambda (rm) (assq rm *room-colors*)) rooms)
+             (prepare-labels! rooms))))
 
     (define (bake-overview-room! rm)
       (prepare-layers! rm)
@@ -1816,15 +1905,21 @@
                   (set-color 1.0 1.0 1.0 1.0)
                   (draw-texture-region (cadr e) (inexact ox) (inexact oy)
                                        (* k VIEW-W) (* k VIEW-H)
-                                       (* (cddr e) VIEW-W) VIEW-H VIEW-W (- VIEW-H))))
+                                       (* VIEW-W (modulo (cddr e) PAGE-COLS))
+                                       (* VIEW-H (- PAGE-ROWS (quotient (cddr e) PAGE-COLS)))
+                                       VIEW-W (- VIEW-H))))
               (when labels?
-                (let ((label (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm)))))
-                  (set-color 0.0 0.0 0.0 0.6)
-                  (draw-filled-rect (+ ox 1) (+ oy 1) (+ 2 (text-width-mini label 1)) 7)
-                  (set-color 0.95 0.95 0.9)
-                  (draw-text-mini label (+ ox 2) (+ oy 2) 1)
-                  (when (room-moment rm)
-                    (draw-note-mark (- (+ ox (floor-int (* k VIEW-W))) 8) (+ oy 2)))))))
+                ;; the label from its page (prepare-labels!), once baked
+                (let ((l (assq rm *room-labels*)))
+                  (when l
+                    (set-blend-mode 'normal)
+                    (set-color 1.0 1.0 1.0 1.0)
+                    (draw-texture-region (cadr l) (inexact (+ ox 1)) (inexact (+ oy 1)) LABEL-W LABEL-H
+                                         (* LABEL-W (modulo (cddr l) LABEL-COLS))
+                                         (* LABEL-H (- LABEL-ROWS (quotient (cddr l) LABEL-COLS)))
+                                         LABEL-W (- LABEL-H))))
+                (when (room-moment rm)
+                  (draw-note-mark (- (+ ox (floor-int (* k VIEW-W))) 8) (+ oy 2))))))
           rooms)))
 
     ;; Lines of text at the top right of the rectangle x y w, cells of
