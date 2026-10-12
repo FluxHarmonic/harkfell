@@ -52,6 +52,18 @@
                 (h (* 60 (if (< h0 0) (+ h0 6) h0))))
            (<= 70 h 170)))))
 
+;; Violet, for the H7 rule: an HSV hue from 240 to 320 degrees, saturation
+;; at least 0.15 and value at least 0.2 (a near-black's hue is invisible).
+(define (violet-hue? rgb)
+  (let* ((r (car rgb)) (g (cadr rgb)) (b (caddr rgb))
+         (mx (max r g b)) (mn (min r g b)) (c (- mx mn)))
+    (and (> c 0) (>= mx 0.2) (>= (/ c mx) 0.15)
+         (let* ((h0 (cond ((= mx r) (/ (- g b) c))
+                          ((= mx g) (+ 2 (/ (- b r) c)))
+                          (else (+ 4 (/ (- r g) c)))))
+                (h (* 60 (if (< h0 0) (+ h0 6) h0))))
+           (<= 240 h 320)))))
+
 ;; Rough rock at column 6 from row 3 to the floor, a shelf on top (test-verbs'
 ;; ROUGH): the wall the climb test climbs.
 (define CLIMB-WALL
@@ -138,6 +150,20 @@
            (roles (take (region-field gw 'palette) 13)))
       (assert-true (green-hue? (hex->rgb (hex 'h3))))
       (assert-equal '() (filter (lambda (role) (green-hue? (hex->rgb (hex role)))) roles))))
+  ;; The fixed-colour ruling (topics/harkfell-design) and Wrongwater's bible:
+  ;; violet is H7's alone, so no region's thirteen roles are violet, and
+  ;; Wrongwater, whose look is "wrong without being violet", least of all.
+  ;; The control: H7's own colour reads as violet by the same rule.
+  (test "no region role has a violet hue (and H7's colour does)"
+    (let ((hex (lambda (role) (let ((e (assq role (content-palette WORLD)))) (and e (cadr e))))))
+      (assert-true (violet-hue? (hex->rgb (hex 'h7))))
+      (assert-true (find (lambda (r) (eq? (region-name r) 'wrongwater)) (content-regions WORLD)))
+      (for-each (lambda (r)
+                  (assert-equal (list (region-name r))
+                                (cons (region-name r)
+                                      (filter (lambda (role) (violet-hue? (hex->rgb (hex role))))
+                                              (take (region-field r 'palette) 13)))))
+                (content-regions WORLD))))
   (test "a lookup names only slots"
     (for-each (lambda (table)
                 (for-each (lambda (e)

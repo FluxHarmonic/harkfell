@@ -589,7 +589,11 @@
             (with-additive-blend
               (disc! x y 3 0.5)
               (disc! x (- base 29) 4 0.4))))
-        (room-upward-drops rm)))
+        ;; a drip over open air is a door drip ((harkfell wrongwater look)
+        ;; draws it, answering stillness)
+        (filter (lambda (cell)
+                  (memv (room-char rm (car cell) (+ (cdr cell) 1)) '(#\# #\% #\= #\o #\~)))
+                (room-upward-drops rm))))
 
     ;; A brief third-homecoming: three broad drifting curtains, drawn
     ;; with whole indexed pixels and a sparse fade instead of blended RGB.

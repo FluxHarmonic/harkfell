@@ -50,6 +50,8 @@
           (harkfell atlas)
           (harkfell pipes look)
           (harkfell cloudstair look)
+          (harkfell wrongwater look)
+          (harkfell cues)
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
@@ -115,7 +117,10 @@
     ;; colours brought up to date once after the content changes.
     (define (use-region! name)
       (let ((e (assq name *strip-texs*))
-            (dark (if (eq? name 'pipes) PIPES-DARK (region-dark-lookup name))))
+            (dark (case name
+                    ((pipes) PIPES-DARK)
+                    ((wrongwater) WRONGWATER-DARK)
+                    (else (region-dark-lookup name)))))
         (cond ((not e)
                (set! *strip-texs* (cons (cons name (make-strips (region-rgb name) dark)) *strip-texs*)))
               ((memq name *strips-stale*)
@@ -433,8 +438,10 @@
         (if e
             (cdr e)
             (let ((t (make-texture-from-pixels VIEW-W VIEW-H
-                                               (if (cloudstair-backdrop-key? key)
-                                                   (cloudstair-backdrop-bytes key)
+                                               (cond
+                                                ((cloudstair-backdrop-key? key) (cloudstair-backdrop-bytes key))
+                                                ((wrongwater-backdrop-key? key) (wrongwater-backdrop-bytes key))
+                                                (else
                                                (case key
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
@@ -448,7 +455,7 @@
                                                  ((glasswood-sun-3) (glasswood-bytes 0.75))
                                                  ((glasswood-sun-4) (glasswood-bytes 1.0))
                                                  ((reedfen) (reedfen-bytes))
-                                                 (else (backdrop-bytes key))))
+                                                 (else (backdrop-bytes key)))))
                                                'nearest)))
               (set! *backdrops* (cons (cons key t) *backdrops*))
               t))))
@@ -462,6 +469,7 @@
     ;; unjoined pair of rooms, so most tops are rock).
     (define (under? rm) (and (not (cloudstair? rm)) (room-under? rm)))
     (define (cloudstair? rm) (eq? (room-region rm) 'cloudstair))
+    (define (wrongwater? rm) (eq? (room-region rm) 'wrongwater))
 
     ;; The focus pull (D16, section 7's depth): while a music moment plays the
     ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
@@ -485,6 +493,7 @@
     ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
       (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
+                                 ((wrongwater? rm) (wrongwater-backdrop-key rm))
                                  ((cloudstair? rm) (cloudstair-backdrop-key rm))
                                  ((and (not (under? rm)) (glasswood-sheet? rm))
                                   ;; Glasswood's sky by the room's sun, in quarters
@@ -550,7 +559,7 @@
              (cave? (and (under? rm) (mat-cells sheet "cave") #t)))
         ;; under water nothing grows: a solid with water on it takes the mask
         ;; of one covered from above (no turf on a pool's floor)
-        (each-tile rm (cond ((eq? (room-region rm) 'pipes)
+        (each-tile rm (cond ((or (eq? (room-region rm) 'pipes) (wrongwater? rm))
                              (lambda (m) (memq m (list 'ledge 'hazard))))
                             ((cloudstair? rm) (lambda (m) #f))   ; all painted ((harkfell cloudstair look))
                             (else solid-mat?))
@@ -711,6 +720,12 @@
                 (draw-pipes-solids! rm
                                     (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
                                     (* S (car g)) (* S (cdr g)))))
+            ;; Wrongwater's wet stone, lit from below ((harkfell wrongwater look))
+            (when (wrongwater? rm)
+              (let ((g (global-tile rm 0 0)))
+                (draw-wrongwater-solids! rm
+                                         (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
+                                         (* S (car g)) (* S (cdr g)))))
             ;; Cloudstair's cliffs likewise ((harkfell cloudstair look))
             (when (cloudstair? rm)
               (let ((g (global-tile rm 0 0)))
@@ -977,7 +992,15 @@
       (with-additive-blend
         (paint-water!)
         (each-tile rm (lambda (m) (eq? m 'water))
-                   (lambda (mat x y m gc gr) (draw-filled-rect x y S S)))))
+                   (lambda (mat x y m gc gr)
+                     ;; Wrongwater's hanging lakes: their own G, so the
+                     ;; resolve draws the surface underneath
+                     (if (and (wrongwater? rm)
+                              (hanging-water? rm (quotient x S) (quotient y S)))
+                         (begin (paint-hanging-water!)
+                                (draw-filled-rect x y S S)
+                                (paint-water!))
+                         (draw-filled-rect x y S S))))))
 
     ;; Thin drifting mist just above exposed water, behind creatures and
     ;; the foreground. Skip solid/reed cells so the banks remain crisp.
@@ -1297,12 +1320,20 @@
         (and p q (= (placed-x p) (placed-x q)) (= (placed-y p) (placed-y q)))))
 
     (define (room-hue w)
-      (if (and (world-room w)
-               (eq? (room-region (placed-data (world-room w))) 'pipes))
-          ;; Environment light is cream. Harmonic atlas/glyph pixels keep
-          ;; their own slots even at a bright core in the resolve shader.
-          (slot-of 'sky-4)
-          (room-harmonic-hue w)))
+      (let ((region (and (world-room w) (room-region (placed-data (world-room w))))))
+        (cond ((eq? region 'pipes)
+               ;; Environment light is cream. Harmonic atlas/glyph pixels keep
+               ;; their own slots even at a bright core in the resolve shader.
+               (slot-of 'sky-4))
+              ;; Wrongwater's light is the ground's own; violet only while
+              ;; H7 itself lies in the room (its upward icicles glow in their
+              ;; own discs, not the room's light)
+              ((eq? region 'wrongwater)
+               (if (find (lambda (pk) (and (= (pickup-overtone pk) 7) (cell-in-room? w (pickup-cell pk))))
+                         (world-pickups w))
+                   (slot-of 'h7)
+                   (slot-of 'sky-4)))
+              (else (room-harmonic-hue w)))))
 
     (define (room-harmonic-hue w)
       (let* ((stones (filter (lambda (st) (cell-in-room? w (stone-cell st))) (world-stones w)))
@@ -1457,6 +1488,21 @@
         (if (> arr 0.0) (* (car MOTH-RINGS) (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 arr))) 0.0)))
 
     ;; Play into the current (index) pass: the room, its things, the body.
+    ;; The room's door drips (an upward drip rising out of a crack: the Ice
+    ;; Well's, Wrongwater's way in), each as (x base still-s near?): its
+    ;; column and floor in room px, as (harkfell pipes look) draws a drip;
+    ;; the seconds the body has stood still; whether the body is within two
+    ;; tiles of it.
+    (define (door-drips w rm ox oy)
+      (let* ((b (world-body w))
+             (c (body-center b HARKFELL-FEEL))
+             (bx (- (car c) ox)) (by (- (cdr c) oy)))
+        (map (lambda (cell)
+               (let ((x (+ 8 (* S (car cell)))) (base (+ 14 (* S (cdr cell)))))
+                 (list x base (/ (world-still w) 60.0)
+                       (and (< (abs (- bx x)) (* 2.5 S)) (< (abs (- by base)) (* 2 S))))))
+             (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))))
+
     (define (draw-play w)
       (let* ((p (world-room w))
              (rm (and p (placed-data p))))
@@ -1515,6 +1561,9 @@
               ;; D43: the upward icicle, where the room has one
               (draw-upward! rm)
               (draw-upward-drips! rm t)
+              ;; the drip door's drip, which answers you standing still
+              (for-each (lambda (d) (draw-drip-build! (car d) (cadr d) t (caddr d) (cadddr d)))
+                        (door-drips w rm ox oy))
               ;; a reedling perched on a reed tip rides the tip's sway
               (for-each (lambda (c)
                           (unless (eyes? c)
@@ -1528,6 +1577,9 @@
               (when (body-down b)
                 (draw-down-tuft! b (- (body-x b) ox) (- (body-y b) oy) t))
               (draw-water! rm)
+              (when (wrongwater? rm)
+                (draw-wrongwater-surfaces! rm t)
+                (draw-rising-rain! rm t))
               (cover-thin-water! w ox oy)
               (draw-crusts!)
               (draw-snow! rm t)
@@ -1570,6 +1622,10 @@
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
                   (draw-pipes-lights! rm t)
+                  (when (wrongwater? rm) (draw-wrongwater-light! rm t))
+                  (draw-violet-well-answer! rm t (world-carry w))
+                  (for-each (lambda (d) (draw-drip-build-light! (car d) (cadr d) t (caddr d) (cadddr d)))
+                            (door-drips w rm ox oy))
                   (draw-glints! t)
                   (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
@@ -1666,9 +1722,15 @@
       (draw-pipes-panels! rm)
       (draw-pipes-cues! rm 0)
       (draw-upward-drips! rm 0)
+      (for-each (lambda (cell) (draw-drip-build! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
+                (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))
       (with-additive-blend
-        (draw-pipes-lights! rm 0))
-      (draw-water! rm))
+        (draw-pipes-lights! rm 0)
+        (when (wrongwater? rm) (draw-wrongwater-light! rm 0)))
+      (draw-water! rm)
+      (when (wrongwater? rm)
+        (draw-wrongwater-surfaces! rm 0)
+        (draw-rising-rain! rm 0)))
 
     ;; Outside any pass: resolve one bounded batch per frame. Every
     ;; render pass appends to sokol_gp's same per-frame vertex buffer; all
@@ -1711,7 +1773,7 @@
         (set-blend-mode 'normal)
         (draw-room-still rm)
         (draw-strips! *strips*))
-      (resolve! 0 0.0 (slot-of (if (eq? (room-region rm) 'pipes) 'sky-4 'h2))
+      (resolve! 0 0.0 (slot-of (if (memq (room-region rm) '(pipes wrongwater)) 'sky-4 'h2))
                 (room-render-light rm) 0.0 (room-daylight-pools? rm))
       (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
         (with-render-target rt

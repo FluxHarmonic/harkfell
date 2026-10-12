@@ -48,7 +48,7 @@
           (harkfell palette))
 
   (export VIEW-W VIEW-H STRIP-ROWS INDEX-H
-          paint-slot! paint-slot-a! paint-water! paint-light!
+          paint-slot! paint-slot-a! paint-water! paint-hanging-water! paint-light!
           strip-bytes make-strips strips-update! draw-strips!
           ensure-render! room-index-rt room-color-rt
           resolve! set-cloud-shade! dark-steps DARK-GAIN LIGHT-POOL-REACH LIGHT-POOL-EDGE
@@ -76,6 +76,10 @@
     (define (paint-slot-a! s a) (set-color (/ s 255.0) 0.0 0.0 a))
     ;; the water pass, additive: G to 1 over the water
     (define (paint-water!) (set-color 0.0 1.0 0.0 1.0))
+    ;; Wrongwater's hanging lakes (G 0.75, not added over ordinary water):
+    ;; the resolve counts their depth up from the underside, so the skin is
+    ;; the bottom row and the mirror shows the ground below, upside down
+    (define (paint-hanging-water!) (set-color 0.0 0.75 0.0 1.0))
     ;; the light pass, additive: B up by amount
     (define (paint-light! amount) (set-color 0.0 0.0 amount 1.0))
 
@@ -232,8 +236,11 @@
        "    bool own = false;\n"
        "    if (s.g > 0.5) {\n"
        ;; depth below the skin, in rows (0 is the skin)
+       ;; hanging water (G 0.75) counts down instead: its skin is its
+       ;; underside, its mirror the ground below (never past the view)
+       "        int dir = (s.g < 0.875) ? 1 : -1;\n"
        "        int d = 0;\n"
-       "        for (int k = 1; k <= 40; k++) { if (px(x, y - k).g < 0.5) break; d = k; }\n"
+       "        for (int k = 1; k <= 40; k++) { int yk = y + dir * k; if (yk >= int(u_view_h) || px(x, yk).g < 0.5) break; d = k; }\n"
        "        if (d == 0) {\n"
        ;; the skin: a broken line of the horizon's light, the breaks drifting
        "            int ph = int(floor(u_t / 9.0));\n"
@@ -258,7 +265,8 @@
        ;; out over seven, each row drifting sideways on its own
        "            if (d <= 7 && (d & 1) == 1 && th < 0.95 - float(d) * 0.11) {\n"
        "                int mw = int(floor(sin(float(y) * 1.3 + u_t * 0.05) * 1.6 + 0.5));\n"
-       "                vec4 mp = px(x + mw, y - 2 * d);\n"
+       "                int my = min(y + dir * 2 * d, int(u_view_h) - 1);\n"
+       "                vec4 mp = px(x + mw, my);\n"
        "                if (mp.g < 0.5) c = strip(3, slotof(mp));\n"
        "            }\n"
        "        }\n"

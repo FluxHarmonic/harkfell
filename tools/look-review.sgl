@@ -11,7 +11,9 @@
 ;;;                       one room in play: body at cell (C R), carrying
 ;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks;
 ;;;                       MODE down carries the cattail down, glide also holds
-;;;                       jump; TAU0 is where the gust clock starts (default 0)
+;;;                       jump; fidgetK steps right and back until the last K ticks,
+;;;                       then stands still (prints "LOOK still N");
+;;;                       TAU0 is where the gust clock starts (default 0)
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
 ;;;                       the same room on a W x H window (fitted as the web
 ;;;                       fits it), with D47's region name over it at ALPHA
@@ -46,10 +48,23 @@
          (tau0 (if (> (length parts) 9) (num (list-ref parts 9)) 0))
          (b (body (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g)) down: (and down? #t) tau: tau0))
          (in (if (string=? mode "glide") (intent jump: #t) (intent)))
+         ;; fidgetK: a step right and back every 30 ticks until the last K
+         ;; ticks, then stand: the body has stood still about K ticks while
+         ;; a dark room's moths have had the whole time to arrive (the drip
+         ;; door's build, by seconds of stillness)
+         (hop-k (and (> (string-length mode) 6) (string=? (substring mode 0 6) "fidget")
+                     (string->number (substring mode 6 (string-length mode)))))
+         (input (lambda (n)
+                  (cond ((not (and hop-k (> n hop-k))) in)
+                        ((< (modulo n 30) 4) (intent h: 1))
+                        ((< 14 (modulo n 30) 19) (intent h: -1))
+                        (else in))))
          (w (world-populate (world-at wm b) (content-stones ct) (content-pickups ct)
                             (carry-of (list-ref parts 6)))))
     (let loop ((w w) (n (num (list-ref parts 7))))
-      (if (= n 0) w (loop (cdr (world-take-news (world-tick w in))) (- n 1))))))
+      (if (= n 0)
+          (begin (display "LOOK still ") (display (world-still w)) (newline) w)
+          (loop (cdr (world-take-news (world-tick w (input n)))) (- n 1))))))
 
 (define (selected) (string-trim (read-file-string CONTROL)))
 

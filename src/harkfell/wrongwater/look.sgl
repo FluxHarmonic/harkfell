@@ -1,0 +1,527 @@
+;;; (harkfell wrongwater look) - Wrongwater's pictures (topics/harkfell-
+;;; wrongwater-bible, "The look"): dry ground under hanging water, lit from
+;;; below. Everything here is in the region's own slots; violet (h7) is
+;;; drawn only for H7's own things, the drip's rings and the hint lines.
+;;;
+;;;   WRONGWATER-DARK                                 the region's dark table
+;;;   (wrongwater-backdrop-key rm) / (wrongwater-backdrop-bytes k)
+;;;   (draw-wrongwater-solids! rm kind-at gx0 gy0)    baked with the room
+;;;   (hanging-water? rm c r)                         a lake's cell over air
+;;;   (draw-wrongwater-surfaces! rm t)                a lake's top, where it
+;;;                                                   opens upward onto air
+;;;   (draw-rising-rain! rm t)                        E's rain, slot pass
+;;;   (draw-wrongwater-light! rm t)                   additive: the ground's
+;;;                                                   light, caustics
+;;;   DRIP-CLIMB-AT, (drip-state still near?)         the drip door's build
+;;;   (draw-drip-build! x base t still near?)         and its picture (the
+;;;   (draw-drip-build-light! x base t still near?)   Ice Well's recess)
+;;;
+;;; The hanging lakes' underside skin and their upside-down mirror are the
+;;; resolve shader's (render.sgl, u_hang: a water pixel painted with G at
+;;; HANG-G counts its depth upward from the lake's underside).
+(define-library (harkfell wrongwater look)
+  (import (sigil math)
+          (sigil list)
+          (sigil graphics)
+          (harkfell content)
+          (harkfell palette)
+          (harkfell render))
+
+  (export WRONGWATER-DARK wrongwater-backdrop-key wrongwater-backdrop-key?
+          wrongwater-backdrop-bytes draw-wrongwater-solids! hanging-water?
+          draw-wrongwater-surfaces! draw-rising-rain! draw-wrongwater-light!
+          DRIP-CLIMB-AT door-drip? drip-state draw-drip-build! draw-drip-build-light!
+          draw-violet-well-answer!)
+
+  (begin
+    (define (pixel x) (exact (floor x)))
+
+    ;; The first four slots are the far cave wall, not a sky. Its darkest
+    ;; slot stays itself at a dark step (the generic sky-1 -> ground-2 would
+    ;; brighten it), so the stone, which darkens to ground-2, still stands
+    ;; out from the wall at the region's light (0.6, one step).
+    (define WRONGWATER-DARK
+      (cons (cons 'sky-1 'sky-1) DARK))
+
+    (define BAYER4 (vector 0 8 2 10 12 4 14 6 3 11 1 9 15 7 13 5))
+    (define (bayer x y)
+      (/ (+ 0.5 (vector-ref BAYER4 (+ (* 4 (modulo y 4)) (modulo x 4)))) 16.0))
+
+    ;; A small deterministic hash of two integers and a salt: 0..65520.
+    (define (hash3 a b k)
+      (let* ((h (modulo (+ (* (modulo a 65521) 7919) (* (modulo b 65521) 104729)
+                           (* k 31337) 17)
+                        65521))
+             (h (modulo (+ (* h h) 12345) 65521)))
+        (modulo (+ (* h 40503) k) 65521)))
+
+    (define (slot-rect! name x y w h)
+      (paint-slot! (slot-of name))
+      (draw-filled-rect x y w h))
+
+    (define (light-rect! a x y w h)
+      (when (> a 0.0)
+        (paint-light! a)
+        (draw-filled-rect x y w h)))
+
+    ;; --- the grid ---------------------------------------------------------------
+
+    (define (solid-char? ch) (memv ch '(#\# #\% #\= #\o)))
+    (define (water-char? ch) (char=? ch #\~))
+    (define (air-char? ch) (not (or (solid-char? ch) (water-char? ch))))
+
+    ;; A water cell whose column of water ends, going down, over air: a
+    ;; hanging lake. A pool on a floor (rock under its column) is not.
+    (define (hanging-water? rm c r)
+      (and (water-char? (room-char rm c r))
+           (let down ((r (+ r 1)))
+             (cond ((>= r ROOM-ROWS) #f)
+                   ((water-char? (room-char rm c r)) (down (+ r 1)))
+                   (else (air-char? (room-char rm c r)))))))
+
+    ;; The bottom cell of a hanging lake's column: water over air.
+    (define (hanging-water-bottom? rm c r)
+      (and (water-char? (room-char rm c r))
+           (air-char? (room-char rm c (+ r 1)))))
+
+    ;; (emit first last) for each maximal run of i in 0..n-1 where (ok? i)
+    (define (runs n ok? emit)
+      (let loop ((i 0) (start #f))
+        (cond ((and (< i n) (ok? i)) (loop (+ i 1) (or start i)))
+              (else (when start (emit start (- i 1)))
+                    (when (< i n) (loop (+ i 1) #f))))))
+
+    ;; --- the far wall ---------------------------------------------------------------
+    ;; A cave wall that is darkest at the top and lit from the bottom, where
+    ;; the light rises from a far floor, too low to see. Far lakes hang from the
+    ;; roof with their bright edge underneath, and far ice grows up from the
+    ;; floor. Cave-wall slots only (sky-1..4). K picks one of three walls.
+    (define (wrongwater-backdrop-key rm)
+      (case (modulo (+ (* 2 (room-x rm)) (room-y rm) 9) 3)
+        ((0) 'wrongwater-0) ((1) 'wrongwater-1) (else 'wrongwater-2)))
+
+    (define (wrongwater-backdrop-key? key)
+      (memq key '(wrongwater-0 wrongwater-1 wrongwater-2)))
+
+    (define (wrongwater-backdrop-bytes key)
+      (let* ((k (case key ((wrongwater-1) 1) ((wrongwater-2) 2) (else 0)))
+             (bv (make-bytevector (* 4 VIEW-W VIEW-H) 0))
+             (s0 (slot-of 'sky-1)) (s1 (slot-of 'sky-2))
+             (s2 (slot-of 'sky-3)) (s3 (slot-of 'sky-4))
+             (put! (lambda (x y s)
+                     (when (and (< -1 x VIEW-W) (< -1 y VIEW-H))
+                       (let ((o (* 4 (+ x (* y VIEW-W)))))
+                         (bytevector-u8-set! bv o s)
+                         (bytevector-u8-set! bv (+ o 3) 255)))))
+             (floor-y 158))
+        ;; the wall: dark above, warming toward the far floor's light
+        (let rows ((y 0))
+          (when (< y VIEW-H)
+            (let ((u (/ y (inexact floor-y))))
+              (let cols ((x 0))
+                (when (< x VIEW-W)
+                  (let ((b (bayer x y)))
+                    (put! x y (cond ((>= y floor-y) (if (< b 0.2) s1 s0))
+                                    ((> u 0.86) (if (< b (/ (- u 0.86) 0.14)) s2 s1))
+                                    ((> u 0.45) (if (< b (/ (- u 0.45) 0.6)) s1 s0))
+                                    (else s0))))
+                  (cols (+ x 1)))))
+            (rows (+ y 1))))
+        ;; the far floor's edge: one bright line
+        (let cols ((x 0))
+          (when (< x VIEW-W)
+            (put! x floor-y s1)
+            (cols (+ x 1))))
+        ;; far lakes hanging from the roof: a dark lobe of rock, the water
+        ;; under it, and its bright underside, wavering
+        (let lakes ((i 0))
+          (when (< i 4)
+            (let* ((h (hash3 i k 41))
+                   (cx (+ 20 (* i 100) (modulo h 60)))
+                   (w (+ 22 (modulo (quotient h 7) 30)))
+                   (rock (+ 8 (modulo (quotient h 13) 14)))
+                   (deep (+ 6 (modulo (quotient h 17) 8))))
+              (let across ((dx 0))
+                (when (< dx w)
+                  (let* ((u (/ (- dx (/ w 2.0)) (/ w 2.0)))
+                         (rd (sqrt (max 0.0 (- 1.0 (* u u)))))
+                         (r (pixel (* rock (+ 0.4 (* 0.6 rd)))))
+                         (d (pixel (* deep rd)))
+                         (x (+ (- cx (quotient w 2)) dx)))
+                    (let down ((y 0))
+                      (when (< y (+ r d 1))
+                        (put! x y (cond ((< y r) s0)
+                                        ((= y (+ r d)) s2)
+                                        ((= y (- (+ r d) 1)) (if (< (bayer x y) 0.4) s2 s1))
+                                        (else (if (< (bayer x y) 0.3) s2 s1))))
+                        (down (+ y 1)))))
+                  (across (+ dx 1)))))
+            (lakes (+ i 1))))
+        ;; far ice growing up from the far floor, lit at the foot
+        (let spikes ((x 3))
+          (when (< x VIEW-W)
+            (let* ((h (hash3 x k 7))
+                   (len (+ 6 (modulo h 26))))
+              (when (< (modulo (quotient h 11) 7) 2)
+                (let up ((d 0))
+                  (when (< d len)
+                    (let ((half (if (< d (* 0.4 len)) 1 0)))
+                      (put! x (- floor-y d) (if (< d 3) s3 s2))
+                      (when (= half 1)
+                        (put! (+ x 1) (- floor-y d) (if (< d 3) s2 s1))))
+                    (up (+ d 1)))))
+              (spikes (+ x 5 (modulo h 9))))))
+        bv))
+
+    ;; --- the near stone ---------------------------------------------------------------
+    ;; # is smooth wet stone in long soft beds; % is rough rock in broken
+    ;; courses with dark joints (the holds). The light comes from below, so
+    ;; the lit faces are the wrong ones: undersides catch a bright rim,
+    ;; tops of floors glow pale (the light itself), and beads of water sit
+    ;; on top of the floors where drips would hang under a ceiling.
+    ;; Drawn as plain rects per cell row from a per-pixel rule, cached in
+    ;; one texture like the Pipes' stone.
+
+    (define PERIOD-X 192)
+    (define PERIOD-Y 96)
+    (define STONE-W (+ PERIOD-X 16))
+    (define BAND (+ PERIOD-Y 16))
+    (define ROCK-Y 0)
+    (define DEEP-Y BAND)
+    (define ROUGH-Y (* 2 BAND))
+    (define STONE-H (* 3 BAND))
+
+    (define (stone-bytes)
+      (let* ((bv (make-bytevector (* 4 STONE-W STONE-H) 0))
+             (g (vector (slot-of 'ground-1) (slot-of 'ground-1) (slot-of 'ground-2)
+                        (slot-of 'ground-3) (slot-of 'ground-4)))
+             (set (lambda (x y s)
+                    (let ((o (* 4 (+ x (* y STONE-W)))))
+                      (bytevector-u8-set! bv o s)
+                      (bytevector-u8-set! bv (+ o 3) 255)))))
+        (let rows ((y 0))
+          (when (< y BAND)
+            (let* ((py (modulo y PERIOD-Y))
+                   ;; smooth beds: soft wavy lines every 10..22 px
+                   (bed-of (lambda (x) (+ py (pixel (* 2.5 (sin (+ (* x 0.045) (* py 0.01))))))))
+                   ;; rough courses, 9..14 px tall
+                   (course (quotient py 12)) (cy (modulo py 12)))
+              (let cols ((x 0))
+                (when (< x STONE-W)
+                  (let* ((px (modulo x PERIOD-X))
+                         (b (bayer px py))
+                         (bd (modulo (bed-of px) 16))
+                         (streak (and (= 0 (modulo (hash3 (quotient px 3) 1 5) 9))
+                                      (< (modulo (+ py (hash3 (quotient px 3) 2 5)) 40) 14)))
+                         (rock (cond ((= bd 0) 2)
+                                     ((= bd 1) (if (< b 0.25) 4 3))
+                                     (streak (if (< b 0.35) 4 3))   ; wet streaks, rising
+                                     ((< bd 4) (if (< b 0.1) 4 3))
+                                     (else 3)))
+                         (deep (if (= bd 0) 1 (if (< b 0.15) 3 2)))
+                         (shift (* 23 (modulo (hash3 course 3 9) 7)))
+                         (bw (+ 9 (modulo (hash3 (quotient (+ px shift) 14) course 4) 9)))
+                         (bx (modulo (+ px shift) bw))
+                         (rough (cond ((= cy 0) 1)
+                                      ((= bx 0) 1)
+                                      ((= cy 11) (if (< b 0.5) 4 3))   ; the lower lip, lit
+                                      ((= bx 1) 2)
+                                      ((< b 0.18) 4)
+                                      (else 3))))
+                    (set x (+ ROCK-Y y) (vector-ref g rock))
+                    (set x (+ DEEP-Y y) (vector-ref g deep))
+                    (set x (+ ROUGH-Y y) (vector-ref g rough)))
+                  (cols (+ x 1)))))
+            (rows (+ y 1))))
+        bv))
+
+    (define *stone* #f)
+    (define (stone-texture)
+      (unless *stone*
+        (set! *stone* (make-texture-from-pixels STONE-W STONE-H (stone-bytes) 'nearest)))
+      *stone*)
+
+    ;; The room's # and % into the current (slot) target. KIND-AT: local
+    ;; (c r), -1..25 and -1..11, to the material there; GX0, GY0: the room's
+    ;; top-left global pixel, so beds run on from room to room.
+    (define (draw-wrongwater-solids! rm kind-at gx0 gy0)
+      (let* ((tex (stone-texture))
+             (solid? (lambda (c r) (memq (kind-at c r) '(rock rough))))
+             (strip! (lambda (x y w h sx sy)
+                       (let loop ((x x) (w w) (sx sx))
+                         (when (> w 0)
+                           (let ((seg (min w (- STONE-W sx))))
+                             (set-color 1.0 1.0 1.0 1.0)
+                             (draw-texture-region tex x y seg h sx sy seg h)
+                             (loop (+ x seg) (- w seg) (modulo (+ sx seg) PERIOD-X))))))))
+        (set-blend-mode 'normal)
+        (let rows ((r 0))
+          (when (< r ROOM-ROWS)
+            (let* ((y (* 16 r))
+                   (py (modulo (+ gy0 y) PERIOD-Y))
+                   (band (lambda (c)
+                           (let ((k (kind-at c r)))
+                             (and (memq k '(rock rough))
+                                  (cond ((eq? k 'rough) ROUGH-Y)
+                                        ((and (solid? c (- r 1)) (solid? c (+ r 1))
+                                              (solid? (- c 1) r) (solid? (+ c 1) r))
+                                         DEEP-Y)
+                                        (else ROCK-Y)))))))
+              ;; the stone, one window per run of a band
+              (let loop ((c 0))
+                (when (< c ROOM-COLS)
+                  (let ((b (band c)))
+                    (if (not b)
+                        (loop (+ c 1))
+                        (let end ((e c))
+                          (if (and (< (+ e 1) ROOM-COLS) (eqv? (band (+ e 1)) b))
+                              (end (+ e 1))
+                              (begin
+                                (strip! (* 16 c) y (* 16 (+ 1 (- e c))) 16
+                                        (modulo (+ gx0 (* 16 c)) PERIOD-X) (+ b py))
+                                (loop (+ e 1)))))))))
+              ;; floors: the pale lip of the light, and beads of water on top
+              (runs ROOM-COLS
+                    (lambda (c) (and (solid? c r) (not (solid? c (- r 1)))
+                                     (not (eq? (kind-at c (- r 1)) 'water))))
+                    (lambda (c0 c1)
+                      (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))))
+                        (slot-rect! 'ground-4 x y w 1)
+                        (slot-rect! 'ground-3 x (+ y 1) w 1)
+                        (let beads ((i 0))
+                          (when (< i w)
+                            (let ((h (hash3 (+ gx0 x i) (+ gy0 y) 19)))
+                              (when (= 0 (modulo h 11))
+                                (slot-rect! 'ground-3 (+ x i) (- y 1) 1 1)
+                                (when (= 0 (modulo h 3))
+                                  (slot-rect! 'ground-4 (+ x i) (- y 3) 1 1))))
+                            (beads (+ i 1)))))))
+              ;; undersides: lit from below, a bright rim and a dark line in
+              (runs ROOM-COLS
+                    (lambda (c) (and (solid? c r) (not (solid? c (+ r 1)))))
+                    (lambda (c0 c1)
+                      (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))))
+                        (slot-rect! 'ground-3 x (+ y 15) w 1)
+                        (slot-rect! 'ground-4 x (+ y 14) w 1)
+                        (slot-rect! 'ground-1 x (+ y 12) w 1)))))
+            (rows (+ r 1))))
+        ;; the sides: a dark rim, then the stone
+        (let cols ((c 0))
+          (when (< c ROOM-COLS)
+            (let ((x (* 16 c)))
+              (runs ROOM-ROWS
+                    (lambda (r) (and (solid? c r) (not (solid? (- c 1) r))))
+                    (lambda (r0 r1)
+                      (slot-rect! 'ground-1 x (* 16 r0) 1 (* 16 (+ 1 (- r1 r0))))
+                      (slot-rect! 'ground-2 (+ x 1) (* 16 r0) 1 (* 16 (+ 1 (- r1 r0))))))
+              (runs ROOM-ROWS
+                    (lambda (r) (and (solid? c r) (not (solid? (+ c 1) r))))
+                    (lambda (r0 r1)
+                      (slot-rect! 'ground-1 (+ x 15) (* 16 r0) 1 (* 16 (+ 1 (- r1 r0))))
+                      (slot-rect! 'ground-2 (+ x 14) (* 16 r0) 1 (* 16 (+ 1 (- r1 r0)))))))
+            (cols (+ c 1))))))
+
+    ;; --- the water's other face ---------------------------------------------------------
+    ;; Where a hanging lake opens upward onto air (the Hanging Tarn's top),
+    ;; that face reads as a surface too: a broken pale line whose breaks
+    ;; drift. Slot pixels over water clear its G, so the line is drawn after
+    ;; the water pass.
+    (define (draw-wrongwater-surfaces! rm t)
+      (let rows ((r 0))
+        (when (< r ROOM-ROWS)
+          (runs ROOM-COLS
+                (lambda (c) (and (water-char? (room-char rm c r))
+                                 (air-char? (room-char rm c (- r 1)))))
+                (lambda (c0 c1)
+                  (let ((y (* 16 r)) (ph (quotient t 9)))
+                    (let across ((x (* 16 c0)))
+                      (when (< x (* 16 (+ c1 1)))
+                        (let ((k (modulo (+ x ph (* 5 (quotient x 23))) 11)))
+                          (unless (or (= k 0) (= k 6))
+                            (slot-rect! (if (< k 3) 'ground-4 'leaf-3) x y 1 1)))
+                        (across (+ x 1)))))))
+          (rows (+ r 1)))))
+
+    ;; --- the rising rain (Rain Rising) --------------------------------------------------
+    ;; From each pool on a floor, drops rise slowly to the water hanging over
+    ;; it (or the rock, where none hangs). Each is a two-pixel drop, its foot
+    ;; lit by the ground. Placed by column, so a room always rains the same.
+    (define (rain-columns rm)
+      (let cols ((c 0) (acc '()))
+        (if (>= c ROOM-COLS)
+            (reverse acc)
+            (let rows ((r 1) (acc acc))
+              (if (>= r ROOM-ROWS)
+                  (cols (+ c 1) acc)
+                  (if (and (water-char? (room-char rm c r))
+                           (air-char? (room-char rm c (- r 1)))
+                           (not (hanging-water? rm c r)))
+                      ;; the pool's surface at r; the target: the first
+                      ;; non-air cell going up
+                      (let up ((u (- r 1)))
+                        (if (and (> u 0) (air-char? (room-char rm c (- u 1))))
+                            (up (- u 1))
+                            (rows (+ r 1) (cons (list c (* 16 r) (* 16 u)) acc))))
+                      (rows (+ r 1) acc)))))))
+
+    (define (draw-rising-rain! rm t)
+      (for-each
+        (lambda (col)
+          (let* ((c (car col)) (y0 (cadr col)) (y1 (caddr col))
+                 (span (max 8 (- y0 y1))))
+            (let drops ((i 0))
+              (when (< i 3)
+                (let* ((h (hash3 c i 23))
+                       (x (+ (* 16 c) 2 (modulo h 12)))
+                       (speed (+ 0.22 (/ (modulo (quotient h 5) 10) 50.0)))
+                       (d (modulo (pixel (+ (* t speed) (modulo h 97))) (+ span 20)))
+                       (y (- y0 d)))
+                  (when (and (< d span) (> d 1))
+                    (slot-rect! 'water x (- y 1) 1 1)
+                    (slot-rect! 'ground-4 x y 1 1)))
+                (drops (+ i 1))))))
+        (rain-columns rm)))
+
+    ;; --- the light (additive B) ---------------------------------------------------------
+    ;; The floors give off light: a glow rising from each floor and fading
+    ;; over 24 px. Under every underside (rock or a hanging lake) the light
+    ;; that came up through the water ripples: caustics, moving.
+    (define GLOW 40)
+    (define (draw-wrongwater-light! rm t)
+      (let rows ((r 0))
+        (when (< r ROOM-ROWS)
+          ;; the floors' glow
+          (runs ROOM-COLS
+                ;; room-char reads rock past the grid: the last row's open
+                ;; cells are a seam (a drop), not a floor
+                (lambda (c) (and (< (+ r 1) ROOM-ROWS)
+                                 (air-char? (room-char rm c r))
+                                 (solid-char? (room-char rm c (+ r 1)))))
+                (lambda (c0 c1)
+                  (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))) (fy (* 16 (+ r 1))))
+                    (let up ((k 0))
+                      (when (< k GLOW)
+                        (let ((u (- 1.0 (/ k (inexact GLOW)))))
+                          (light-rect! (* 0.44 u u) x (- fy 1 k) w 1))
+                        (up (+ k 1)))))))
+          ;; a hanging lake's underside is its surface (the resolve draws the
+          ;; skin there): light it, so it reads at the region's dark step
+          (runs ROOM-COLS
+                (lambda (c) (hanging-water-bottom? rm c r))
+                (lambda (c0 c1)
+                  (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))) (y (* 16 r)))
+                    (light-rect! 0.32 x (+ y 15) w 1)
+                    (light-rect! 0.12 x (+ y 13) w 2))))
+          ;; caustics under undersides: rock over air, and hanging water's
+          ;; bottom row
+          (runs ROOM-COLS
+                (lambda (c) (and (air-char? (room-char rm c (+ r 1)))
+                                 (or (memv (room-char rm c r) '(#\# #\%))
+                                     (water-char? (room-char rm c r)))))
+                (lambda (c0 c1)
+                  (let ((y (+ 15 (* 16 r))))
+                    (let across ((x (* 16 c0)))
+                      (when (< x (* 16 (+ c1 1)))
+                        (let ((v (+ (sin (+ (* x 0.37) (* t 0.052) r))
+                                    (sin (- (* x 0.13) (* t 0.031))))))
+                          (when (> v 1.05)
+                            (light-rect! 0.42 x y 1 1)
+                            (light-rect! 0.24 x (- y 1) 1 1)
+                            (when (> v 1.5) (light-rect! 0.2 x (+ y 1) 1 1))))
+                        (across (+ x 1)))))))
+          (rows (+ r 1)))))
+
+    ;; --- the drip door's build (the Ice Well's recess) ----------------------------------
+    ;; David's ruling 1: the drip changes as you come near, so you stop and
+    ;; watch. SOUND's climb enters its notes at these seconds of stillness
+    ;; ((harkfell sound) DRIP-CLIMB-AT, agreed 2026-10-12); a violet ring
+    ;; pulses out of the hanging drop with each, so the rings come closer
+    ;; together. At 5 s the drop falls the right way, into the crack.
+    (define DRIP-CLIMB-AT (list 1.0 1.9 2.7 3.4 4.0 4.5 5.0))
+
+    ;; A door drip rises out of a crack: open air directly under its cell
+    ;; (the Ice Well's, (15,9) over its crack at (15,10)). The Pipes' drip
+    ;; rises out of a pool and is not one.
+    (define (door-drip? rm cell)
+      (air-char? (room-char rm (car cell) (+ (cdr cell) 1))))
+    (define DRIP-OPEN-S 5.0)
+    (define HANG-RISE 8)         ; px above the base where the drop hangs: inside
+                                 ; the Ice Well's recess, one row tall
+
+    ;; still: seconds the body has stood at rest; near?: within two tiles.
+    ;; -> one of (rise PERIOD) (hang RINGS-AGES) (fall AGE)
+    (define (drip-state still near?)
+      (cond ((not near?) (list 'rise 180))
+            ((< still 0.25) (list 'rise 300))
+            ((< still DRIP-OPEN-S)
+             (list 'hang (map (lambda (at) (- still at))
+                              (filter (lambda (at) (<= at still)) DRIP-CLIMB-AT))))
+            (else (list 'fall (- still DRIP-OPEN-S)))))
+
+    ;; Slot pass: the drop, its stain line, the rings. X, BASE: the drip's
+    ;; column and the floor it rises from, as (harkfell pipes look) draws an
+    ;; upward drip.
+    (define (draw-drip-build! x base t still near?)
+      (let ((st (drip-state still near?)))
+        (slot-rect! 'h7 (- x 2) (- base 29) 5 1)
+        (case (car st)
+          ((rise)
+           ;; near, the drop rises slowly and hangs at the top before it goes
+           (let* ((period (cadr st))
+                  (u (modulo t period))
+                  (rise (if (= period 180) (quotient u 6) (min 29 (quotient u 7)))))
+             (slot-rect! 'water x (- base rise) 1 2)
+             (slot-rect! 'ground-4 x (- base rise) 1 1)))
+          ((hang)
+           (let* ((settle (min 1.0 (* 2.0 still)))
+                  (y (- base (pixel (* HANG-RISE settle))
+                        (if (= 0 (modulo (quotient t 20) 2)) 0 1))))
+             (slot-rect! 'water x y 1 2)
+             (slot-rect! 'ground-4 x y 1 1)
+             ;; each ring grows over 0.7 s and thins as it goes
+             (for-each
+               (lambda (age)
+                 (when (< age 0.7)
+                   (let ((rad (+ 2 (pixel (* age 14.0)))) (steps 24))
+                     (let ring ((i 0))
+                       (when (< i steps)
+                         (when (or (< age 0.35) (even? i))
+                           (let ((a (/ (* 2.0 3.14159265 i) steps)))
+                             (slot-rect! 'h7 (+ x (pixel (* rad (cos a))))
+                                         (+ y 1 (pixel (* rad (sin a)))) 1 1)))
+                         (ring (+ i 1)))))))
+               (cadr st))))
+          ((fall)
+           ;; the right way down: into the crack, then gone
+           (let* ((age (cadr st))
+                  (y (+ (- base HANG-RISE) (pixel (* 0.5 900.0 age age)))))
+             (when (< y (+ base 16))
+               (slot-rect! 'water x y 1 2)
+               (slot-rect! 'ground-4 x (+ y 1) 1 1)))))))
+
+    ;; The violet-well mural's answer (the bible's hints table): carrying H7,
+    ;; the thin violet line of the well (draw-pipes-panels!: a rail at +12,
+    ;; posts at +18 and +45, from the panel's corner) glows a little brighter,
+    ;; breathing slowly. Additive pass.
+    (define (draw-violet-well-answer! rm t carry)
+      (when (memv 7 carry)
+        (for-each
+          (lambda (thing)
+            (when (eq? (thing-kw thing "image") 'violet-well)
+              (let* ((at (thing-at thing))
+                     (x (* 16 (car at))) (y (+ 20 (* 16 (cdr at))))
+                     (a (+ 0.3 (* 0.12 (sin (* t 0.025))))))
+                (light-rect! a (+ x 17) (+ y 11) 30 3)
+                (light-rect! a (+ x 17) (+ y 14) 3 7)
+                (light-rect! a (+ x 44) (+ y 14) 3 7))))
+          (room-things-of rm 'mural))))
+
+    ;; Additive pass: the drop's own violet glow, brighter while it hangs.
+    (define (draw-drip-build-light! x base t still near?)
+      (let ((st (drip-state still near?)))
+        (when (eq? (car st) 'hang)
+          (let ((y (- base HANG-RISE)))
+            (light-rect! 0.5 (- x 1) y 3 2)
+            (for-each (lambda (age)
+                        (when (< age 0.3) (light-rect! 0.3 (- x 3) (- y 2) 7 6)))
+                      (cadr st))))))))
