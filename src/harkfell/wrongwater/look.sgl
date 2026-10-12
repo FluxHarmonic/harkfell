@@ -392,22 +392,28 @@
       (let rows ((r 0))
         (when (< r ROOM-ROWS)
           ;; the floors' glow
-          (runs ROOM-COLS
-                ;; room-char reads rock past the grid: the last row's open
-                ;; cells are a seam (a drop), not a floor
-                (lambda (c) (and (< (+ r 1) ROOM-ROWS)
-                                 (air-char? (room-char rm c r))
-                                 (solid-char? (room-char rm c (+ r 1)))))
-                (lambda (c0 c1)
-                  (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))) (fy (* 16 (+ r 1))))
-                    ;; in bands of GLOW-BAND px (10 rects a floor run, not 40),
-                    ;; and caustics one rect per bright stretch, not per pixel:
-                    ;; the overview bakes eight rooms in one frame
-                    (let up ((k 0))
-                      (when (< k GLOW)
-                        (let ((u (- 1.0 (/ (+ k (/ GLOW-BAND 2.0)) GLOW))))
-                          (light-rect! (* 0.44 u u) x (- fy k GLOW-BAND) w GLOW-BAND))
-                        (up (+ k GLOW-BAND)))))))
+          ;; (a false wall, +, is drawn as rock: a third of the glow on it, so
+          ;; it reads as "not quite stone" without lighting up like air)
+          (for-each
+            (lambda (pass)
+              (runs ROOM-COLS
+                    ;; room-char reads rock past the grid: the last row's open
+                    ;; cells are a seam (a drop), not a floor
+                    (lambda (c) (and (< (+ r 1) ROOM-ROWS)
+                                     (air-char? (room-char rm c r))
+                                     (eq? (char=? (room-char rm c r) #\+) (car pass))
+                                     (solid-char? (room-char rm c (+ r 1)))))
+                    (lambda (c0 c1)
+                      (let ((x (* 16 c0)) (w (* 16 (+ 1 (- c1 c0)))) (fy (* 16 (+ r 1))))
+                        ;; in bands of GLOW-BAND px (10 rects a floor run, not 40),
+                        ;; and caustics one rect per bright stretch, not per pixel:
+                        ;; the overview bakes eight rooms in one frame
+                        (let up ((k 0))
+                          (when (< k GLOW)
+                            (let ((u (- 1.0 (/ (+ k (/ GLOW-BAND 2.0)) GLOW))))
+                              (light-rect! (* (cdr pass) 0.44 u u) x (- fy k GLOW-BAND) w GLOW-BAND))
+                            (up (+ k GLOW-BAND))))))))
+            (list (cons #f 1.0) (cons #t 0.33)))
           ;; a hanging lake's underside is its surface (the resolve draws the
           ;; skin there): light it, so it reads at the region's dark step
           (runs ROOM-COLS
