@@ -43,7 +43,7 @@
 (define RATE 32000)
 (define DT 0.02)
 (define PARTS (let ((e (getenv "UNDERHUM_PARTS")))
-                (if (and e (> (string-length e) 0)) (filter number? (map string->number (string-split e " "))) '(1 2 3 4 5))))
+                (if (and e (> (string-length e) 0)) (filter number? (map string->number (string-split e " "))) '(1 2 3 4 5 6))))
 (define (part? n) (and (memv n PARTS) #t))
 (define SAID '())
 (define (say . parts) (set! SAID (cons parts SAID)))
@@ -302,15 +302,19 @@
 ;; heard sections as ((section . t) ...), whether a bed sounded each frame,
 ;; and the finale's own lines.
 (define TOLD '())   ; ((what . t) ...), newest first, the last run
+(define CARDS '())  ; ((t index . alpha) ...), newest first, the last run
 (define (run-ending! t-end plan events)
   (fresh!)
   (set! H5-LEVELS '())
+  (set! DRONE-PEAKS '())
   (set! TOLD '())
+  (set! CARDS '())
   (sound-set-finale-listener! (lambda (what) (set! TOLD (cons (cons what *frame-t*) TOLD))))
   (let ((heard '()) (bed '()) (evs events))
     (frames! 0.0 t-end plan
              (lambda (t)
                (set! *frame-t* t)
+               (let ((c (sound-credits-card))) (when c (set! CARDS (cons (cons t c) CARDS))))
                (let ((due (filter (lambda (e) (<= (car e) t)) evs)))
                  (set! evs (filter (lambda (e) (> (car e) t)) evs))
                  (for-each (lambda (e) ((cdr e))) due))
@@ -319,14 +323,17 @@
                    (set! heard (cons (cons (car s) t) heard))))
                (set! bed (cons (cons t (and (mixer-find "bed") #t)) bed))
                (let ((pp (sound-finale-players)))
-                 (when pp (set! H5-LEVELS (cons (cons t (list-ref (player-peaks (cdr pp)) 4)) H5-LEVELS))))))
+                 (when pp (let ((pk (player-peaks (cdr pp))))
+                            (set! H5-LEVELS (cons (cons t (list-ref pk 4)) H5-LEVELS))
+                            (set! DRONE-PEAKS (cons (cons t pk) DRONE-PEAKS)))))))
     (list (reverse heard) (reverse bed))))
 
 (define (heard-at seq s) (let ((e (assq s seq))) (and e (cdr e))))
 (define (bed-during bed t0 t1) (map cdr (filter (lambda (b) (and (>= (car b) t0) (< (car b) t1))) bed)))
 
 (define H5-LEVELS '())
-(define *frame-t* 0.0)   ; ((t . H5's drone channel peak since the last frame) ...), the last run
+(define *frame-t* 0.0)
+(define DRONE-PEAKS '())   ; ((t . (peak-per-channel ...)) ...), the last run   ; ((t . H5's drone channel peak since the last frame) ...), the last run
 ;; A: the fuse at 1 s; the climb asked during the theme (the news, at 40 s);
 ;; the sky verse played twice over; home (the news) at 160 s.
 (define A-HOME-T 160.0)
@@ -338,6 +345,7 @@
                      (cons A-HOME-T (lambda () (sound-finale-home!)))))))
 (define A-SEQ (car A))
 (define A-TOLD (reverse TOLD))
+(define A-CARDS (reverse CARDS))
 (define A-H5 H5-LEVELS)
 (define (h5-in t0 t1) (map cdr (filter (lambda (e) (and (>= (car e) t0) (< (car e) t1))) A-H5)))
 (define A-BED (cadr A))
@@ -381,6 +389,18 @@
     (assert-equal '(fuse fundamental theme rise glass pipes sky home close dawn done) (map car A-TOLD))
     (assert-true (near? (- (cdr (assq 'fundamental A-TOLD)) (cdr (assq 'fuse A-TOLD))) FINALE-FUNDAMENTAL-S 0.05))
     (assert-true (near? (cdr (assq 'dawn A-TOLD)) (heard-at A-SEQ 'dawn) 0.05)))
+  (test "the credits: from the climb's music, every card in order, the last over the dawn"
+    (let* ((first (car A-CARDS))
+           (shown (let loop ((cs A-CARDS) (acc '()))
+                    (cond ((null? cs) (reverse acc))
+                          ((and (pair? acc) (= (car acc) (cadr (car cs)))) (loop (cdr cs) acc))
+                          (else (loop (cdr cs) (cons (cadr (car cs)) acc))))))
+           (last-at (car (find (lambda (c) (= (cadr c) 8)) A-CARDS))))
+      (display "  cards shown: ") (display shown) (display " first at ") (display (car first))
+      (display " last at ") (display last-at) (newline)
+      (assert-equal '(0 1 2 3 4 5 6 7 8) shown)
+      (assert-true (near? (car first) (heard-at A-SEQ 'rise) 0.1))
+      (assert-true (>= last-at (- (heard-at A-SEQ 'dawn) 0.05)))))
   (test "the ending ends, is saved, and never plays again"
     (assert-false A-ACTIVE)
     (assert-equal '(#t (2 3 4 5) #f) A-FLAGS)
@@ -436,7 +456,10 @@
     (assert-true (near? (- (heard-at C-SEQ 'home) (heard-at C-SEQ 'fuse)) (* 7.0 FINALE-BAR-S) 0.05)))))
 
 ;; --- 5. the heart, the listening place, the after-ending bed, the coda ---------------------------
-(define HEART '((heart shut 1000.0 900.0)))
+;; The heart as SYSTEMS' world gives it (underhum/rooms 5cc0acd:
+;; (ring-stone at: (12 9) overtone: 2 keys: (2 3 4 5))): overtone 2, its keys
+;; a fifth element; and the amber stone (H2) beside it, open.
+(define HEART '((2 shut 1000.0 900.0 (2 3 4 5)) (2 open 1200.0 900.0)))
 (define (bowl carry . news)
   (place key: "hollow:4,3" region: 'hollow bed-tune: #f groups: '(wind water hum drone) levels: '()
          tones: '() carry: carry stones: HEART news: (if (pair? news) (car news) '())
@@ -447,6 +470,9 @@
     (fresh!)
     (frames! 0.0 1.0 (lambda (t) (bowl '(2 3 4))))
     (assert-false (sound-voice-source "call-heart"))
+    ;; carrying H2 with the amber stone open, the shut heart (overtone 2) must
+    ;; not call with H2's tone: it cannot open yet
+    (assert-false (sound-voice-source "call-h2"))
     (assert-false (sound-voice-source HUM-ID))
     (frames! 1.0 2.0 (lambda (t) (bowl '(2 3 4 5))))
     (assert-true (and (sound-voice-source "call-heart") #t)))
@@ -454,7 +480,8 @@
     (fresh!)
     (frames! 0.0 30.0 (lambda (t) #f))
     (for-each (lambda (n) (assert-true (and (sound-cue n) #t))) '(ring-heart miss-heart heart-sink))
-    (frames! 30.0 30.1 (lambda (t) (bowl '(2 3 4 5) '((ring heart 1000 900) (near-miss (2 3 4 5) 1000 900) (sink heart 1000 900)))))
+    ;; the gates' own news for it: the chord when it rings, near-miss 2, sink 2
+    (frames! 30.0 30.1 (lambda (t) (bowl '(2 3 4 5) '((chord (2 3 4 5) 1000.0 900.0) (near-miss 2 1000.0 900.0) (sink 2 1000.0 900.0)))))
     (assert-true (said? "sound" "cue" "ring-heart"))
     (assert-true (said? "sound" "cue" "miss-heart"))
     (assert-true (said? "sound" "cue" "heart-sink")))
@@ -496,6 +523,20 @@
       (assert-false moment)
       (assert-equal spots0 (sound-spots-played))
       (assert-equal '() bed-at)))
+  (test "back to back: an ending whose mixer was reopened holds nothing (a bed opens, a moment can play)"
+    (fresh!)
+    (frames! 0.0 1.0 (lambda (t) (room CHAMBER)))
+    (sound-frame! 1.0 DT (room CHAMBER 'news '((finale fuse 1 1))))
+    (frames! 1.02 3.0 (lambda (t) (room CHAMBER)))
+    (assert-true (sound-finale-active?))
+    ;; the next test file, or a world reload: a new mixer, a new boot, a room
+    (mixer-open-headless! RATE #f)
+    (sound-boot! '() say)
+    (frames! 3.0 4.0 (lambda (t) (place key: "hollow:9,8" region: 'hollow bed-tune: "hollow-bed" groups: '(wind water hum drone)
+                                         levels: '() moment: "hollow-answers" tones: '() carry: '(2 3 4 5) px: 3000.0 py: 600.0 rx: 9 ry: 8)))
+    (assert-false (sound-finale-active?))
+    (assert-true (and (mixer-find "bed") #t))
+    (assert-equal "hollow-answers" (sound-moment-playing)))
   (test "the coda: once, for H7 found after the ending, and only then"
     (fresh!)
     (sound-finale-restore! #t '(2 3 4 5) #f)
@@ -508,3 +549,38 @@
     (sound-frame! 0.0 DT (room CHAMBER 'bed #f 'carry '(2 3 4 5 7) 'news '((finale coda 1 1))))
     (assert-false (sound-moment-playing))
     (assert-true (said? "sound" "finale" "coda-ignored")))))
+
+;; --- 6. the H7 ending, heard through close ------------------------------------------------------
+;; Carrying H7, home asked during the fuse (so close comes 75 s in): the
+;; voices leave H5 H4 H3 H2, then the fundamental, and H7 is the one left,
+;; held, unresolved; the dawn begins when it is alone, 12 bars into close.
+(define D
+  (if (not (part? 6)) '(() ())
+      (run-ending! 150.0 (lambda (t) (room CHAMBER 'carry '(2 3 4 5 7)))
+                   (list (cons 1.0 (lambda () (sound-frame! 1.0 DT (room CHAMBER 'carry '(2 3 4 5 7) 'news '((finale fuse 1 1))))))
+                         (cons 6.0 (lambda () (sound-finale-home!)))))))
+(define D-SEQ (car D))
+(define D-PEAKS (reverse DRONE-PEAKS))
+(define (drone-max ch t0 t1)
+  (let ((xs (map (lambda (e) (list-ref (cdr e) (- ch 1))) (filter (lambda (e) (and (>= (car e) t0) (< (car e) t1))) D-PEAKS))))
+    (if (null? xs) -1.0 (apply max xs))))
+
+(when (part? 6) (test-group "underhum sound: 6, the H7 ending, heard"
+  (test "the dawn comes 12 bars into close, when H7 is alone"
+    (display "  heard: ") (display D-SEQ) (newline)
+    (assert-equal '(fuse home close dawn) (map car D-SEQ))
+    (assert-true (near? (- (heard-at D-SEQ 'dawn) (heard-at D-SEQ 'close)) (* 12.0 FINALE-BAR-S) 0.1)))
+  (test "the voices leave H5, H4, H3, H2, the fundamental, and H7 last (drone channels 5 4 3 2 1, then 6)"
+    (let* ((c (heard-at D-SEQ 'close))
+           (gone (lambda (ch) (let loop ((t (+ c 2.0)))   ; the first frame from which the channel stays silent
+                                (cond ((> t 149.0) 999.0)
+                                      ((< (drone-max ch t 150.0) 1e-4) t)
+                                      (else (loop (+ t 0.25))))))))
+      (let ((order (map gone '(5 4 3 2 1 6))))
+        (display "  silent from (s into close): ") (display (map (lambda (x) (- x c)) order)) (newline)
+        (assert-true (apply < order))
+        ;; between the fundamental's leaving and H7's, H7 alone still sounds
+        (assert-true (> (drone-max 6 (+ c 41.0) (+ c 49.0)) 0.005))
+        (assert-true (every (lambda (ch) (< (drone-max ch (+ c 41.0) (+ c 49.0)) 1e-4)) '(1 2 3 4 5))))))
+  (test "the ending ends after H7 has gone"
+    (assert-false (sound-finale-active?)))))

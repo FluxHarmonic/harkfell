@@ -9,7 +9,7 @@
 # THE GREEN ARM
 #   score    tools/underhum-compose.mjs --check: the piece, its H7 version and
 #            the coda in assets/tunes are what the score writes
-#   test     test/test-underhum-sound.sgl, all 35 tests (parts 1 to 5)
+#   test     test/test-underhum-sound.sgl, all 40 tests (parts 1 to 6)
 # The test runs on a harkfell-test that loads THIS tree's src/ (folio
 # procedures/harkfell-look-review-harness, "For sound"): HARNESS, default
 # build/audio-harness/bin/harkfell-test, whose lib/harkfell and lib/engine
@@ -58,7 +58,7 @@ trap 'exit 130' INT TERM
 FAIL=0
 HARNESS=${HARNESS:-build/audio-harness/bin/harkfell-test}
 T=test/test-underhum-sound.sgl
-TOTAL=35
+TOTAL=40
 
 hash() { sha256sum "$1" | cut -c1-16; }
 setup_failed() { echo "SETUP-FAILED: $*"; echo "GATE-UNDERHUM-SOUND SETUP-FAILED"; exit 2; }
@@ -79,7 +79,7 @@ green() {
   node tools/underhum-compose.mjs --check > "$TMP/score.out" 2>&1 \
     && echo "GREEN score: $(tr '\n' ' ' < "$TMP/score.out")" \
     || { echo "NOT GREEN score: $(tr '\n' ' ' < "$TMP/score.out")"; FAIL=1; }
-  run "1 2 3 4 5" "$TMP/green.out"; rc=$?
+  run "1 2 3 4 5 6" "$TMP/green.out"; rc=$?
   line="$(clean "$TMP/green.out" | grep -a 'Tests:' | tail -1)"
   passed="$(echo "$line" | sed -n 's/.*Tests: *\([0-9][0-9]*\) passed.*/\1/p')"
   total="$(echo "$line" | sed -n 's/.*(\([0-9][0-9]*\) total).*/\1/p')"

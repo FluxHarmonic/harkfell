@@ -64,13 +64,14 @@
           (engine mixer)
           (harkfell tunes)
           (harkfell hush)
-          (harkfell finale))
+          (harkfell finale)
+          (harkfell credits))
 
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
           ;; the Underhum's ending (harkfell-underhum-bible; (harkfell finale))
           sound-finale-fuse! sound-finale-rise! sound-finale-home! sound-coda! sound-finale-section sound-finale-time
           sound-finale-active? sound-finale-sounding sound-finale-flags sound-finale-restore! sound-finale-walk
-          sound-finale-players sound-bed-name sound-set-finale-listener!
+          sound-finale-players sound-bed-name sound-set-finale-listener! sound-credits-card
           place-listen FINALE-ID FINALE-DRONE-ID FINALE-TUNE FINALE-TUNE-H7 CODA-TUNE AFTER-BED CHAMBER-KEY BOWL-KEY
           LISTEN-ID heart-stone? FUSE-BED-OUT-S DAWN-IN-S FINALE-LEVELS
           sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
@@ -1049,6 +1050,20 @@
     (define HEART-KEY '(2 3 4 5))
     (define (heart-stone? n) (or (eq? n 'heart) (and (pair? n) (list? n))))
     (define (stone-n n) (if (heart-stone? n) 'heart n))
+    ;; A stone ENTRY is the heart when its overtone says so, or when it carries
+    ;; its keys as a fifth element and needs more than one: SYSTEMS' real
+    ;; heart is overtone 2 with keys (2 3 4 5) (the Cloudstair sound worker's
+    ;; review of 3ad3142), and its gates' news then names overtone 2 (or the
+    ;; chord). A keyed entry: (overtone state x y keys).
+    (define (stone-keys-of st) (and (= (length st) 5) (list? (list-ref st 4)) (list-ref st 4)))
+    (define (heart-entry? st)
+      (or (heart-stone? (car st)) (let ((k (stone-keys-of st))) (and k (> (length k) 1)))))
+    (define (entry-n st) (if (heart-entry? st) 'heart (car st)))
+    ;; Where the hearts stand (from the place's stones, every frame): news at
+    ;; one of them is the heart's, whatever overtone it names.
+    (define *heart-spots* '())
+    (define (heart-at? x y)
+      (any (lambda (h) (and (< (abs (- (car h) x)) 4.0) (< (abs (- (cadr h) y)) 4.0))) *heart-spots*))
     (define (calls-for? n) (if (heart-stone? n) (every (lambda (h) (memv h *carry*)) HEART-KEY) (memv n *carry*)))
     (define (call-id? id) (and (>= (string-length id) 6) (string=? (substring id 0 6) "call-h")))
     ;; a voice standing still sharpens: the finding tones and the calls
@@ -1059,7 +1074,7 @@
       (let loop ((ss (place-stones pl)) (best '()))   ; ((n d x y) ...)
         (if (null? ss)
             (map (lambda (b) (list (car b) (caddr b) (cadddr b))) best)
-            (let* ((st (car ss)) (n (stone-n (car st))) (x (caddr st)) (y (cadddr st))
+            (let* ((st (car ss)) (n (entry-n st)) (x (caddr st)) (y (cadddr st))
                    (d (sqrt (+ (expt (- x (place-px pl)) 2) (expt (- y (place-py pl)) 2))))
                    (have (assv n best)))
               (if (and (eq? (cadr st) 'shut) (calls-for? n) (or (not have) (< d (cadr have))))
@@ -1097,7 +1112,7 @@
                          best
                          (let* ((st (car ss))
                                 (d (sqrt (+ (expt (- (caddr st) (place-px pl)) 2) (expt (- (cadddr st) (place-py pl)) 2)))))
-                           (if (and (eq? (cadr st) 'shut) (not (heart-stone? (car st))) (not (memv (car st) *carry*)) (< d bd))
+                           (if (and (eq? (cadr st) 'shut) (not (heart-entry? st)) (not (memv (car st) *carry*)) (< d bd))
                                (loop (cdr ss) (cons st d) d)
                                (loop (cdr ss) best bd))))))
              (n (and near (car (car near)))))
@@ -1563,21 +1578,26 @@
                     *pending-cues*)))
 
     (define (news-frame! pl)
+      (set! *heart-spots* (map (lambda (st) (list (caddr st) (cadddr st))) (filter heart-entry? (place-stones pl))))
       (for-each
         (lambda (item)
           (case (car item)
             ((pickup) (let ((c (harmonic-cue "pickup-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
-            ((ring) (let ((c (if (heart-stone? (cadr item)) 'ring-heart (harmonic-cue "ring-h" (cadr item))))) (gate-cue! c (spot-gain c) (caddr item) pl)))
-            ((near-miss) (let ((c (if (heart-stone? (cadr item)) 'miss-heart (harmonic-cue "miss-h" (cadr item))))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((ring) (let ((c (if (or (heart-stone? (cadr item)) (heart-at? (caddr item) (cadddr item))) 'ring-heart (harmonic-cue "ring-h" (cadr item))))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((near-miss) (let ((c (if (or (heart-stone? (cadr item)) (heart-at? (caddr item) (cadddr item))) 'miss-heart (harmonic-cue "miss-h" (cadr item))))) (gate-cue! c (spot-gain c) (caddr item) pl)))
             ((chord)
-             ;; CONTENT supplies the carried series; the stone answers it locally.
-             (for-each
-               (lambda (n)
-                 (let ((c (harmonic-cue "ring-h" n)))
-                   (when (spot-ref c)
-                     (gate-cue! c (* 0.3 (spot-gain c)) (caddr item) pl))))
-               (cadr item)))
-            ((sink) (let ((c (if (heart-stone? (cadr item)) 'heart-sink 'stone-slide))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+             ;; CONTENT supplies the carried series; the stone answers it
+             ;; locally. At the heart it is the heart's own ring (SYSTEMS' heart
+             ;; rings as the four-voice chord).
+             (if (heart-at? (caddr item) (cadddr item))
+                 (gate-cue! 'ring-heart (spot-gain 'ring-heart) (caddr item) pl)
+                 (for-each
+                   (lambda (n)
+                     (let ((c (harmonic-cue "ring-h" n)))
+                       (when (spot-ref c)
+                         (gate-cue! c (* 0.3 (spot-gain c)) (caddr item) pl))))
+                   (cadr item))))
+            ((sink) (let ((c (if (or (heart-stone? (cadr item)) (heart-at? (caddr item) (cadddr item))) 'heart-sink 'stone-slide))) (gate-cue! c (spot-gain c) (caddr item) pl)))
             ;; the Underhum's ending ((harkfell world)'s news: (finale WHAT x y))
             ((finale) (case (cadr item)
                         ((fuse) (sound-finale-fuse! *now*))
@@ -2034,8 +2054,13 @@
     ;; sounds and the cue bank's work until it is over, as a moment does: its
     ;; close still plays after the dawn (a Hollow wandering moment drawn then
     ;; would start over the credits' music).
-    (define (finale-holds-bed?) (and *fin* (not (fin-dawn *fin*))))
-    (define (finale-busy?) (and *fin* #t))
+    ;; Only while its piece is still a mixer source: a mixer reopened mid-piece
+    ;; (a world reload; the next test file of a suite) drops it, and the
+    ;; ending must not hold the beds and moments for ever (the d45d8c6 class,
+    ;; the Cloudstair sound worker's review of 3ad3142).
+    (define (finale-live?) (and *fin* (mixer-find FINALE-ID) #t))
+    (define (finale-holds-bed?) (and (finale-live?) (not (fin-dawn *fin*))))
+    (define (finale-busy?) (finale-live?))
     ;; the Underhum's bed after the ending: its drone breathing as one
     (define (bed-for name) (if (and *ended* (equal? name UNDERHUM-BED)) AFTER-BED name))
 
@@ -2115,6 +2140,7 @@
                      rise: #f home: #f homing: #f walk: 'calm play: 'calm heard: 'calm heard-at: now
                      close-t: #f dawn: #f told: '() quiet: (vector #f) ended: (vector #f) thin: (make-vector 7 1.0))))
         (set! *fin* st)
+        (set! *credits-t0* #f)
         (set! *ended* #t)
         ;; players opened ahead for the other version (H7 found meanwhile)
         (for-each (lambda (e) (when (cdr e) (player-close! (cdr e)))) *finale-ahead*)
@@ -2253,6 +2279,8 @@
               (set-fin-heard! st heard) (set-fin-heard-at! st now)
               (*say* "sound" "finale" "section" (symbol->string heard)))
             (tell! st (if (eq? heard 'calm) 'fuse heard))
+            (when (and (not *credits-t0*) (memq heard '(rise glass pipes sky home close)))
+              (set! *credits-t0* now))
             (let ((ft (sound-finale-time)))
               (when (and ft (>= ft FINALE-FUNDAMENTAL-S)) (tell! st 'fundamental)))
             (when (and (eq? play 'close) (not (fin-close-t st)))
@@ -2294,6 +2322,20 @@
       (let ((st *fin*))
         (and st (cons (cond ((fin-dawn st) 'dawn) ((eq? (fin-heard st) 'calm) 'fuse) (else (fin-heard st)))
                       (max 0.0 (- *now* (or (fin-dawn st) (fin-heard-at st))))))))
+    ;; THE CREDITS for LOOK: (CARD-INDEX . ALPHA), or #f. The cards' clock
+    ;; starts when the climb's music is first heard (rise, or home for a fast
+    ;; climber whose piece jumps straight there); the last card waits for the
+    ;; dawn ((harkfell credits)). CREDITS holds the cards' lines.
+    (define *credits-t0* #f)       ; *now* when rise or home was first heard
+    (define (sound-credits-card)
+      (let ((st *fin*))
+        (and st *credits-t0*
+             ;; before the dawn has begun the last card waits for it: its time
+             ;; is not known yet, so it is "not yet" (the test caught the last
+             ;; card at its clock turn, 59 s before the dawn)
+             (credits-at (- *now* *credits-t0*)
+                         (if (fin-dawn st) (- (fin-dawn st) *credits-t0*) 1e9)))))
+
     ;; The ending's players, (piece . drone), or #f: for the gates.
     (define (sound-finale-players) (and *fin* (cons (fin-piece *fin*) (fin-drone *fin*))))
     ;; The walk's section, for the gates.
@@ -2336,6 +2378,9 @@
 
     (define (sound-boot! moments say)
       (set! *say* say)
+      (when (and *fin* (not (mixer-find FINALE-ID)))
+        (player-close! (fin-piece *fin*)) (player-close! (fin-drone *fin*))
+        (set! *fin* #f))
       (set! *to-open* moments)
       ;; a boot renders every cue afresh (a second boot, a world reloaded, starts
       ;; from nothing: the late-cue gate relies on it)
