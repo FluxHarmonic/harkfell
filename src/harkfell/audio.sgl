@@ -256,7 +256,9 @@
     ;; remain numeric; composite keys belong in the first audio field.
     (define (stone-sound-key st)
       (cond ((stone-heart? st) 'heart)
-            ((stone-keys st) (stone-keys st))
+            ((stone-keys st)
+             (let ((keys (stone-keys st)))
+               (if (null? (cdr keys)) (car keys) keys)))
             (else (stone-overtone st))))
 
     ;; Match position and key so gallery chords and ordinary stones retain
