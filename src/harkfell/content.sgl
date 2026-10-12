@@ -285,7 +285,8 @@
     ;; standable?), so a way over it must be crossed in one go. Placement, a
     ;; problem each when it fails:
     ;;   ice      its cell is # (glass ice), in the grid
-    ;;   over     the cell under it is ~ (meltwater: what you fall into)
+    ;;   over     the cell under it is ~ (meltwater: what you fall into); in the
+    ;;            Underhum (its worn treads) open air or the fissure (x) too
     ;;   a floor  the cell above it is open (air, reeds or a false wall), so it
     ;;            is walked on
 
@@ -332,7 +333,7 @@
                    (map (lambda (t) (thing-kw t "at"))
                         (filter (lambda (t) (and (pair? t) (eq? (car t) 'thin-ice))) (room-things rm))))))
 
-    (define (thin-ice-placement-problems grid c r)
+    (define (thin-ice-placement-problems grid c r . region)
       (let* ((here (grid-char grid c r))
              (below (grid-char grid c (+ r 1)))
              (above (grid-char grid c (- r 1)))
@@ -342,7 +343,7 @@
               (list (string-append "thin-ice at: " at " is not on # (ice: its own cell must be glass ice)")))
           ;; over meltwater (Glasswood), or open air or the fissure (the Underhum's
           ;; worn treads, which crumble into the cistern's dark)
-          (if (and below (memv below (list #\~ #\space #\x))) (quote ())
+          (if (and below (memv below (if (equal? region (list (quote underhum))) (list #\~ #\space #\x) (list #\~)))) (quote ())
               (list (string-append "thin-ice at: " at " is not over ~, air or x (over: the cell under it must be meltwater, air or a fissure)")))
           (if (and above (or (ice-air? above) (char=? above #\+))) '()
               (list (string-append "thin-ice at: " at " has no open cell above it (a floor: it is walked on)"))))))
@@ -682,7 +683,7 @@
                                (if (not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
                                    (add! (string-append "things: thin-ice at: " (datum->string a) " is not a cell of the grid") "things")
                                    (for-each (lambda (m) (add! (string-append "things: " m) "things"))
-                                             (thin-ice-placement-problems (roomfile-grid rf) (car a) (cadr a))))))
+                                             (thin-ice-placement-problems (roomfile-grid rf) (car a) (cadr a) region-sym)))))
                             ((and reg (not (memq (car t) (or (region-field reg 'roster) '()))))
                              (add! (string-append "things: " (symbol->string (car t)) " is not on "
                                                   (symbol->string region-sym) "'s roster")

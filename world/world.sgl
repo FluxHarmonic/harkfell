@@ -249,7 +249,7 @@
 ;; the bowl's floor, keyed to all four harmonics. Dark, no moths: the light
 ;; is the carried harmonics' orbs. Bounds overlap the Pipes' rectangle; a
 ;; room is checked against its own region's bounds, and every slot here is
-;; filled. The bed and its channels are SOUND's (underhum-bed: the
+;; filled (by the Pipes' rooms, Reedfen's x8y4 and its own). The bed and its channels are SOUND's (underhum-bed: the
 ;; fundamental, the chamber's resonance, the one drip, the drone); the
 ;; finale is triggered by SYSTEMS's news, so there are no moments here.
 (region underhum

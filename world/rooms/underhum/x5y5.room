@@ -20,5 +20,6 @@
    "                         "
    "#########################"
    "#########################")
-  things: ((slab at: (4 8)))
+  things: ((slab at: (4 8))
+           (mural at: (11 6) image: heart-ring))
   decor: none)

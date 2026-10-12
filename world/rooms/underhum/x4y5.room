@@ -21,4 +21,5 @@
    "#                        "
    "#        #++#############"
    "#########################")
+  things: ((mural at: (10 9) image: drip-ring))
   decor: none)
