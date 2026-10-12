@@ -1493,14 +1493,33 @@
     ;; column and floor in room px, as (harkfell pipes look) draws a drip;
     ;; the seconds the body has stood still; whether the body is within two
     ;; tiles of it.
+    ;; With the stillness door that listens at the drip ((harkfell gates):
+    ;; stone-still, stone-listen, stone-listening), the picture runs on the
+    ;; door's own clock and radius, the clock the sound's climb uses, so the
+    ;; rings land on the notes: still-s is its listening seconds while shut,
+    ;; 5 plus the seconds since it began to sink while sinking, and 'open
+    ;; once open; near? is the door's own test (the body's centre within its
+    ;; radius of the drip). Without one, world-still and a box round the drip.
     (define (door-drips w rm ox oy)
       (let* ((b (world-body w))
              (c (body-center b HARKFELL-FEEL))
              (bx (- (car c) ox)) (by (- (cdr c) oy)))
         (map (lambda (cell)
-               (let ((x (+ 8 (* S (car cell)))) (base (+ 14 (* S (cdr cell)))))
-                 (list x base (/ (world-still w) 60.0)
-                       (and (< (abs (- bx x)) (* 2.5 S)) (< (abs (- by base)) (* 2 S))))))
+               (let* ((x (+ 8 (* S (car cell)))) (base (+ 14 (* S (cdr cell))))
+                      (g (global-tile rm (car cell) (cdr cell)))
+                      (st (find (lambda (s) (and (stone-still s) (equal? (stone-listen s) g)))
+                                (world-stones w))))
+                 (if st
+                     (let ((dx (- (car c) (+ (* S (car g)) (/ S 2.0))))
+                           (dy (- (cdr c) (+ (* S (cdr g)) (/ S 2.0)))))
+                       (list x base
+                             (case (stone-state st)
+                               ((open) 'open)
+                               ((sinking) (+ (stone-still st) (/ (stone-t st) 60.0)))
+                               (else (/ (stone-listening st) 60.0)))
+                             (<= (sqrt (+ (* dx dx) (* dy dy))) (stone-radius st))))
+                     (let ((near (and (< (abs (- bx x)) (* 2.5 S)) (< (abs (- by base)) (* 2 S)))))
+                       (list x base (if near (/ (world-still w) 60.0) 0.0) near)))))
              (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))))
 
     (define (draw-play w)

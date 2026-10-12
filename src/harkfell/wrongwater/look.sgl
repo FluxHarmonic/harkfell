@@ -457,13 +457,17 @@
 
     ;; still: seconds the body has stood at rest; near?: within two tiles.
     ;; -> one of (rise PERIOD) (hang RINGS-AGES) (fall AGE)
+    ;; still may also be 'open: the door has opened, and the drip falls the
+    ;; right way for good. Once the door decides (5 s, or open) its state
+    ;; wins over where the body is.
     (define (drip-state still near?)
-      (cond ((not near?) (list 'rise 180))
+      (cond ((eq? still 'open) (list 'down))
+            ((>= still DRIP-OPEN-S) (list 'fall (- still DRIP-OPEN-S)))
+            ((not near?) (list 'rise 180))
             ((< still 0.25) (list 'rise 300))
-            ((< still DRIP-OPEN-S)
+            (else
              (list 'hang (map (lambda (at) (- still at))
-                              (filter (lambda (at) (<= at still)) DRIP-CLIMB-AT))))
-            (else (list 'fall (- still DRIP-OPEN-S)))))
+                              (filter (lambda (at) (<= at still)) DRIP-CLIMB-AT))))))
 
     ;; How far a rising drop is above its base: the old 3 s rise (period
     ;; 180), or near you a slower one that hangs at the top before it goes.
@@ -502,6 +506,14 @@
                                          (+ y 1 (pixel (* rad (sin a)))) 1 1)))
                          (ring (+ i 1)))))))
                (cadr st))))
+          ((down)
+           ;; the door open: now and then a drop falls the right way, from
+           ;; the stain into the crack, quietly
+           (let* ((u (modulo t 120))
+                  (y (+ (- base 29) (quotient (* u u) 120))))
+             (when (< y (+ base 16))
+               (slot-rect! 'water x y 1 2)
+               (slot-rect! 'ground-4 x (+ y 1) 1 1))))
           ((fall)
            ;; the right way down: into the crack, then gone
            (let* ((age (cadr st))

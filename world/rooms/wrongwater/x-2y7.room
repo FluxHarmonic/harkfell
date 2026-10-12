@@ -8,7 +8,7 @@
   light: 0.6
   grid:
   ("############### #########"
-   "###############+#~~~~~###"
+   "###############o#~~~~~###"
    "####    ####    #~~~~~# #"
    "###                     #"
    "##                      #"
@@ -18,14 +18,15 @@
    "#                        "
    "##%  %###################"
    "##%  %###################")
+  things: ((ring-stone at: (15 1) overtone: 7 still: 5 radius: 2 listen: (glasswood -2 6 15 9)))
   decor: auto)
 ;; The crack under the Ice Well's rising drip comes in at (15,0), one cell
 ;; wide. The drip door sits at its foot, (15,1), inside this room, off the
 ;; seam (a shut door is solid; a solid cell against an open one fails the
-;; seam check). STUB until SYSTEMS lands the stillness door
-;; (tasks/harkfell-depths-systems): (15,1) is a + (air drawn as rock), so the
-;; door is open in every carry set, which is what the checker assumes for
-;; the real door. The landing (row 8) is seven rows under the door: the
+;; seam check). It is the stillness door (tasks/harkfell-depths-systems):
+;; stand still within two tiles of the Ice Well's drip (15,9) for five
+;; seconds and it sinks. The checker treats it as open in every carry set.
+;; The landing (row 8) is seven rows under the door: the
 ;; crack cannot be reached again from here. A small lake hangs in a ceiling
 ;; pocket east of the crack (17-21, rows 1-2), out of every jump's reach: a
 ;; picture. East to the Hanging Tarn (rows 7-8); down the rough shaft (3-4)
