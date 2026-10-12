@@ -172,19 +172,20 @@ answers, and the homeward wind blows west through the arch and on over Q
 (`(air-field ... kind: homeward gate: (C R))`, a hold-up and a westward
 push that blow only while the gate cell is open, so carry gates it as it
 gates the stone). It carries a glider to the homeward shaft, columns 1-3
-down through Q and K beside the cliff, here two tiles thick, to a niche
-cut into it in K, roofed by the cliff with a rock sill at its mouth: a
-covered entrance like the Hollow's Old Cut. A second rose stone is the
-niche's floor (1,9); you drop onto the sill, step in, the stone opens, and
-you fall through the hole under it into E and onto E's chute and A, then
-the launch column home. The shaft is there before H5 too, marked by seeds
-drifting down it and a faint light (the way home reads without the
-wind), but the shut stone seals it: from E the hole under the stone is
-the only cell that leads up, so no wall kick climbs it (SYSTEMS' replay
-found that reverse route, E->K->Q without H5, when the shaft was open;
-David asked for the stone to sit in the rock, not float).
+down through Q and K beside the cliff, here two tiles thick, onto a rock
+mass that fills K's west side. Under its thick roof a low alcove is cut,
+and a second rose stone stands as the door at its mouth, at floor level,
+a covered entrance like the Hollow's Old Cut, its alcove in shadow. You
+land on the mass, walk off, come down to the door, it opens, and you
+walk in and fall through the hole inside into E and onto E's chute and
+A, then the launch column home. The shaft is there before H5 too, marked
+by seeds drifting down it and a faint light (the way home reads without
+the wind), but the shut door seals it: from E the hole leads only into
+the alcove, so no wall kick climbs past it (SYSTEMS' replay found that
+reverse route, E->K->Q without H5, when the shaft was open; David chose
+this door over a niche in the cliff and a shelf).
 test/test-cloudstair-homeward.sgl rides it with and without H5, floods
-the niche, and replays that reverse route.
+the alcove, and replays that reverse route.
 
 New room things:
 
