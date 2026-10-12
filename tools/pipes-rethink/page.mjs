@@ -116,8 +116,9 @@ ${sections.map((s) => `<h2 id="${s.id}">${esc(s.title)}</h2>${s.body.map((p) => 
 </html>`;
 // the hostable page: index.html and mono 128 kbps MP3s (low-bandwidth mode), in DIR/page
 const pageDir = path.join(dir, 'page');
+fs.rmSync(pageDir, { recursive: true, force: true });   // nothing stale survives
 fs.mkdirSync(pageDir, { recursive: true });
-for (const n of Object.keys(manifest)) {
+for (const n of sections.flatMap((x) => clips(x.id).map(([c]) => c))) {
   const r = spawnSync('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-i', path.join(dir, n + '.wav'), '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '128k', path.join(pageDir, n + '.mp3')], { encoding: 'utf8' });
   if (r.status !== 0) throw Error('mp3 encode failed for ' + n + ': ' + r.stderr);
 }
