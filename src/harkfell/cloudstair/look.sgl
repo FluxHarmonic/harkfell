@@ -672,13 +672,13 @@
                   (streak (+ i 1)))))))
         (room-air-fields rm)))
 
-    ;; The homeward shaft (Q, K and E, columns 1-3; in K down to the shelf
-    ;; holding its rose stone): seeds drifting slowly
+    ;; The homeward shaft (Q and K, columns 2-3 beside the thickened cliff,
+    ;; then E under the stone's niche): seeds drifting slowly
     ;; down it, there before H5 too, so the way home reads.
     (define (homeward-shaft rm)
-      (cond ((and (= (room-x rm) 7) (= (room-y rm) -2)) (list 1 3 5 10))
-            ((and (= (room-x rm) 7) (= (room-y rm) -1)) (list 1 3 0 8))     ; down to the shelf and its rose stone (row 9)
-            ((and (= (room-x rm) 7) (= (room-y rm) 0)) (list 1 3 0 9))      ; on down from the gap under K's shelf
+      (cond ((and (= (room-x rm) 7) (= (room-y rm) -2)) (list 2 3 5 10))
+            ((and (= (room-x rm) 7) (= (room-y rm) -1)) (list 2 3 0 8))     ; down past the niche to its threshold
+            ((and (= (room-x rm) 7) (= (room-y rm) 0)) (list 1 3 1 9))      ; on down from the hole under the stone
             (else #f)))
 
     (define (draw-homeward-tells! rm t)

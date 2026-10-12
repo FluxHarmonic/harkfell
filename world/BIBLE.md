@@ -172,18 +172,19 @@ answers, and the homeward wind blows west through the arch and on over Q
 (`(air-field ... kind: homeward gate: (C R))`, a hold-up and a westward
 push that blow only while the gate cell is open, so carry gates it as it
 gates the stone). It carries a glider to the homeward shaft, columns 1-3
-down through Q and K onto a small rock shelf jutting from K's west wall
-(row 9), a second rose stone set in it like a trapdoor (1,9) with two
-tiles of lip and open sky beyond. The stone opens as you come down onto
-it, and you drop through the gap under the shelf into E and onto E's
-chute and A, then the launch column home. The shaft is there before H5
-too, marked by seeds drifting down it and a faint light (the way home
-reads without the wind), but the shut stone seals it: the gap under the
-shelf is one tile high and closed to the east, so no wall kick climbs it
-from E (SYSTEMS' replay found that reverse route, E->K->Q without H5,
-when the shaft was open; David asked for the stone to sit in rock rather
-than float). test/test-cloudstair-homeward.sgl rides it with and without
-H5, floods the shelf, and replays that reverse route.
+down through Q and K beside the cliff, here two tiles thick, to a niche
+cut into it in K, roofed by the cliff with a rock sill at its mouth: a
+covered entrance like the Hollow's Old Cut. A second rose stone is the
+niche's floor (1,9); you drop onto the sill, step in, the stone opens, and
+you fall through the hole under it into E and onto E's chute and A, then
+the launch column home. The shaft is there before H5 too, marked by seeds
+drifting down it and a faint light (the way home reads without the
+wind), but the shut stone seals it: from E the hole under the stone is
+the only cell that leads up, so no wall kick climbs it (SYSTEMS' replay
+found that reverse route, E->K->Q without H5, when the shaft was open;
+David asked for the stone to sit in the rock, not float).
+test/test-cloudstair-homeward.sgl rides it with and without H5, floods
+the niche, and replays that reverse route.
 
 New room things:
 
