@@ -32,7 +32,7 @@ const sections = [
     id: 'pa', title: 'A · Breath into song',
     body: [
       'What changes: the breath stays the lead voice, but it sings an eight-bar tune an octave higher (E5 C5 A4, G4 A4 C5, B♭4 A4, then an answer that comes down to E4 and back to A). A soft pitched core under the breath makes each note clear. A pad and a low line move under it through Am, F, C, Gm and Dm: the finale\'s pad and the low line of the H3 and H5 homecomings. The drips echo in time, on the eighth notes.',
-      'The bed keeps its notes and timing. Its breath is narrower, so it reads as a pitch rather than a hiss, and it sits {pa-bed-b} LUFS in B against {now-bed-b} now.',
+      'The bed keeps its notes and timing. Its breath is narrower, so it reads as a pitch rather than a hiss, and it sits at {pa-bed-b} LUFS in B against {now-bed-b} now.',
       'Why: the smallest step from what you have. It keeps the falling E, C, A you already know, so the finale\'s Pipes verse only moves up an octave and gains its answering phrase.',
       'The cost: a breath through stone is still a noisy voice, so of the three this is the least clear tune and the most austere. The finding tone stands {tone:pa-moment-r} dB above this mix in its own band (now: {tone:now-moment-r}).',
     ],
@@ -82,13 +82,13 @@ for (const s of sections) {
 }
 fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 1));
 const esc = (s) => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-const fill = (s) => s.replace(/\{(tone:)?([\w-]+)\}/g, (m, t, k) => { if (!manifest[k]) throw Error('no figure ' + k); const v = t ? manifest[k].tone_band_db : manifest[k].lufs; if (v === undefined || v === null) throw Error('no value ' + m); return String(v).replace('-', '−'); });
+const fill = (s) => s.replace(/\{(tone:)?([\w-]+)\}/g, (m, t, k) => { if (!manifest[k]) throw Error('no figure ' + k); const v = t ? manifest[k].tone_band_db : manifest[k].lufs; if (v === undefined || v === null) throw Error('no value ' + m); return v.toFixed(1).replace('-', '−'); });
 const clipText = {
   hook: { now: 'The Long Pipe\'s moment alone: E4, C4, A3 on the breath, two drips. This is what the finale\'s Pipes verse quotes now.', pa: 'The breath and its core, alone, with two drips: the first four bars.', pb: 'The leap and the fall to C4 on the flue and its octave rank, with a drip.', pc: 'The tune and its two returns, with the water clock.' },
   'moment-r': 'Over R\'s bed, ducked 6 dB as in play, carrying H2, with H4\'s finding tone one room away (without the director\'s distance low-pass, so the tone is a little brighter here than in play).',
   'bed-b': 'Near the way in: wind 0.5, pipes 0.9.', 'bed-n': 'The wet room: water 0.8, pipes 0.4.',
 };
-const meta = (n) => { const m = manifest[n]; return `${m.seconds} s · ${String(m.lufs).replace('-', '−')} LUFS · peak ${String(m.peak_dbfs).replace('-', '−')} dBFS${m.tone_band_db !== undefined ? ` · the finding tone stands ${m.tone_band_db} dB above this mix in its own band` : ''}`; };
+const meta = (n) => { const m = manifest[n]; return `${m.seconds} s · ${m.lufs.toFixed(1).replace('-', '−')} LUFS · peak ${m.peak_dbfs.toFixed(1).replace('-', '−')} dBFS${m.tone_band_db !== undefined ? ` · the finding tone stands ${m.tone_band_db} dB above this mix in its own band` : ''}`; };
 const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>The Pipes · sound rethink</title>
 <style>
