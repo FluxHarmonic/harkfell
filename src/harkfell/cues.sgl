@@ -47,4 +47,8 @@
       (map thing-at (room-things-of rm 'upward-drip)))
 
     (define (room-standing-stones rm)
-      (map thing-at (room-things-of rm 'standing-stone)))))
+      (map thing-at
+           (append (room-things-of rm 'standing-stone)
+                   (if (eq? (room-region rm) 'underhum)
+                       (room-things-of rm 'gallery-stone)
+                       '()))))))

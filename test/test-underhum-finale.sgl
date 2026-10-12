@@ -7,6 +7,7 @@
         (harkfell content)
         (harkfell source)
         (harkfell check)
+        (harkfell depths reach)
         (harkfell feel)
         (harkfell world)
         (engine worldmap)
@@ -23,13 +24,16 @@
   (load-content
     (map (lambda (e)
            (cons (car e)
-                 (string-replace (string-replace (cdr e) "stonefen" "underhum") "(0 0)" "(7 5)")))
+                 (string-replace
+                   (string-replace (string-replace (cdr e) "stonefen" "underhum") "(0 0)" "(7 5)")
+                   "things: (" "things: ((gallery-stone at: (3 8)) (listening-place at: (4 8)) ")))
          (read-world-source "test/fixtures/worlds/stone"))))
 (define (world-wait w ticks)
   (if (= ticks 0) w (world-wait (world-tick w NOTHING) (- ticks 1))))
 
 (test-group "Underhum: actual world integration"
   (test "the body keeps control and the world emits fuse on its 120th still tick"
+    (assert-equal '() (content-problems CHAMBER))
     (let* ((tm (worldmap-tiles (content-map CHAMBER)))
            (w (world-populate
                 (world-at (content-map CHAMBER) (cell-body tm HARKFELL-FEEL 2 8))
@@ -41,7 +45,11 @@
       (assert-equal 'play (world-phase after))
       (assert-equal '(fuse)
         (map cadr (filter (lambda (item) (eq? (car item) 'finale)) (world-news after))))
-      (assert-true (finale-lit (world-ending (world-finale-mark after 'fundamental)))))))
+      (assert-equal '() (filter (lambda (item) (eq? (car item) 'chord)) (world-news after)))
+      (let ((lit (world-finale-mark after 'fundamental)))
+        (assert-true (finale-lit (world-ending lit)))
+        (assert-true (pair? (filter (lambda (item) (eq? (car item) 'chord))
+                                    (world-news (world-wait lit 1)))))))))
 
 (test-group "Underhum: chamber trigger paths"
   (test "119 still ticks do not trigger; 120 do"
@@ -111,6 +119,15 @@
 (define BODY (cell-body TM HARKFELL-FEEL (car CELL) (cdr CELL)))
 (define (saved ended with coda active)
   (save-datum CT BODY FULL (content-stones CT) '() 1.0 #f #f '() ended with coda active))
+
+(test-group "depths: diagnostic setup refuses missing regions"
+  (test "absent rooms cannot silently pass a regional check"
+    (for-each
+      (lambda (region)
+        (assert-true (guard (failure (#t #t))
+                       (depths-region-content CT region)
+                       #f)))
+      '(underhum wrongwater))))
 
 (test-group "Underhum: forgiving save state"
   (test "old saves restore as not ended"
