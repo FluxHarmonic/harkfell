@@ -75,7 +75,8 @@
                  (if (and (timed-wait? node next) (not (shelter? node)))
                      (reverse (cons node rev))
                      (run next (cdr script) (cons node rev))))))))
-        ;; Rotation keys identify certificates, never simulated arrivals.
+        ;; Keys with tau removed describe poses for waiting certificates,
+        ;; never simulated arrivals.
         ;; Hidden fields and product state must remain identical on every
         ;; real no-input tick before a waiting rest can share a continuation.
         (define (rotation-key node)
@@ -267,11 +268,11 @@
                            (edges
                              (list-sort
                                (lambda (a b)
-                                 (< (vector-ref dist (cell-index tm (caar a) (cdar a)))
-                                    (vector-ref dist (cell-index tm (caar b) (cdar b)))))
-                               (filter (lambda (edge)
-                                         (vector-ref dist (cell-index tm (caar edge) (cdar edge))))
-                                       (graph-edges-from graph cell)))))
+                                 (< (or (vector-ref dist (cell-index tm (caar a) (cdar a)))
+                                        100000)
+                                    (or (vector-ref dist (cell-index tm (caar b) (cdar b)))
+                                        100000)))
+                               (graph-edges-from graph cell))))
                       (let try ((edges edges))
                         (and (not halted) (pair? edges)
                              (or
@@ -287,21 +288,16 @@
                                                  (observe (replay stage (witness-script (cdar edges))) target)
                                                  (+ depth 1)
                                                  (lambda (end)
-                                                   (let* ((next (cell-of end))
-                                                          (d (and next
-                                                                   (vector-ref dist
-                                                                     (cell-index tm (car next) (cdr next)))))
-                                                          (here (vector-ref dist
-                                                                  (cell-index tm (car cell) (cdr cell))))
-                                                          (changed
-                                                            (or (not (equal? (timed-node-data node)
-                                                                             (timed-node-data end)))
-                                                                (not (eq? (body-down (timed-node-body node))
-                                                                          (body-down (timed-node-body end)))))))
-                                                     (and next
-                                                          (or changed
-                                                              (and d here
-                                                                   (not (equal? next cell))))))))))
+                                                   ;; Repositioning and hidden body changes
+                                                   ;; are genuine progress even within this
+                                                   ;; cell. Frozen labels never rule them out.
+                                                   ;; Clock-only changes continue unless a real
+                                                   ;; invariant waiting cycle covers that phase.
+                                                   (and (cell-of end)
+                                                        (not (or (equal? (timed-key node) (timed-key end))
+                                                                 (and (equal? (rotation-key node)
+                                                                              (rotation-key end))
+                                                                      (invariant-rest? node)))))))))
                                         (depart (cdr phases)))))
                                (try (cdr edges)))))))))
             (if (equal? (cell-of start) target)
