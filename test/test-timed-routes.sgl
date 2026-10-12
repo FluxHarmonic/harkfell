@@ -296,3 +296,58 @@
         (assert-true arrival)
         (when arrival
           (assert-equal (timed-key fresh) (timed-key arrival)))))))
+
+(test-group "timed routes: useful detours"
+  (test "nearby cyclic states cannot starve a real farther continuation"
+    (let* ((f HARKFELL-FEEL)
+           (tm
+             (let fill ((c 0) (tm (make-tilemap 16 4 16)))
+               (if (= c 16)
+                   (let walls ((r 0) (tm tm))
+                     (if (= r 3)
+                         tm
+                         (walls (+ r 1)
+                           (tilemap-set (tilemap-set tm 0 r 'solid) 15 r 'solid))))
+                   (fill (+ c 1) (tilemap-set tm c 3 'solid)))))
+           (start (timed-node body: (body (stand-body tm f 6 2) down: #t tau: 359)
+                              data: '(2 4)))
+           (advance
+             (lambda (node in)
+               (timed-node node body: (body-step (timed-node-body node) in tm f))))
+           (near-script (append (make-list 30 (intent h: 1)) (make-list 30 NO-INTENT)))
+           (back-script (append (make-list 30 (intent h: -1)) (make-list 30 NO-INTENT)))
+           (detour-script (append (make-list 140 (intent h: -1)) (make-list 30 NO-INTENT)))
+           (finish-script (append (make-list 140 (intent h: 1)) (make-list 30 NO-INTENT)))
+           (near (car (reverse (timed-run advance start near-script))))
+           (detour (car (reverse (timed-run advance start detour-script))))
+           (fresh (car (reverse (timed-run advance detour finish-script))))
+           (near-cell (rest-cell tm f (timed-node-body near)))
+           (detour-cell (rest-cell tm f (timed-node-body detour)))
+           (goal (rest-cell tm f (timed-node-body fresh)))
+           (edges (make-vector 64 '())))
+      (define (put from target script)
+        (let ((i (cell-index tm (car from) (cdr from))))
+          (vector-set! edges i
+            (cons (cons (cell-index tm (car target) (cdr target))
+                        (witness from: from script: script))
+                  (vector-ref edges i)))))
+      (put '(6 . 2) detour-cell detour-script)
+      (put '(6 . 2) near-cell near-script)
+      (put near-cell '(6 . 2) back-script)
+      (put near-cell goal (list NO-INTENT))
+      (put detour-cell goal finish-script)
+      (let* ((incomplete #f)
+             (graph (reach-graph tm: tm cells: (standable-cells tm) edges: edges))
+             (wait (timed-waiter tm f advance))
+             (route
+               (timed-route-finder advance (lambda (carry) tm) f
+                 (lambda (node) graph)
+                 (lambda (node) (and (wait node (body-tau (timed-node-body node))) #t))
+                 wait 12 (lambda (node) #t) (lambda () (set! incomplete #t))))
+             (arrival (route start goal)))
+        (assert-true (< (abs (- (car near-cell) (car goal)))
+                        (abs (- (car detour-cell) (car goal)))))
+        (assert-true arrival)
+        (assert-false incomplete)
+        (when arrival
+          (assert-equal goal (rest-cell tm f (timed-node-body arrival))))))))
