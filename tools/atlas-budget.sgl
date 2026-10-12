@@ -50,6 +50,17 @@
                     ((and ready? (>= after 30))
                      (display "ATLAS-BUDGET OK rooms ") (display (length rooms))
                      (display " frames ") (display frame)
-                     (display " most-draws ") (display (max most draws)) (newline))
+                     (display " most-draws ") (display (max most draws)) (newline)
+                     ;; The samplers left: 1 x 1 targets (one sampler each,
+                     ;; sigil-graphics' native_make_render_target), one at a
+                     ;; time, a marker before each; sokol logs
+                     ;; SAMPLER_POOL_EXHAUSTED at the first that finds none.
+                     ;; None is drawn, so nothing aborts; the process ends here.
+                     (let probe ((k 1))
+                       (when (<= k 70)
+                         (display "ATLAS-SAMPLERS creating ") (display k) (newline)
+                         (flush-output-port (current-output-port))
+                         (make-render-target 1 1 'nearest)
+                         (probe (+ k 1)))))
                     (else (loop (+ frame 1) (if ready? (+ after 1) 0) (max most draws)))))))
         (flush-output-port (current-output-port))))))

@@ -60,9 +60,14 @@ for leg in world "world+40"; do
     timeout 900 scripts/dev $H/bin/harkfell-test --no-strict tools/atlas-budget.sgl > "$T/$leg.log" 2>&1
   grep -a '^ATLAS-BUDGET world' "$T/$leg.log" | sed "s|$T/||"
   if grep -aq '^ATLAS-BUDGET OK' "$T/$leg.log"; then
-    echo "PASS $leg: $(grep -a '^ATLAS-BUDGET OK' "$T/$leg.log")"
+    # samplers in use once the overview is cached: 64 less the free ones
+    # (the markers before the first SAMPLER_POOL_EXHAUSTED); the bake's own
+    # peak adds up to 9 transient targets (8 rooms, the page being copied)
+    used=$(awk '/^ATLAS-SAMPLERS creating/ { k = $3 } /SAMPLER_POOL_EXHAUSTED/ && k { print 65 - k; exit }' "$T/$leg.log")
+    echo "PASS $leg: $(grep -a '^ATLAS-BUDGET OK' "$T/$leg.log") samplers-in-use ${used:-unmeasured} of 64"
   elif grep -aq 'APPENDBUF\|panic\|ABORTING' "$T/$leg.log"; then
     echo "FAIL $leg: a frame overflowed: $(grep -a 'VALIDATE_[A-Z_]*' -o "$T/$leg.log" | head -1)"; rc=1
+    grep -aq SAMPLER_POOL_EXHAUSTED "$T/$leg.log" && echo "  (sokol's 64 samplers ran out: expected until sigil-graphics shares samplers, BLOCKED-ON t-253c7c)"
   else
     echo "FAIL $leg: no OK line (setup or load failure?):"; grep -a "rror\|TIMED-OUT" "$T/$leg.log" | head -5; rc=1
   fi
