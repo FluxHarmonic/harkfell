@@ -58,6 +58,13 @@ for (const [, , tracks] of sections) for (const [n] of tracks) {
   const P = (o.match(/Peak:\s+(-?[\d.]+) dBFS/g) || []).pop();
   const secFile = path.join(dir, n + '.sections');
   const marks = fs.existsSync(secFile) ? fs.readFileSync(secFile, 'utf8').trim().split('\n').map((l) => { const [t, s] = l.split(' '); return { t: +t, s }; }).filter((m) => m.s !== '#f') : [];
+  // the page plays an MP3 (VBR about 190 kbit/s): David listens over a phone
+  // hotspot, and the WAVs are about 300 MB. The figures are the WAV's.
+  const mp3 = path.join(dir, n + '.mp3');
+  if (!fs.existsSync(mp3) || fs.statSync(mp3).mtimeMs < fs.statSync(f).mtimeMs) {
+    const r = spawnSync('ffmpeg', ['-nostats', '-hide_banner', '-y', '-i', f, '-codec:a', 'libmp3lame', '-q:a', '2', mp3], { encoding: 'utf8' });
+    if (r.status !== 0) throw Error('mp3 failed for ' + n + ': ' + String(r.stderr).slice(-300));
+  }
   manifest.push({ name: n, seconds: +(frames / 32000).toFixed(2), lufs: I ? +I.match(/-?[\d.]+/)[0] : null, peak_dbfs: P ? +P.match(/-?[\d.]+/)[0] : null, sections: marks });
 }
 fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 1));
@@ -76,9 +83,9 @@ h3{font-size:1rem;margin:0}p{margin:.25rem 0}.m{color:#7f8590;font-size:.8rem}au
 li{margin:.3rem 0;color:#b9bcc4}
 </style>
 <h1>The Underhum · the ending's sound</h1>
-<p class="lede">The finale: one song in D at 72 bpm made of the world's moments, with the Hollow's homecoming as its chorus and a verse for each region in the order the climb passes them (Reedfen, Glasswood, the Pipes, Cloudstair). Synthesised by the game's own instruments through a harness at the 0.22.10 lock. Try a steady volume first, then a phone speaker and laptop speakers.</p>
+<p class="lede">The finale: one song in D at 72 bpm made of the world's moments, with the Hollow's homecoming as its chorus and a verse for each region in the order the climb passes them (Reedfen, Glasswood, the Pipes, Cloudstair). Synthesised by the game's own instruments through a harness at the 0.22.10 lock. The players stream MP3s (about 190 kbit/s); the figures under each are measured on the full-quality WAV, which sits beside it. Try a steady volume first, then a phone speaker and laptop speakers.</p>
 <p class="lede">What this cannot show: the orbs, the white stone and the credits over the climb (those are the look's), your own timing in the rooms, and the phone's performance (the ending is two players, 14 voices, with the bed closed).</p>
-${sections.map(([t, d, tracks]) => `<h2>${esc(t)}</h2>${d ? `<p class="sec">${esc(d)}</p>` : ''}${tracks.map(([n, title, desc]) => `<article><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}<audio id="${n}" controls preload="none" src="${n}.wav"></audio>${chapters(n)}<p class="m">${meta[n].seconds} s · ${meta[n].lufs ?? '-'} LUFS · peak ${meta[n].peak_dbfs ?? '-'} dBFS</p></article>`).join('')}`).join('')}
+${sections.map(([t, d, tracks]) => `<h2>${esc(t)}</h2>${d ? `<p class="sec">${esc(d)}</p>` : ''}${tracks.map(([n, title, desc]) => `<article><h3>${esc(title)}</h3>${desc ? `<p>${esc(desc)}</p>` : ''}<audio id="${n}" controls preload="none" src="${n}.mp3"></audio>${chapters(n)}<p class="m">${meta[n].seconds} s · ${meta[n].lufs ?? '-'} LUFS · peak ${meta[n].peak_dbfs ?? '-'} dBFS</p></article>`).join('')}`).join('')}
 <h2>For you to decide</h2>
 <ul>
 <li><b>The credits.</b> Your rulings don't pick one of the bible's three options, so the climb is timed for option B ("How it was made", 9 cards, recommended). A ("Short and plain", 6 cards) and C ("Thanks first", 7 cards, with names only you can fill in) fit the same music. The cards start with verse 1 and run through home and close, about three minutes, so each can hold 8 to 10 s.</li>
