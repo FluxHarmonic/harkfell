@@ -70,6 +70,7 @@
           ;; the Underhum's ending (harkfell-underhum-bible; (harkfell finale))
           sound-finale-fuse! sound-finale-rise! sound-finale-home! sound-coda! sound-finale-section sound-finale-time
           sound-finale-active? sound-finale-sounding sound-finale-flags sound-finale-restore! sound-finale-walk
+          sound-finale-players sound-bed-name
           place-listen FINALE-ID FINALE-DRONE-ID FINALE-TUNE FINALE-TUNE-H7 CODA-TUNE AFTER-BED CHAMBER-KEY BOWL-KEY
           LISTEN-ID heart-stone? FUSE-BED-OUT-S DAWN-IN-S FINALE-LEVELS
           sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
@@ -396,6 +397,8 @@
 
     ;; The bed as last opened (after strip-uncarried): for the gates.
     (define *bed-opened* #f)
+    (define *bed-name* #f)         ; the bed's tune as last opened (the after-ending bed is another)
+    (define (sound-bed-name) *bed-name*)
     (define (sound-bed-notes ch)
       (if *bed-opened*
           (apply + (map (lambda (p) (length (filter (lambda (c) (and (eqv? (cell-channel c) ch) (number? (cell-note c))))
@@ -439,6 +442,7 @@
                         (opened (if quick? (quick-attack stripped fresh) stripped))
                         (p (open-tune-player opened (mixer-rate) loop: #t)))
                    (set! *bed-opened* opened)
+                   (set! *bed-name* name)
                    (set! *bed-carried* carry)
                    p)))))
 
@@ -2239,6 +2243,8 @@
       (let ((st *fin*))
         (and st (cons (cond ((fin-dawn st) 'dawn) ((eq? (fin-heard st) 'calm) 'fuse) (else (fin-heard st)))
                       (max 0.0 (- *now* (or (fin-dawn st) (fin-heard-at st))))))))
+    ;; The ending's players, (piece . drone), or #f: for the gates.
+    (define (sound-finale-players) (and *fin* (cons (fin-piece *fin*) (fin-drone *fin*))))
     ;; The walk's section, for the gates.
     (define (sound-finale-walk) (and *fin* (fin-walk *fin*)))
     ;; Seconds since the fuse as HEARD, on the drone's own clock: the orbs'
