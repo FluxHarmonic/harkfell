@@ -44,6 +44,7 @@
   (import (sigil struct)
           (sigil list)
           (sigil math)
+          (only (sigil string) string-split)
           (engine tilemap)
           (engine body)
           (engine air)
