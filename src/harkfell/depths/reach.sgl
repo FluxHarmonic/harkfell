@@ -53,6 +53,25 @@
                     (map (lambda (carry) (list (cons carry #f) (cons carry #t)))
                          '((2 3 4) (2 3 4 5) (2 3 4 7) (2 3 4 5 7)))))))
 
+    ;; Revision 1's cistern is reached by the glide, and its one-way shaft
+    ;; returns through I's upper ledge. With no down these must stay outside
+    ;; the forward graph; they are not exemptions from checking traps.
+    (define (down-only-cells ct rooms tm)
+      (apply append
+        (map (lambda (p)
+               (let* ((rm (placed-data p))
+                      (x (room-x rm))
+                      (y (room-y rm)))
+                 (if (not (eq? (room-region rm) 'underhum))
+                     '()
+                     (filter
+                       (lambda (cell)
+                         (or (and (= y 7) (memv x '(7 8)))
+                             (and (= x 8) (= y 5)
+                                  (<= (cdr (global->local ct rm cell)) 2))))
+                       (room-standable-cells ct rm tm)))))
+             rooms)))
+
     (define (depths-region-check source region profiles log)
       (let* ((ct (depths-region-content source region))
              (home (start-cell ct))
@@ -79,16 +98,20 @@
                    (seen? (lambda (v c) (vector-ref v (cell-index tm (car c) (cdr c)))))
                    (cells (apply append
                             (map (lambda (p) (room-standable-cells ct (placed-data p) tm)) rooms)))
+                   (requires-down (down-only-cells ct rooms tm))
                    (bad (filter (lambda (c)
-                                  (if admitted
-                                      (or (not (seen? fwd c)) (not (seen? back c)))
-                                      (seen? fwd c)))
+                                  (cond ((not admitted) (seen? fwd c))
+                                        ((and (not down) (member c requires-down))
+                                         (seen? fwd c))
+                                        (else
+                                         (or (not (seen? fwd c)) (not (seen? back c))))))
                                 cells))
                    (water-traps
                      (filter (lambda (w)
                                (not (find (lambda (c) (seen? back c)) (cdr w))))
                              (graph-waters graph))))
               (log (list region 'carry carry 'down down 'admitted (and admitted #t)
+                         'requires-down requires-down
                          'bad-cells bad 'water-traps (map car water-traps)
                          'stats (graph-stats graph)))
               (when (or (pair? bad) (pair? water-traps))
