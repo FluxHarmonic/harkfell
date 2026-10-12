@@ -105,3 +105,54 @@
     (for-each (lambda (region)
                 (assert-equal '() (place-tones (pickup-world region))))
               '(glasswood pipes hollow underhum))))
+
+(define HEART-CT
+  (load-content
+    (map (lambda (e)
+           (cons (car e)
+                 (string-replace (cdr e)
+                                 "(ring-stone at: (15 8) overtone: 2)"
+                                 "(ring-stone at: (15 8) overtone: 2 keys: (2 3 4 5))")))
+         (read-world-source "test/fixtures/worlds/stone"))))
+(define (heart-world carry ticks)
+  (let* ((tm (worldmap-tiles (content-map HEART-CT)))
+         (stones (content-stones HEART-CT))
+         (at (cell-centre tm (stone-cell (car stones))))
+         (w (world-populate
+              (world-at (content-map HEART-CT) (cell-body tm HARKFELL-FEEL 2 8))
+              stones '() carry)))
+    (let loop ((g (world-gates w)) (left ticks))
+      (if (= left 0)
+          (world w gates: g)
+          (loop (gates-step g at '(0 0 8 14) #t #t) (- left 1))))))
+
+(test-group "Underhum: heart identity stays at the sound boundary"
+  (test "shut and open tuples are tagged, while the world stays numeric"
+    (for-each
+      (lambda (ticks)
+        (let* ((w (heart-world '(2 3 4 5) ticks))
+               (s (car (world-stones w)))
+               (st (car (place-stones (world-place w HEART-CT)))))
+          (assert-equal 2 (stone-overtone s))
+          (assert-equal '(2 3 4 5) (stone-keys s))
+          (assert-equal 'heart (car st))
+          (assert-equal (stone-state s) (cadr st))
+          (assert-equal 4 (length st))))
+      '(0 1 41 89)))
+  (test "one full-set ring replaces its chord; sink and open keep the identity"
+    (let* ((w (heart-world '(2 3 4 5) 89))
+           (items (place-news (world-place w HEART-CT (gstate-news (world-gates w))))))
+      (assert-equal '(ring sink open) (map car items))
+      (assert-equal '(heart heart heart) (map cadr items))))
+  (test "partial carry produces a tagged near miss"
+    (let* ((w (heart-world '(2 4 5) 1))
+           (items (place-news (world-place w HEART-CT (gstate-news (world-gates w))))))
+      (assert-equal '(near-miss) (map car items))
+      (assert-equal 'heart (cadar items))))
+  (test "ordinary H2 and gallery chords retain their own identities"
+    (let* ((w (heart-world '() 0))
+           (news '((chord (2 3 4 5) 0.0 0.0) (ring 2 0.0 0.0)))
+           (items (place-news (world-place w HEART-CT news))))
+      (assert-equal '((chord (2 3 4 5)) (ring 2))
+                    (map (lambda (item) (list (car item) (cadr item))) items)))
+    (assert-equal 7 (caar (place-stones (pickup-world 'wrongwater))))))
