@@ -145,7 +145,12 @@
                     (if prior (cdr prior)
                         (timed-route-finder advance tiles-for HARKFELL-FEEL
                           (lambda (node) candidate) shelter? wait bound record!
-                          (lambda () (set! search-incomplete #t))))))
+                          (lambda () (set! search-incomplete #t))
+                          (lambda (node target expanded pending depth)
+                            (log (list 'regional-search 'target target
+                                       'expanded expanded 'pending pending 'depth depth
+                                       'at (cell-of node) 'carry (timed-node-data node)
+                                       'tau (body-tau (timed-node-body node)))))))))
               (unless prior (set! route-cache (cons (cons record! route) route-cache)))
               (route start target))))
         (for-each

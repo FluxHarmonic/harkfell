@@ -74,7 +74,13 @@
                     graph)))))
         (define route
           (timed-route-finder advance tiles-for HARKFELL-FEEL guide-for shelter? wait
-                              bound record! (lambda () (set! complete #f))))
+                              bound record! (lambda () (set! complete #f))
+            (lambda (node target expanded pending depth)
+              (log (list 'world-search 'target target
+                         'expanded expanded 'pending pending 'depth depth
+                         'at (cell-of node) 'carry (timed-node-data node)
+                         'down (body-down (timed-node-body node))
+                         'tau (body-tau (timed-node-body node)))))))
         (define (from-history target)
           (let try ((starts history))
             (and complete (pair? starts)

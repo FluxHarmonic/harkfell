@@ -46,7 +46,7 @@
     ;; record! receives genuine safe catches and nonhazard terminal states.
     ;; incomplete! is called at a hard bound; callers must never report PASS.
     (define (timed-route-finder advance tiles-for f guides shelter? wait
-                                bound record! incomplete!)
+                                bound record! incomplete! . reports)
       (let ((distance-cache '()) (invariant-rests #{}))
         (define (cell-of node)
           (and (still? node)
@@ -136,129 +136,176 @@
                     (reverse trace))
                   (list-sort (lambda (a b) (< (remaining a target) (remaining b target)))
                              (reverse choices))))))
+        ;; Frozen hop costs order scripts. The frontier uses real grid
+        ;; distance and path depth, so a misleading cheap hint cannot force
+        ;; repeated threshold passes before an actual nearby continuation.
+        ;; Optional reports receive actual node, target, count, pending, depth.
+        (define (report node target count pending depth)
+          (when (and (pair? reports)
+                     (or (= count 1) (= (modulo count 250) 0)))
+            ((car reports) node target count pending depth)))
         (lambda (start target)
-          (let ((seen #{}) (count 0) (halted #f)
-                (threshold 0) (next-threshold #f))
-            (define (score node depth)
+          (let ((queued #{}) (seen #{}) (count 0) (halted #f)
+                (heap (make-vector 64 #f)) (size 0) (serial 0))
+            (define (stop!)
+              (unless halted
+                (set! halted #t)
+                (incomplete!)))
+            (define (physical-distance node)
               (let ((cell (cell-of node)))
                 (if cell
-                    (let* ((graph (guides node)) (tm (graph-tm graph))
-                           (dist (distance-for graph target)))
-                      (+ depth (or (vector-ref dist
-                                    (cell-index tm (car cell) (cdr cell))) 0)))
-                    depth)))
-            (define (walk node depth)
+                    (+ (abs (- (car cell) (car target)))
+                       (abs (- (cdr cell) (cdr target))))
+                    100000)))
+            (define (before? a b)
+              (or (< (vector-ref a 2) (vector-ref b 2))
+                  (and (= (vector-ref a 2) (vector-ref b 2))
+                       (or (< (vector-ref a 3) (vector-ref b 3))
+                           (and (= (vector-ref a 3) (vector-ref b 3))
+                                (< (vector-ref a 4) (vector-ref b 4)))))))
+            (define (push! node depth)
+              (let* ((key (timed-key node))
+                     (prior (dict-ref queued key #f)))
+                (unless (and prior (<= prior depth))
+                  (cond
+                    ;; The expansion bound also limits frontier memory. Overflow
+                    ;; stays explicitly incomplete; it cannot supply a witness.
+                    ((or (> depth 2048) (>= size (* 8 (max 1 bound)))) (stop!))
+                    (else
+                     (set! queued (dict-set queued key depth))
+                     (when (= size (vector-length heap))
+                       (let ((larger (make-vector (* 2 size) #f)))
+                         (let copy ((i 0))
+                           (when (< i size)
+                             (vector-set! larger i (vector-ref heap i))
+                             (copy (+ i 1))))
+                         (set! heap larger)))
+                     (let* ((distance (physical-distance node))
+                            (entry (vector node depth (+ depth distance) distance serial)))
+                       (set! serial (+ serial 1))
+                       (let rise ((i size))
+                         (if (= i 0)
+                             (vector-set! heap i entry)
+                             (let* ((parent (quotient (- i 1) 2))
+                                    (above (vector-ref heap parent)))
+                               (if (before? entry above)
+                                   (begin
+                                     (vector-set! heap i above)
+                                     (rise parent))
+                                   (vector-set! heap i entry)))))
+                       (set! size (+ size 1))))))))
+            (define (pop!)
+              (let ((first (vector-ref heap 0))
+                    (last (vector-ref heap (- size 1))))
+                (set! size (- size 1))
+                (vector-set! heap size #f)
+                (when (> size 0)
+                  (let sink ((i 0))
+                    (let ((left (+ (* 2 i) 1)))
+                      (if (>= left size)
+                          (vector-set! heap i last)
+                          (let* ((right (+ left 1))
+                                 (child (if (and (< right size)
+                                                 (before? (vector-ref heap right)
+                                                          (vector-ref heap left)))
+                                            right left))
+                                 (below (vector-ref heap child)))
+                            (if (before? below last)
+                                (begin
+                                  (vector-set! heap i below)
+                                  (sink child))
+                                (vector-set! heap i last)))))))
+                first))
+            (define (resume nodes depth eligible?)
+              (let loop ((nodes nodes))
+                (and (not halted) (pair? nodes)
+                     (let ((next (car nodes)))
+                       (cond
+                         ((equal? (cell-of next) target) next)
+                         (else
+                          (when (eligible? next) (push! next depth))
+                          (loop (cdr nodes))))))))
+            (define (expand node depth)
               (let ((cell (cell-of node)))
-                (cond
-                  ((and cell (equal? cell target)) node)
-                  ((or halted (> depth 2048) (>= count bound))
-                   (unless halted
-                     (set! halted #t)
-                     (incomplete!))
-                   #f)
-                  ((> (score node depth) threshold)
-                   (let ((cut (score node depth)))
-                     (set! next-threshold
-                           (if next-threshold (min next-threshold cut) cut)))
-                   #f)
-                  ((and (dict-contains? seen (timed-key node))
-                        (<= (dict-ref seen (timed-key node)) depth))
-                   #f)
-                  (else
-                   (set! seen (dict-set seen (timed-key node) depth))
-                   (set! count (+ count 1))
-                   (if (not cell)
-                       (let recover
-                         ((scripts
-                           (cons (make-list 360 NO-INTENT)
-                             (append
-                               (apply append
-                                 (map (lambda (h)
-                                        (map (lambda (held)
-                                               (append
-                                                 (if held (list (intent h: h jump: #t press: #t)) '())
-                                                 (make-list 120 (intent h: h jump: held))
-                                                 (make-list 180 NO-INTENT)))
-                                             '(#f #t))) '(-1 1)))
-                               (map (lambda (v)
-                                      (append (make-list 120 (intent v: v))
-                                              (make-list 180 NO-INTENT))) '(-1 1))))))
-                         (and (not halted) (pair? scripts)
-                              (or
-                                (let resume ((nodes (observe (replay node (car scripts)) target)))
-                                  (and (not halted) (pair? nodes)
-                                       (or (and (still? (car nodes))
-                                                (walk (car nodes) (+ depth 1)))
-                                           (resume (cdr nodes)))))
-                                (recover (cdr scripts)))))
-                       (let* ((graph (guides node)) (tm (graph-tm graph))
-                              (dist (distance-for graph target))
-                              (edges
-                                (list-sort
-                                  (lambda (a b)
-                                    (< (vector-ref dist (cell-index tm (caar a) (cdar a)))
-                                       (vector-ref dist (cell-index tm (caar b) (cdar b)))))
-                                  (filter (lambda (e)
-                                            (vector-ref dist (cell-index tm (caar e) (cdar e))))
-                                          (graph-edges-from graph cell)))))
-                         (let try ((edges edges))
-                           (and (not halted) (pair? edges)
-                                (or
-                                  (let depart ((phases (list 'actual AIR-GUST 0)))
-                                    (and (not halted) (pair? phases)
-                                         (or
-                                           (let* ((proof (and (not (eq? (car phases) 'actual))
-                                                              (wait node (car phases))))
-                                                  (stage (if (eq? (car phases) 'actual) node
-                                                             (and proof (car proof)))))
-                                             (and stage
-                                                  (let resume
-                                                    ((nodes (observe
-                                                              (replay stage (witness-script (cdar edges))) target)))
-                                                    (and (not halted) (pair? nodes)
-                                                      (or
-                                                        (let* ((end (car nodes))
-                                                               (next (and end (cell-of end)))
-                                                               (d (and next
-                                                                       (vector-ref dist
-                                                                         (cell-index tm (car next) (cdr next)))))
-                                                               (here (vector-ref dist
-                                                                       (cell-index tm (car cell) (cdr cell))))
-                                                               (changed
-                                                                 (and end
-                                                                      (or (not (equal? (timed-node-data node)
-                                                                                       (timed-node-data end)))
-                                                                          (not (eq? (body-down (timed-node-body node))
-                                                                                    (body-down (timed-node-body end))))))))
-                                                          (and next
-                                                         ;; Frozen composite shortcuts
-                                                         ;; can give optimistic hop
-                                                         ;; costs. Use those costs to
-                                                         ;; order suggestions, never
-                                                         ;; to reject an actual route
-                                                         ;; through a waiting rest.
-                                                         ;; A phase-only self-loop adds
-                                                         ;; no movement option beyond
-                                                         ;; the explicit departures.
-                                                         (or changed
-                                                             (and d here
-                                                                  (not (equal? next cell))))
-                                                               (walk end (+ depth 1))))
-                                                        (resume (cdr nodes)))))))
-                                           (depart (cdr phases)))))
-                                  (try (cdr edges)))))))))))
-            ;; Progressively widen the suggestion budget before following a
-            ;; cheaper cyclic branch indefinitely. Frozen hop costs affect
-            ;; ordering only: a cut branch is retried at the next threshold.
-            ;; Every attempt retains actual states; the shared hard bound
-            ;; still reports incomplete rather than treating a cut as a trap.
-            (set! threshold (score start 0))
-            (let deepen ()
-              (let ((arrival (walk start 0)))
-                (or arrival
-                    (and (not halted) next-threshold
-                         (begin
-                           (set! threshold next-threshold)
-                           (set! next-threshold #f)
-                           (set! seen #{})
-                           (deepen))))))))))))
+                (if (not cell)
+                    (let recover
+                      ((scripts
+                        (cons (make-list 360 NO-INTENT)
+                          (append
+                            (apply append
+                              (map (lambda (h)
+                                     (map (lambda (held)
+                                            (append
+                                              (if held (list (intent h: h jump: #t press: #t)) '())
+                                              (make-list 120 (intent h: h jump: held))
+                                              (make-list 180 NO-INTENT)))
+                                          '(#f #t))) '(-1 1)))
+                            (map (lambda (v)
+                                   (append (make-list 120 (intent v: v))
+                                           (make-list 180 NO-INTENT))) '(-1 1))))))
+                      (and (not halted) (pair? scripts)
+                           (or (resume (observe (replay node (car scripts)) target)
+                                       (+ depth 1) still?)
+                               (recover (cdr scripts)))))
+                    (let* ((graph (guides node)) (tm (graph-tm graph))
+                           (dist (distance-for graph target))
+                           (edges
+                             (list-sort
+                               (lambda (a b)
+                                 (< (vector-ref dist (cell-index tm (caar a) (cdar a)))
+                                    (vector-ref dist (cell-index tm (caar b) (cdar b)))))
+                               (filter (lambda (edge)
+                                         (vector-ref dist (cell-index tm (caar edge) (cdar edge))))
+                                       (graph-edges-from graph cell)))))
+                      (let try ((edges edges))
+                        (and (not halted) (pair? edges)
+                             (or
+                               (let depart ((phases (list 'actual AIR-GUST 0)))
+                                 (and (not halted) (pair? phases)
+                                      (or
+                                        (let* ((proof (and (not (eq? (car phases) 'actual))
+                                                           (wait node (car phases))))
+                                               (stage (if (eq? (car phases) 'actual) node
+                                                          (and proof (car proof)))))
+                                          (and stage
+                                               (resume
+                                                 (observe (replay stage (witness-script (cdar edges))) target)
+                                                 (+ depth 1)
+                                                 (lambda (end)
+                                                   (let* ((next (cell-of end))
+                                                          (d (and next
+                                                                   (vector-ref dist
+                                                                     (cell-index tm (car next) (cdr next)))))
+                                                          (here (vector-ref dist
+                                                                  (cell-index tm (car cell) (cdr cell))))
+                                                          (changed
+                                                            (or (not (equal? (timed-node-data node)
+                                                                             (timed-node-data end)))
+                                                                (not (eq? (body-down (timed-node-body node))
+                                                                          (body-down (timed-node-body end)))))))
+                                                     (and next
+                                                          (or changed
+                                                              (and d here
+                                                                   (not (equal? next cell))))))))))
+                                        (depart (cdr phases)))))
+                               (try (cdr edges)))))))))
+            (if (equal? (cell-of start) target)
+                start
+                (begin
+                  (push! start 0)
+                  (let search ()
+                    (and (not halted) (> size 0)
+                         (let* ((entry (pop!))
+                                (node (vector-ref entry 0))
+                                (depth (vector-ref entry 1))
+                                (key (timed-key node)))
+                           (cond
+                             ((< (dict-ref queued key) depth) (search))
+                             ((and (dict-contains? seen key)
+                                   (<= (dict-ref seen key) depth)) (search))
+                             ((>= count bound) (stop!) #f)
+                             (else
+                              (set! seen (dict-set seen key depth))
+                              (set! count (+ count 1))
+                              (report node target count size depth)
+                              (or (expand node depth) (search)))))))))))))))
