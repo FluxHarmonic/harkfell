@@ -138,7 +138,8 @@ case "$JOB" in
     # the test binary (harkfell-test) is built by sigil test, not sigil build
     step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl && \
       step render env JOBS=tools/wrongwater-review.jobs OUT=../out/wrongwater-listening \
-        scripts/dev build/dev/bin/harkfell-test --no-strict tools/wrongwater-render.sgl ;;
+        scripts/dev build/dev/bin/harkfell-test --no-strict tools/wrongwater-render.sgl && \
+      step encode sh tools/wrongwater-review-encode.sh ../out/wrongwater-listening ;;
   sabotage)
     if step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl; then
       for lib in engine harkfell; do rm -rf "build/dev/lib/$lib" && ln -s "$PWD/src/$lib" "build/dev/lib/$lib"; done
@@ -184,7 +185,7 @@ if [ -d "$STAGE/fetched" ]; then
   if [ "$JOB" = review ] && [ -d "$STAGE/fetched/wrongwater-listening" ]; then
     mv "$STAGE/fetched/wrongwater-listening" "$LOGS/wrongwater-listening"
     printf '%s\n' "$FULL" > "$LOGS/wrongwater-listening/BUILD-SHA"
-    say "fetched the recordings of $SHA to $LOGS/wrongwater-listening ($(ls "$LOGS/wrongwater-listening" | grep -c '\.wav$') WAVs)"
+    say "fetched the recordings of $SHA to $LOGS/wrongwater-listening ($(ls "$LOGS/wrongwater-listening" | grep -c '\.ogg$') Opus files, $(du -sh "$LOGS/wrongwater-listening" | cut -f1))"
   fi
   say "runner logs in $LOGS"
 fi
