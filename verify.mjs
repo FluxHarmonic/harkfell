@@ -84,6 +84,9 @@
 //              queue at least 50 ms (it keeps 120). Both figures leave out the
 //              device's output latency
 //   errors     no console error and no exception in any leg
+//   samplers   explicit full-world gate: visit every room door with empty
+//              and full carry in one context, measure actual WebGL sampler
+//              lifetime/peak, and reject sokol sampler/appendbuf aborts
 //
 // Every leg but frame, save and fullscreen boots with &frame=off (open()
 // adds it): the frame is theirs to skip, and a door skips it anyway.
@@ -222,11 +225,39 @@ ws.addEventListener("message", (ev) => {
     const text = (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
     lines.push(text);
     if (msg.params.type === "error") errors.push("console.error: " + text);
+    else if (LEGS.includes("samplers") && /SAMPLER_POOL_EXHAUSTED|VALIDATE_APPENDBUF|ABORTING|panic|Aborted\(/i.test(text)) {
+      errors.push("graphics abort: " + text);
+    }
   }
   if (msg.method === "Runtime.exceptionThrown") errors.push("exception: " + (msg.params.exceptionDetails?.exception?.description || msg.params.exceptionDetails?.text));
 });
 await new Promise((res, rej) => { ws.addEventListener("open", res); ws.addEventListener("error", rej); });
 await send("Page.enable"); await send("Runtime.enable");
+if (LEGS.includes("samplers")) {
+  // Installed before the wasm creates its context. Sokol's GLES backend
+  // uses glGenSamplers/glDeleteSamplers, so this measures actual resources
+  // without exhausting the pool with extra probe allocations.
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+    const stats = window.__harkfellSamplerStats = { available: false, live: 0, peak: 0, created: 0, deleted: 0 };
+    const proto = window.WebGL2RenderingContext?.prototype;
+    if (!proto?.createSampler || !proto?.deleteSampler) return;
+    const make = proto.createSampler, remove = proto.deleteSampler, live = new Set();
+    proto.createSampler = function (...args) {
+      const sampler = make.apply(this, args);
+      if (sampler) {
+        live.add(sampler); stats.created++; stats.live = live.size;
+        stats.peak = Math.max(stats.peak, stats.live);
+      }
+      return sampler;
+    };
+    proto.deleteSampler = function (sampler) {
+      const result = remove.call(this, sampler);
+      if (live.delete(sampler)) { stats.deleted++; stats.live = live.size; }
+      return result;
+    };
+    stats.available = true;
+  })();` });
+}
 await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
 
 const results = [];
@@ -270,6 +301,61 @@ const touch = (type, pts) => send("Input.dispatchTouchEvent", { type, touchPoint
 const W = await evaluate("window.innerWidth"), H = await evaluate("window.innerHeight");
 
 // ---- the legs -------------------------------------------------------------------
+if (LEGS.includes("samplers")) {
+  ran.add("samplers");
+  const doors = bakedWorld.flatMap(([file]) => {
+    const match = file.match(/^world\/rooms\/([^/]+)\/x(-?\d+)y(-?\d+)\.room$/);
+    return match ? [{ key: `${match[1]}:${match[2]},${match[3]}`, region: match[1] }] : [];
+  });
+  const regions = [...new Set(doors.map(door => door.region))];
+  const count = region => doors.filter(door => door.region === region).length;
+  if (count("underhum") !== 13 || count("wrongwater") !== 12) {
+    fail("samplers", `BLOCKED full-world gate needs Underhum 13 and Wrongwater 12; got ${count("underhum")}/${count("wrongwater")}`);
+  } else {
+    await open("trace&room=hollow:4,3&new&still");
+    const coverage = new Set();
+    let routeFailed = false;
+    for (const carry of ["", "2,3,4,5,7"]) {
+      await evaluate(`SigilWebApp.dispatch("carry", ${JSON.stringify(carry)})`);
+      for (const door of doors) {
+        const before = lines.length;
+        const entered = await evaluate(`SigilWebApp.dispatch("goto", ${JSON.stringify(door.key)})`);
+        if (entered !== 1) {
+          fail("samplers", `door refused: ${door.key}`); routeFailed = true; break;
+        }
+        await waitFor(() => lines.slice(before).includes(`harkfell: room ${door.key}`), 10000, `sampler door ${door.key}`);
+        const stats = await evaluate(`new Promise(resolve => {
+          let frames = 0, quiet = 0, created = -1;
+          function tick() {
+            const s = window.__harkfellSamplerStats;
+            if (s.created === created) quiet++; else { created = s.created; quiet = 0; }
+            if (++frames >= 12 && quiet >= 8) resolve({ ...s });
+            else if (frames >= 180) resolve({ ...s, unsettled: true });
+            else requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        })`);
+        console.log(`SAMPLERS door ${door.key} carry ${carry || "none"} live ${stats?.live} peak ${stats?.peak}`);
+        if (!stats?.available || stats.peak < 1 || stats.unsettled || errors.length) {
+          fail("samplers", `door ${door.key}; instrumentation/caches/errors: ${JSON.stringify(stats)}; ${errors.slice(-3).join(" | ")}`);
+          routeFailed = true; break;
+        }
+        coverage.add(`${carry}/${door.key}`);
+      }
+      if (routeFailed) break;
+    }
+    const stats = await evaluate("window.__harkfellSamplerStats");
+    const detail = `rooms ${doors.length}, regions ${regions.length}, doors visited ${coverage.size}/${doors.length * 2}; peak-samplers ${stats?.peak}, live ${stats?.live}, created ${stats?.created}, deleted ${stats?.deleted}`;
+    if (!routeFailed && coverage.size === doors.length * 2 && errors.length === 0) pass("samplers", detail);
+    else {
+      console.log(`SAMPLERS partial ${detail}`);
+      if (errors.some(error => /SAMPLER_POOL_EXHAUSTED/i.test(error))) {
+        console.log("BLOCKED-ON t-253c7c: preserve authored art; sampler pool exhausted before the graphics fix");
+      }
+    }
+  }
+}
+
 if (LEGS.includes("boot")) {
   ran.add("boot");
   // a fresh profile with no ?stick: the default form, fixed (David's pick)
