@@ -19,7 +19,7 @@
                            ((underhum) '((4 . 3)))
                            ((wrongwater) '((-2 . 6) (1 . 8)))
                            (else (error "unknown depths region" region))))
-             (expected (if (eq? region 'underhum) 8 6))
+             (expected (if (eq? region 'underhum) 13 12))
              (own (filter (lambda (p) (eq? (room-region (placed-data p)) region))
                           (content-rooms ct)))
              (rooms (filter (lambda (p)
