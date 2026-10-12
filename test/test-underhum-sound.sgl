@@ -116,7 +116,46 @@
       (assert-equal '(5 4 3 2 1) (starts #f))
       (assert-equal '(5 4 3 2 1 7) (starts #t)))
     (assert-true (= 1.0 (finale-leave 1 (finale-dawn-s #f) #f)))
-    (assert-true (= 0.0 (finale-leave 2 (finale-dawn-s #f) #f))))
+    (assert-true (= 0.0 (finale-leave 2 (finale-dawn-s #f) #f)))
+    ;; the dawn begins when one voice is left: the fundamental, or H7 (12 bars in)
+    (for-each (lambda (h7)
+                (let* ((d (finale-dawn-s h7))
+                       (left (filter (lambda (h) (> (finale-leave h d h7) 0.0)) (if h7 '(1 2 3 4 5 7) '(1 2 3 4 5)))))
+                  (assert-equal (if h7 '(7) '(1)) left)))
+              '(#f #t))
+    (assert-true (near? (finale-dawn-s #t) (* 12.0 FINALE-BAR-S) 1e-6)))
+  (test "H5's F# leaves the drone where the verse's mode has none (rise, pipes), and only there"
+    (for-each (lambda (s) (assert-true (= 0.0 (finale-thin 5 s)))) '(rise pipes))
+    (for-each (lambda (s) (assert-true (= 1.0 (finale-thin 5 s)))) '(calm theme hold glass sky home close)))
+  (test "the tuning: every F#, C#, and with H7 every C, is a voice that takes cents: at its just tuning"
+    ;; motif's synth kinds ignore cents: (folio topics/motif-synth-kinds-ignore-cents);
+    ;; a struck bell or harp (fm4-bell, karplus-strong) is short and may stay
+    ;; equal-tempered. pc: the MIDI note mod 12 (C 0, C# 1, F# 6).
+    (let ((bad '()) (checked 0))
+      (for-each
+        (lambda (name)
+          (let* ((t (tune-parsed name)) (h7? (member name '("the-fundamental-h7" "underhum-coda" "finale-drone"))))
+            (for-each
+              (lambda (p)
+                (for-each
+                  (lambda (c)
+                    (when (number? (cell-note c))
+                      (let* ((pc (modulo (exact (round (cell-note c))) 12))
+                             (want (cond ((= pc 6) -13.686) ((= pc 1) -11.731) ((and h7? (= pc 0)) -31.174) (else #f)))
+                             (i (tune-find-instrument t (cell-inst c)))
+                             (kind (tune-instrument-kind i))
+                             (cents (let ((e (assq 'cents (tune-instrument-params i)))) (and e (cdr e)))))
+                        (when (and want (not (memq kind '(fm4-bell karplus-strong))))
+                          (set! checked (+ checked 1))
+                          (unless (and (memq kind '(drone-fm drone-saw pipe-breath finding-tone noise-bed drip))
+                                       cents (< (abs (- cents want)) 0.001))
+                            (set! bad (cons (list name (tune-pattern-id p) (cell-channel c) (tune-instrument-name i)) bad)))))))
+                  (tune-pattern-cells p)))
+              (tune-patterns t))))
+        '("the-fundamental" "the-fundamental-h7" "underhum-coda" "finale-drone" "underhum-bed" "underhum-after"))
+      (display "  tuning: ") (display checked) (display " notes checked, wrong: ") (display bad) (newline)
+      (assert-true (> checked 100))
+      (assert-equal '() bad)))
   (test "the credits: option B's nine cards on the climb's clock; the last waits for the dawn"
     (assert-equal 9 (length CREDITS))
     (assert-equal '("Harkfell") (car CREDITS))
@@ -181,15 +220,23 @@
 (define (common h t) (* (level-of h) (let ((lo (finale-depth t))) (+ lo (* (- 1.0 lo) (+ 0.5 (* 0.5 (cos (finale-common-phase t)))))))))
 (define (rows-in rows t0 t1) (filter (lambda (r) (and (>= (car r) t0) (< (car r) t1))) rows))
 
+;; The director sets the volumes every 256 frames (BREATH-CHUNK), so a frame's
+;; peak ratio is the gain of one of the sub-chunks it pulled: it lies within
+;; the common breath's values at those sub-chunks' starts.
+(define (common-range h t0 t1)
+  (let loop ((t t0) (lo 10.0) (hi -10.0))
+    (if (>= t t1)
+        (cons lo hi)
+        (let ((c (common h t))) (loop (+ t (/ 256.0 RATE)) (min lo c) (max hi c))))))
 ;; Measured lock time: the first t from which (to 12 s) voice h's gain stays
-;; within 0.002 of the common breath at its pull's start (a voice converges
-;; smoothly, so this is within a tenth of a second or so of its lock).
+;; within 0.002 of that range (a voice converges smoothly, so this is within a
+;; tenth of a second or so of its lock).
 (define (lock-at rows h)
   (let loop ((rs (reverse (rows-in rows 0.0 12.0))) (last 12.0))
     (if (null? rs)
         last
-        (let* ((r (car rs)) (g (gain-of r h)))
-          (if (and g (<= (abs (- g (common h (list-ref r 4)))) 0.002))
+        (let* ((r (car rs)) (g (gain-of r h)) (cr (common-range h (list-ref r 4) (car r))))
+          (if (and g (>= g (- (car cr) 0.002)) (<= g (+ (cdr cr) 0.002)))
               (loop (cdr rs) (car r))
               last)))))
 
@@ -253,6 +300,7 @@
 ;; and the finale's own lines.
 (define (run-ending! t-end plan events)
   (fresh!)
+  (set! H5-LEVELS '())
   (let ((heard '()) (bed '()) (evs events))
     (frames! 0.0 t-end plan
              (lambda (t)
@@ -262,12 +310,15 @@
                (let ((s (sound-finale-section)))
                  (when (and s (or (null? heard) (not (eq? (car s) (car (car heard))))))
                    (set! heard (cons (cons (car s) t) heard))))
-               (set! bed (cons (cons t (and (mixer-find "bed") #t)) bed))))
+               (set! bed (cons (cons t (and (mixer-find "bed") #t)) bed))
+               (let ((pp (sound-finale-players)))
+                 (when pp (set! H5-LEVELS (cons (cons t (list-ref (player-peaks (cdr pp)) 4)) H5-LEVELS))))))
     (list (reverse heard) (reverse bed))))
 
 (define (heard-at seq s) (let ((e (assq s seq))) (and e (cdr e))))
 (define (bed-during bed t0 t1) (map cdr (filter (lambda (b) (and (>= (car b) t0) (< (car b) t1))) bed)))
 
+(define H5-LEVELS '())   ; ((t . H5's drone channel peak since the last frame) ...), the last run
 ;; A: the fuse at 1 s; the climb asked during the theme (the news, at 40 s);
 ;; the sky verse played twice over; home (the news) at 160 s.
 (define A-HOME-T 160.0)
@@ -278,6 +329,8 @@
                      (cons 40.0 (lambda () (sound-frame! 40.0 DT (room CHAMBER 'news '((finale rise 1 1))))))
                      (cons A-HOME-T (lambda () (sound-finale-home!)))))))
 (define A-SEQ (car A))
+(define A-H5 H5-LEVELS)
+(define (h5-in t0 t1) (map cdr (filter (lambda (e) (and (>= (car e) t0) (< (car e) t1))) A-H5)))
 (define A-BED (cadr A))
 (define A-FLAGS (sound-finale-flags))
 (define A-ACTIVE (sound-finale-active?))
@@ -306,6 +359,14 @@
   (test "the bed: closed from the fuse's fade to the dawn, and sounding again after it"
     (assert-true (every not (bed-during A-BED (+ 1.0 FUSE-BED-OUT-S 0.1) (- (heard-at A-SEQ 'dawn) 0.05))))
     (assert-true (every (lambda (x) x) (bed-during A-BED (+ (heard-at A-SEQ 'dawn) 0.1) 270.0))))
+  (test "H5's F# is gone from the drone through the Reedfen verse (F natural) and back in the Glasswood verse"
+    (let ((theme (apply max (h5-in (+ (heard-at A-SEQ 'theme) 2.0) (- (heard-at A-SEQ 'rise) 0.5))))
+          (rise (apply max (h5-in (+ (heard-at A-SEQ 'rise) 0.6) (- (heard-at A-SEQ 'glass) 0.1))))
+          (glass (apply max (h5-in (+ (heard-at A-SEQ 'glass) 2.0) (- (heard-at A-SEQ 'pipes) 0.1)))))
+      (display "  H5 peak: theme ") (display theme) (display " rise ") (display rise) (display " glass ") (display glass) (newline)
+      (assert-true (> theme 0.01))
+      (assert-true (< rise (* 0.01 theme)))
+      (assert-true (> glass (* 0.5 theme)))))
   (test "the ending ends, is saved, and never plays again"
     (assert-false A-ACTIVE)
     (assert-equal '(#t (2 3 4 5) #f) A-FLAGS)
@@ -335,6 +396,7 @@
                                  (else (room "hollow:4,3" 'region 'hollow 'bed "hollow-bed"))))
                (list (cons 1.0 (lambda () (sound-frame! 1.0 DT (room CHAMBER 'news '((finale fuse 1 1))))))))))
 (define B-SEQ (car B))
+(define B-BED (cadr B))
 ;; C: home asked during the fuse lands exactly at its end
 (define C
   (if (not (part? 4)) '(() ()) (run-ending! 30.0 (lambda (t) (room CHAMBER))
@@ -349,6 +411,10 @@
     (assert-true (> (- (heard-at B-SEQ 'rise) (heard-at B-SEQ 'hold)) (* 4.0 FINALE-BAR-S))))
   (test "a room entered is the climb (within a bar of entering D at 95 s)"
     (let ((d (- (heard-at B-SEQ 'rise) 95.0))) (assert-true (and (>= d 0.0) (<= d (+ FINALE-BAR-S 0.05))))))
+  (test "entering the Hollow during the ending opens no bed (the bed waits for the dawn)"
+    (let ((b (bed-during B-BED 130.0 135.0)))
+      (assert-true (> (length b) 100))
+      (assert-true (every not b))))
   (test "the bowl is home (within a bar of entering it at 130 s)"
     (let ((d (- (heard-at B-SEQ 'home) 130.0))) (assert-true (and (>= d 0.0) (<= d (+ FINALE-BAR-S 0.05))))))
   (test "home asked during the fuse waits for its end and lands there"
@@ -393,6 +459,29 @@
     (sound-finale-restore! #t '(2 3 4 5) #f)
     (frames! 0.0 0.5 (lambda (t) (room CHAMBER)))
     (assert-equal AFTER-BED (sound-bed-name)))
+  (test "during the ending: no moment, no spot sound, and no bed on a carry change or a region entered"
+    (fresh!)
+    (let ((spots0 #f) (moment #f) (bed-at '()))
+      ;; 1 s in the chamber with its bed, the fuse; a carry change at 3 s in
+      ;; the chamber (the bed would reopen); from 6 s a Hollow room with a
+      ;; fixed moment, reeds and water (a moment, birds and plops would start)
+      (frames! 0.0 1.0 (lambda (t) (room CHAMBER)))
+      (sound-frame! 1.0 DT (room CHAMBER 'news '((finale fuse 1 1))))
+      (set! spots0 (sound-spots-played))
+      (frames! 1.02 36.0
+               (lambda (t)
+                 (cond ((< t 3.0) (room CHAMBER))
+                       ((< t 6.0) (room CHAMBER 'carry '(2 3 4 5 7)))
+                       (else (place key: "hollow:9,9" region: 'hollow bed-tune: "hollow-bed" groups: '(wind water hum drone)
+                                    levels: '((wind . 0.5) (water . 0.8) (reeds . 0.6) (hum . 0.5) (drone . 0.6))
+                                    moment: "hollow-answers" tones: '() carry: '(2 3 4 5 7) px: 3000.0 py: 600.0 rx: 9 ry: 9))))
+               (lambda (t)
+                 (when (sound-moment-playing) (set! moment #t))
+                 (when (and (> t 4.2) (mixer-find "bed")) (set! bed-at (cons t bed-at)))))
+      (assert-true (sound-finale-active?))
+      (assert-false moment)
+      (assert-equal spots0 (sound-spots-played))
+      (assert-equal '() bed-at)))
   (test "the coda: once, for H7 found after the ending, and only then"
     (fresh!)
     (sound-finale-restore! #t '(2 3 4 5) #f)

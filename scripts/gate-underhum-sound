@@ -9,7 +9,7 @@
 # THE GREEN ARM
 #   score    tools/underhum-compose.mjs --check: the piece, its H7 version and
 #            the coda in assets/tunes are what the score writes
-#   test     test/test-underhum-sound.sgl, all 29 tests (parts 1 to 5)
+#   test     test/test-underhum-sound.sgl, all 34 tests (parts 1 to 5)
 # The test runs on a harkfell-test that loads THIS tree's src/ (folio
 # procedures/harkfell-look-review-harness, "For sound"): HARNESS, default
 # build/audio-harness/bin/harkfell-test, whose lib/harkfell and lib/engine
@@ -33,6 +33,13 @@
 #   bed-kept         the bed is not closed at the fuse
 #   no-dawn          the dawn never brings the bed back
 #   replays          a second fuse plays the ending again
+#   h5-in-rise       H5's F# stays in the drone under the Reedfen verse's F natural
+#   dawn-h7-early    with H7 the dawn comes while the fundamental still sounds
+#   moment-during    a room's fixed moment starts during the ending
+#   spots-during     birds and plops during the ending
+#   bed-on-region    a region entered during the ending opens its bed
+#   bed-on-carry     a carry change during the ending reopens the bed
+#   csharp-untuned   the glass flute's C# without its cents (motif's tuning rule)
 # and the region's:
 #   h7-unstripped    H7's drone voice sounds without H7 carried
 #   heart-early      the heart calls with any harmonic carried
@@ -50,7 +57,7 @@ trap 'exit 130' INT TERM
 FAIL=0
 HARNESS=${HARNESS:-build/audio-harness/bin/harkfell-test}
 T=test/test-underhum-sound.sgl
-TOTAL=29
+TOTAL=34
 
 hash() { sha256sum "$1" | cut -c1-16; }
 setup_failed() { echo "SETUP-FAILED: $*"; echo "GATE-UNDERHUM-SOUND SETUP-FAILED"; exit 2; }
@@ -206,6 +213,37 @@ plant coda-again "$S" \
   "(memv 7 *carry*) (not (memv 7 *ended-with*))" \
   "(memv 7 *carry*) #t" \
   "5" "the coda: once, for H7 found after the ending, and only then"
+
+plant h5-in-rise "$F" \
+  "(memq section '(rise pipes))) 0.0)" \
+  "(memq section '(pipes))) 0.0)" \
+  "3" "H5's F# is gone from the drone through the Reedfen verse"
+plant dawn-h7-early "$F" \
+  "(let ((e (assv (if h7? 1 2) (finale-leave-schedule h7?))))" \
+  "(let ((e (assv 2 (finale-leave-schedule h7?))))" \
+  "1" "close: the voices leave H5, H4, H3, H2"
+plant moment-during "$S" \
+  "      (let ((m (and (not (finale-busy?)) (place-moment pl))))" \
+  "      (let ((m (place-moment pl)))" \
+  "5" "during the ending: no moment, no spot sound"
+plant spots-during "$S" \
+  "    (define (spots-frame! pl now)
+      (if (or *moment* (finale-busy?))" \
+  "    (define (spots-frame! pl now)
+      (if *moment*" \
+  "5" "during the ending: no moment, no spot sound"
+plant bed-on-region "$S" \
+  "      (cond ((and (not (eq? (place-region pl) *region*)) (finale-holds-bed?))" \
+  "      (cond ((and #f (not (eq? (place-region pl) *region*)) (finale-holds-bed?))" \
+  "4" "entering the Hollow during the ending opens no bed"
+plant bed-on-carry "$S" \
+  "        (when (and *carry-changed* *region* *bed-tune* (not (finale-holds-bed?)))" \
+  "        (when (and *carry-changed* *region* *bed-tune*)" \
+  "5" "during the ending: no moment, no spot sound"
+plant csharp-untuned assets/tunes/the-fundamental.cts \
+  'drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 0.7 cents: -11.731' \
+  'drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 0.7' \
+  "1" "the tuning: every F#, C#, and with H7 every C"
 
 if [ "$FAIL" -eq 0 ]; then echo "GATE-UNDERHUM-SOUND GREEN (every leg RED)"; else echo "GATE-UNDERHUM-SOUND RED"; fi
 exit $FAIL

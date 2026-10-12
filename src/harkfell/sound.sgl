@@ -295,7 +295,7 @@
     ;; bed, with the duck, whatever the hush says; it counts as a wandering
     ;; moment heard.
     (define (sound-audition! name)
-      (unless *moment*
+      (unless (or *moment* (finale-busy?))
         (*say* "sound" "audition" name)
         (start-moment! name #f *now*)))
     (define (sound-border-mode) *border-mode*)
@@ -1594,7 +1594,7 @@
             ;; sounds. Cues ice-tell ice-fall ice-shatter ice-creak ice-crack.
             ((ice) (let ((c (string->symbol (string-append "ice-" (symbol->string (cadr item))))))
                      (*say* "sound" "ice" (symbol->string (cadr item)))
-                     (when (or (memq (cadr item) '(tell creak)) (not *moment*))
+                     (when (or (memq (cadr item) '(tell creak)) (not (or *moment* (finale-busy?))))
                        (cue-at! c (spot-gain c) (caddr item) pl))))
             (else #f)))
         (place-news pl)))
@@ -1993,6 +1993,7 @@
     (define-struct fin
       (piece) (drone) (h7) (marks)
       (rise mutable: #t) (home mutable: #t)  ; the wishes, not yet acted on
+      (homing mutable: #t)                   ; a home jump asked: no rise may replace it
       (walk mutable: #t)                     ; the walk's section (the walker's newest row)
       (play mutable: #t)                     ; the section being rendered
       (heard mutable: #t) (heard-at mutable: #t)
@@ -2005,6 +2006,7 @@
     (define *ended* #f)              ; the ending has happened (from its fuse)
     (define *ended-with* '())        ; what was carried then
     (define *coda-done* #f)
+    (define *coda-want* #f)          ; asked during a moment: plays when it is over
     (define *finale-ahead* '())      ; ((name . player-or-#f) ...) opened ahead in the Underhum
 
     (define (sound-finale-active?) (and *fin* #t))
@@ -2030,7 +2032,7 @@
         (for-each (lambda (id) (when (mixer-find id) (mixer-remove! id))) (list FINALE-ID FINALE-DRONE-ID))
         (player-close! (fin-piece *fin*)) (player-close! (fin-drone *fin*)))
       (for-each (lambda (e) (when (cdr e) (player-close! (cdr e)))) *finale-ahead*)
-      (set! *fin* #f) (set! *ended* #f) (set! *ended-with* '()) (set! *coda-done* #f) (set! *finale-ahead* '()))
+      (set! *fin* #f) (set! *ended* #f) (set! *ended-with* '()) (set! *coda-done* #f) (set! *coda-want* #f) (set! *finale-ahead* '()) (set! *bed-name* #f))
 
     ;; finale-drone as opened: H7's notes dropped when it is not carried (a
     ;; muted channel still synthesises, as strip-uncarried says for the beds)
@@ -2090,10 +2092,13 @@
 
     (define (finale-start! piece drone h7? now)
       (let ((st (fin piece: piece drone: drone h7: h7? marks: (tune-marks (player-tune piece))
-                     rise: #f home: #f walk: 'calm play: 'calm heard: 'calm heard-at: now
+                     rise: #f home: #f homing: #f walk: 'calm play: 'calm heard: 'calm heard-at: now
                      close-t: #f dawn: #f quiet: (vector #f) ended: (vector #f) thin: (make-vector 7 1.0))))
         (set! *fin* st)
         (set! *ended* #t)
+        ;; players opened ahead for the other version (H7 found meanwhile)
+        (for-each (lambda (e) (when (cdr e) (player-close! (cdr e)))) *finale-ahead*)
+        (set! *finale-ahead* '())
         (set! *ended-with* (if h7? '(2 3 4 5 7) '(2 3 4 5)))
         (set! *wander-due* #f) (set! *still-wait* #f)
         (when *moment* (fade-moment! now))
@@ -2117,23 +2122,39 @@
 
     (define (drone-t st) (/ (player-rendered (fin-drone st)) (* 1.0 (mixer-rate))))
 
+    ;; The volumes are set at most BREATH-CHUNK frames apart: a channel's
+    ;; volume steps (motif does not smooth it), and a native pull can be 4096
+    ;; frames (the review: a breath step every 0.13 s would be heard).
+    (define BREATH-CHUNK 256)
     (define (finale-drone-pull st)
       (lambda (out off n)
-        (let* ((d (fin-drone st)) (t (drone-t st))
-               (step (* THIN-RATE (/ n (* 1.0 (mixer-rate)))))
-               (close (fin-close-t st)))
-          (for-each
-            (lambda (cv)
-              (let* ((ch (car cv)) (h (cdr cv))
-                     (want (finale-thin h (fin-play st)))
-                     (th0 (vector-ref (fin-thin st) ch))
-                     (th (+ th0 (max (- step) (min step (- want th0))))))
-                (vector-set! (fin-thin st) ch th)
-                (player-set-channel-volume! d ch
-                  (* (cdr (assv h FINALE-LEVELS)) (finale-breath h t) th
-                     (if close (finale-leave h (- t close) (fin-h7 st)) 1.0)))))
-            FINALE-CHANNELS)
-          (player-pull! d out off n))))
+        (let loop ((done 0) (more #t))
+          (if (or (>= done n) (not more))
+              more
+              (let ((k (min BREATH-CHUNK (- n done))))
+                (finale-breathe! st k)
+                (loop (+ done k) (player-pull! (fin-drone st) out (+ off (* 8 done)) k)))))))
+
+    ;; Each voice's volume for the next k frames: its level, its breath, the
+    ;; verse's thinning (eased at THIN-RATE, or H5's faster THIN5-RATE, so the
+    ;; F# is gone by the verse's second beat) and, in close, its leaving.
+    (define THIN5-RATE 3.0)
+    (define (finale-breathe! st k)
+      (let* ((d (fin-drone st)) (t (drone-t st))
+             (secs (/ k (* 1.0 (mixer-rate))))
+             (close (fin-close-t st)))
+        (for-each
+          (lambda (cv)
+            (let* ((ch (car cv)) (h (cdr cv))
+                   (step (* (if (eqv? h 5) THIN5-RATE THIN-RATE) secs))
+                   (want (finale-thin h (fin-play st)))
+                   (th0 (vector-ref (fin-thin st) ch))
+                   (th (+ th0 (max (- step) (min step (- want th0))))))
+              (vector-set! (fin-thin st) ch th)
+              (player-set-channel-volume! d ch
+                (* (cdr (assv h FINALE-LEVELS)) (finale-breath h t) th
+                   (if close (finale-leave h (- t close) (fin-h7 st)) 1.0)))))
+          FINALE-CHANNELS)))
 
     ;; The walk's order position (its newest row) and the one at depth frames.
     (define (walk-pos p)
@@ -2152,7 +2173,8 @@
                     (pat (tune-find-pattern t (list-ref (tune-order t) pos))))
                (and pat
                     (any (lambda (m) (= (cdr m) (+ pos 1))) marks)
-                    (>= row (* 16 (quotient (- (tune-pattern-rows pat) 1) 16))))))))
+                    (let ((bar (* (car (tune-meter t)) (cdr (tune-meter t)))))
+                      (>= row (* bar (quotient (- (tune-pattern-rows pat) 1) bar)))))))))
 
     (define (finale-hold! st section)
       (let ((r (finale-region section)) (p (fin-piece st)))
@@ -2167,7 +2189,7 @@
         (when st
           (*say* "sound" "finale" "want" (symbol->string what))
           (case what
-            ((rise) (unless (memq (fin-walk st) '(rise glass pipes sky home close)) (set-fin-rise! st #t)))
+            ((rise) (unless (or (fin-homing st) (memq (fin-walk st) '(rise glass pipes sky home close))) (set-fin-rise! st #t)))
             ((home) (unless (memq (fin-walk st) '(home close)) (set-fin-home! st #t)))
             (else #f)))))
     (define (sound-finale-rise!) (finale-want! 'rise))
@@ -2185,6 +2207,7 @@
       (let ((l (car (reverse (finale-leave-schedule h7?))))) (+ (cadr l) (caddr l))))
 
     (define (finale-frame! pl now)
+      (when (and *coda-want* (not *moment*)) (sound-coda! now))
       (let ((st *fin*))
         (when st
           (let* ((p (fin-piece st))
@@ -2198,7 +2221,7 @@
             (finale-hold! st walk)
             (case (finale-actions walk (last-bar? p marks) (fin-rise st) (fin-home st))
               ((jump-home) (when (player-jump-to-mark! p 'home)
-                             (set-fin-home! st #f) (set-fin-rise! st #f)
+                             (set-fin-home! st #f) (set-fin-rise! st #f) (set-fin-homing! st #t)
                              (*say* "sound" "finale" "jump" "home" (symbol->string walk))))
               ((jump-rise) (when (player-jump-to-mark! p 'rise)
                              (set-fin-rise! st #f)
@@ -2221,6 +2244,7 @@
     ;; The dawn: the bed of the region you are in comes back with the wind.
     (define (finale-dawn! now)
       (*say* "sound" "finale" "dawn")
+      (set! *carry-changed* #f)
       (when (and *region* *bed-tune* (not *bed-src*))
         (open-region-bed! *region* *groups* *bed-tune* *room-levels* now)
         (when *bed-src* (source-factor! *bed-src* 'fade 1.0 DAWN-IN-S now))))
@@ -2262,10 +2286,11 @@
     ;; THE CODA: a late H7 finder in the chamber, once.
     (define (sound-coda! now)
       (cond ((not (and *ended* (not *fin*) (not *coda-done*) (memv 7 *carry*) (not (memv 7 *ended-with*))))
+             (set! *coda-want* #f)
              (*say* "sound" "finale" "coda-ignored"))
-            (*moment* (*say* "sound" "finale" "coda-waits"))
+            (*moment* (set! *coda-want* #t) (*say* "sound" "finale" "coda-waits"))
             (else
-             (set! *coda-done* #t)
+             (set! *coda-done* #t) (set! *coda-want* #f)
              (*say* "sound" "finale" "coda")
              (start-moment! CODA-TUNE #f now))))
 

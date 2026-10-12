@@ -48,7 +48,8 @@
 ;;;   (finale-actions section last? rise? home?)   'jump-home | 'jump-rise | #f
 ;;;                              (last?: the walk is in the section's final pattern)
 ;;;   (finale-leave h t h7?)     voice h's gain as the voices leave, t seconds into close
-;;;   (finale-thin h section)    voice h's gain in the pipes verse (H4 and the fundamental only)
+;;;   (finale-thin h section)    voice h's factor by section: H5 out where the mode has no F#
+;;;                              (rise, pipes), the pipes verse thinned to H4 and the fundamental
 ;;;   (finale-dawn-s h7?)        seconds into close when the dawn begins
 
 (define-library (harkfell finale)
@@ -196,11 +197,18 @@
               ((>= t (+ (cadr e) (caddr e))) 0.0)
               (else (let ((x (/ (- t (cadr e)) (caddr e)))) (* (- 1.0 x) (- 1.0 x)))))))
 
-    ;; The dawn starts when the fundamental (or H7) is alone.
-    (define (finale-dawn-s h7?) (+ (bars 8) (bars 1)))
+    ;; The dawn starts when the fundamental (or H7) is alone: when the last
+    ;; voice before it has finished leaving (H2; with H7, the fundamental).
+    (define (finale-dawn-s h7?)
+      (let ((e (assv (if h7? 1 2) (finale-leave-schedule h7?)))) (+ (cadr e) (caddr e))))
 
-    ;; The pipes verse is the song's one dark turn: the drone thins to H4 and
-    ;; the fundamental.
+    ;; Where the verse's mode has no F#, H5's F# leaves the drone: Reedfen's
+    ;; Dorian and the Pipes' Aeolian sound F natural over it (a sustained
+    ;; semitone against the carried third; the review of 5e88755). The Pipes
+    ;; verse, the song's one dark turn, also thins the rest of the drone to H4
+    ;; and the fundamental.
     (define THIN-GAIN 0.3)
     (define (finale-thin h section)
-      (if (and (eq? section 'pipes) (not (memv h '(1 4)))) THIN-GAIN 1.0))))
+      (cond ((and (eqv? h 5) (memq section '(rise pipes))) 0.0)
+            ((and (eq? section 'pipes) (not (memv h '(1 4)))) THIN-GAIN)
+            (else 1.0)))))

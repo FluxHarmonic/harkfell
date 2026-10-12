@@ -74,6 +74,11 @@ const INSTRUMENTS = [
   [20, "seed harp, circling", "karplus-strong decay: 1.4 excite-gain: 0.5", 24, 0.55, 0.4],
   [21, "first flute", "flute-wind attack: 0.12 release: 0.7 noise-amp: 0.15", 38, 0.5, 0.4, -0.2],
   [22, "second flute", "flute-wind attack: 0.15 release: 0.8 noise-amp: 0.18", 28, 0.5, 0.5, 0.25],
+  // just-tuned voices for sustained notes the kinds above cannot tune
+  [23, "glass flute, its C# (15 x D2)", `${FM_FLUTE} ${C15}`, 38, 0.5, 0.4],
+  [24, "low line, its C H7", `${LOW} ${H7C}`, 30, 0.5, 0.3],
+  [26, "drop with two soft returns, its C H7", "drip level: 0.6 rise: 0.9 sweep: 0.035 decay: 0.07 echo: 0.31 feedback: 0.55 echo-mix: 0.55 hp: 400 seed: 15 cents: -31.174", 30, 0.55, 0.25],
+  [25, "wind in a carved mouth, its C H7", "pipe-breath level: 0.5 width: 0.07 octave: 0.3 tone: 0.07 swell: 0.7 swell-rate: 0.09 attack: 1.5 release: 2.5 seed: 21 cents: -31.174", 30, 0.6, 0.4],
 ];
 
 // --- notes -------------------------------------------------------------------
@@ -87,7 +92,12 @@ function cell(n) {            // "D5" "F#4" "Bb3" -> "D-5" "F#4" "A#3"
 const pc = (n) => { const m = /^([A-G][b#]?)/.exec(n); return FLATS[m[1]] || m[1]; };
 
 // The voice for a sustained note on the glass flute or the pad.
-const flute = (n, h7) => pc(n) === "F#" ? 2 : (h7 && pc(n) === "C") ? 3 : 1;
+const flute = (n, h7) => pc(n) === "F#" ? 2 : pc(n) === "C#" ? 23 : (h7 && pc(n) === "C") ? 3 : 1;
+// any other voice: its C is H7's in the H7 version (through a drone-fm or
+// bed-kind voice that takes cents:), and an F# on a flute-wind voice is the
+// glass flute's just F#
+const h7c = (h7, base, tuned) => (n) => (h7 && pc(n) === "C") ? tuned : base;
+let H7 = false;   // the version being written (the low line reads it)
 const padInst = (n, h7) => pc(n) === "F#" ? 9 : pc(n) === "C#" ? 10 : (h7 && pc(n) === "C") ? 11 : 8;
 const bellInst = (n, h7) => pc(n) === "F#" ? 6 : (h7 && pc(n) === "C") ? 7 : 4;
 
@@ -129,11 +139,12 @@ class Section {
   chord(row, notes, h7, vol = 22) {
     notes.forEach((n, i) => this.put(row, 5 + i, n, padInst(n, h7), vol));
   }
-  low(row, note, vol = 30) { this.put(row, 8, note, 12, vol); }
+  low(row, note, vol = 30) { this.put(row, 8, note, (H7 && pc(note) === "C") ? 24 : 12, vol); }
 }
 
 // --- the score -----------------------------------------------------------------
 function score(h7) {
+  H7 = h7;
   const S = [];
 
   // FUSE (calm), 7 bars, 23.3 s. The drone's voices lock onto one breath one
@@ -233,7 +244,7 @@ function score(h7) {
     const lows = ["D3", "G2", "D3", "G2", "F2", "C3"];
     pads.forEach((p, b) => { s.chord(b * 16, p, h7, 20); s.low(b * 16, lows[b], 30); });
     s.put(4, 1, "A4", 13, 40);
-    s.line(1, 16, 13, 42, "B4:6 D5:6 E5:4 F5:8 E5:4 D5:4 B4:8 A4:4 G4:4 A4:6 C5:6 F5:4 E5:8 D5:4 C5:4");
+    s.line(1, 16, h7c(h7, 13, 3), 42, "B4:6 D5:6 E5:4 F5:8 E5:4 D5:4 B4:8 A4:4 G4:4 A4:6 C5:6 F5:4 E5:8 D5:4 C5:4");
   }
 
   // GLASS: verse 2, Glasswood, D Lydian, 6 bars, 20 s: up the Ringing Stair
@@ -267,8 +278,8 @@ function score(h7) {
   {
     const s = new Section("pipes", 5); S.push(s);
     s.off(0, 8);
-    s.line(1, 0, 18, 28, "E4:14 r:6 C4:14 r:6 A3:16 r:8 D4:16");
-    s.put(9, 3, "C6", 19, 22);
+    s.line(2, 0, h7c(h7, 18, 25), 28, "E4:14 r:6 C4:14 r:6 A3:16 r:8 D4:16");
+    s.put(9, 3, "C6", h7 ? 26 : 19, 22);
     s.put(45, 3, "A5", 19, 20);
     s.put(70, 3, "D6", 19, 16);
     s.chord(0, ["D4", "F4", "A4"], h7, 16);
@@ -314,8 +325,8 @@ function score(h7) {
           }
         }
       };
-      lay(1, tune1, 21, 40);
-      lay(2, tune1.map(([at, n, d]) => [at, down4[n] || n, d]), 22, 30, 12);
+      lay(1, tune1, h7c(h7, 21, 3), 40);
+      lay(2, tune1.map(([at, n, d]) => [at, down4[n] || n, d]), (n) => pc(n) === "F#" ? 2 : 22, 30, 12);
       // the call, on the glass flute so its C can be H7 in the H7 version
       lay(1, call, (n) => (h7 && pc(n) === "C") ? 3 : 21, 44);
     }
@@ -404,6 +415,7 @@ function score(h7) {
 // notch, H7, over the fused chord; the glass flute falls to C, H7, and is
 // left there: the hanging close.
 function coda() {
+  H7 = true;
   const S = [];
   const s = new Section("calm", 9); S.push(s);
   s.strike(0, 4, "D4", 4, 32);
