@@ -49,6 +49,8 @@ const LEGS = [
     'walking in under a moment, the climb is ready: standing still, it starts from its beginning'],
   ['drop-not-prepared', [[SOUND, "          (want-cue! 'drip-fall)))", "          #f))"]], AUDIO_T,
     'the door\'s drop plays on its frame, under a moment'],
+  ['pickup-not-prepared', [[SOUND, '(want-cue! (harmonic-cue "pickup-h" (car sp)))', '#f']], AUDIO_T,
+    'walking in under a moment, H7\'s pickup plays on its frame at the shelf'],
   ['answers-not-prepared', [[SOUND, "        (want-cue! 'answer-h7-a)\n        (want-cue! 'answer-h7-b)))", "        #f))"]], AUDIO_T,
     'carrying H7, a hint\'s answer plays on its frame, under a moment'],
   ['merge-took-loop-ref', [[SOUND, '(or (buffer-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)', '(or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)']], AUDIO_T,

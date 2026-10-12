@@ -424,3 +424,37 @@
     (fresh-under-a-moment!)
     (approach! (fall (- IX 400.0) '(2 3 4)) 3.0)
     (assert-false (sound-cue 'answer-h7-a))))
+
+;; --- H7 in the Drowned Grove (J) ---------------------------------------------------------------
+;; David moved H7 down (rooms eba6eeb): from the Seventh's shelf in C (0,7),
+;; now the Long Drop, to the shelf over the hanging lake in J, the Drowned
+;; Grove (-1,9), cell (18,2), with four upward icicles below it on the
+;; pool's banks and islands (row 7). The director keys the finding tone and
+;; pickup-h7's preparation on the world's pickup, wherever it is; these pin
+;; that at the new place. Rooms are 400 x 176 px.
+(define JX (+ (* 400.0 -1) (* 16 18) 8.0))
+(define JY (+ (* 176.0 9) (* 16 2) 8.0))
+(define J-HUMS (map (lambda (c) (list 7 (+ (* 400.0 -1) (* 16 c) 8.0) (+ (* 176.0 9) (* 16 7) 8.0))) '(4 10 13 19)))
+;; the Long Drop's shelf (0,7), standing row 3, by the lip (12,3)
+(define LX (+ (* 400.0 0) (* 16 12) 8.0))
+(define LY (+ (* 176.0 7) (* 16 3) 8.0))
+(define (ww px py rx ry carry . kw)
+  (apply place key: (string-append "wrongwater:" (number->string rx) "," (number->string ry))
+         region: 'wrongwater bed-tune: #f groups: '() levels: '() carry: carry
+         tones: (if (memv 7 carry) '() (list (list 7 JX JY))) stones: '() hums: J-HUMS
+         px: px py: py rx: rx ry: ry kw))
+
+(test-group "wrongwater: H7 in the Drowned Grove"
+  (test "from the Long Drop's shelf, standing still, H7's tone sounds and the ears point below"
+    (sound-reset!)
+    (frames (ww LX LY 0 7 '(2 3 4) still: #t) 45)
+    (display "  from the Long Drop ") (display (list (and (sound-voice-source "tone-h7") #t) (sound-ears))) (newline)
+    (assert-true (sound-voice-source "tone-h7"))
+    (assert-equal 'below (sound-ears)))
+  (test "walking in under a moment, H7's pickup plays on its frame at the shelf"
+    (fresh-under-a-moment!)
+    (approach! (ww (- JX 300.0) (+ JY 80.0) -1 9 '(2 3 4)) 3.0)
+    (set! SAID '())
+    (frame! (ww JX JY -1 9 '(2 3 4 7) news: (list (list 'pickup 7 JX JY))))
+    (assert-true (said? "sound" "cue" "pickup-h7"))
+    (assert-false (said? "sound" "cue-waiting" "pickup-h7"))))

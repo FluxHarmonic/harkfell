@@ -21,8 +21,8 @@ const sections = [
     ['ww-bed-a-under-the-well', 'A · Under the Well', 'Water 0.5, hang 0.35.'],
     ['ww-bed-b-hanging-tarn', 'B · The Hanging Tarn', 'Hang 0.6: the lake overhead.'],
     ['ww-bed-e-rain-rising', 'E · Rain Rising', 'Water 0.7: the rising rain.'],
-    ['ww-bed-c-still-without-h7', 'C · standing still, before H7', 'Compare with the next clip at the same volume.'],
-    ['ww-bed-c-still-with-h7', 'C · standing still, carrying H7', 'H7 has joined the drone.'],
+    ['ww-bed-j-still-without-h7', 'J · The Drowned Grove, standing still, before H7', 'Compare with the next clip at the same volume.'],
+    ['ww-bed-j-still-with-h7', 'J · standing still, carrying H7', 'H7 has joined the drone.'],
   ]],
   ['The moment', 'E, Rain Rising, after 6 s still. The rain rises into music: scattered drops climb and fall into a pulse up the overtone chord, then a glass voice sings over D, A major (12:15:18), the series\' own wrong chord (9:11:13, E G# B-flat) and the overtone chord itself (4:5:6:7), and comes to rest on C6, H7\'s octave, the drip\'s own note. About 23 s. H7 does not dip under this one.', [
     ['moment-e-rain-rising', 'Rain Rising, in E, before H7', 'Bed ducked 6 dB, as in play.'],
@@ -30,9 +30,9 @@ const sections = [
     ['alone-rain-rising', 'Rain Rising alone', 'The music without the bed.'],
   ]],
   ['Finding H7, and the cues', 'H7\'s finding tone sounds only inside Wrongwater (decision 2). The cues at their in-play gains.', [
-    ['find-h7-from-a', 'From A, two rooms from C, standing still', 'The tone forward 4 dB, the bed down 6. It comes from above and east.'],
+    ['find-h7-from-a', 'From A, about two rooms from J, standing still', 'The tone forward 4 dB, the bed down 6. It comes from below and east: H7 waits in J, the Drowned Grove, on the shelf over its hanging lake.'],
     ['cue-pickup-h7', 'H7 taken', 'Its own partials rising, 7 14 21 28 35 42 times D2 (C5 C6 G6 C7 E7 G7), at their just tuning.'],
-    ['cue-pickup-h7-into-bed', 'H7 taken, into C\'s bed', 'Then H7 blooms into the drone on its own slow attack.'],
+    ['cue-pickup-h7-into-bed', 'H7 taken, into J\'s bed', 'Then H7 blooms into the drone on its own slow attack.'],
     ['cue-drip-fall', 'The drop falling the right way', 'One plain drip, no echo. Once the door is open the crack drips like this now and then, quietly.'],
     ['hint-icicle-answers', 'Behind the Fall, carrying H7: the icicle answers', 'Passing the upward icicle with H7, a short phrase answers from it (at most once every 12 s). Here both answers, 6 s apart, over Glasswood\'s bed and the icicle\'s faint hum.'],
     ['cue-answer-h7-a', 'Answer a', 'A5 rising to C6: the 24th and 28th partials, a 7:6 third landing on H7\'s octave.'],
