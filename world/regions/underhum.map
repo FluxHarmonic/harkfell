@@ -1,0 +1,31 @@
+;;; world/regions/underhum.map - The Underhum's eight rooms under the bowl,
+;;; from the approved map (topics/harkfell-underhum-map, 2026-10-11).
+;;;
+;;;   x4   x5   x6   x7
+;;;   A -  B -  C -  D      y4  the Throat, the niches, the gallery, the stair
+;;;   |              |
+;;;   E -  F -  G -  H      y5  the roots, the slab, the approach, the chamber
+;;;
+;;; One loop. The only way in is the heart in the bowl's floor (A north,
+;;; under the Hollow's H); every other outer edge is rock. Down: A, E, F, G,
+;;; H. Out: H's lift to D, the gallery west through C and B, A's column (or
+;;; its rough face) up through the heart.
+;;;
+;;; Breaths: B, E, F (three of eight).
+(map
+  region: underhum
+  origin: (4 4)
+  layout:
+  ("A-B-C-D"
+   "|     |"
+   "E-F-G-H")
+  rooms:
+  ((A "The Throat" "under the heart a throat of dark stone falls away, and the hum you woke to is all around you")
+   (B "The Bearers' Shelf" "four empty niches in the wall take a light each as you pass, the colours you carried down: a breath")
+   (C "The Gallery of Stones" "a row of old stones stands in the dark, mute on the way down and ringing on the way up")
+   (D "The Ringing Stair" "the rising light from below sets you down on old steps at the top of the chamber's wall")
+   (E "The Roots of the Hum" "at the bottom of the throat, steps cut by the old people lead east: a breath")
+   (F "The Low Door" "a great slab leans against the wall where it once closed the bowl, and you walk under its place: a breath")
+   (G "The Approach" "the passage opens and slopes down toward a sound that makes your own hum louder")
+   (H "The Underhum" "a hollow too large for your light, a round dark stone in its middle, and the note you have been hearing all along"))
+  borders: ((A north)))

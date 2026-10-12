@@ -1,0 +1,22 @@
+;; G, the Approach. The passage widens and steps down east into H (rows
+;; 8-9). Nothing here is hard.
+(room
+  region: underhum
+  at: (6 5)
+  title: "The Approach"
+  intent: "the passage opens and slopes down toward a sound that makes your own hum louder"
+  bed: (hum 0.8 air 0.7 water 0)
+  light: 0.2
+  grid:
+  ("#########################"
+   "#########################"
+   "##########    #   #######"
+   "#######             #####"
+   "#####                 ###"
+   "###                    ##"
+   "#                       #"
+   "                        #"
+   "                         "
+   "########                 "
+   "#########################")
+  decor: auto)

@@ -1,0 +1,27 @@
+;; H, the Underhum. A floor wide enough to stand anywhere (row 9); the
+;; great stone stands on it in the middle, scenery drawn behind the body,
+;; and the listening place sparkles at its foot. The lift (columns 21-23,
+;; steady ^) rises at the east wall into D; release jump in it to come
+;; back down onto this floor.
+(room
+  region: underhum
+  at: (7 5)
+  title: "The Underhum"
+  intent: "a hollow too large for your light, a round dark stone in its middle, and the note you have been hearing all along"
+  bed: (hum 1.0 air 1.0 water 0 drone 0.7)
+  light: 0.2
+  grid:
+  ("#####################^^^#"
+   "###########    ######^^^#"
+   "########          ###^^^#"
+   "######              #^^^#"
+   "####                 ^^^#"
+   "###                  ^^^#"
+   "##                   ^^^#"
+   "#                    ^^^#"
+   "                     ^^^#"
+   "                     ^^^#"
+   "#########################")
+  things: ((great-stone at: (12 9))
+           (listening-place at: (12 9)))
+  decor: auto)

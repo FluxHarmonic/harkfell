@@ -16,13 +16,20 @@
    "##### |           |# o##%"
    "#######         ########%"
    "#########       o    o o%"
-   "#########################"
-   "#########################")
+   "############o%###########"
+   "############ %###########")
   things: ((ring-stone at: (16 8) overtone: 2)
            (ring-stone at: (21 8) overtone: 3)
            (ring-stone at: (23 8) overtone: 4)
            (ring-stone at: (21 6) overtone: 5)
            (stone-passage at: (23 8) cells: ((23 7) (23 6) (22 6)))
+           ;; STUB(systems): the heart, keyed to {2,3,4,5}. Until SYSTEMS
+           ;; lands the set-keyed stone it is keyed to H5 alone, which reach
+           ;; treats the same today (every set holding H5 holds 2, 3 and 4).
+           (ring-stone at: (12 9) overtone: 5)
+           ;; the Underhum's column rises through the open heart to the
+           ;; bowl floor; (13,9..10) carry A's rough face up beside it
+           (air-field at: (12 8) size: (1 3) kind: steady-lift)
            (standing-stone at: (2 5))
            (standing-stone at: (22 5))
            (lantern-moth at: (18 6) count: 3 drawn: 3)

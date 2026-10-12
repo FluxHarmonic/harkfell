@@ -652,6 +652,22 @@
                                                                    (char=? (grid-char (roomfile-grid rf) (car p) (cadr p)) #\#)))
                                                             cells))))
                                    (add! "things: stone-passage needs a ring-stone at: and interior rock cells:" "things")))))
+                            ;; The Underhum's scenery (on no roster, never solid): the
+                            ;; Bearers' niches (each names a harmonic), the gallery's
+                            ;; old stones, the sealing slab, the great stone and the
+                            ;; listening place (a floor cell, the finale's focus)
+                            ((memq (car t) '(niche gallery-stone slab great-stone listening-place))
+                             (let ((a (thing-at t)) (o (thing-kw t "overtone")))
+                               (cond ((not (and a (< -1 (car a) ROOM-COLS) (< -1 (cdr a) ROOM-ROWS)))
+                                      (add! (string-append "things: " (symbol->string (car t)) " has no at: cell inside the grid") "things"))
+                                     ((and (memq (car t) '(gallery-stone great-stone listening-place))
+                                           (not (grid-standable? (roomfile-grid rf) (car a) (cdr a))))
+                                      (add! (string-append "things: " (symbol->string (car t)) " at: " (datum->string (thing-kw t "at"))
+                                                           " does not stand on a floor (open, with rock or a ledge under it)")
+                                            "things"))
+                                     ((and (eq? (car t) 'niche) (not (memv o '(2 3 4 5 7))))
+                                      (add! "things: niche needs overtone: 2, 3, 4, 5 or 7" "things"))
+                                     (else #f))))
                             ((eq? (car t) 'upward-icicle)     ; Glasswood's secret (D43): on no roster, grows from a floor
                              (let ((a (thing-kw t "at")))
                                (cond ((not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))

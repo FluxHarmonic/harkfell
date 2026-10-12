@@ -1,0 +1,23 @@
+;; E, the Roots of the Hum. A's shaft (columns 3-5) comes down onto the
+;; low floor; the rough pillar at column 6 hangs to two rows above it, the
+;; climb back to A. Cut steps lead east to F (rows 7-8).
+(room
+  region: underhum
+  at: (4 5)
+  title: "The Roots of the Hum"
+  intent: "at the bottom of the throat, steps cut by the old people lead east: a breath"
+  bed: (hum 0.7 air 0.3 water 0.5)
+  light: 0.2
+  grid:
+  ("###   %##################"
+   "###   %##################"
+   "###   %##################"
+   "###   %###  ###   #######"
+   "#     %#     #     ######"
+   "#     %              ####"
+   "#     %                ##"
+   "#                        "
+   "#                        "
+   "#        ################"
+   "#########################")
+  decor: auto)
