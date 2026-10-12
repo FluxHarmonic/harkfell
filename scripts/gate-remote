@@ -3,6 +3,7 @@
 #
 #   scripts/gate-remote suite       dev build, then the whole suite in one call
 #   scripts/gate-remote depths-tests dev build, focused systems tests and sabotage
+#   scripts/gate-remote depths-focused dev build and focused systems tests
 #   scripts/gate-remote depths-water-paths dev build, path tests and wet/dry route diagnostics
 #   scripts/gate-remote depths-water-check also focused systems tests and strict water fixtures
 #   scripts/gate-remote release     release build (its --replay trace kept as
@@ -32,7 +33,7 @@ cd "$(dirname "$0")/.."
 say() { printf 'gate-remote: %s\n' "$*" >&2; }
 
 JOB=${1:-}
-case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-water-paths|depths-water-check) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-water-paths|depths-water-check"; exit 125 ;; esac
+case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check"; exit 125 ;; esac
 
 REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
 [ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
@@ -102,18 +103,20 @@ case "$JOB" in
         step depths-water-reach scripts/dev ./build/dev/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
       fi
     fi ;;
-  depths|depths-tests)
+  depths|depths-tests|depths-focused)
     # All SYSTEMS validation on one lease. No production rooms/assets are
     # fabricated to make the final obligations appear green.
     if step build-dev scripts/dev sigil build; then
       step depths-tests scripts/dev sigil test --report ../out/depths-tests.json test/test-depths-gates.sgl test/test-depths-discovery.sgl test/test-underhum-finale.sgl test/test-save.sgl test/test-gates.sgl test/test-calls.sgl test/test-place.sgl
-      step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
-      for d in /tmp/harkfell-depths-red-*; do
-        [ -d "$d" ] || continue
-        mkdir -p ../out/depths-red
-        cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
-        cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
-      done
+      if [ "$JOB" != depths-focused ]; then
+        step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
+        for d in /tmp/harkfell-depths-red-*; do
+          [ -d "$d" ] || continue
+          mkdir -p ../out/depths-red
+          cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+          cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
+        done
+      fi
     fi
     if [ "$JOB" = depths ] && step build-release scripts/dev sigil build --config release; then
       step parse-seams scripts/dev ./build/release/bin/harkfell --room-check --parse-only
