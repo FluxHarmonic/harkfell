@@ -301,7 +301,7 @@
        "            if (w > ow) { ow = w; oslot = int(o.w + 0.5); }\n"
        "        }\n"
        "    }\n"
-       "    if (oslot >= 0 && slot >= 4 && slot <= 12 && s.b > 0.0 && dk < 0.5 && bayer(x + 2, y + 1) < ow * ow * 0.3) c = strip(0, oslot);\n"
+       "    if (oslot >= 0 && slot >= 4 && slot <= 12 && s.b > 0.0 && dk < 1.6 && bayer(x + 2, y + 1) < ow * ow * 0.3) c = strip(0, oslot);\n"
        "    L = L - u_dark / 5.0;\n"
        ;; light: B against the threshold: lit, lit twice, the light's colour
        "    if (L > 0.0) {\n"
@@ -478,6 +478,9 @@
     ;; A cloud's shadow for the next resolves: STRENGTH (0 is none, 1 a whole
     ;; DARK step) over a band centred at view column X, W px either side. The
     ;; next resolve! uses it and clears it, so it is set each frame it is wanted.
+    (define *shade* (vector 0.0 0.0 0.0))
+    (define (set-cloud-shade! strength x w)
+      (set! *shade* (vector strength x w)))
     ;; The Underhum's orbs for the next resolve: up to six (x y radius slot),
     ;; view pixels; like the shade, used once and cleared.
     (define *orbs* '())
@@ -489,9 +492,6 @@
             (let ((o (if (pair? os) (car os) (list 0.0 0.0 0.0 0.0))))
               (loop (if (pair? os) (cdr os) os) (+ k 1)
                     (append (reverse (map inexact o)) acc))))))
-    (define *shade* (vector 0.0 0.0 0.0))
-    (define (set-cloud-shade! strength x w)
-      (set! *shade* (vector strength x w)))
 
     ;; The index target resolved into the colour target. t: the world's
     ;; ticks; black: 0..1, the dithered fade; hue: the slot of the light's

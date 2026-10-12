@@ -51,6 +51,7 @@
           (harkfell pipes look)
           (harkfell cloudstair look)
           (harkfell underhum look)
+          (only (harkfell underhum finale) finale-lit finale-phase finale-still)
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
@@ -687,10 +688,21 @@
     (define (bowl? rm)
       (and (eq? (room-region rm) 'hollow) (= (room-x rm) 4) (= (room-y rm) 3)))
 
-    ;; STUB(systems): the heart is the bowl's stone at (12,9) until SYSTEMS gives
-    ;; it a kind of its own; (harkfell underhum look) draws it.
+    ;; The heart: the bowl's stone keyed to the whole set (SYSTEMS's keys:);
+    ;; (harkfell underhum look) draws it.
     (define (heart-stone? rm st)
-      (and (bowl? rm) (equal? (stone-cell st) (global-tile rm 12 9))))
+      (and (bowl? rm) (equal? (stone-keys st) '(2 3 4 5))))
+
+    ;; The Underhum's finale as the look draws it: fused once the
+    ;; fundamental has been heard (finale-lit), listening while the breaths
+    ;; lock or once the body has kept still in the chamber for half a
+    ;; second; the look review's override wins when set.
+    (define (underhum-phase-of w)
+      (or (underhum-phase)
+          (let ((f (world-ending w)))
+            (cond ((finale-lit f) 'fused)
+                  ((or (eq? (finale-phase f) 'fuse) (> (finale-still f) 30)) 'listening)
+                  (else #f)))))
 
     (define (stone-visible? rm st)
       (or (heart-stone? rm st)
@@ -1519,7 +1531,7 @@
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
               (draw-reedfen-water-haze! rm t)
               (draw-pipes-panels! rm)
-              (draw-underhum-scenery! rm t (underhum-phase) (world-carry w))
+              (draw-underhum-scenery! rm t (underhum-phase-of w) (world-carry w))
               ;; Cloudstair's lifts, gusts and seeds, on the shared air clock;
               ;; elsewhere a lift column's seeds (the Hollow's launch lift)
               (if (cloudstair? rm)
@@ -1554,7 +1566,7 @@
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (when (body-down b)
                 (draw-down-tuft! b (- (body-x b) ox) (- (body-y b) oy) t))
-              (draw-underhum-sprites! rm b (world-carry w) t (underhum-phase) ox oy)
+              (draw-underhum-sprites! rm b (world-carry w) t (underhum-phase-of w) ox oy)
               (draw-water! rm)
               (cover-thin-water! w ox oy)
               (draw-crusts!)
@@ -1580,7 +1592,7 @@
                                       (draw-heart-light! x y t (world-carry w) (stone-state st) (stone-t st))
                                       (draw-stone-light st x y t slot)))))
                             (world-stones w))
-                  (draw-underhum-lights! rm b (world-carry w) t (underhum-phase) ox oy)
+                  (draw-underhum-lights! rm b (world-carry w) t (underhum-phase-of w) ox oy)
                   (for-each (lambda (pk)
                               (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
                                 (when (in-room? x y) (draw-pickup-light (pickup-overtone pk) x y t))))
@@ -1633,7 +1645,7 @@
           (draw-strips! *strips*))
         ;; the Underhum's orbs, for the resolve's colours
         (set-orb-lights! (if rm (underhum-orb-lights rm (world-body w) (world-carry w) (world-ticks w)
-                                                     (underhum-phase) (car (world-origin w)) (cdr (world-origin w)))
+                                                     (underhum-phase-of w) (car (world-origin w)) (cdr (world-origin w)))
                              '()))
         (resolve! (world-ticks w)
                   (max (world-dim w) (if (pair? black) (car black) 0.0))
@@ -1643,7 +1655,7 @@
                       (let ((c (body-center (world-body w) HARKFELL-FEEL))
                             (cs (world-critters w)))
                         (if (underhum? rm)
-                            (underhum-dark-extra rm (underhum-phase))
+                            (underhum-dark-extra rm (underhum-phase-of w))
                             (room-dark-extra rm (moth-arrival (if cs (critters-list cs) '()) (car c) (cdr c)))))
                       0.0)
                   (and rm (room-daylight-pools? rm)))))

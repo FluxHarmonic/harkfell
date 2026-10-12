@@ -22,13 +22,15 @@
 ;;;   (draw-underhum-lights! rm b carry t ph ox oy)   their light (B, additive)
 ;;;   (underhum-orb-lights rm b carry t ph ox oy)     the resolve's u_orbs list
 ;;;   (underhum-dark-extra rm ph)                     the extra step of dark
-;;;   (underhum-phase) / (set-underhum-review-phase! ph)
-;;;   (draw-heart! x y t carry) (draw-heart-light! x y t carry)   the bowl's heart
+;;;   (underhum-phase) / (set-underhum-review-phase! ph)  the review override
+;;;   (draw-heart! x y t carry state st-t) (draw-heart-light! ...)   the bowl's heart
 ;;;
 ;;; ph, the finale's state: #f before the fundamental, listening while the
-;;; body keeps still at the listening place, fused once the fundamental has
-;;; sounded. STUB(systems): (underhum-phase) answers the review override only
-;;; until SYSTEMS provides the real state ([[tasks/harkfell-depths-systems]]).
+;;; body keeps still in the chamber or the breaths lock, fused once the
+;;; fundamental has been heard. (harkfell draw)'s underhum-phase-of derives it
+;;; from SYSTEMS's (harkfell underhum finale) state (finale-lit, finale-phase,
+;;; finale-still); (underhum-phase) is only the look review's override, #f in
+;;; play.
 (define-library (harkfell underhum look)
   (import (sigil math)
           (sigil list)
@@ -70,7 +72,7 @@
       (paint-slot! (slot-of s))
       (draw-filled-rect x y w h))
 
-    ;; --- the finale's state (STUB(systems)) ----------------------------------
+    ;; --- the look review's override of the finale's state ------------------
 
     (define *review-phase* #f)
     (define (set-underhum-review-phase! ph) (set! *review-phase* ph))
@@ -567,13 +569,15 @@
     ;; The rising motes of a lift column: A's from the start (the way back
     ;; up, shown), the chamber's and the stair's only after the fundamental.
     (define (column-motes rm t ph)
-      (let* ((cells (let loop ((r 0) (acc '()))
-                      (if (= r ROOM-ROWS) acc
-                          (loop (+ r 1)
-                                (let cl ((c 0) (acc acc))
-                                  (if (= c ROOM-COLS) acc
-                                      (cl (+ c 1) (if (char=? (room-char rm c r) #\^) (cons (cons c r) acc) acc))))))))
-             (shown (or (eq? ph 'fused) (and (= (room-x rm) 4) (= (room-y rm) 4))))
+      (let* ((shown (or (eq? ph 'fused) (and (= (room-x rm) 4) (= (room-y rm) 4))))
+             (cells (if (not shown)
+                        '()
+                        (let loop ((r 0) (acc '()))
+                          (if (= r ROOM-ROWS) acc
+                              (loop (+ r 1)
+                                    (let cl ((c 0) (acc acc))
+                                      (if (= c ROOM-COLS) acc
+                                          (cl (+ c 1) (if (char=? (room-char rm c r) #\^) (cons (cons c r) acc) acc)))))))))
              (role (if (eq? ph 'fused) 'fund 'sky-4)))
         (if (not shown)
             '()
@@ -586,13 +590,16 @@
                        (list (+ (* S (car cell)) 3 (modulo (quotient h 7) 10)) y role))))
               cells))))
 
-    ;; Niches you have passed, this visit: ((room-key . cell) ...). Cosmetic.
+    ;; Niches you have passed, this visit: their cells. Cosmetic: forgotten
+    ;; whenever the body is drawn in another room (note-room!).
     (define *lit-niches* '())
     (define *niche-room* #f)
+    (define (note-room! rm)
+      (let ((k (and rm (cons (room-x rm) (room-y rm)))))
+        (unless (equal? *niche-room* k)
+          (set! *niche-room* k)
+          (set! *lit-niches* (quote ())))))
     (define (niche-lit? rm a bx by carry o)
-      (unless (equal? *niche-room* (cons (room-x rm) (room-y rm)))
-        (set! *niche-room* (cons (room-x rm) (room-y rm)))
-        (set! *lit-niches* '()))
       (when (and (memv o carry) (< (abs (- bx (+ (* S (car a)) 8))) 40) (not (member a *lit-niches*)))
         (set! *lit-niches* (cons a *lit-niches*)))
       (and (member a *lit-niches*) #t))
@@ -602,6 +609,7 @@
     ;; the columns' motes, each a pixel or two of its own colour (the light
     ;; pass gives them their glow; a harmonic slot keeps its colour there).
     (define (draw-underhum-sprites! rm b carry t ph ox oy)
+      (note-room! rm)
       (when (underhum? rm)
         (let ((c (body-center b HARKFELL-FEEL)))
           (for-each (lambda (o)
@@ -673,6 +681,14 @@
                       (disc! (car m) (cadr m) 2.5 (if (eq? (caddr m) 'fund) 0.5 0.28))
                       (disc! (car m) (cadr m) 0.5 (if (eq? (caddr m) 'fund) 1.6 0.9)))
                     (column-motes rm t ph))
+          ;; fused: the gallery's stones ring (SYSTEMS sounds them), a breath of
+          ;; white in each one's cut ring
+          (when (eq? ph 'fused)
+            (for-each (lambda (th)
+                        (let ((a (thing-at th)))
+                          (disc! (+ (* S (car a)) 8) (- (* S (+ 1 (cdr a))) 21) 6.0
+                                 (+ 0.25 (* 0.1 (sin (+ (/ t 30.0) (car a))))))))
+                      (things rm 'gallery-stone)))
           ;; fused: the great stone lights from inside, white, and its notches
           (when (eq? ph 'fused)
             (for-each (lambda (th)
@@ -689,8 +705,8 @@
                       (things rm 'great-stone))))))
 
     ;; --- the heart, in the bowl -------------------------------------------------
-    ;; STUB(systems): drawn for the bowl's (12,9) stone until SYSTEMS gives
-    ;; the heart a kind of its own. A round dark stone in the floor, humming,
+    ;; The heart, the bowl's stone keyed to the whole set (heart-stone? in
+    ;; (harkfell draw)). A round dark stone in the floor, humming,
     ;; with four notches that light as you carry each harmonic.
     (define HEART-NOTCHES '((h2 3 5) (h3 6 3) (h4 9 3) (h5 12 5)))
     (define (notch-overtone role) (case role ((h2) 2) ((h3) 3) ((h4) 4) (else 5)))
