@@ -120,12 +120,22 @@
 (define (saved ended with coda active)
   (save-datum CT BODY FULL (content-stones CT) '() 1.0 #f #f '() ended with coda active))
 
+;; The world without these regions' room files: Wrongwater's rooms are in the
+;; world now, and the Underhum's will be.
+(define (string-prefix? p s)
+  (and (>= (string-length s) (string-length p)) (string=? (substring s 0 (string-length p)) p)))
+(define ABSENT-CT
+  (load-content
+    (filter (lambda (e) (not (or (string-prefix? "world/rooms/wrongwater/" (car e))
+                                 (string-prefix? "world/rooms/underhum/" (car e)))))
+            (read-world-source "world"))))
+
 (test-group "depths: diagnostic setup refuses missing regions"
   (test "absent rooms cannot silently pass a regional check"
     (for-each
       (lambda (region)
         (assert-true (guard (failure (#t #t))
-                       (depths-region-content CT region)
+                       (depths-region-content ABSENT-CT region)
                        #f)))
       '(underhum wrongwater))))
 

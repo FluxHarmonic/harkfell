@@ -70,7 +70,8 @@
 (define (world-cues ct)
   (append (map (lambda (n) (h "pickup-h" n)) (map pickup-overtone (content-pickups ct)))
           (apply append (map (lambda (n) (list (h "ring-h" n) (h "miss-h" n)))
-                             (map stone-overtone (content-stones ct))))
+                             ;; a stillness door never rings or near-misses (gates-step)
+                             (map stone-overtone (filter (lambda (s) (not (stone-still s))) (content-stones ct)))))
           (drawn-moth-cues ct)
           CODE-CUES))
 

@@ -63,9 +63,9 @@
 (test-group "gates: the current world's stones and harmonics"
   (test "the world loads clean"
     (assert-equal '() (content-problems CT)))
-  (test "twelve ring-stones: four H2, three H3, four H4 and the reserved H5"
-    (assert-equal 12 (length (content-stones CT)))
-    (assert-equal '(2 2 2 2 3 3 3 4 4 4 4 5)
+  (test "thirteen ring-stones: four H2, three H3, four H4, the reserved H5 and Wrongwater's H7 stillness door"
+    (assert-equal 13 (length (content-stones CT)))
+    (assert-equal '(2 2 2 2 3 3 3 4 4 4 4 5 7)
                   (list-sort < (map stone-overtone (content-stones CT))))
     (assert-true (the-stone (world-standing 10 3 18 8 '())))
     (assert-equal 2 (stone-overtone (the-stone (world-standing 10 3 18 8 '())))))

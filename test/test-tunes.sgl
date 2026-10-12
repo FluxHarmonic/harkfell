@@ -96,10 +96,11 @@
                           (map (lambda (base) (string-append base (number->string n)))
                                (list "tone-h" "pickup-h" "ring-h" "miss-h")))
                         (map pickup-overtone (content-pickups ct)))
-                   (map (lambda (n)
-                          (map (lambda (base) (string-append base (number->string n)))
-                               (list "tone-h" "ring-h" "miss-h")))
-                        (map stone-overtone (content-stones ct)))))))
+                   ;; a stillness door never rings or near-misses (gates-step): its tone only
+                   (map (lambda (s)
+                          (map (lambda (base) (string-append base (number->string (stone-overtone s))))
+                               (if (stone-still s) (list "tone-h") (list "tone-h" "ring-h" "miss-h"))))
+                        (content-stones ct))))))
 
 (define (unreadable names)
   (filter (lambda (n) (not (and (tune-exists? n) (guard (x (#t #f)) (read-tune-string (tune-text n))))))
