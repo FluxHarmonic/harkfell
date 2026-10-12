@@ -106,13 +106,12 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-// The written world's span in rooms: the legs below place rooms by it. A4's
-// world started at x 1; Glasswood (0.2, x -6..0) moves it west, and its
-// rooms reach x -6 (Snow Hollow, at y 5)
-// and y 6 (the Ice Well).
-const X0 = -6, X1 = 17, Y0 = 2, Y1 = 6;
+// The 0.4 world's span: Glasswood reaches west to -6, Pipes east to 17
+// and south to 8, and Cloudstair north to -2. Coordinate and atlas checks
+// below retain their exact authored room and tile expectations.
+const X0 = -6, X1 = 17, Y0 = -2, Y1 = 8;
 const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
-const WORLD_FILES = 58 + 3 + 1;   // rooms, maps, world.sgl (58: the Hollow 14, Reedfen 22, Glasswood 22)
+const WORLD_FILES = 104 + 5 + 1;  // Hollow 14, Reedfen 22, Glasswood 22, Pipes 24, Cloudstair 22; maps, world.sgl
 const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`;   // rooms at 1/4, a 2 px gap
 const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "cues", "startup", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
