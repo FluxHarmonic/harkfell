@@ -24,4 +24,4 @@
            (gallery-stone at: (12 5))
            (gallery-stone at: (16 5))
            (gallery-stone at: (20 5)))
-  decor: auto)
+  decor: none)

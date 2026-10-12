@@ -24,4 +24,4 @@
    "#########################")
   things: ((great-stone at: (12 9))
            (listening-place at: (12 9)))
-  decor: auto)
+  decor: none)

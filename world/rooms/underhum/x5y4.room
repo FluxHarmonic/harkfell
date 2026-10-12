@@ -23,4 +23,4 @@
            (niche at: (10 4) overtone: 3)
            (niche at: (14 4) overtone: 4)
            (niche at: (18 4) overtone: 5))
-  decor: auto)
+  decor: none)
