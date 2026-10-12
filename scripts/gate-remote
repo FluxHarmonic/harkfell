@@ -29,7 +29,7 @@ cd "$(dirname "$0")/.."
 say() { printf 'gate-remote: %s\n' "$*" >&2; }
 
 JOB=${1:-}
-case "$JOB" in suite|release|reach|web) ;; *) say "usage: scripts/gate-remote suite|release|reach|web"; exit 125 ;; esac
+case "$JOB" in suite|release|reach|web|depths) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths"; exit 125 ;; esac
 
 REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
 [ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
@@ -87,6 +87,30 @@ step() {
   return $r
 }
 case "$JOB" in
+  depths)
+    # All SYSTEMS validation on one lease. No production rooms/assets are
+    # fabricated to make the final obligations appear green.
+    if step build-dev scripts/dev sigil build; then
+      step depths-tests scripts/dev sigil test --report test/test-depths-gates.sgl test/test-depths-discovery.sgl test/test-underhum-finale.sgl test/test-save.sgl test/test-gates.sgl test/test-calls.sgl test/test-place.sgl
+      step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
+      for d in /tmp/harkfell-depths-red-*; do
+        [ -d "$d" ] || continue
+        mkdir -p ../out/depths-red
+        cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+      done
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      step parse-seams scripts/dev ./build/release/bin/harkfell --room-check --parse-only
+      step depths-water scripts/dev sigil -L src -L build/release/lib eval -f tools/depths-water.sgl
+      step depths-water-reach scripts/dev ./build/release/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
+      if [ -d world/rooms/underhum ] && [ -d world/rooms/wrongwater ]; then
+        step underhum-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
+        step wrongwater-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region wrongwater
+        step full-world env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3
+      else
+        echo "BLOCKED authored-region and final full-world reach: room track tips are absent"
+      fi
+    fi ;;
   suite)
     step build-dev scripts/dev sigil build && step suite scripts/dev sigil test --report ;;
   release)

@@ -1,0 +1,66 @@
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine worldmap)
+        (engine reach)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell world)
+        (harkfell gates)
+        (harkfell feel)
+        (harkfell audio)
+        (harkfell shell)
+        (harkfell sound))
+
+;; Explicitly use a review door, so no preceding opening-screen test can
+;; suppress the adapter and no personal save is read or written.
+(shell-test-room!)
+
+(define CT (load-content (read-world-source "world")))
+(define (at-hint x y c r carry)
+  (let* ((cell (local->global CT (content-room CT x y) c r))
+         (tm (worldmap-tiles (content-map CT))))
+    (world-populate (world-at (content-map CT) (cell-body tm HARKFELL-FEEL (car cell) (cdr cell)))
+                    (content-stones CT) (content-pickups CT) carry)))
+(define (wait w n)
+  (if (= n 0) w (wait (world-tick w NOTHING) (- n 1))))
+(define (answers w)
+  (filter (lambda (item) (eq? (car item) 'hint-answer)) (world-news w)))
+
+(test-group "Wrongwater: the three established hints"
+  (test "each answers only after H7 and waits twelve seconds between answers"
+    (for-each
+      (lambda (spot)
+        (let* ((without (apply at-hint (append spot (list '(2 3 4)))))
+               (with (apply at-hint (append spot (list '(2 3 4 7)))))
+               (first (wait with 1))
+               (waiting (wait first 719)))
+          (assert-equal '() (answers (wait without 1)))
+          (assert-equal 1 (length (answers first)))
+          (assert-equal 1 (length (answers waiting)))
+          (assert-equal 2 (length (answers (wait waiting 1))))))
+      '((-6 4 13 7) (-2 6 15 9) (1 8 12 8)))))
+
+(define (pickup-world region)
+  (let* ((source (map (lambda (e)
+                       (cons (car e)
+                             (string-replace
+                               (string-replace
+                                 (string-replace (cdr e) "stonefen" (symbol->string region))
+                                 "overtone: 2" "overtone: 7")
+                               "overtone 2" "overtone 7")))
+                     (read-world-source "test/fixtures/worlds/stone")))
+         (ct (load-content source))
+         (tm (worldmap-tiles (content-map ct)))
+         (w (world-populate (world-at (content-map ct) (cell-body tm HARKFELL-FEEL 2 8))
+                            (content-stones ct) (content-pickups ct) '())))
+    (world-place w ct)))
+
+(test-group "Wrongwater: finding target admission"
+  (test "H7 is a finding target inside Wrongwater"
+    (assert-equal '(7) (map car (place-tones (pickup-world 'wrongwater)))))
+  (test "H7 is absent from finding/ear targets in the surrounding regions"
+    (for-each (lambda (region)
+                (assert-equal '() (place-tones (pickup-world region))))
+              '(glasswood pipes hollow underhum))))
