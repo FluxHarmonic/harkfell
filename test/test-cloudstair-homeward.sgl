@@ -1,0 +1,61 @@
+;;; D50: Cloudstair's arch becomes the way home. With H5 the Windworn
+;;; Arch's rose stone (R 12,7) opens and a homeward wind blows west through
+;;; the arch and on over Q, carrying a glider to the homeward shaft (Q, K,
+;;; E, columns 1-3) that drops to E's chute and A. Without H5 the wind is
+;;; still: the stone is shut, so its gated field does not blow. The shaft is
+;;; there either way (the way home, readable before H5), one way down: on
+;;; foot without H5 the steady region reach proves it (tools/cloudstair-
+;;; rooms-reach.sgl, carry with and without H5).
+(import (sigil test)
+        (sigil list)
+        (engine body)
+        (engine air)
+        (engine tilemap)
+        (engine worldmap)
+        (engine reach)
+        (harkfell feel)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check))
+
+(define F HARKFELL-FEEL)
+(define CT (load-content (read-world-source "world")))
+(define WM (content-map CT))
+(define (gcol rx c) (+ c (* 25 (- rx (worldmap-x0 WM)))))
+(define (grow ry r) (+ r (* 11 (- ry (worldmap-y0 WM)))))
+(define (room-of b)
+  (let ((c (body-center b F)))
+    (cons (+ (worldmap-x0 WM) (exact (floor (/ (car c) 400))))
+          (+ (worldmap-y0 WM) (exact (floor (/ (cdr c) 176)))))))
+
+;; From R's ridge inside the arch: jump, hold jump and steer west for 300
+;; ticks, then hold jump, then let go and settle. (body-at-tick-120 . end)
+(define (ride carry)
+  (let* ((tm (tiles-carrying CT carry))
+         (b0 (body (stand-body tm F (gcol 8 13) (grow -2 7)) down: #t)))
+    (let loop ((b (body-step b0 (intent h: -1 jump: #t press: #t) tm F)) (n 1) (at120 #f))
+      (cond ((< n 300) (loop (body-step b (intent h: -1 jump: #t) tm F) (+ n 1) (if (= n 120) b at120)))
+            ((< n 420) (loop (body-step b (intent jump: #t) tm F) (+ n 1) at120))
+            ((and (< n 900) (not (and (eq? (body-mode b) 'ground) (= (body-vx b) 0) (= (body-vy b) 0))))
+             (loop (body-step b NO-INTENT tm F) (+ n 1) at120))
+            (else (cons at120 b))))))
+
+(define WITH (ride '(2 4 5)))
+(define WITHOUT (ride '(2 4)))
+(define RIDGE-TOP (* 16 (grow -2 8)))       ; R's ridge top, global y
+
+(test-group "D50: the homeward wind through the Windworn Arch"
+  (test "a gated field blows only while its gate cell is open"
+    (let ((f (air-field x: 0 y: 0 w: 32 h: 32 lift: 0.3 west: 0.8 gate: (cons 100 100))))
+      (assert-equal (cons 0.0 0.0) (air-sample (list f) 10 10 0))
+      (assert-equal (cons 0.0 0.0) (air-sample (list f) 10 10 0 (lambda (x y) #f)))
+      (assert-equal (cons 0.3 -0.8) (air-sample (list f) 10 10 0 (lambda (x y) (and (= x 100) (= y 100)))))))
+  (test "with H5 the stone is open and the wind carries a glider west, aloft"
+    (let ((b (car WITH)))
+      (assert-true (< (+ (body-y b) (feel-box-h F)) RIDGE-TOP))   ; still above the ridge
+      (assert-equal '(7 . -2) (room-of b))))                      ; already over Q
+  (test "without H5 the stone is shut and the same glide comes down in R"
+    (let ((b (car WITHOUT)))
+      (assert-equal '(8 . -2) (room-of b))))
+  (test "with H5 the ride ends at home's door: down the shaft through K to E or A"
+    (assert-true (member (room-of (cdr WITH)) '((7 . 0) (7 . 1))))))

@@ -351,3 +351,106 @@
         (assert-false incomplete)
         (when arrival
           (assert-equal goal (rest-cell tm f (timed-node-body arrival))))))))
+
+(test-group "timed routes: geometry labels only order suggestions"
+  (test "an inaccurate label cannot hide a genuine physical arrival"
+    (let* ((graph (guide '(7 . 2)))
+           (route (finder graph step 20 (lambda (node) #t) (lambda () #t)))
+           (arrival (route START TARGET)))
+      (assert-true arrival)
+      (when arrival
+        (assert-equal (timed-key END) (timed-key arrival))))))
+
+(test-group "timed routes: actual progress within a cell"
+  (test "a real repositioning within the starting cell can resume a local script"
+    (let* ((nudge (append (make-list 5 (intent h: 1)) (make-list 30 NO-INTENT)))
+           (finish (append (make-list 46 (intent h: 1)) (make-list 30 NO-INTENT)))
+           (middle (car (reverse (timed-run step START nudge))))
+           (fresh (car (reverse (timed-run step middle finish))))
+           (direct (car (reverse (timed-run step START finish))))
+           (goal (rest-cell TM F (timed-node-body fresh)))
+           (edges (make-vector 32 '())))
+      (vector-set! edges (cell-index TM 1 2)
+        (list (cons (cell-index TM (car goal) (cdr goal))
+                    (witness from: '(1 . 2) script: finish))
+              (cons (cell-index TM 1 2)
+                    (witness from: '(1 . 2) script: nudge))))
+      (let* ((incomplete #f)
+             (graph (reach-graph tm: TM cells: (standable-cells TM) edges: edges))
+             (route (finder graph step 20 (lambda (node) #t)
+                            (lambda () (set! incomplete #t))))
+             (arrival (route START goal)))
+        (assert-equal '(1 . 2) (rest-cell TM F (timed-node-body middle)))
+        (assert-false (equal? goal (rest-cell TM F (timed-node-body direct))))
+        (assert-true arrival)
+        (assert-false incomplete)
+        (when arrival
+          (assert-equal goal (rest-cell TM F (timed-node-body arrival)))
+          (assert-equal (body-x (timed-node-body fresh))
+                        (body-x (timed-node-body arrival))))))))
+
+(test-group "timed routes: unsheltered phase-changing motion"
+  (test "a real same-pose motion loop keeps its unproved clock continuation"
+    (let* ((seed (step START NO-INTENT))
+           (x (body-x (timed-node-body seed)))
+           (loop-script
+             (append (list (intent h: -1 v: 1))
+                     (make-list 4 (intent h: -1))
+                     (make-list 30 NO-INTENT)
+                     (make-list 5 (intent h: 1))
+                     (make-list 30 NO-INTENT)))
+           (finish
+             (append (list (intent h: 1 v: -1))
+                     (make-list 46 (intent h: 1))
+                     (make-list 30 NO-INTENT)))
+           (advance
+             (lambda (node in)
+               (let* ((b (timed-node-body node))
+                      (at-start (= (body-x b) x)))
+                 ;; A departure marker is legal only at the original pose;
+                 ;; rightward departure and resting there require late phase.
+                 ;; The leftward loop uses ordinary physical body steps.
+                 (and (not (and (not (= (intent-v in) 0))
+                                (or (not at-start)
+                                    (and (> (intent-h in) 0)
+                                         (< (body-tau b) 400)))))
+                      (not (and at-start (= (body-vx b) 0)
+                                (= (body-vy b) 0) (= (intent-h in) 0)
+                                (< (body-tau b) 400)))
+                      (step node in)))))
+           (loop-trace (timed-run advance seed loop-script))
+           (returned (car (reverse loop-trace)))
+           (fresh (car (reverse (timed-run advance returned finish))))
+           (goal (rest-cell TM F (timed-node-body fresh)))
+           (edges (make-vector 32 '())))
+      (assert-false (timed-shelter? TM F advance seed))
+      (assert-false (timed-run advance seed finish))
+      (assert-equal
+        (timed-key (timed-node seed body: (body (timed-node-body seed) tau: 0)))
+        (timed-key (timed-node returned body: (body (timed-node-body returned) tau: 0))))
+      (assert-false (= (body-tau (timed-node-body seed))
+                       (body-tau (timed-node-body returned))))
+      (vector-set! edges (cell-index TM 1 2)
+        (list (cons (cell-index TM (car goal) (cdr goal))
+                    (witness from: '(1 . 2) script: finish))
+              (cons (cell-index TM 1 2)
+                    (witness from: '(1 . 2) script: loop-script))))
+      (let* ((incomplete #f)
+             (graph (reach-graph tm: TM cells: (standable-cells TM) edges: edges))
+             (route (finder graph advance 20 (lambda (node) #t)
+                            (lambda () (set! incomplete #t))))
+             (arrival (route seed goal)))
+        (assert-true arrival)
+        (assert-false incomplete)
+        (when arrival
+          (assert-equal (body-x (timed-node-body fresh))
+                        (body-x (timed-node-body arrival)))
+          (assert-true
+            (find
+              (lambda (prefix)
+                (let ((trace (timed-run advance prefix finish)))
+                  (and trace
+                       (find (lambda (node)
+                               (equal? (timed-key node) (timed-key arrival)))
+                             trace))))
+              loop-trace)))))))

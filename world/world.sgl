@@ -217,7 +217,7 @@
   hazard: gap
   tiles: cloudstair
   roster: (seed reedling)
-  moments: (the-last-grass low-cloud above-the-cloud)
+  moments: (the-last-grass low-cloud above-the-cloud windworn-arch)
   wander: (thermals)
   gives: ((overtone 5)))
 ;; Seeds: small tufted seeds that drift in the lifts, rise with the gust and

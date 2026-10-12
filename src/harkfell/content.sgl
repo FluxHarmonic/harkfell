@@ -607,7 +607,7 @@
                                  (add! "things: down must rest behind Reedfen's amber door on safe ground" "things"))))
                             ((eq? (car t) 'air-field)
                              (unless (air-thing-valid? t)
-                               (add! "things: air-field needs an in-room at:/size: rectangle and a known kind:" "things")))
+                               (add! "things: air-field needs an in-room at:/size: rectangle, a known kind:, and gate: (C R) exactly when the kind is homeward" "things")))
                             ((eq? (car t) 'harmonic)          ; A3: a pickup
                              (let ((a (thing-kw t "at")) (o (thing-kw t "overtone")))
                                (cond ((not (and (int-pair? a) (< -1 (car a) ROOM-COLS) (< -1 (cadr a) ROOM-ROWS)))
@@ -876,13 +876,22 @@
     (define (air-thing-valid? thing)
       (let ((at (thing-at thing))
             (size (thing-kw thing "size"))
-            (kind (thing-kw thing "kind")))
+            (kind (thing-kw thing "kind"))
+            (gate (thing-kw thing "gate")))
         (and at (int-pair? size)
              (<= 0 (car at)) (<= 0 (cdr at))
              (> (car size) 0) (> (cadr size) 0)
              (<= (+ (car at) (car size)) ROOM-COLS)
              (<= (+ (cdr at) (cadr size)) ROOM-ROWS)
-             (memq kind '(steady-lift pulsed-lift east-gust)))))
+             (memq kind '(steady-lift pulsed-lift east-gust homeward))
+             ;; the homeward wind names its gate: a cell (room-relative, may lie
+             ;; in a neighbouring room) whose stone it waits behind
+             (if (eq? kind 'homeward) (int-pair? gate) (not gate)))))
+
+    ;; The homeward wind (D50): a gentle hold-up, so a glider rides level,
+    ;; and a westward push at the drift cap, blowing only while its gate is
+    ;; open.
+    (define HOMEWARD-LIFT 0.3)
 
     ;; Footprints are authored in room tiles. Strength is shared product
     ;; tuning, never random or a per-room clock. ^ defaults to steady lift;
@@ -891,12 +900,20 @@
       (map (lambda (thing)
              (let ((at (thing-at thing))
                    (size (thing-kw thing "size"))
-                   (kind (thing-kw thing "kind")))
+                   (kind (thing-kw thing "kind"))
+                   (gate (thing-kw thing "gate")))
                (air-field x: (* TILE (car at)) y: (* TILE (cdr at))
                           w: (* TILE (car size)) h: (* TILE (cadr size))
-                          lift: (if (eq? kind 'east-gust) 0.0 (feel-lift-v HARKFELL-FEEL))
+                          lift: (case kind
+                                  ((east-gust) 0.0)
+                                  ((homeward) HOMEWARD-LIFT)
+                                  (else (feel-lift-v HARKFELL-FEEL)))
                           east: (if (eq? kind 'east-gust) (feel-wind-cap HARKFELL-FEEL) 0.0)
-                          pulsed: (not (eq? kind 'steady-lift)))))
+                          west: (if (eq? kind 'homeward) (feel-wind-cap HARKFELL-FEEL) 0.0)
+                          pulsed: (and (memq kind '(pulsed-lift east-gust)) #t)
+                          gate: (and (eq? kind 'homeward)
+                                     (cons (+ (* TILE (car gate)) (/ TILE 2))
+                                           (+ (* TILE (cadr gate)) (/ TILE 2)))))))
            (filter air-thing-valid? (room-things-of rm 'air-field))))
 
     ;; A room's tilemap and its placed form (the grid must be whole).
