@@ -22,7 +22,7 @@
         (motif tune player)
         (harkfell tunes))
 
-(define SERIES-TUNES '("wrongwater-bed" "drip-climb" "drip-fall" "rain-rising" "answer-h7-a" "answer-h7-b"))
+(define SERIES-TUNES (quote ("wrongwater-bed" "drip-climb" "drip-fall" "rain-rising" "seventh-rest" "answer-h7-a" "answer-h7-b")))
 (define H7-TUNES '("pickup-h7"))
 (define ALL (append SERIES-TUNES H7-TUNES))
 ;; the bed kinds take cents: ((motif patches beds), every kind there)

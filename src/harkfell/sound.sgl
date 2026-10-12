@@ -362,7 +362,7 @@
     ;; next room's levels, and the duck is on the source, not the channel.
     ;; H7-KEEPS: the moments where H7 is meant to sound (Wrongwater's own; the
     ;; Underhum's late finders' coda).
-    (define H7-KEEPS '("rain-rising" "underhum-coda"))
+    (define H7-KEEPS '("rain-rising" "seventh-rest" "underhum-coda"))
     (define H7-DIP 0.1)            ; -20 dB
     (define H7-CHANNEL 8)
     (define (h7-dipped?) (and *moment* (not (member (car *moment*) H7-KEEPS)) #t))

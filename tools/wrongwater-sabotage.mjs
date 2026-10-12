@@ -63,7 +63,7 @@ const LEGS = [
   // the dip
   ['dip-not-folded', [[SOUND, '(for-each (lambda (ch) (ramp-channel! ch (channel-level levels (car gc) ch) now secs))', '(for-each (lambda (ch) (ramp-channel! ch (channel-target levels (car gc)) now secs))']], AUDIO_T,
     'a room change during the moment keeps it dipped'],
-  ['dip-under-rain-rising', [[SOUND, '(define H7-KEEPS \'("rain-rising" "underhum-coda"))', '(define H7-KEEPS \'("underhum-coda"))']], AUDIO_T,
+  ['dip-under-rain-rising', [[SOUND, '(define H7-KEEPS \'("rain-rising" "seventh-rest" "underhum-coda"))', '(define H7-KEEPS \'("seventh-rest" "underhum-coda"))']], AUDIO_T,
     'under rain-rising (one of H7-KEEPS) it does not dip'],
   ['no-dip', [[SOUND, '(define H7-DIP 0.1)', '(define H7-DIP 1.0)']], AUDIO_T,
     'under the-ice-rings it drops to H7-DIP of the drone, the other drone channels untouched'],
