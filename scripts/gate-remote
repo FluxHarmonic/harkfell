@@ -15,6 +15,12 @@
 #                                   reach check (ROOM_CHECK_TIMEOUT 10800)
 #   scripts/gate-remote web         web build (the served tree is fetched to
 #                                   build/remote-web-<sha>/) and verify.mjs
+#   scripts/gate-remote review      dev build; the Wrongwater listening page's
+#                                   recordings (tools/wrongwater-review.jobs),
+#                                   fetched to build/remote-review-<sha>.logs/
+#   scripts/gate-remote sabotage    dev build; tools/wrongwater-sabotage.mjs, with
+#                                   the harness's engine and harkfell libraries
+#                                   linked to src/ so a plant in src/ is what runs
 #
 # Each job leases its own runner (procedures/azoth-remote-builds), so the
 # four can run at once. Generalised from Crash The Stack's scripts/build-remote:
@@ -33,7 +39,7 @@ cd "$(dirname "$0")/.."
 say() { printf 'gate-remote: %s\n' "$*" >&2; }
 
 JOB=${1:-}
-case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check"; exit 125 ;; esac
+case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|review|sabotage) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|review|sabotage"; exit 125 ;; esac
 
 REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
 [ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
@@ -147,6 +153,18 @@ case "$JOB" in
   reach)
     step build-release scripts/dev sigil build --config release && \
       step gate-a3 env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3 ;;
+  review)
+    # the test binary (harkfell-test) is built by sigil test, not sigil build
+    step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl && \
+      step render env JOBS=tools/wrongwater-review.jobs OUT=../out/wrongwater-listening \
+        scripts/dev build/dev/bin/harkfell-test --no-strict tools/wrongwater-render.sgl && \
+      step encode sh tools/wrongwater-review-encode.sh ../out/wrongwater-listening ;;
+  sabotage)
+    if step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl; then
+      for lib in engine harkfell; do rm -rf "build/dev/lib/$lib" && ln -s "$PWD/src/$lib" "build/dev/lib/$lib"; done
+      step sabotage node tools/wrongwater-sabotage.mjs build/dev/bin/harkfell-test
+      cp build/sabotage-*.log ../out/ 2>/dev/null || true
+    fi ;;
   web)
     if step build-web scripts/dev sigil build --config web; then
       STAMP=$(grep -o 'version: "[^"]*"' build/web/index.html | head -1 | cut -d'"' -f2)
@@ -187,6 +205,11 @@ if [ -d "$STAGE/fetched" ]; then
       mv "$STAGE/fetched/web" "build/remote-web-$SHA"; printf '%s\n' "$FULL" > "build/remote-web-$SHA/BUILD-SHA"
       say "fetched the web build of $SHA to build/remote-web-$SHA (stamp verified here)"
     fi
+  fi
+  if [ "$JOB" = review ] && [ -d "$STAGE/fetched/wrongwater-listening" ]; then
+    mv "$STAGE/fetched/wrongwater-listening" "$LOGS/wrongwater-listening"
+    printf '%s\n' "$FULL" > "$LOGS/wrongwater-listening/BUILD-SHA"
+    say "fetched the recordings of $SHA to $LOGS/wrongwater-listening ($(ls "$LOGS/wrongwater-listening" | grep -c '\.ogg$') Opus files, $(du -sh "$LOGS/wrongwater-listening" | cut -f1))"
   fi
   say "runner logs in $LOGS"
 fi

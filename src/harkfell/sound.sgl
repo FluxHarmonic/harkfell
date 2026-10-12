@@ -87,6 +87,9 @@
           place-listen
           place-wander place-moment-carrying place-moment-still place-moment-key place-hums place-exits place-static UPWARD-ID
           place-tau place-gusts place-gaps place-seeds place-gliding
+          H7-KEEPS H7-DIP DRIP-CLIMB-AT DRIP-START-S DRIP-LAND-S DRIP-FALLBACK-S DRIP-ID
+          sound-drip sound-drip-source sound-drip-nudge! sound-answers CLOCK-CUES sound-bed-opened
+          DRIP-GAIN-SOFT DRIP-GAIN-MOMENT sound-drip-gain sound-set-drip-gain!
           sound-gust sound-gust-source sound-gust-nudge! sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-FREEZE-S GUST-MOMENT-DIP GAP-GAIN GAP-R
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
@@ -273,6 +276,7 @@
       (set! *moment-quiet* #f) (set! *opening-quiet* #f)
       (set! *gust* #f) (set! *gust-dip* #f) (set! *gliding* #f) (set! *glide-at* -100.0) (set! *seed-answer-at* -100.0)
       (set! *seed-calls* (quote ()))
+      (set! *drip* #f) (set! *answer-b* #f) (set! *answers* '())
       (finale-reset!))
 
     ;; --- A4: the border, and what a save keeps ---------------------------------------
@@ -361,20 +365,44 @@
     (define (channel-target levels g)
       (* (room-level levels g) (if (and (eq? g 'drone) (not *still*)) DRONE-MOVING 1.0)))
 
+    ;; THE H7 DIP (the Wrongwater bible, "H7 in the drone everywhere", 4):
+    ;; while a moment plays that is not one of H7-KEEPS, H7's drone channel
+    ;; (8) drops to H7-DIP, nearly silent, so the moments' equal-tempered Cs
+    ;; and C#s never rub against it, and it comes back with the bed. It is
+    ;; folded into the channel's target here, as DRONE-MOVING is (D23): one
+    ;; ramp per target means a separate dip ramp would be overwritten by the
+    ;; next room's levels, and the duck is on the source, not the channel.
+    ;; H7-KEEPS: the moments where H7 is meant to sound (Wrongwater's own; the
+    ;; Underhum's late finders' coda).
+    (define H7-KEEPS '("rain-rising" "seventh-rest" "underhum-coda"))
+    (define H7-DIP 0.1)            ; -20 dB
+    (define H7-CHANNEL 8)
+    (define (h7-dipped?) (and *moment* (not (member (car *moment*) H7-KEEPS)) #t))
+
+    (define (ramp-channel! ch v now secs)
+      (let ((from (level-now ch now)))
+        (player-ramp! *bed-player* (cons 'channel-volume ch) from v (* 1000.0 secs))
+        (set! *levels* (cons (cons ch (vector from v now secs))
+                             (filter (lambda (e) (not (eqv? (car e) ch))) *levels*)))))
+
+    (define (channel-level levels g ch)
+      (* (channel-target levels g)
+         (if (and (eqv? ch H7-CHANNEL) (eq? g 'drone) (h7-dipped?)) H7-DIP 1.0)))
+
     ;; only: a group to ramp alone (the drone on a stop or a start), or all
     (define (apply-room-levels! levels now secs . only)
       (when *bed-player*
         (for-each
           (lambda (gc)
-            (let ((v (channel-target levels (car gc))))
-              (for-each (lambda (ch)
-                          (let ((from (level-now ch now)))
-                            (player-ramp! *bed-player* (cons 'channel-volume ch) from v (* 1000.0 secs))
-                            (set! *levels* (cons (cons ch (vector from v now secs))
-                                                 (filter (lambda (e) (not (eqv? (car e) ch))) *levels*)))))
-                        (cdr gc))))
+            (for-each (lambda (ch) (ramp-channel! ch (channel-level levels (car gc) ch) now secs))
+                      (cdr gc)))
           (filter (lambda (gc) (or (null? only) (eq? (car gc) (car only))))
                   (bed-channels-of *groups*)))))
+
+    ;; A moment started or ended: H7's channel alone ramps to its target.
+    (define (h7-dip-frame! now secs)
+      (when (and *bed-player* (memv H7-CHANNEL (group-channels *groups* 'drone)))
+        (ramp-channel! H7-CHANNEL (channel-level *room-levels* 'drone H7-CHANNEL) now secs)))
 
     ;; The bed as opened: the notes of every drone channel whose harmonic is
     ;; not carried are dropped. Measured (native dev build, 20 s of reedfen-bed
@@ -412,6 +440,7 @@
     (define *bed-opened* #f)
     (define *bed-name* #f)         ; the bed's tune as last opened (the after-ending bed is another)
     (define (sound-bed-name) *bed-name*)
+    (define (sound-bed-opened) *bed-opened*)
     (define (sound-bed-notes ch)
       (if *bed-opened*
           (apply + (map (lambda (p) (length (filter (lambda (c) (and (eqv? (cell-channel c) ch) (number? (cell-note c))))
@@ -437,12 +466,19 @@
                                   (tune-patterns t)))))
         (tune-with-instruments t
           (map (lambda (i)
-                 (if (memv (tune-instrument-id i) slow-ids)
+                 ;; an attack written under a second is the voice's character,
+                 ;; not a slow fade-in (Wrongwater's drops played backwards
+                 ;; swell over 0.45 s and cut): kept
+                 (if (or (memv (tune-instrument-id i) slow-ids) (short-attack? i))
                      i
                      (tune-instrument i params: (cons (cons 'attack BORDER-ATTACK-S)
                                                       (filter (lambda (kv) (not (eq? (car kv) 'attack)))
                                                               (tune-instrument-params i))))))
                (tune-instruments t)))))
+
+    (define (short-attack? i)
+      (let ((a (assq 'attack (tune-instrument-params i))))
+        (and a (number? (cdr a)) (< (cdr a) 1.0))))
 
     ;; quick?: opened at a border or a carry change (not the world's first bed)
     (define (open-bed name region quick?)
@@ -614,6 +650,7 @@
           (set! *moment-quiet* (vector #f))
           (let ((s (mixer-add! MOMENT-ID (watch-pull p *moment-quiet*) #t)))
             (duck-bed! now)
+            (h7-dip-frame! now DUCK-IN-S)
             (source-on-end! s (lambda (t)
                                 (when (and *moment* (eq? (cdr *moment*) p))
                                   (moment-over! t)
@@ -631,7 +668,8 @@
       (set! *moment* #f)
       (set! *moment-key* #f)
       (set! *hush* (hush-ended *hush*))
-      (unduck-bed! t))
+      (unduck-bed! t)
+      (h7-dip-frame! t DUCK-OUT-S))
 
     ;; Walking into a room whose own fixed moment is still armed: the playing
     ;; moment fades out and leaves.
@@ -886,6 +924,13 @@
     ;; The unfound harmonics' places: ((overtone x y) ...), absolute world
     ;; pixels. A3: the place's (the world's pickups); without them, A2's one
     ;; placeholder, H2 at the centre of *tone-room*.
+    ;; Wrongwater (the bible's decision 2, David: "I'm fine with 'no'"): H7's
+    ;; finding tone sounds ONLY while the body is in the region wrongwater, a
+    ;; departure from D22 for H7 alone (SYSTEMS' a7dd343; the adapter also drops
+    ;; H7's pickup from the tones outside). Under the range rule an H7 in
+    ;; Wrongwater would be heard from the western Pipes and the glass caves,
+    ;; pointing a player with only H2 at a wall. Outside, the hints keep their
+    ;; local hums and nothing else points at H7.
     (define (tone-spots pl)
       (filter (lambda (t) (or (not (= (car t) 7)) (eq? (place-region pl) 'wrongwater)))
         (or (place-tones pl)
@@ -1159,8 +1204,27 @@
     (define UPWARD-R 112.0)        ; px: 7 tiles, the hollow behind the fall
     (define UPWARD-GAIN 0.2)
     (define *upward-n* #f)
+    ;; Wrongwater: the Ice Well's drip is the door. While you stand still by it
+    ;; its hum swells with the door's count, up to DRIP-SWELL times (+6 dB)
+    ;; at DRIP-LAND-S; once the door is open the drip falls the right way, so
+    ;; it no longer hums (door-drip-hum?).
+    (define DRIP-SWELL 2.0)
+    (define (door-drip-hum? pl h)
+      (let ((d (place-drip pl)))
+        (and d
+             (< (sqrt (+ (expt (- (cadr h) (cadr d)) 2) (expt (- (caddr h) (caddr d)) 2))) 16.0))))
+    (define (drip-swell pl h)
+      (let ((d (place-drip pl)))
+        (if (and d (eq? (car d) 'shut) (door-drip-hum? pl h))
+            (+ 1.0 (* (- DRIP-SWELL 1.0) (/ (min DRIP-LAND-S (max 0.0 (cadddr d))) DRIP-LAND-S)))
+            1.0)))
+    (define (live-hums pl)
+      (let ((d (place-drip pl)))
+        (if (and d (eq? (car d) 'open))
+            (filter (lambda (h) (not (door-drip-hum? pl h))) (place-hums pl))
+            (place-hums pl))))
     (define (upward-frame! pl now)
-      (let* ((near (let loop ((hs (place-hums pl)) (best #f) (bd UPWARD-R))
+      (let* ((near (let loop ((hs (live-hums pl)) (best #f) (bd UPWARD-R))
                      (if (null? hs)
                          best
                          (let* ((h (car hs))
@@ -1173,8 +1237,164 @@
           (unless (assoc UPWARD-ID *voices*) (voice-open! UPWARD-ID (tone-id n) now))
           (let* ((h (car near)) (d (cdr near))
                  (dx (/ (- (cadr h) (place-px pl)) 200.0)))
-            (voice-set! UPWARD-ID (* UPWARD-GAIN (- 1.0 (/ d UPWARD-R))) (clamp (- MAX-PAN) MAX-PAN dx) #f now)))
+            (voice-set! UPWARD-ID (* UPWARD-GAIN (drip-swell pl h) (- 1.0 (/ d UPWARD-R))) (clamp (- MAX-PAN) MAX-PAN dx) #f now)))
         (set! *upward-n* n)))
+
+    ;; THE HINTS ANSWER H7 (the bible's decision 5): carrying H7, near one of
+    ;; the three hints (the upward icicle behind the fall, the Pipes' rising
+    ;; drip, the Ice Well's), a short local phrase sounds from it, answer-h7-a
+    ;; and -b in turn. WHEN is SYSTEMS' rule, the world's (hint-answer 7 x y)
+    ;; news: within 4 tiles, at most once every 12 s (the standing stones'
+    ;; rule, world/BIBLE.md). Like the stones' chord it answers what you did,
+    ;; so it plays under a moment too; it is a cue, never a finding target.
+    (define *answer-b* #f)
+    (define *answers* '())          ; ((name . t) ...), newest first, at most 50 (the gates)
+    (define (take* l n) (if (or (= n 0) (null? l)) '() (cons (car l) (take* (cdr l) (- n 1)))))
+    (define (sound-answers) *answers*)
+    (define (answer! x pl)
+      (let ((name (if *answer-b* 'answer-h7-b 'answer-h7-a)))
+        (set! *answer-b* (not *answer-b*))
+        (set! *answers* (let ((l (cons (cons name *now*) *answers*))) (if (> (length l) 50) (take* l 50) l)))
+        (gate-cue! name (spot-gain name) x pl)))
+
+    ;; --- Wrongwater: the drip door's climb, on the door's clock ---------------------------
+    ;; David's ruling 1: "it needs to change in some way to make them
+    ;; anticipate something ... potentially a short musical event that builds
+    ;; intrigue". Standing still by the drip, the door counts (SYSTEMS', the
+    ;; place's drip: held); from DRIP-START-S a soft climb up the harmonic
+    ;; series of D rises out of the crack (drip-climb: partials 8 to 14, one
+    ;; note entering at each of DRIP-CLIMB-AT and holding, closer together as
+    ;; the drop's rings come closer) and lands on H7 at DRIP-LAND-S, when the
+    ;; door opens. Moving before then, the climb falls away over
+    ;; DRIP-FALLBACK-S; the next stillness starts it again from the start.
+    ;; It is a cue, not a moment: the hush never blocks it, it ducks nothing,
+    ;; and it plays each time until the door is open.
+    ;; The climb is rendered once by the cue bank (CLOCK-CUES) and played by a
+    ;; source of its own whose read position is kept on held, as the gust's
+    ;; is kept on tau: the frame being heard (the read position less the
+    ;; source's lead) is compared with held's; past GUST-SNAP-S apart it moves
+    ;; there, crossfading. So it lands on H7 at the door's 5.0 s by
+    ;; construction, through a stall or a sink's depth. Once it has landed (or
+    ;; the door is open) it plays out free: the H7 note rings on as the drop
+    ;; falls.
+    (define DRIP-ID "drip-climb")
+    (define DRIP-START-S 1.0)
+    (define DRIP-LAND-S 5.0)
+    (define DRIP-CLIMB-AT '(1.0 1.9 2.7 3.4 4.0 4.5 5.0))
+    (define DRIP-FALLBACK-S 0.5)
+    ;; The climb's loudness, for David to choose by ear (both on the listening
+    ;; page; ?sound=climb:soft | climb:moment in play). SOFT is the bible's
+    ;; word ("a soft cue"): -28.4 LUFS alone, about 5 dB over the recess's
+    ;; bed while you stand still. MOMENT is as loud as a moment (-22.3 LUFS),
+    ;; the first take. The default is SOFT until he rules.
+    (define DRIP-GAIN-SOFT 0.4)
+    (define DRIP-GAIN-MOMENT 0.8)
+    (define *drip-gain* DRIP-GAIN-SOFT)
+    (define (sound-drip-gain) *drip-gain*)
+    (define (sound-set-drip-gain! g) (set! *drip-gain* g))
+    (define DRIP-OPEN-LO 2.5)       ; s: the open crack's plain drip, now and then
+    (define DRIP-OPEN-HI 4.5)
+    (define DRIP-OPEN-GAIN 0.3)
+    ;; (name tune seconds): rendered whole, at most SECONDS, kept as a buffer
+    (define CLOCK-CUES '((drip-climb "drip-climb" 7.6)))
+    (define (clock-ref name) (assq name CLOCK-CUES))
+    ;; #(source-id buf head pending-head xfade-k following?)
+    (define *drip* #f)
+    (define *drip-n* 0)
+    (define (sound-drip-source) (and *drip* (mixer-find (vector-ref *drip* 0))))
+    ;; For the gates: #f, or (heard-seconds following?): heard-seconds is the
+    ;; buffer position being heard (the read position less the lead).
+    (define (sound-drip)
+      (let ((s (sound-drip-source)))
+        (and s (list (/ (- (vector-ref *drip* 2) (source-lead s)) (* 1.0 (mixer-rate)))
+                     (vector-ref *drip* 5)))))
+
+    ;; A test's door: move the read position by SECS, as a stall or a played-out
+    ;; sink would.
+    (define (sound-drip-nudge! secs)
+      (when *drip* (vector-set! *drip* 2 (max 0 (+ (vector-ref *drip* 2) (exact (round (* secs (mixer-rate)))))))))
+
+    ;; Reads the buffer from the head; past its end, silence and the end.
+    (define (drip-pull st)
+      (lambda (out off n)
+        (let* ((buf (vector-ref st 1)) (len (buf-frames buf))
+               (at (lambda (h) (if (and (>= h 0) (< h len)) (bytevector-ieee-single-ref buf (* 4 h) 'little) 0.0))))
+          (let loop ((i 0) (h (vector-ref st 2)) (to (vector-ref st 3)) (k (vector-ref st 4)))
+            (if (< i n)
+                (let* ((s (if to
+                              (let ((w (/ k (* 1.0 GUST-XFADE)))) (+ (* (- 1.0 w) (at h)) (* w (at to))))
+                              (at h)))
+                       (o (+ off (* 8 i))))
+                  (bytevector-ieee-single-set! out o s 'little)
+                  (bytevector-ieee-single-set! out (+ o 4) s 'little)
+                  (cond ((not to) (loop (+ i 1) (+ h 1) #f 0))
+                        ((>= (+ k 1) GUST-XFADE) (loop (+ i 1) (+ to 1) #f 0))
+                        (else (loop (+ i 1) (+ h 1) (+ to 1) (+ k 1)))))
+                (begin
+                  (vector-set! st 2 h)
+                  (vector-set! st 3 to)
+                  (vector-set! st 4 (if to k 0))
+                  (< (if to to h) len)))))))
+
+    (define (held->frame held) (exact (round (* (- held DRIP-START-S) (mixer-rate)))))
+
+    (define (drip-open-source! buf held pl now)
+      (set! *drip-n* (+ *drip-n* 1))
+      (let* ((sid (string-append DRIP-ID "#" (number->string *drip-n*)))
+             (st (vector sid buf 0 #f 0 #t))
+             (s (mixer-add! sid (drip-pull st) #t)))
+        ;; the read position leads what is heard by the stream's depth (0 headless)
+        (vector-set! st 2 (+ (held->frame held) (source-lead s)))
+        (source-factor! s 'dist *drip-gain* 0.0 now)
+        (set! *drip* st)
+        (*say* "sound" "drip" "climb" (number->string held))))
+
+    (define (drip-fall-away! now)
+      (let ((st *drip*))
+        (when st
+          (set! *drip* #f)
+          (let ((s (mixer-find (vector-ref st 0))))
+            (when s
+              (*say* "sound" "drip" "fall-away")
+              (source-factor! s 'fade 0.0 DRIP-FALLBACK-S now)
+              (mixer-at! (+ now DRIP-FALLBACK-S 0.05)
+                         (lambda () (when (eq? (mixer-find (vector-ref st 0)) s) (mixer-remove! (vector-ref st 0))))))))))
+
+    (define (drip-frame! pl now)
+      (let* ((d (place-drip pl))
+             (shut? (and d (eq? (car d) 'shut)))
+             (held (if shut? (max 0.0 (cadddr d)) 0.0))
+             (buf (sound-loop 'drip-climb))
+             (src (sound-drip-source)))
+        ;; wanted only near the drip, where a climb could start (review: the
+        ;; door is in every place, so this pulled 7.6 s of render to the head
+        ;; of the queue in every room from boot)
+        (when (and d (not buf) (< (local-distance pl (cadr d) (caddr d)) UPWARD-R)) (want-loop! 'drip-climb))
+        (when (and *drip* (not src)) (set! *drip* #f))   ; it played out
+        (cond
+          ;; following the door's clock
+          ((and *drip* (vector-ref *drip* 5))
+           (cond ((not d) (drip-fall-away! now))      ; the door is gone (a world swap)
+                 ((or (not shut?) (>= held DRIP-LAND-S))
+                  ;; landed, or the door opened: it plays out free
+                  (vector-set! *drip* 5 #f))
+                 ((< held DRIP-START-S) (drip-fall-away! now))
+                 (else
+                  (let* ((st *drip*) (len (buf-frames (vector-ref st 1)))
+                         (want (+ (held->frame held) (source-lead src)))
+                         (err (- (vector-ref st 2) want)))
+                    (when (and (not (vector-ref st 3)) (> (abs err) (* GUST-SNAP-S (mixer-rate))))
+                      (vector-set! st 3 (min want (- len 1)))
+                      (vector-set! st 4 0))))))
+          ;; nothing following: stillness past the start opens one
+          ((and shut? buf (>= held DRIP-START-S) (< held DRIP-LAND-S))
+           (drip-open-source! buf held pl now))
+          (else #f))
+        ;; the open crack drips the right way, quietly, for good
+        (when (and d (not shut?) (not *moment*)
+                   (< (local-distance pl (cadr d) (caddr d)) UPWARD-R)
+                   (due? 'open-drip now DRIP-OPEN-LO DRIP-OPEN-HI))
+          (cue-at! 'drip-fall (* DRIP-OPEN-GAIN (spot-gain 'drip-fall)) (cadr d) pl))))
 
     ;; Persistent route and hazard sources bypass the moment duck. They never
     ;; enter the finding/calling roster, and cannot select the ears' direction.
@@ -1548,6 +1768,13 @@
             (list 'seed-chirr "seed-chirr" 0.0 0.0 0.55)
             (list 'seed-answer-a "seed-answer-a" 0.0 0.0 0.4)
             (list 'seed-answer-b "seed-answer-b" 0.0 0.0 0.4)
+            ;; Wrongwater: H7 taken; the drop falling back into its crack as the
+            ;; Ice Well door opens (and the open crack's quiet drip); the
+            ;; upward things answering a carried H7
+            (list 'pickup-h7 "pickup-h7" 0.0 0.0 0.6)
+            (list 'drip-fall "drip-fall" 0.0 0.0 0.5)
+            (list 'answer-h7-a "answer-h7-a" 0.0 0.0 0.4)
+            (list 'answer-h7-b "answer-h7-b" 0.0 0.0 0.4)
             ;; A2's spot sounds
             (list 'bird "spot-bird" 14.0 32.0 0.35)
             (list 'plop "spot-plop" 7.0 18.0 0.4)))
@@ -1635,6 +1862,16 @@
                         ((home) (finale-want! 'home))
                         ((coda) (sound-coda! *now*))
                         (else #f)))
+            ;; Wrongwater: the Ice Well door opens ((drip-fall 7 x y), SYSTEMS',
+            ;; with (sink 7 x y) beside it, which plays the stone's usual
+            ;; sound above): the drop falls the right way with one plain drip.
+            ;; drip-build and drip-cancel need nothing here: the climb follows
+            ;; the door's count itself (drip-frame!).
+            ((drip-fall) (gate-cue! 'drip-fall (spot-gain 'drip-fall) (caddr item) pl))
+            ;; the hints answering a carried H7 ((hint-answer 7 x y), SYSTEMS'
+            ;; rule: within 4 tiles of one of the three hints, at most once
+            ;; every 12 s)
+            ((hint-answer) (answer! (caddr item) pl))
             ;; the cattail down settles on you ((harkfell world) down-tick: (down x y))
             ((down) (gate-cue! 'down-settles (spot-gain 'down-settles) (cadr item) pl))
             ((call) (unless (or *moment* (finale-busy?)) (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
@@ -1689,7 +1926,11 @@
       (list 'ice-crack 'ice-fall 'ice-shatter
             'moth-h3 'owl-h3 'vole
             'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
-            'gust-lift 'gust-east))
+            'gust-lift 'gust-east
+            ;; Wrongwater: heard only at the Ice Well and after. The climb, the
+            ;; drop and the answers are wanted on approach (gate-proximity-frame!),
+            ;; and render even under a moment; pickup-h7 is a gate cue, eager.
+            'drip-climb 'drip-fall 'answer-h7-a 'answer-h7-b))
     ;; THE STONES' AND PICKUPS' CUES ARE PREPARED EAGERLY: right after the
     ;; movement sounds, before anything else, so a pickup's tune lands on its
     ;; frame. Measured before (c7dcaf0, the test's budget): a pickup the bank
@@ -1726,13 +1967,27 @@
                         (for-each want-cue! '(ring-heart miss-heart heart-sink))
                         (begin (want-cue! (harmonic-cue "ring-h" (car st)))
                                (want-cue! (harmonic-cue "miss-h" (car st)))))))
-                (place-stones pl)))
+                (place-stones pl))
+      ;; Wrongwater (the review of 813718e: the same gap as H5's late pickup):
+      ;; within a finding tone's range of the Ice Well's drip, the door's climb
+      ;; and its drop; carrying H7 within it of an upward thing, the answers.
+      ;; So the climb is ready by the time you have walked into the recess and
+      ;; stood a second, and the drop and an answer land on their frame.
+      (let ((d (place-drip pl)))
+        (when (and d (eq? (car d) 'shut) (< (caddr (geometry-to pl (cadr d) (caddr d))) TONE-OPEN-ROOMS))
+          (unless (sound-loop 'drip-climb) (want-loop! 'drip-climb))
+          (want-cue! 'drip-fall)))
+      (when (and (memv 7 *carry*)
+                 (any (lambda (h) (< (caddr (geometry-to pl (cadr h) (caddr h))) TONE-OPEN-ROOMS)) (place-hums pl)))
+        (want-cue! 'answer-h7-a)
+        (want-cue! 'answer-h7-b)))
     (define (bank-order)
       (let ((gates (gate-cue-names)))
         (append (filter spot-ref MOVING-CUES)
                 gates
                 (filter (lambda (n) (not (or (memq n MOVING-CUES) (memq n gates)))) (map car SPOTS))
-                (map car GUST-LOOPS))))
+                (map car GUST-LOOPS)
+                (map car CLOCK-CUES))))
     (define *cue-job* #f)         ; #(name player chunks frames silent heard?) being rendered
     (define *cue-buf* (make-bytevector (* 8 CUE-BLOCK) 0))
     (define *moving-said* #f)
@@ -1750,7 +2005,8 @@
       (when *cue-job*
         (let* ((j *cue-job*) (p (vector-ref j 1))
                (loop? (loop-ref (vector-ref j 0)))
-               (limit (exact (round (* (if loop? (+ GUST-CYCLE-S 1.0) CUE-LIMIT-S)
+               (clock (clock-ref (vector-ref j 0)))
+               (limit (exact (round (* (cond (loop? (+ GUST-CYCLE-S 1.0)) (clock (caddr clock)) (else CUE-LIMIT-S))
                                       (mixer-rate)))))
                ;; Fold exactly one second of release, independent of how the
                ;; cycle/rate divides into render blocks. Ordinary cue trimming
@@ -1788,7 +2044,9 @@
     (define (loop-ref name) (assq name GUST-LOOPS))
     (define (cue-tune-of name)
       (let ((s (spot-ref name)))
-        (if s (cadr s) (let ((l (loop-ref name))) (and l (cadr l))))))
+        (if s (cadr s) (let ((l (or (loop-ref name) (clock-ref name)))) (and l (cadr l))))))
+    ;; a buffer a source plays on a clock: a gust loop, or a clock cue
+    (define (buffer-ref name) (or (loop-ref name) (clock-ref name)))
 
     ;; A gust loop: its cycle and one-second release folded into exactly one
     ;; cycle, the release added onto the start, where it falls in play. Ease
@@ -1818,7 +2076,26 @@
         (bank-news!)))
 
     (define (finish-cue! j . fade?)
-      (if (loop-ref (vector-ref j 0)) (finish-loop! j) (apply finish-cue-buffer! j fade?)))
+      (cond ((loop-ref (vector-ref j 0)) (finish-loop! j))
+            ((clock-ref (vector-ref j 0)) (apply finish-clock! j fade?))
+            (else (apply finish-cue-buffer! j fade?))))
+
+    ;; A clock cue (CLOCK-CUES): kept whole as a mono buffer beside the gust
+    ;; loops (sound-loop), less its trailing silent blocks, for a source that
+    ;; reads it on a clock.
+    (define (finish-clock! j . fade?)
+      (let* ((chunks (list-tail* (vector-ref j 2) (vector-ref j 4)))
+             (frames (apply + (map (lambda (c) (quotient (bytevector-length c) 4)) chunks)))
+             (out (make-bytevector (* 4 frames) 0)))
+        (player-close! (vector-ref j 1))
+        (let fill ((cs (reverse chunks)) (at 0))
+          (when (pair? cs)
+            (bytevector-copy! out (* 4 at) (car cs) 0 (bytevector-length (car cs)))
+            (fill (cdr cs) (+ at (quotient (bytevector-length (car cs)) 4)))))
+        (when (and (pair? fade?) (car fade?)) (fade-out! out frames))
+        (set! *loops* (cons (cons (vector-ref j 0) out) (filter (lambda (e) (not (eq? (car e) (vector-ref j 0)))) *loops*)))
+        (set! *cue-job* #f)
+        (bank-news!)))
 
     (define (finish-cue-buffer! j . fade?)
       (let* ((chunks (list-tail* (vector-ref j 2) (vector-ref j 4)))
@@ -2480,7 +2757,7 @@
       (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
       (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
-      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) LOCAL-TUNES (map cadr SPOTS) (map cadr GUST-LOOPS)
+      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) LOCAL-TUNES (map cadr SPOTS) (map cadr GUST-LOOPS) (map cadr CLOCK-CUES)
                                   (list FINALE-TUNE FINALE-TUNE-H7 FINALE-DRONE-TUNE CODA-TUNE AFTER-BED))))
 
     ;; One piece of deferred work a frame: a cue render or a moment open,
@@ -2518,7 +2795,7 @@
              'block)
             ((and (pair? *cue-queue*) (waited-out? *cue-wait* (car *cue-queue*)))
              (*say* "sound" "error" "no-text" (cue-tune-of (car *cue-queue*)))
-             (when (loop-ref (car *cue-queue*)) (set! *loops-failed* (cons (car *cue-queue*) *loops-failed*)))
+             (when (buffer-ref (car *cue-queue*)) (set! *loops-failed* (cons (car *cue-queue*) *loops-failed*)))
              (set! *cue-queue* (cdr *cue-queue*))
              (set! *cue-wait* #f)
              (bank-news!)
@@ -2570,7 +2847,7 @@
       (let loop ()
         (when (or *cue-job*
                   (and (pair? *cue-queue*)
-                       (or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)
+                       (or (buffer-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)
                            (memq (car *cue-queue*) *cues-wanted*))
                        (tune-text (cue-tune-of (car *cue-queue*)))))
           (render-next-cue!)
@@ -2632,6 +2909,7 @@
         (listen-frame! pl now)
         (gust-frame! pl now)
         (gate-proximity-frame! pl)
+        (drip-frame! pl now)
         (news-frame! pl)
         (movement-frame! pl)
         (pending-cues-frame!)
