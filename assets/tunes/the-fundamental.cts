@@ -20,8 +20,9 @@
     (instrument id: 21 name: "first flute" patch: (flute-wind attack: 0.12 release: 0.7 noise-amp: 0.15) volume: 38 gain: 0.5 send: 0.4 pan: -0.2)
     (instrument id: 22 name: "second flute" patch: (flute-wind attack: 0.15 release: 0.8 noise-amp: 0.18) volume: 28 gain: 0.5 send: 0.5 pan: 0.25)
     (instrument id: 23 name: "glass flute, its C# (15 x D2)" patch: (drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 0.7 cents: -11.731) volume: 38 gain: 0.5 send: 0.4)
-    (instrument id: 27 name: "the long rank" patch: (drone-fm level: 0.3 index: 0.55 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2) volume: 30 gain: 0.6 send: 0.5)
-    (instrument id: 29 name: "wind on its lip" patch: (pipe-breath level: 0.4 width: 0.05 octave: 0.5 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23) volume: 20 gain: 0.9 send: 0.5)
+    (instrument id: 27 name: "the long rank" patch: (drone-fm level: 0.3 index: 1.3 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2) volume: 30 gain: 0.6 send: 0.5)
+    (instrument id: 33 name: "the long rank, its D" patch: (drone-fm level: 0.3 index: 1.4 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.25 release: 1.2) volume: 30 gain: 0.6 send: 0.5)
+    (instrument id: 29 name: "wind on its lip" patch: (pipe-breath level: 0.4 width: 0.05 octave: 0.9 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23) volume: 20 gain: 0.9 send: 0.5)
     (instrument id: 31 name: "the octave rank" patch: (drone-fm level: 0.3 index: 0.4 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.3 release: 1.2) volume: 14 gain: 0.6 send: 0.6))
   (patterns
     (pattern id: 0 rows: 64
@@ -166,7 +167,7 @@
       (row 48 (2 "A#3" 29 16 "000") (4 "A#3" 27 24 "000") (5 "D-4" 8 16 "000") (6 "F-4" 8 16 "000") (7 "A#4" 8 16 "000") (8 "A#4" 31 10 "000"))
       (row 56 (2 "C-4" 29 16 "000") (4 "C-4" 27 24 "000") (8 "C-5" 31 10 "000")))
     (pattern id: 11 rows: 16
-      (row 0 (2 "D-4" 29 16 "000") (4 "D-4" 27 24 "000") (5 "D-4" 8 16 "000") (6 "E-4" 8 16 "000") (7 "A-4" 8 16 "000") (8 "D-5" 31 10 "F06"))
+      (row 0 (2 "D-4" 29 16 "000") (4 "D-4" 33 24 "000") (5 "D-4" 8 16 "000") (6 "E-4" 8 16 "000") (7 "A-4" 8 16 "000") (8 "D-5" 31 10 "F06"))
       (row 6 (3 "D-6" 19 16 "000")))
     (pattern id: 12 rows: 12
       (row 0 (1 "===" 0 0 "000") (2 "===" 0 0 "000") (3 "D-5" 20 24 "000") (4 "===" 0 0 "000") (5 "D-4" 8 18 "000") (6 "F#4" 9 18 "000") (7 "A-4" 8 18 "000") (8 "D-3" 12 26 "F08"))

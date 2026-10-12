@@ -79,10 +79,15 @@ const INSTRUMENTS = [
   [24, "low line, its C H7", `${LOW} ${H7C}`, 30, 0.5, 0.3],
   // the Pipes' stone organ (David's pick, the Pipes rethink's direction B):
   // the long rank, the wind on its lip doubling it, the octave rank above
-  [27, "the long rank", "drone-fm level: 0.3 index: 0.55 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2", 30, 0.6, 0.5],
-  [28, "the long rank, its C H7", "drone-fm level: 0.3 index: 0.55 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2 cents: -31.174", 30, 0.6, 0.5],
-  [29, "wind on its lip", "pipe-breath level: 0.4 width: 0.05 octave: 0.5 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23", 20, 0.9, 0.5],
-  [30, "wind on its lip, its C H7", "pipe-breath level: 0.4 width: 0.05 octave: 0.5 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23 cents: -31.174", 20, 0.9, 0.5],
+  // (the voices as the Pipes shipped them: index 1.3 and the lip's octave
+  // 0.9 pass the phone-speaker rule, D10; the sketch's 0.55 did not, about
+  // 0.10 under 300 Hz; and a mod-2 D4 measured 0.218, so the verse's
+  // landing D4 is a mod-1 rank)
+  [27, "the long rank", "drone-fm level: 0.3 index: 1.3 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2", 30, 0.6, 0.5],
+  [28, "the long rank, its C H7", "drone-fm level: 0.3 index: 1.3 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.25 release: 1.2 cents: -31.174", 30, 0.6, 0.5],
+  [33, "the long rank, its D", "drone-fm level: 0.3 index: 1.4 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.25 release: 1.2", 30, 0.6, 0.5],
+  [29, "wind on its lip", "pipe-breath level: 0.4 width: 0.05 octave: 0.9 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23", 20, 0.9, 0.5],
+  [30, "wind on its lip, its C H7", "pipe-breath level: 0.4 width: 0.05 octave: 0.9 tone: 0.05 swell: 0.5 swell-rate: 0.12 attack: 0.3 release: 1.5 seed: 23 cents: -31.174", 20, 0.9, 0.5],
   [31, "the octave rank", "drone-fm level: 0.3 index: 0.4 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.3 release: 1.2", 14, 0.6, 0.6],
   [32, "the octave rank, its C H7", "drone-fm level: 0.3 index: 0.4 index-wander: 0 mod: 2 breath-lo: 1 attack: 0.3 release: 1.2 cents: -31.174", 14, 0.6, 0.6],
   [26, "drop with two soft returns, its C H7", "drip level: 0.6 rise: 0.9 sweep: 0.035 decay: 0.07 echo: 0.31 feedback: 0.55 echo-mix: 0.55 hp: 400 seed: 15 cents: -31.174", 30, 0.55, 0.25],
@@ -290,7 +295,7 @@ function score(h7) {
     const hook = "A3:8 A4:8 G4:4 F4:4 E4:8 C4:16 Bb3:8 C4:8 D4:16";
     // 2.5 dB under the first take (measured: the verse at -19.0 LUFS against
     // the old quote's -22.5; it stays the song's quietest passage)
-    s.line(4, 0, h7c(h7, 27, 28), 24, hook, { offAtEnd: false });
+    s.line(4, 0, (n) => pc(n) === "D" ? 33 : (h7 && pc(n) === "C") ? 28 : 27, 24, hook, { offAtEnd: false });
     s.line(2, 0, h7c(h7, 29, 30), 16, hook, { offAtEnd: false });
     s.line(8, 0, h7c(h7, 31, 32), 10, hook.replace(/([A-G]b?)(\d)/g, (m, n, o) => n + (Number(o) + 1)), { offAtEnd: false });
     s.put(9, 3, "C6", h7 ? 26 : 19, 22);
