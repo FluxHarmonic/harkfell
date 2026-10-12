@@ -52,6 +52,9 @@
 ;;;   (sound-ears)                   #f, or up | left | right | below: the ears' point
 ;;;   (sound-lines)                  the readout's lines
 ;;;   (sound-hush) (sound-bed-levels) (sound-moment-playing)   for the gates
+;;;   (sound-moment-sounding)   the playing moment while its tune's rows still play
+;;;                             (its music heard), #f once they end, ahead of its
+;;;                             quiet tail: the look's haze step (D51) follows it
 
 (define-library (harkfell sound)
   (import (sigil math)
@@ -74,7 +77,7 @@
           sound-finale-players sound-bed-name sound-set-finale-listener! sound-credits-card
           place-listen FINALE-ID FINALE-DRONE-ID FINALE-TUNE FINALE-TUNE-H7 CODA-TUNE AFTER-BED CHAMBER-KEY BOWL-KEY
           LISTEN-ID heart-stone? FUSE-BED-OUT-S DAWN-IN-S FINALE-LEVELS
-          sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
+          sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-moment-sounding sound-reset!
           sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING sound-bed-notes sound-region sound-cue-tunes sound-voice-source HUM-ID CALL-GAIN call-id
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
@@ -203,6 +206,11 @@
                                     (list spent (if (pair? wander) (car wander) '())))))
     (define (sound-region) *region*)
     (define (sound-moment-playing) (and *moment* (car *moment*)))
+    ;; The moment's music: its rows still playing. A moment is over only once
+    ;; its tail falls under QUIET-OVER (high-fell: rows end at 22 s, over at
+    ;; 29 s); the haze step (D51) leaves with the music, not the tail.
+    (define (sound-moment-sounding)
+      (and *moment* (not (player-ended? (cdr *moment*))) (car *moment*)))
     ;; D35: seconds since the playing moment's start was HEARD (its sink
     ;; holds DEPTH-S), or #f. Content times the wordmark's reveal by it.
     (define *moment-t0* 0.0)
@@ -1650,14 +1658,52 @@
     ;; past its 60 s at 15 frames a second).
     (define LATE-CUES
       (list 'ice-crack 'ice-fall 'ice-shatter
-            'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4
-            'pickup-h5 'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
+            'moth-h3 'owl-h3 'vole
+            'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
             'gust-lift 'gust-east))
+    ;; THE STONES' AND PICKUPS' CUES ARE PREPARED EAGERLY: right after the
+    ;; movement sounds, before anything else, so a pickup's tune lands on its
+    ;; frame. Measured before (c7dcaf0, the test's budget): a pickup the bank
+    ;; had not reached sounded 1.33 to 1.37 s late, or not at all under a
+    ;; moment before that. A dev door can still land near a stone before the
+    ;; bank is through; gate-proximity-frame! then pulls that stone's cues to
+    ;; the head (and they render under a moment).
+    (define (starts? p s) (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
+    (define (gate-cue-names)
+      (filter (lambda (n) (let ((s (symbol->string n)))
+                            (or (starts? "pickup-h" s) (starts? "ring-h" s) (starts? "miss-h" s))))
+              (map car SPOTS)))
     (define *late-cues* '())
+    ;; Near a stone or an unfound pickup (inside a finding tone's range) its
+    ;; cues are wanted: to the head of the queue, rendered even under a moment.
+    (define *cues-wanted* '())
+    (define (want-cue! name)
+      (unless (or (not (spot-ref name)) (assq name *cues*) (memq name *cues-wanted*)
+                  (and *cue-job* (eq? (vector-ref *cue-job* 0) name)))
+        (set! *cues-wanted* (cons name *cues-wanted*))
+        (set! *late-cues* (filter (lambda (n) (not (eq? n name))) *late-cues*))
+        (set! *cue-queue* (cons name (filter (lambda (n) (not (eq? n name))) *cue-queue*)))))
+    (define (gate-proximity-frame! pl)
+      (for-each (lambda (sp)
+                  (when (< (caddr (geometry-to pl (cadr sp) (caddr sp))) TONE-OPEN-ROOMS)
+                    (want-cue! (harmonic-cue "pickup-h" (car sp)))))
+                (tone-spots pl))
+      (for-each (lambda (st)
+                  (when (and (eq? (cadr st) 'shut)
+                             (< (caddr (geometry-to pl (caddr st) (cadddr st))) TONE-OPEN-ROOMS))
+                    ;; the heart's cues are its own (and its overtone may be a
+                    ;; symbol or a list: no harmonic-cue for it)
+                    (if (heart-entry? st)
+                        (for-each want-cue! '(ring-heart miss-heart heart-sink))
+                        (begin (want-cue! (harmonic-cue "ring-h" (car st)))
+                               (want-cue! (harmonic-cue "miss-h" (car st)))))))
+                (place-stones pl)))
     (define (bank-order)
-      (append (filter spot-ref MOVING-CUES)
-              (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))
-              (map car GUST-LOOPS)))
+      (let ((gates (gate-cue-names)))
+        (append (filter spot-ref MOVING-CUES)
+                gates
+                (filter (lambda (n) (not (or (memq n MOVING-CUES) (memq n gates)))) (map car SPOTS))
+                (map car GUST-LOOPS))))
     (define *cue-job* #f)         ; #(name player chunks frames silent heard?) being rendered
     (define *cue-buf* (make-bytevector (* 8 CUE-BLOCK) 0))
     (define *moving-said* #f)
@@ -2378,15 +2424,20 @@
 
     (define (sound-boot! moments say)
       (set! *say* say)
+      ;; an ending whose piece the mixer no longer has is over
       (when (and *fin* (not (mixer-find FINALE-ID)))
         (player-close! (fin-piece *fin*)) (player-close! (fin-drone *fin*))
         (set! *fin* #f))
+      ;; a moment whose source the mixer no longer has is over
+      (when (and *moment* (not (mixer-find MOMENT-ID)))
+        (set! *moment* #f)
+        (set! *moment-key* #f))
       (set! *to-open* moments)
       ;; a boot renders every cue afresh (a second boot, a world reloaded, starts
       ;; from nothing: the late-cue gate relies on it)
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
       (set! *cue-job* #f) (set! *cues* (quote ())) (set! *loops* (quote ())) (set! *pending-cues* (quote ()))
-      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ()))
+      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ())) (set! *cues-wanted* (quote ()))
       (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
       (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
@@ -2461,19 +2512,30 @@
     (define (in-frame-more?)
       (let ((n 1)) (lambda () (set! n (+ n 1)) (<= n CUE-BLOCKS-PER-FRAME))))
     ;; more?: a thunk, #t while there is time for another step.
-    ;; While a moment plays only a gust loop a gust room is waiting for
-    ;; renders (and the cue ahead of it, finished first): the warning must
-    ;; not wait for a moment to end.
+    ;; While a moment plays only what something is waiting for renders: a
+    ;; gust loop a gust room asked for, or a gate cue the player has just
+    ;; caused (a pickup, a ring) that the bank had not reached (and the cue
+    ;; ahead of it, finished first). The warning must not wait for a moment
+    ;; to end, and a pickup must not be dropped because one is playing
+    ;; (David's D50 playtest: taking H5 soon after the demo door, during a
+    ;; moment, was silent: pickup-h5 is a late cue, the bank was paused, and
+    ;; the pending cue was dropped after PENDING-S).
     (define (sound-work! more?)
       (if (moment-busy?)
-          (when (loop-wanted?) (loop-work! more?))
+          (when (urgent-work?) (urgent-work! more?))
           (boot-work! more?)))
-    (define (loop-work! more?)
+    (define (gate-wanted?) (any (lambda (p) (not (assq (car p) *cues*))) *pending-cues*))
+    (define (cue-wanted?) (any (lambda (n) (not (assq n *cues*))) *cues-wanted*))
+    (define (urgent-work?) (or (loop-wanted?) (gate-wanted?) (cue-wanted?)))
+    (define (urgent-work! more?)
       (let loop ()
         (when (or *cue-job*
-                  (and (pair? *cue-queue*) (loop-ref (car *cue-queue*)) (tune-text (cue-tune-of (car *cue-queue*)))))
+                  (and (pair? *cue-queue*)
+                       (or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)
+                           (memq (car *cue-queue*) *cues-wanted*))
+                       (tune-text (cue-tune-of (car *cue-queue*)))))
           (render-next-cue!)
-          (when (and (loop-wanted?) (more?)) (loop)))))
+          (when (and (urgent-work?) (more?)) (loop)))))
     ;; Is the bank still rendering (the game gives it more time while it is)?
     (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*) (pair? *late-cues*)))
     ;; A rendered cue by name ((engine mixer) make-cue), or #f: for the tests.
@@ -2530,13 +2592,19 @@
         (local-frame! pl now)
         (listen-frame! pl now)
         (gust-frame! pl now)
+        (gate-proximity-frame! pl)
         (news-frame! pl)
         (movement-frame! pl)
         (pending-cues-frame!)
         (spots-frame! pl now))
       (finale-frame! pl now))
 
-    (define (moment-busy?) (or (and *moment* #t) (finale-busy?)))
+    ;; A moment is busy only while the mixer still has its source: a mixer
+    ;; reopened under a playing moment (a test file after one that left a
+    ;; moment playing; a world reload) must not leave the bank paused for good.
+    ;; The ending holds the bank as a moment does, on the same terms
+    ;; (finale-busy? needs the piece's source).
+    (define (moment-busy?) (or (and *moment* (mixer-find MOMENT-ID) #t) (finale-busy?)))
 
     (define TEXT-WAIT-S 3.0)
     (define *waiting* #f)          ; (key . since): a room entry waiting for its texts

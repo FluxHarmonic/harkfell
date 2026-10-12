@@ -1,5 +1,6 @@
 ;; A sheltered hollow under a stepped roof; a steady lift (columns 4-6)
-;; rises from its floor to Q.
+;; rises from its floor to Q. West of it the homeward shaft (columns 1-3,
+;; D50) falls from Q through to E: the way home, readable before H5.
 (room
   region: cloudstair
   at: (7 -1)
@@ -9,7 +10,7 @@
   light: 1
   sun: 1
   grid:
-  ("####^^^##################"
+  ("#   ^^^##################"
    "#   ^^^   ###############"
    "#   ^^^     #############"
    "#   ^^^       ###########"
@@ -18,8 +19,8 @@
    "#   ^^^             #####"
    "#   ^^^                  "
    "#   ^^^                  "
-   "# | ^^^ |  ||  |  | |    "
-   "#########################")
+   "#   ^^^ |  ||  |  | |    "
+   "#   #####################")
   things: ((seed at: (12 9) count: 3)
            (seed at: (5 5) count: 2))
   decor: auto)

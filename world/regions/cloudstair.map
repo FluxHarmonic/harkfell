@@ -6,7 +6,7 @@
 ;;;   Q -  R -  S -  T -  U -  V      y-2  open sky; H5 at V
 ;;;   |         |         v
 ;;;   K -  L -  M -  N -  O -  P      y-1
-;;;        |                   |
+;;;   v    |                   |
 ;;;   E -  F -  G -  H -  I -  J      y0
 ;;;   v         v    |
 ;;;   A -> B -  C -  D                y1   A over Updraft Edge (7,2)
@@ -14,7 +14,9 @@
 ;;; The map's bars are open seams; direction is the terrain's. Lifts:
 ;;; D-H, J-P, K-Q steady; F-L, M-S pulsed with the shared gust (calm 0-239,
 ;;; warning 240-299, gust 300-479). One way: A->B (a seven-tile drop),
-;;; E->A, G->C, U->O (drops onto broad shelves). The optional G-M glide and
+;;; E->A, G->C, U->O, K->E (drops onto broad shelves; K->E is D50's homeward
+;;; shaft from Q, columns 1-3, and with H5 the arch's wind at R carries a
+;;; glider to it). The optional G-M glide and
 ;;; single wall kick is omitted: with the measured glide (fall 3 px/tick at
 ;;; 1.32 px/tick across) a four-tile glide loses as much height as the jump
 ;;; gains, so one kick cannot reach M's floor from any lip under G's roof;
@@ -29,7 +31,7 @@
   ("Q-R-S-T-U-V"
    "|   |   |  "
    "K-L-M-N-O-P"
-   "  |       |"
+   "| |       |"
    "E-F-G-H-I-J"
    "|   | |    "
    "A-B-C-D    ")

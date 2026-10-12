@@ -1,0 +1,49 @@
+;;; Test order must not matter: the cue bank after a file that left a moment
+;;; playing. test-cloudstair-audio ends with S's moment playing; the next file
+;;; (test-cue-bank) reopened the mixer, which drops every source, and booted.
+;;; The director still held the moment as playing, so it treated the bank as
+;;; paused for a moment that could never end, and all five of
+;;; test-cue-bank's checks failed when it ran second (2026-10-12, found by
+;;; the rooms worker). This file runs the two halves back to back. Run
+;;; through the native audio harness.
+(import (sigil test)
+        (sigil list)
+        (engine mixer)
+        (harkfell sound))
+
+(define SAID '())
+(define (say . parts) (set! SAID (cons parts SAID)))
+(define (said? word) (any (lambda (p) (and (pair? (cdr p)) (equal? (cadr p) word))) SAID))
+
+;; the first file: a moment playing through a mixer, left as it is
+(mixer-open-headless! 32000 (lambda (id buf n gain) #f))
+(sound-boot! '("above-the-cloud") say)
+(sound-reset!)
+(define ROOM (place key: "cloudstair:9,-2" region: 'cloudstair bed-tune: "cloudstair-bed" groups: '(wind water air drone)
+                    levels: '((wind . 0.8) (air . 0.7) (drone . 0.3)) carry: '(2 4) tones: '() stones: '()
+                    px: 3700.0 py: -200.0 rx: 9 ry: -2))
+(sound-audition! "above-the-cloud")
+(let loop ((i 0))
+  (when (< i 30)
+    (sound-frame! (/ i 30.0) (/ 1.0 30.0) ROOM)
+    (mixer-pump! (/ i 30.0))
+    (loop (+ i 1))))
+(define LEFT-PLAYING (sound-moment-playing))
+
+;; the next file: a fresh mixer and a boot, then held frames as test-cue-bank runs them
+(mixer-open-headless! 32000 #f)
+(set! SAID '())
+(sound-boot! '() say)
+(define FRAMES
+  (let loop ((f 0))
+    (if (and (< f 3000) (not (said? "cues-moving")))
+        (begin (sound-frame! (/ f 60.0) (/ 1.0 60.0) #f) (loop (+ f 1)))
+        f)))
+
+(test-group "the cue bank does not depend on the file before it"
+  (test "the first half really left a moment playing (the check has its subject)"
+    (assert-equal "above-the-cloud" LEFT-PLAYING))
+  (test "after a fresh mixer and boot the moment is over, and the bank renders the movement cues"
+    (assert-false (sound-moment-playing))
+    (assert-true (said? "cues-moving"))
+    (assert-true (< FRAMES 3000))))

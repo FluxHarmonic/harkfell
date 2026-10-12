@@ -87,6 +87,12 @@
           (assert-equal '(300) (on 3))
           (assert-true (every (lambda (c) (< (* 6 (cell-row c)) 480)) offs))))
       '("gust-lift" "gust-east")))
+  (test "the lifts' column air climbs an octave over the three-second gust (its slides sum to 12 semitones, give or take a quarter)"
+    ;; 1xx slides xx/16 semitone on each tick after a row's first: 5 ticks a row at speed 6
+    (let* ((t (tune-parsed "gust-lift"))
+           (slides (filter (lambda (c) (and (= 3 (cell-channel c)) (string=? "1" (substring (cell-fx c) 0 1)))) (cells t)))
+           (st (apply + (map (lambda (c) (* 5 (/ (string->number (substring (cell-fx c) 1 3) 16) 16.0))) slides))))
+      (assert-true (< (abs (- st 12.0)) 0.25))))
   (test "both gust loops give the same warning"
     (let ((w (lambda (n) (let ((t (tune-parsed n)))
                            (list (tune-instrument-params (instrument t 1))
@@ -106,8 +112,12 @@
       (assert-equal 'low-cloud (moment-kw (m 10 -1) "tune"))
       (assert-equal 8 (moment-kw (m 10 -1) "still"))
       (assert-equal 'above-the-cloud (moment-kw (m 9 -2) "tune"))))
-  (test "no other Cloudstair room has a fixed moment (none in A, D, I, P or V), and no two share an edge"
-    (let ((with (filter room-moment CLOUD)))
+  ;; The first-visit moments keep to their rooms and apart. D50's arch answer
+  ;; is a different kind: it waits for H5 (carrying: 5), so it sits beside Q
+  ;; and S on purpose, and the hush keeps any two moments apart in time.
+  (test "no other Cloudstair room has a first-visit moment (none in A, D, I, P or V), and no two share an edge"
+    (let ((with (filter (lambda (rm) (and (room-moment rm) (not (moment-kw (room-moment rm) "carrying"))))
+                        CLOUD)))
       (assert-equal 3 (length with))
       (for-each (lambda (a)
                   (for-each (lambda (b)
@@ -115,6 +125,12 @@
                                 (assert-false (= 1 (+ (abs (- (room-x a) (room-x b))) (abs (- (room-y a) (room-y b))))))))
                             with))
                 with)))
+  (test "the Windworn Arch answers H5 (D50): its moment waits for carrying 5, and is the only one that does"
+    (let ((carried (filter (lambda (rm) (and (room-moment rm) (moment-kw (room-moment rm) "carrying"))) CLOUD)))
+      (assert-equal 1 (length carried))
+      (assert-equal '(8 -2) (list (room-x (car carried)) (room-y (car carried))))
+      (assert-equal 'windworn-arch (moment-kw (room-moment (car carried)) "tune"))
+      (assert-equal 5 (moment-kw (room-moment (car carried)) "carrying"))))
   (test "every Cloudstair room names its air level"
     (for-each (lambda (rm) (assert-true (memq 'air (room-bed rm)))) CLOUD))
   (test "the bowl's H5 homecoming comes after hollow-octave, carrying 5"
