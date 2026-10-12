@@ -665,6 +665,8 @@
       (when *bed-src* (source-factor! *bed-src* 'duck 1.0 DUCK-OUT-S t)))
 
     (define (moment-over! t)
+      (when (and *moment* (equal? (car *moment*) CODA-TUNE))
+        (*finale-listener* 'done))
       (set! *moment* #f)
       (set! *moment-key* #f)
       (set! *hush* (hush-ended *hush*))
@@ -2419,6 +2421,10 @@
     (define (sound-finale-flags) (list *ended* *ended-with* *coda-done*))
     ;; From a save: (ended ended-with coda), any of them missing or #f.
     (define (sound-finale-restore! . flags)
+      (when (and *moment* (equal? (car *moment*) CODA-TUNE))
+        (fade-moment! *now*))
+      (finale-reset!)
+      (set! *key* #f)
       (let ((get (lambda (i) (and (> (length flags) i) (list-ref flags i)))))
         (set! *ended* (and (get 0) #t))
         (set! *ended-with* (let ((w (get 1))) (if (list? w) (filter number? w) '())))

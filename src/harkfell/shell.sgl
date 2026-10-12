@@ -68,6 +68,7 @@
           (harkfell frame)
           (harkfell reveal)
           (harkfell underhum finale)
+          (only (harkfell credits) CREDITS)
           (harkfell title)
           (harkfell render))
 
@@ -472,10 +473,20 @@
                          (if (and here (not (memq here a))) (append a (list here)) a)))
                  (set! *mode* 'play)
                  (*save-set* (restored-moments r) (restored-played r))
+                 ;; Explicit world flags are authoritative after legacy save
+                 ;; migration. Restore once; live news must still start music.
+                 (sound-finale-restore! (world-ended *world*)
+                                       (world-ended-with *world*)
+                                       (world-coda *world*))
                  ;; D40: a save to continue, so the start screen offers starting over
                  (set! *frame* (frame-new web? #t))
                  (restored-notes r)))
-              (else (set! *world* #f) (shell-goto-start!) #f))))
+              (else
+               (set! *world* #f)
+               (*save-set* '() 0.0)
+               (sound-finale-restore! #f '() #f)
+               (shell-goto-start!)
+               #f))))
 
     ;; The save of the world now, or #f outside the written world.
     (define (current-save)
@@ -980,6 +991,7 @@
         (set-look-sound! (sound-moment-sounding)
                          (let ((e (assq 'wind (sound-bed-levels)))) (and e (cdr e)))
                          (/ t1 1000.0) (sound-moment-time) (sound-moment-playing))
+        (set-look-finale! (sound-finale-section) (sound-finale-time))
         ;; D15: the creature curled asleep until the first input
         (set-look-waking! *waking*)
         ;; the dawn (D15), the world coming in from black by the dither, in
@@ -999,6 +1011,9 @@
         ;; the room's target on the window at its fit, copied opaque, through
         ;; the sharp-bilinear pass when the fit is 'sharp
         (view-present! *presenter* (room-color-rt) f)
+        (let ((card (sound-credits-card)))
+          (when card
+            (draw-credits! win-w win-h (list-ref CREDITS (car card)) (cdr card))))
         ;; D35: the wordmark over the live world, at the first homecoming
         ;; ((harkfell title)'s draw-reveal!, on (harkfell reveal)'s schedule)
         (when (> (shell-reveal-alpha) 0.0)

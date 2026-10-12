@@ -40,12 +40,14 @@
           (harkfell feel)
           (harkfell content)
           (harkfell palette)
+          (only (harkfell finale) finale-breath)
           (harkfell render))
 
   (export underhum? UNDERHUM-DARK underhum-backdrop-key underhum-backdrop-key?
           underhum-backdrop-bytes draw-underhum-solids! draw-underhum-scenery!
           draw-underhum-sprites! draw-underhum-lights! underhum-orb-lights
           underhum-orbs underhum-dark-extra underhum-phase set-underhum-review-phase!
+          set-underhum-finale-time!
           draw-heart! draw-heart-light! underhum-stone-bytes
           draw-underhum-extras! draw-underhum-extra-lights! draw-underhum-treads!)
 
@@ -405,6 +407,15 @@
             (list 5 'h5 17.0 -0.26 5.1 0.027)
             (list 7 'h7 21.0 0.21 2.6 0.0244)))
 
+    (define *finale-heard* #f)
+    (define (set-underhum-finale-time! seconds)
+      (set! *finale-heard* (and (number? seconds) seconds)))
+
+    (define (orb-breath n seconds phase frequency fused?)
+      (cond (*finale-heard* (finale-breath n *finale-heard*))
+            (fused? (+ 0.5 (* 0.5 (sin (* TAU 0.4 seconds)))))
+            (else (+ 0.5 (* 0.5 (sin (+ phase (* TAU frequency seconds))))))))
+
     ;; The orbs as ((x y role breath) ...) in map pixels. b: the body; carry:
     ;; the carried overtones; t: world ticks; ph: the finale's state.
     (define (underhum-orbs b carry t ph)
@@ -430,9 +441,7 @@
                        (a (if fused
                               (+ (* TAU turns s) (/ (* TAU k) (max 1 n)))
                               (+ (list-ref o 4) (* TAU turns s))))
-                       (breath (if fused
-                                   (+ 0.5 (* 0.5 (sin (* TAU 0.4 s))))
-                                   (+ 0.5 (* 0.5 (sin (+ (list-ref o 4) (* TAU (list-ref o 5) s)))))))
+                       (breath (orb-breath (car o) s (list-ref o 4) (list-ref o 5) fused))
                        (x (+ cx (* r (cos a))))
                        (y (+ cy (* 0.6 r (sin a)) (* 1.5 (sin (+ (* s 2.1) k))))))
                   (loop (cdr os) (+ k 1) (cons (list x y (list-ref o 1) breath) acc)))))
@@ -947,7 +956,7 @@
                              (s (/ t 60.0)))
                         (list (+ (car g) (* 9.0 (cos a))) (+ (caddr g) (* 8.0 (sin a)))
                               (list-ref o 1)
-                              (+ 0.5 (* 0.5 (sin (+ (list-ref o 4) (* TAU (list-ref o 5) s)))))))))))
+                              (orb-breath (car o) s (list-ref o 4) (list-ref o 5) #f)))))))
         ORBS))
 
     ;; After the body, in the index pass: the tell motes, the lit benches'

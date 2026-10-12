@@ -8,7 +8,7 @@
   (export finale finale? finale-step finale-mark finale-restored
           finale-ended finale-ended-with finale-coda finale-phase
           finale-lit finale-chamber finale-still finale-t finale-credits
-          finale-events finale-night)
+          finale-events finale-night finale-heard-night)
 
   (begin
     (define-struct finale
@@ -60,8 +60,6 @@
            (enter (finale f credits: (or (finale-credits f) 0)) 'home))
           ((and column? (memq (finale-phase f) '(fuse theme)))
            (enter (finale f credits: 0) 'rise))
-          ((and (eq? (finale-phase f) 'dawn) (>= (finale-t f) 1800))
-           (enter f 'done))
           (else
            (if (finale-credits f)
                (finale f credits: (+ (finale-credits f) 1))
@@ -94,4 +92,14 @@
       (case (finale-phase f)
         ((home close) 1.0)
         ((dawn) (max 0.0 (- 1.0 (/ (finale-t f) 1800.0))))
-        (else 0.0)))))
+        (else 0.0)))
+
+    ;; Presentation follows SOUND's heard section and seconds in it. The
+    ;; bible's thirty-second dawn never advances while the mixer is paused.
+    (define (finale-heard-night section)
+      (if (not section)
+          0.0
+          (case (car section)
+            ((home close) 1.0)
+            ((dawn) (max 0.0 (- 1.0 (/ (cdr section) 30.0))))
+            (else 0.0))))))

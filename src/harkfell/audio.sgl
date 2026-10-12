@@ -92,6 +92,7 @@
       ;; A4: a save keeps the moments heard and the time played, and a
       ;; continue gives them back ((harkfell save))
       (shell-set-save-extras! save-extras restore-extras!)
+      (sound-set-finale-listener! shell-finale-mark!)
       ;; A4: the frame's phases: the card's tune, the hold, the dawn (frame-event!)
       (shell-add-frame-listener! frame-event!)
       ;; D35: the wordmark's reveal is timed by the playing moment as heard

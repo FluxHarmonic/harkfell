@@ -52,7 +52,7 @@
           (harkfell pipes look)
           (harkfell cloudstair look)
           (harkfell underhum look)
-          (only (harkfell underhum finale) finale-lit finale-phase finale-still)
+          (only (harkfell underhum finale) finale-lit finale-phase finale-still finale-heard-night)
           (harkfell wrongwater look)
           (harkfell cues)
           (harkfell sprites))
@@ -60,7 +60,7 @@
   (export VIEW-W VIEW-H draw-world draw-readout
           set-draw-content! draw-play present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
-          slot player-frame set-look-sound! region-colours set-look-waking! waking-frame
+          slot player-frame set-look-sound! set-look-finale! region-colours set-look-waking! waking-frame
           floating-reeds room-hue FIREFLY-RINGS firefly-light-budget
           room-render-light room-dark-extra moth-lit?)
 
@@ -495,6 +495,10 @@
     ;; follows the moment's separate heard clock, including its quiet tail.
     (define *moment-name* #f)
     (define *moment-heard* #f)
+    (define *finale-night* 0.0)
+    (define (set-look-finale! section seconds)
+      (set! *finale-night* (finale-heard-night section))
+      (set-underhum-finale-time! seconds))
     (define (set-look-sound! moment wind . clocks)
       (set! *moment* (and moment #t))
       (set! *bed-wind* (if (number? wind) wind 0.5))
@@ -1480,7 +1484,10 @@
     ;; The light a room is drawn at. Open-air lighting belongs to the
     ;; lighting track (the Hollow's dawn shade, Reedfen's covered rooms), so
     ;; every room draws its authored light: level; only moth caves add black.
-    (define (room-render-light rm) (room-light rm))
+    (define (room-render-light rm)
+      (if (eq? (room-region rm) 'hollow)
+          (* (room-light rm) (- 1.0 (* 0.75 *finale-night*)))
+          (room-light rm)))
 
     ;; Glints at the tips of a moth-lit room's hanging icicles, whether or not the
     ;; moth light has reached them (David, playing b22a4d6: he ran into an icicle

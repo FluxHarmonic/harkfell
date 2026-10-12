@@ -65,7 +65,7 @@
   (cond-expand
     (wasm (import (sigil browser gles3))))
 
-  (export title-set-content! start-reset! draw-start! draw-card! draw-reveal! draw-region-name!
+  (export title-set-content! start-reset! draw-start! draw-card! draw-reveal! draw-region-name! draw-credits!
           card-fade CARD-SECONDS start-moths TEXT-LAYOUT type-scale
           start-over-hit? start-update-hit? over-id WORDS-FADE-S WORDS-STAGGER-S start-words-landed?)
 
@@ -517,6 +517,26 @@
     (define NAME-RULE-EM 0.045)    ; the rule's thickness (at least a device pixel)
     (define NAME-SHADOW (list (cons -1 0) (cons 1 0) (cons 0 -1) (cons 0 1)
                               (cons -1 -1) (cons 1 -1) (cons -1 1) (cons 1 1)))
+
+    ;; Credits share the live world's IM Fell face, at window resolution.
+    ;; SOUND owns the card schedule; this draws only the supplied lines.
+    (define (draw-credits! w h lines alpha)
+      (let* ((f (fit-of w h))
+             (s (/ (fit-w f) (* 1.0 VIEW-W)))
+             (font (and (> alpha 0.0) (font! NAME-FONT (* 12.0 s))))
+             (cream (vector-ref (rgb) (slot-of 'fur-1)))
+             (ink (vector-ref (rgb) (slot-of 'ink))))
+        (when font
+          (let loop ((lines lines) (row 0))
+            (when (pair? lines)
+              (let* ((line (car lines))
+                     (x (- (+ (fit-x f) (* 200 s)) (/ (text-width font line) 2)))
+                     (y (+ (fit-y f) (* (+ 148 (* row 16)) s))))
+                (set-color (car ink) (cadr ink) (caddr ink) (* 0.6 alpha))
+                (draw-text font line (+ x 1) (+ y 1))
+                (set-color (car cream) (cadr cream) (caddr cream) alpha)
+                (draw-text font line x y))
+              (loop (cdr lines) (+ row 1)))))))
 
     (define (draw-region-name! w h text alpha)
       (let* ((f (fit-of w h))

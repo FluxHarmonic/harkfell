@@ -13,6 +13,8 @@
         (harkfell audio)
         (harkfell sound)
         (harkfell shell)
+        (only (harkfell underhum look) underhum-orbs set-underhum-finale-time!)
+        (only (harkfell finale) finale-breath)
         (engine worldmap)
         (engine reach))
 
@@ -127,15 +129,33 @@
             (assert-equal 'done (finale-phase late))
             (assert-equal '() (finale-events late))))
         '(fundamental theme close dawn done))))
-  (test "dawn ramps for 30 seconds; restored endings are already daylight"
+  (test "simulation ticks cannot finish a sounding dawn; restored endings are daylight"
     (let* ((home (finale-step (wait (finale) 120 #t) #f #f #f #t #t FULL))
            (dawn (finale-mark (finale-mark home 'close) 'dawn))
            (half (wait dawn 900 #f))
            (done (wait half 900 #f)))
       (assert-equal 0.5 (finale-night half))
-      (assert-equal 'done (finale-phase done))
+      (assert-equal 'dawn (finale-phase done))
+      (assert-equal 'done (finale-phase (finale-mark done 'done)))
       (assert-equal 0.0 (finale-night done))
       (assert-equal 0.0 (finale-night (finale-restored #t FULL #f))))))
+
+(test-group "Underhum: heard presentation clock"
+  (test "night waits for heard home and dawn follows heard seconds"
+    (assert-equal 0.0 (finale-heard-night #f))
+    (assert-equal 0.0 (finale-heard-night '(rise . 45.0)))
+    (assert-equal 1.0 (finale-heard-night '(home . 0.0)))
+    (assert-equal 0.5 (finale-heard-night '(dawn . 15.0)))
+    (assert-equal 0.0 (finale-heard-night '(dawn . 30.0))))
+  (test "the rendered orbs follow each heard voice even as physics ticks advance"
+    (let* ((b (cell-body (worldmap-tiles (content-map CHAMBER)) HARKFELL-FEEL 2 8))
+           (carry '(2 3 4 5 7))
+           (gains (lambda (ticks)
+                    (map cadddr (underhum-orbs b carry ticks 'listening)))))
+      (set-underhum-finale-time! 3.0)
+      (assert-equal (map (lambda (n) (finale-breath n 3.0)) carry) (gains 0))
+      (assert-equal (gains 0) (gains 900))
+      (set-underhum-finale-time! #f))))
 
 (test-group "Underhum: H7 and once-only coda"
   (test "an H7 ending records its voice and never plays a coda"
@@ -182,6 +202,22 @@
       '(underhum wrongwater))))
 
 (test-group "Underhum: forgiving save state"
+  (test "legacy SOUND ending strings migrate before world restore and leave the hush"
+    (let ((r (save-restore CT
+               '(harkfell-save 1 (room reedfen 9 3) (cell 4 7)
+                 (moments "finale:ended" "finale:with:2,3,4,5,7" "finale:coda")))))
+      (assert-true (restored-ended r))
+      (assert-equal '(2 3 4 5 7) (restored-ended-with r))
+      (assert-true (restored-coda r))
+      (assert-equal '() (restored-moments r))))
+  (test "explicit ending fields override contradictory legacy strings"
+    (let ((r (save-restore CT
+               '(harkfell-save 1 (room reedfen 9 3) (cell 4 7)
+                 (ended #f) (ended-with) (coda #f)
+                 (moments "finale:ended" "finale:with:2,3,4,5,7" "finale:coda")))))
+      (assert-false (restored-ended r))
+      (assert-equal '() (restored-ended-with r))
+      (assert-false (restored-coda r))))
   (test "old saves restore as not ended"
     (let ((r (save-restore CT '(harkfell-save 1 (room reedfen 9 3) (cell 4 7)))))
       (assert-false (restored-ended r))

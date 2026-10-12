@@ -22,7 +22,7 @@
 ;;;                                   began (or #f): (index . alpha) or #f
 
 (define-library (harkfell credits)
-  (import (sigil core) (sigil list))
+  (import (sigil list))
   (export CREDITS CARD-EVERY-S CARD-S CARD-FADE-S credits-at credits-last-start)
   (begin
     (define CREDITS

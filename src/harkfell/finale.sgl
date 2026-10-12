@@ -53,8 +53,7 @@
 ;;;   (finale-dawn-s h7?)        seconds into close when the dawn begins
 
 (define-library (harkfell finale)
-  (import (sigil core)
-          (sigil math)
+  (import (sigil math)
           (sigil list))
 
   (export FINALE-BPM FINALE-BEAT-S FINALE-BAR-S FINALE-LOCKS FINALE-FUNDAMENTAL-S

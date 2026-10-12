@@ -175,6 +175,23 @@
 
     (define (wander-key? k) (and (>= (string-length k) 7) (string=? (substring k 0 7) "wander:")))
 
+    ;; SOUND's earlier saves kept ending flags among the hush identities.
+    ;; Migrate them before restoring the world; explicit fields win.
+    (define (legacy-finale-key? k)
+      (and (>= (string-length k) 7)
+           (string=? (substring k 0 7) "finale:")))
+
+    (define (legacy-ended-with moments)
+      (let ((key (find (lambda (k)
+                         (and (>= (string-length k) 12)
+                              (string=? (substring k 0 12) "finale:with:")))
+                       moments)))
+        (if key
+            (filter number?
+                    (map string->number
+                         (string-split (substring key 12 (string-length key)) ",")))
+            '())))
+
     (define (string-index-of s ch)
       (let loop ((i 0))
         (cond ((>= i (string-length s)) #f)
@@ -192,8 +209,16 @@
                  (carry (field fields 'carry))
                  (stones (field fields 'stones))
                  (moments (field fields 'moments))
+                 (moments (if (list? moments) (filter string? moments) '()))
                  (played (let ((p (field fields 'played))) (and (pair? p) (car p))))
-                 (ended (true-field fields 'ended))
+                 (ended (if (field fields 'ended)
+                            (true-field fields 'ended)
+                            (and (member "finale:ended" moments) #t)))
+                 (ended-with (or (field fields 'ended-with)
+                                 (legacy-ended-with moments)))
+                 (coda (if (field fields 'coda)
+                           (true-field fields 'coda)
+                           (and (member "finale:coda" moments) #t)))
                  (notes '())
                  (note! (lambda (s) (set! notes (cons s notes))))
                  (world-harmonics (map car (content-pickup-cells ct)))
@@ -238,7 +263,8 @@
                  (restored cell: at
                            carry: carry
                            stones: stones
-                           moments: (if (list? moments) (map (lambda (k) (moment-key-now ct k)) (filter string? moments)) '())
+                           moments: (map (lambda (k) (moment-key-now ct k))
+                                         (filter (lambda (k) (not (legacy-finale-key? k))) moments))
                            played: (if (number? played) played 0.0)
                            revealed: (let ((v (field fields 'revealed))) (and (pair? v) (eq? (car v) #t)))
                            aurora: (let ((v (field fields 'aurora))) (and (pair? v) (eq? (car v) #t)))
@@ -247,11 +273,11 @@
                                         (if (list? v) (filter symbol? v) '()))
                            down: (let ((v (field fields 'down))) (and (pair? v) (eq? (car v) #t)))
                            ended: ended
-                           ended-with: (let ((v (field fields 'ended-with)))
+                           ended-with: (let ((v ended-with))
                                          (if (and ended (list? v))
                                              (carry-normal (filter (lambda (h) (memv h '(2 3 4 5 7))) v))
                                              '()))
-                           coda: (and ended (true-field fields 'coda))
+                           coda: (and ended coda)
                            tau: (let ((v (field fields 'tau)))
                                   (if (and (pair? v) (exact-integer? (car v))
                                            (<= 0 (car v)) (< (car v) AIR-PERIOD))
