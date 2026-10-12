@@ -9,8 +9,8 @@
   grid:
   ("#########################"
    "########         ########"
-   "                 ########"
-   "          #         #####"
+   "         ===     ########"
+   "                    #####"
    "#############       #####"
    "#############       #####"
    "#############       #####"
@@ -18,11 +18,13 @@
    "#############       #####"
    "#############       #####"
    "#############       #####")
-  things: ((harmonic at: (10 2) overtone: 7))
+  things: ((harmonic at: (10 1) overtone: 7))
   decor: auto)
 ;; The shelf from the tarn (standing row 3) runs east under a raised roof
-;; to H7 on a one-step pedestal (10,2), then ends at a lip over a shaft
-;; seven wide (13-19) that drops through the whole room into the Way Out:
-;; one way, too wide to kick up and with no rough rock. Back west, the
-;; shelf leads to the tarn's top: drop in and sink out of its bottom. No
-;; moment: H7 enters the drone in ambience.
+;; to a lip over a shaft seven wide (13-19) that drops through the whole
+;; room into the Way Out: one way, too wide to kick up and with no rough
+;; rock. H7 waits above the shelf on a one-way ledge (9-11, row 2), a jump
+;; up through it; the walk east passes under it, so H7 can be left (the
+;; map: bypassed from C, home through F). Back west, the shelf leads to
+;; the tarn's top: drop in and sink out of its bottom. No moment: H7 enters
+;; the drone in ambience.
