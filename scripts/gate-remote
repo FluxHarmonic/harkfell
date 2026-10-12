@@ -4,6 +4,7 @@
 #   scripts/gate-remote suite       dev build, then the whole suite in one call
 #   scripts/gate-remote depths-tests dev build, focused systems tests and sabotage
 #   scripts/gate-remote depths-focused dev build and focused systems tests
+#   scripts/gate-remote depths-full integrated suite, release, reach, sound/look and web gates
 #   scripts/gate-remote depths-water-paths dev build, path tests and wet/dry route diagnostics
 #   scripts/gate-remote depths-water-check also focused systems tests and strict water fixtures
 #   scripts/gate-remote release     release build (its --replay trace kept as
@@ -39,7 +40,7 @@ cd "$(dirname "$0")/.."
 say() { printf 'gate-remote: %s\n' "$*" >&2; }
 
 JOB=${1:-}
-case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|review|sabotage) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|review|sabotage"; exit 125 ;; esac
+case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|review|sabotage) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|review|sabotage"; exit 125 ;; esac
 
 REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
 [ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
@@ -97,6 +98,45 @@ step() {
   return $r
 }
 case "$JOB" in
+  depths-full)
+    if step build-dev scripts/dev sigil build; then
+      step suite scripts/dev sigil test --report ../out/suite.json
+      step audio-harness sh -c 'mkdir -p build/audio-harness/bin build/audio-harness/lib; cp build/dev/bin/harkfell-test build/audio-harness/bin/; for p in _pkg motif sigil substratic; do ln -sfn "$PWD/build/dev/lib/$p" "build/audio-harness/lib/$p"; done; for p in engine harkfell; do ln -sfn "$PWD/src/$p" "build/audio-harness/lib/$p"; done'
+      step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
+      for d in /tmp/harkfell-depths-red-*; do
+        [ -d "$d" ] || continue
+        mkdir -p ../out/depths-red
+        cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+        cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
+      done
+      step underhum-sabotage scripts/dev scripts/gate-underhum-sound --sabotage
+      step wrongwater-sabotage scripts/dev node tools/wrongwater-sabotage.mjs build/audio-harness/bin/harkfell-test
+      step restored-source git diff --exit-code
+      step atlas scripts/dev scripts/gate-atlas
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      awk -f ../audit-helpers.awk build/release/native/mod_*.c > ../out/audit-release.txt
+      step gate-replay scripts/gate-replay
+      step gate-sound scripts/gate-sound
+      # gate-a4-sound needs the sketchbook's existing native probe tool.
+      step build-sketchbook scripts/dev sh -c 'cd sketchbook && sigil deps install && sigil build --config release'
+      step gate-a4-sound scripts/gate-a4-sound
+      step gate-look scripts/gate-look
+      step parse-seams scripts/dev ./build/release/bin/harkfell --room-check --parse-only
+      step depths-water-replay scripts/dev sigil -L src -L build/release/lib eval -f tools/depths-water.sgl
+      step strict-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures
+      step depths-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
+      step underhum-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
+      step wrongwater-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region wrongwater
+      step full-world env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3 --sabotage
+    fi
+    if step build-web scripts/dev sigil build --config web; then
+      step web-gates scripts/dev node verify.mjs build/web
+      step play-samplers scripts/dev scripts/gate-play-samplers build/web
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi ;;
   depths-water-paths|depths-water-check)
     if step build-dev scripts/dev sigil build; then
       step reach-paths-tests scripts/dev sigil test --report ../out/reach-paths.json test/test-reach-paths.sgl
@@ -199,7 +239,7 @@ if [ -d "$STAGE/fetched" ]; then
     [ "$(basename "$item")" = web ] && continue
     cp -a "$item" "$LOGS/"
   done
-  if [ "$JOB" = web ] && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
+  if { [ "$JOB" = web ] || [ "$JOB" = depths-full ]; } && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
     STAMP=$(grep -o 'version: "[^"]*"' "$STAGE/fetched/web/index.html" | head -1 | cut -d'"' -f2)
     if [ "$STAMP" = "$SHA" ] && [ ! -e "build/remote-web-$SHA" ]; then
       mv "$STAGE/fetched/web" "build/remote-web-$SHA"; printf '%s\n' "$FULL" > "build/remote-web-$SHA/BUILD-SHA"
