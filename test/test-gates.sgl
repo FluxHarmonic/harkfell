@@ -69,7 +69,7 @@
                   (list-sort < (map stone-overtone (content-stones CT))))
     (assert-true (the-stone (world-standing 10 3 18 8 '())))
     (assert-equal 2 (stone-overtone (the-stone (world-standing 10 3 18 8 '())))))
-  (test "five pickups: H2 on the Far Mound, H3 at the Old Birch, H4 in the Pipes, H5 on the Still Crag, H7 in the Seventh"
+  (test "five pickups: H2 on the Far Mound, H3 at the Old Birch, H4 in the Pipes, H5 on the Still Crag, H7 in the Drowned Grove"
     (assert-equal 5 (length (content-pickups CT)))
     (assert-equal '(2 3 4 5 7) (list-sort < (map pickup-overtone (content-pickups CT))))
     (assert-equal (local->global CT (content-room CT 17 3) 22 3) (pickup-cell (find (lambda (p) (= 2 (pickup-overtone p))) (content-pickups CT))))
@@ -78,7 +78,7 @@
                   (pickup-cell (find (lambda (p) (= 4 (pickup-overtone p))) (content-pickups CT))))
     (assert-equal (local->global CT (content-room CT 12 -2) 16 5)
                   (pickup-cell (find (lambda (p) (= 5 (pickup-overtone p))) (content-pickups CT))))
-    (assert-equal (local->global CT (content-room CT 0 7) 10 1)
+    (assert-equal (local->global CT (content-room CT -1 9) 18 2)
                   (pickup-cell (find (lambda (p) (= 7 (pickup-overtone p))) (content-pickups CT))))))
 
 ;; Standing three tiles west of the stone, then pushing east into it.
