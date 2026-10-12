@@ -8,10 +8,10 @@
     (instrument id: 5 name: "H3 A3" patch: (drone-saw level: 0.12 fm-index: 1.4 fm-level: 0.12 bright: 12 excite: 0.4 excite-freq: 600 cents: 1.955 breath-rate: 0.0323 breath-lo: 0.15 seed: 3) volume: 22 gain: 2 send: 0.35)
     (instrument id: 6 name: "H4 D4" patch: (drone-saw level: 0.3 fm-index: 1.8 fm-level: 0.45 bright: 8 excite: 0.3 excite-freq: 900 breath-rate: 0.0189 breath-lo: 0.15 seed: 4) volume: 21 gain: 2 send: 0.35)
     (instrument id: 7 name: "H5 F#4" patch: (drone-saw level: 0.3 fm-index: 1.1 fm-level: 0.3 bright: 8 excite: 0.3 excite-freq: 900 cents: -13.686 breath-rate: 0.027 breath-lo: 0.15 seed: 5) volume: 19 gain: 2 send: 0.35)
-    (instrument id: 8 name: "H7 C5" patch: (drone-saw level: 0.3 fm-index: 1.0 fm-level: 0.2 bright: 8 excite: 0.3 excite-freq: 900 cents: -31.174 breath-rate: 0.0244 breath-lo: 0.3 seed: 7) volume: 18 gain: 2 send: 0.4))
+    (instrument id: 8 name: "H7 C5" patch: (drone-saw level: 0.3 fm-index: 1.0 fm-level: 0.2 bright: 4 cents: -31.174 breath-rate: 0.0161 breath-lo: 0.12 seed: 7) volume: 15 gain: 2 send: 0.4))
   (patterns
     (pattern id: 0 rows: 16
-      (row 0 (1 "C-4" 1 22 "000") (3 "A-3" 3 27 "000") (4 "D-3" 4 24 "000") (5 "A-3" 5 22 "000") (6 "D-4" 6 21 "000") (7 "F#4" 7 19 "000") (8 "C-5" 8 18 "000"))
+      (row 0 (1 "C-4" 1 22 "000") (3 "A-3" 3 27 "000") (4 "D-3" 4 24 "000") (5 "A-3" 5 22 "000") (6 "D-4" 6 21 "000") (7 "F#4" 7 19 "000") (8 "C-5" 8 15 "000"))
       (row 6 (2 "A-5" 2 30 "000")))
     (pattern id: 1 rows: 128
       (row 3 (2 "C-6" 2 26 "000"))
