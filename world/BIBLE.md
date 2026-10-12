@@ -172,10 +172,14 @@ answers, and the homeward wind blows west through the arch and on over Q
 (`(air-field ... kind: homeward gate: (C R))`, a hold-up and a westward
 push that blow only while the gate cell is open, so carry gates it as it
 gates the stone). It carries a glider to the homeward shaft, columns 1-3
-down through Q, K and E (the one-way K->E), onto E's chute and A, then
-the launch column home. The shaft is there before H5 too, marked by seeds
-drifting down it and a faint light: the way home reads without the wind.
-test/test-cloudstair-homeward.sgl rides it with and without H5.
+down through Q and K to a second rose stone just above K's floor (1,9),
+which opens as you come down onto it, then through a one-tile hole into E
+and onto E's chute and A, then the launch column home. The shaft is there
+before H5 too, marked by seeds drifting down it and a faint light (the
+way home reads without the wind), but the shut stone seals it: no wall
+kick climbs it from E (SYSTEMS' replay found that reverse route, E->K->Q
+without H5, when the shaft was open). test/test-cloudstair-homeward.sgl
+rides it with and without H5, and replays that reverse route.
 
 New room things:
 

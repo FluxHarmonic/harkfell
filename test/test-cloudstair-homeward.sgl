@@ -16,7 +16,9 @@
         (harkfell feel)
         (harkfell content)
         (harkfell source)
-        (harkfell check))
+        (harkfell check)
+        (engine reach timed)
+        (harkfell cloudstair reach))
 
 (define F HARKFELL-FEEL)
 (define CT (load-content (read-world-source "world")))
@@ -59,3 +61,43 @@
       (assert-equal '(8 . -2) (room-of b))))
   (test "with H5 the ride ends at home's door: down the shaft through K to E or A"
     (assert-true (member (room-of (cdr WITH)) '((7 . 0) (7 . 1))))))
+
+;; The shaft is one way (SYSTEMS' complete-world replay on 505f690: from E
+;; local (1,7), carrying H2 H4 with the down, wall kicks up E's west wall
+;; crossed into K at tick 53 and K's lift carried the body to Q by tick
+;; 422, no H5). A rose stone (H5) just above K's floor at (1,9) now seals the
+;; shaft: without H5 no column is open from E's top row up through K's floor
+;; and the stone's row, so nothing climbs from E into K, and the replayed
+;; witness stays out of K and Q.
+(define (border-open carry)
+  ;; the columns where a body could pass from E's top row up through K's
+  ;; bottom two rows (the stone stands just above K's floor, at (1,9))
+  (let ((tm (tiles-carrying CT carry)))
+    (filter (lambda (c)
+              (and (not (kind-solid? (tilemap-ref tm (gcol 7 c) (grow 0 0))))
+                   (not (kind-solid? (tilemap-ref tm (gcol 7 c) (grow -1 10))))
+                   (not (kind-solid? (tilemap-ref tm (gcol 7 c) (grow -1 9))))))
+            (iota 25))))
+
+;; SYSTEMS' witness, its 17 input groups: (ticks h v jump press)
+(define WITNESS
+  '((1 0 0 #t #t) (5 0 0 #t #f) (8 -1 0 #t #f) (1 -1 0 #t #t) (28 1 0 #t #f) (1 1 0 #t #t)
+    (42 -1 0 #f #f) (1 -1 0 #t #t) (29 1 0 #f #f) (1 1 0 #t #t) (29 -1 0 #f #f) (1 -1 0 #t #t)
+    (63 1 0 #t #f) (85 -1 0 #t #f) (1 -1 0 #t #t) (119 1 0 #t #f) (7 0 0 #f #f)))
+(define WITNESS-SCRIPT
+  (apply append (map (lambda (g) (map (lambda (k) (intent h: (list-ref g 1) v: (list-ref g 2) jump: (list-ref g 3) press: (list-ref g 4)))
+                               (iota (car g))))
+              WITNESS)))
+(define WITNESS-ROOMS
+  (let* ((start (car (cloudstair-entry-phases CT (local->global CT (content-room CT 7 0) 1 7) '(2 4) #t)))
+         (trace (timed-run (cloudstair-stepper CT) start WITNESS-SCRIPT)))
+    (map (lambda (n) (room-of (timed-node-body n))) trace)))
+
+(test-group "D50: the homeward shaft is one way"
+  (test "without H5 no column is open from E up through K's floor and the stone's row"
+    (assert-equal '() (border-open '(2 4))))
+  (test "with H5 the shaft's stone is open: column 1 falls through"
+    (assert-equal '(1) (border-open '(2 4 5))))
+  (test "SYSTEMS' reverse witness (422 ticks from E local 1,7, H2 H4 and the down) never enters K or Q"
+    (assert-equal 422 (length WITNESS-SCRIPT))
+    (assert-equal #f (and (or (member '(7 . -1) WITNESS-ROOMS) (member '(7 . -2) WITNESS-ROOMS)) #t))))
