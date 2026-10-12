@@ -36,6 +36,7 @@
         (harkfell tunes)
         (harkfell hush)
         (harkfell finale)
+        (harkfell credits)
         (harkfell sound)
         (only (harkfell audio) save-extras restore-extras!))
 
@@ -115,7 +116,21 @@
       (assert-equal '(5 4 3 2 1) (starts #f))
       (assert-equal '(5 4 3 2 1 7) (starts #t)))
     (assert-true (= 1.0 (finale-leave 1 (finale-dawn-s #f) #f)))
-    (assert-true (= 0.0 (finale-leave 2 (finale-dawn-s #f) #f))))))
+    (assert-true (= 0.0 (finale-leave 2 (finale-dawn-s #f) #f))))
+  (test "the credits: option B's nine cards on the climb's clock; the last waits for the dawn"
+    (assert-equal 9 (length CREDITS))
+    (assert-equal '("Harkfell") (car CREDITS))
+    (assert-equal '("Thanks for playing!") (car (reverse CREDITS)))
+    (assert-false (credits-at #f #f))
+    (assert-equal 0 (car (credits-at 5.0 #f)))
+    (assert-true (near? (cdr (credits-at 0.75 #f)) 0.5 1e-9))
+    (assert-false (credits-at 13.0 #f))
+    (assert-equal 7 (car (credits-at 117.0 #f)))
+    ;; the clock reaches the last card at 128 s; with the dawn at 200 s it waits
+    (assert-false (credits-at 130.0 200.0))
+    (assert-equal 8 (car (credits-at 201.0 200.0)))
+    (assert-equal 8 (car (credits-at 130.0 #f)))
+    (assert-false (credits-at 215.0 200.0)))))
 
 ;; --- 2. the fuse, heard -------------------------------------------------------------------------
 ;; The twin: finale-drone as the director opens it (H7 stripped unless

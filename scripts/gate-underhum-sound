@@ -9,7 +9,7 @@
 # THE GREEN ARM
 #   score    tools/underhum-compose.mjs --check: the piece, its H7 version and
 #            the coda in assets/tunes are what the score writes
-#   test     test/test-underhum-sound.sgl, all 28 tests (parts 1 to 5)
+#   test     test/test-underhum-sound.sgl, all 29 tests (parts 1 to 5)
 # The test runs on a harkfell-test that loads THIS tree's src/ (folio
 # procedures/harkfell-look-review-harness, "For sound"): HARNESS, default
 # build/audio-harness/bin/harkfell-test, whose lib/harkfell and lib/engine
@@ -50,7 +50,7 @@ trap 'exit 130' INT TERM
 FAIL=0
 HARNESS=${HARNESS:-build/audio-harness/bin/harkfell-test}
 T=test/test-underhum-sound.sgl
-TOTAL=28
+TOTAL=29
 
 hash() { sha256sum "$1" | cut -c1-16; }
 setup_failed() { echo "SETUP-FAILED: $*"; echo "GATE-UNDERHUM-SOUND SETUP-FAILED"; exit 2; }
