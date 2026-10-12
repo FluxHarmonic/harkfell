@@ -8,7 +8,32 @@
   (begin
     ;; (SIDE C R) at the middle of each contiguous real edge opening.
     ;; Reserved slots have sealed edges, so they never advertise an exit.
+    ;; Neither does a one-way way in: a run holding a (quiet-exit at: (C R))
+    ;; cell (Against the Drip's lip from Wrongwater, out of reach from the
+    ;; room, which the map wants read as a dark slot).
     (define (room-exits rm)
+      (let ((quiet (map thing-at (room-things-of rm 'quiet-exit))))
+        (filter (lambda (e)
+                  (not (find (lambda (q)
+                               (if (memq (car e) '(west east))
+                                   (and (= (car q) (cadr e)) (run-holds? rm (car e) (cdr q) (caddr e)))
+                                   (and (= (cdr q) (caddr e)) (run-holds? rm (car e) (car q) (cadr e)))))
+                             quiet)))
+                (all-exits rm))))
+
+    ;; Whether position I and the run's middle M lie in one open run along
+    ;; SIDE's edge (no closed cell between them).
+    (define (run-holds? rm side i m)
+      (let ((open? (lambda (k)
+                     (let ((p (if (memq side '(west east))
+                                  (cons (if (eq? side 'west) 0 (- ROOM-COLS 1)) k)
+                                  (cons k (if (eq? side 'north) 0 (- ROOM-ROWS 1))))))
+                       (kind-open? (char-kind (room-char rm (car p) (cdr p))))))))
+        (let loop ((k (min i m)))
+          (or (> k (max i m))
+              (and (open? k) (loop (+ k 1)))))))
+
+    (define (all-exits rm)
       (apply append
         (map
           (lambda (side)

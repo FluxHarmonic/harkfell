@@ -1,0 +1,28 @@
+;; world/rooms/wrongwater/x-3y9.room
+(room
+  region: wrongwater
+  at: (-3 9)
+  title: "The Seventh's Rest"
+  intent: "behind a wall that is not quite stone, a still pool hangs over a dry floor and a picture shows the note that is wrong and belongs: a breath"
+  bed: (air 0.1 water 0.2 hang 0.5 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "#########~~~~~~~#########"
+   "#######  ~~~~~~~  #######"
+   "#####               #####"
+   "###                   ###"
+   "##                     ##"
+   "##                       "
+   "##                       "
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((mural at: (3 4) image: seventh))
+  decor: auto)
+;; Reached only through Under the Grove's false wall (rows 6-7). A still pool
+;; (9-15, rows 1-2) hangs over the floor (standing row 7), out of reach: it
+;; lights violet when you come carrying H7, and SOUND's moment plays then
+;; (moment: carrying: 7, SOUND's line with its tune). The mural shows the
+;; seventh harmonic: the six notes of the stones in a row, and the seventh a
+;; little apart, in violet. No pickup and no way on.

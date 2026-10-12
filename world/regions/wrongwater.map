@@ -1,0 +1,29 @@
+;;; world/regions/wrongwater.map - Wrongwater's twelve rooms under the Ice
+;;; Well (topics/harkfell-wrongwater-map, approved by David 2026-10-11; the
+;;; six western and lower rooms G-L approved 2026-10-12, the map note's
+;;; appendix). In through the drip door at the Ice Well's crack (A north);
+;;; out one way east, through Against the Drip's west wall (F east). C to F
+;;; and D to I are drops; L is behind a false wall in I.
+(map
+  region: wrongwater
+  origin: (-3 7)
+  layout:
+  ("G-A-B-C"
+   "| |   |"
+   "H-D-E-F"
+   "  |   |"
+   "L-I-J-K")
+  rooms:
+  ((A "Under the Well" "you drop onto dry ground, and the water you came through hangs overhead with its surface facing down: a breath")
+   (B "The Hanging Tarn" "a tarn hangs above a dry floor, and the only way higher is up through it")
+   (C "The Long Drop" "above the highest water a dry shelf ends at a long drop, and the violet note you can hear is somewhere below")
+   (D "The Upward Grove" "icicles grow up from the floor toward a lake above them, each humming faintly: a breath")
+   (E "Rain Rising" "rain rises from puddles into the water overhead, and if you wait it starts to play")
+   (F "The Way Out" "a passage runs east into the dark, toward a curtain of stone and a picture you may already know")
+   (G "The Inverted Fall" "a column of water hangs from the roof like a waterfall stopped and turned over, and the only way to the nook above is up through it")
+   (H "Stepping Lakes" "three small lakes hang at different heights, and the way up is to choose your lake and swim through it, then the next")
+   (I "Under the Grove" "under the grove the icicles' roots come through the roof as pale ice, and one stretch of wall is not quite stone: a breath")
+   (J "The Drowned Grove" "icicles grow up out of a dark pool under a lake that hangs over it, and above the lake a violet note waits that no stone has ever answered")
+   (K "The Climb Back" "a rough shaft climbs from under the grove back up to the way out: a second way, and a small lake to look at on the way")
+   (L "The Seventh's Rest" "behind a wall that is not quite stone, a still pool hangs over a dry floor and a picture shows the note that is wrong and belongs: a breath"))
+  borders: ((A north) (F east)))

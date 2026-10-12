@@ -17,10 +17,13 @@
    "########~~~##############"
    "########~~~##############"
    "#######  ~~o     ########"
-   "#########################")
+   "############### #########")
   things: ((ring-stone at: (11 9) overtone: 4)
            (upward-drip at: (15 9))
            (lantern-moth at: (6 3) count: 3 drawn: 3))
   decor: auto)
-;; The blue door opens a sealed standing recess. Its rising drip hums H7
-;; locally; the existing water shaft and west air rest remain the way home.
+;; The blue door opens the recess. Its rising drip hums H7 locally and rises
+;; out of a pit one cell wide and deep at (15,10), Wrongwater's way in: the
+;; drip door is its floor, Under the Well's (15,0)
+;; (topics/harkfell-wrongwater-bible). The existing water shaft and west air
+;; rest remain the way home.

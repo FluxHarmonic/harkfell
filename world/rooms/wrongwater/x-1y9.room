@@ -1,0 +1,38 @@
+;; world/rooms/wrongwater/x-1y9.room
+(room
+  region: wrongwater
+  at: (-1 9)
+  title: "The Drowned Grove"
+  intent: "icicles grow up out of a dark pool under a lake that hangs over it, and above the lake a violet note waits that no stone has ever answered"
+  bed: (air 0.15 water 0.6 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "###########         #####"
+   "###########         #####"
+   "###       #~~~~#####  ###"
+   "##        #~~~~#       ##"
+   "          #~~~~#         "
+   "                         "
+   "                         "
+   "#######~~~#~~#~~#########"
+   "#######~~~#~~#~~#########"
+   "#########################")
+  things: ((harmonic at: (18 2) overtone: 7)
+           (upward-icicle at: (4 7))
+           (upward-icicle at: (10 7))
+           (upward-icicle at: (13 7))
+           (upward-icicle at: (19 7)))
+  decor: auto)
+;; H7 lies here (David, after the expansion demo: the Seventh's shelf was
+;; too near the way in). A floor pool two rows deep (7-9, 11-12, 14-15)
+;; lies between banks (standing row 7), split by two stone islands each
+;; holding an upward icicle; two more grow on the banks. Over it hangs a
+;; lake (11-14, rows 3-5, 12 cells) walled on both sides (col 10 from the
+;; roof, col 15 the shelf block's west face); its bottom is two rows over
+;; the floor and islands, so a held jump enters it. Swim up and leap out at
+;; its top onto the shelf (15-19, standing row 2), level with the surface,
+;; where H7 waits at (18,2). The shelf is five rows over the floor and its
+;; only wall below is single: the lake is the only way up. Back down: drop
+;; into the lake and sink out onto the pool or the islands. West to Under
+;; the Grove, east to the Climb Back (rows 5-7).

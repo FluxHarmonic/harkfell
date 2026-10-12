@@ -1,0 +1,31 @@
+;; world/rooms/wrongwater/x-2y8.room
+(room
+  region: wrongwater
+  at: (-2 8)
+  title: "The Upward Grove"
+  intent: "icicles grow up from the floor toward a lake above them, each humming faintly: a breath"
+  bed: (air 0.15 water 0.3 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("##%  %###################"
+   "##%  %###################"
+   "##%  %#####~~~~~~########"
+   "##%  %###  ~~~~~~  ######"
+   "##%  %#                ##"
+   "##%  %                  #"
+   "##                       "
+   "                         "
+   "                         "
+   "#####################  ##"
+   "#####################  ##")
+  things: ((upward-icicle at: (9 8))
+           (upward-icicle at: (12 8))
+           (upward-icicle at: (14 8))
+           (upward-icicle at: (16 8))
+           (upward-icicle at: (19 8)))
+  decor: auto)
+;; Under the Well's rough shaft (3-4) comes down the west side; its rough
+;; walls (2 and 5) stop at row 5, a held jump's grab above the floor, and
+;; are the way back up. The icicles grow from the floor under a lake hung
+;; in the ceiling (11-16, rows 2-3, 12 cells), out of reach: a picture.
+;; East to Rain Rising (rows 6-8).

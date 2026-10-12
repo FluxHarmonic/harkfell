@@ -1,0 +1,66 @@
+;;; The atlas's frame budget: every room of a world drawn in the ?atlas
+;;; overview, the way (harkfell shell)'s present-overview! draws it (one
+;;; target the size of the overview, prepare-overview! then draw-overview
+;;; with labels, each frame), for as many frames as the caches take and
+;;; then thirty more. Run by scripts/gate-atlas in a native test harness
+;;; that loads this tree's src/ (procedures/harkfell-look-review-harness),
+;;; on a private display, with ATLAS_WORLD naming the world to load.
+;;;
+;;; A frame whose draws overflow sokol_gp's vertex buffer aborts the process
+;;; (sokol: VALIDATE_APPENDBUF_SIZE, then a panic), so the verdict is the
+;;; last line: "ATLAS-BUDGET OK rooms N frames F" only if every frame was
+;;; drawn. sigil-graphics exposes no vertex count, so the draws per frame
+;;; (sokol's own counter, gfx-frame-stats) are printed as a second measure.
+(import (sigil test) (sigil process) (sigil io) (sigil desktop) (sigil graphics) (sigil list)
+        (engine worldmap)
+        (harkfell content) (harkfell source) (harkfell draw) (harkfell render))
+
+(define WORLD (or (getenv "ATLAS_WORLD") "world"))
+(define K 0.25)
+(define GAP 2)
+
+(test "atlas budget"
+  (run-game "atlas budget" 1200 528
+    (lambda ()
+      (gfx-setup)
+      (set-viewport #f)
+      (let* ((ct (load-content (read-world-source WORLD)))
+             (rooms (map placed-data (content-rooms ct)))
+             (sz (overview-size rooms K GAP))
+             (rt (make-render-target (car sz) (cadr sz) 'nearest)))
+        (set-draw-content! ct)
+        (display "ATLAS-BUDGET world ") (display WORLD) (display ": ")
+        (display (length rooms)) (display " rooms, ") (display (length (content-problems ct)))
+        (display " content problems, overview ") (display (car sz)) (display "x") (display (cadr sz))
+        (newline)
+        (flush-output-port (current-output-port))
+        (let loop ((frame 1) (after 0) (most 0))
+          (wait-frame)
+          (begin-frame)
+          (set-blend-mode 'normal)
+          (let ((ready? (prepare-overview! rooms)))
+            (with-render-target rt
+              (set-blend-mode 'normal)
+              (draw-overview rooms K GAP #t))
+            (with-blend-mode 'none (draw-render-target rt 0 0 1200 528))
+            (end-frame)
+            (let ((draws (vector-ref (gfx-frame-stats) 0)))
+              (cond ((> frame 600)
+                     (display "ATLAS-BUDGET TIMED-OUT: the caches never filled in 600 frames") (newline))
+                    ((and ready? (>= after 30))
+                     (display "ATLAS-BUDGET OK rooms ") (display (length rooms))
+                     (display " frames ") (display frame)
+                     (display " most-draws ") (display (max most draws)) (newline)
+                     ;; The samplers left: 1 x 1 targets (one sampler each,
+                     ;; sigil-graphics' native_make_render_target), one at a
+                     ;; time, a marker before each; sokol logs
+                     ;; SAMPLER_POOL_EXHAUSTED at the first that finds none.
+                     ;; None is drawn, so nothing aborts; the process ends here.
+                     (let probe ((k 1))
+                       (when (<= k 70)
+                         (display "ATLAS-SAMPLERS creating ") (display k) (newline)
+                         (flush-output-port (current-output-port))
+                         (make-render-target 1 1 'nearest)
+                         (probe (+ k 1)))))
+                    (else (loop (+ frame 1) (if ready? (+ after 1) 0) (max most draws)))))))
+        (flush-output-port (current-output-port))))))

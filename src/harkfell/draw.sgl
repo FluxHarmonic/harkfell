@@ -52,6 +52,8 @@
           (harkfell cloudstair look)
           (harkfell underhum look)
           (only (harkfell underhum finale) finale-lit finale-phase finale-still)
+          (harkfell wrongwater look)
+          (harkfell cues)
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
@@ -120,6 +122,7 @@
             (dark (case name
                     ((pipes) PIPES-DARK)
                     ((underhum) UNDERHUM-DARK)
+                    ((wrongwater) WRONGWATER-DARK)
                     (else (region-dark-lookup name)))))
         (cond ((not e)
                (set! *strip-texs* (cons (cons name (make-strips (region-rgb name) dark)) *strip-texs*)))
@@ -441,6 +444,7 @@
                                                (cond
                                                  ((cloudstair-backdrop-key? key) (cloudstair-backdrop-bytes key))
                                                  ((underhum-backdrop-key? key) (underhum-backdrop-bytes key))
+                                                 ((wrongwater-backdrop-key? key) (wrongwater-backdrop-bytes key))
                                                  (else
                                                (case key
                                                  ((under) (under-bytes))
@@ -469,6 +473,7 @@
     ;; unjoined pair of rooms, so most tops are rock).
     (define (under? rm) (and (not (cloudstair? rm)) (room-under? rm)))
     (define (cloudstair? rm) (eq? (room-region rm) 'cloudstair))
+    (define (wrongwater? rm) (eq? (room-region rm) 'wrongwater))
 
     ;; The focus pull (D16, section 7's depth): while a music moment plays the
     ;; far world goes soft, the backdrop scattered by up to FOCUS-R pixels,
@@ -481,8 +486,14 @@
 
     ;; From the shell, each frame: whether a moment plays, and the bed's wind
     ;; level now (0..1; the reeds bend with what you hear).
-    (define (set-look-sound! moment wind)
+    ;; heard (optional): the playing moment's seconds as heard
+    ;; ((harkfell sound) sound-moment-time), or #f
+    (define *moment-name* #f)
+    (define *moment-heard* #f)
+    (define (set-look-sound! moment wind . heard)
       (set! *moment* (and moment #t))
+      (set! *moment-name* moment)
+      (set! *moment-heard* (and (pair? heard) (number? (car heard)) (car heard)))
       (set! *bed-wind* (if (number? wind) wind 0.5)))
 
     (define (step-focus!)
@@ -492,6 +503,7 @@
     ;; another room; scattered by the focus pull.
     (define (draw-backdrop! rm)
       (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
+                                 ((wrongwater? rm) (wrongwater-backdrop-key rm))
                                  ((cloudstair? rm) (cloudstair-backdrop-key rm))
                                  ((underhum? rm) (underhum-backdrop-key rm))
                                  ((and (not (under? rm)) (glasswood-sheet? rm))
@@ -558,7 +570,7 @@
              (cave? (and (under? rm) (mat-cells sheet "cave") #t)))
         ;; under water nothing grows: a solid with water on it takes the mask
         ;; of one covered from above (no turf on a pool's floor)
-        (each-tile rm (cond ((eq? (room-region rm) 'pipes)
+        (each-tile rm (cond ((or (eq? (room-region rm) 'pipes) (wrongwater? rm))
                              (lambda (m) (memq m (list 'ledge 'hazard))))
                             ((cloudstair? rm) (lambda (m) #f))   ; all painted ((harkfell cloudstair look))
                             ((underhum? rm) (lambda (m) #f))     ; all painted ((harkfell underhum look))
@@ -737,6 +749,12 @@
                 (draw-pipes-solids! rm
                                     (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
                                     (* S (car g)) (* S (cdr g)))))
+            ;; Wrongwater's wet stone, lit from below ((harkfell wrongwater look))
+            (when (wrongwater? rm)
+              (let ((g (global-tile rm 0 0)))
+                (draw-wrongwater-solids! rm
+                                         (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
+                                         (* S (car g)) (* S (cdr g)))))
             ;; Cloudstair's cliffs likewise ((harkfell cloudstair look))
             (when (cloudstair? rm)
               (let ((g (global-tile rm 0 0)))
@@ -1009,7 +1027,15 @@
       (with-additive-blend
         (paint-water!)
         (each-tile rm (lambda (m) (eq? m 'water))
-                   (lambda (mat x y m gc gr) (draw-filled-rect x y S S)))))
+                   (lambda (mat x y m gc gr)
+                     ;; Wrongwater's hanging lakes: their own G, so the
+                     ;; resolve draws the surface underneath
+                     (if (and (wrongwater? rm)
+                              (hanging-water? rm (quotient x S) (quotient y S)))
+                         (begin (paint-hanging-water!)
+                                (draw-filled-rect x y S S)
+                                (paint-water!))
+                         (draw-filled-rect x y S S))))))
 
     ;; Thin drifting mist just above exposed water, behind creatures and
     ;; the foreground. Skip solid/reed cells so the banks remain crisp.
@@ -1329,12 +1355,20 @@
         (and p q (= (placed-x p) (placed-x q)) (= (placed-y p) (placed-y q)))))
 
     (define (room-hue w)
-      (if (and (world-room w)
-               (eq? (room-region (placed-data (world-room w))) 'pipes))
-          ;; Environment light is cream. Harmonic atlas/glyph pixels keep
-          ;; their own slots even at a bright core in the resolve shader.
-          (slot-of 'sky-4)
-          (room-harmonic-hue w)))
+      (let ((region (and (world-room w) (room-region (placed-data (world-room w))))))
+        (cond ((eq? region 'pipes)
+               ;; Environment light is cream. Harmonic atlas/glyph pixels keep
+               ;; their own slots even at a bright core in the resolve shader.
+               (slot-of 'sky-4))
+              ;; Wrongwater's light is the ground's own; violet only while
+              ;; H7 itself lies in the room (its upward icicles glow in their
+              ;; own discs, not the room's light)
+              ((eq? region 'wrongwater)
+               (if (find (lambda (pk) (and (= (pickup-overtone pk) 7) (cell-in-room? w (pickup-cell pk))))
+                         (world-pickups w))
+                   (slot-of 'h7)
+                   (slot-of 'sky-4)))
+              (else (room-harmonic-hue w)))))
 
     (define (room-harmonic-hue w)
       (let* ((stones (filter (lambda (st) (cell-in-room? w (stone-cell st))) (world-stones w)))
@@ -1489,6 +1523,40 @@
         (if (> arr 0.0) (* (car MOTH-RINGS) (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 arr))) 0.0)))
 
     ;; Play into the current (index) pass: the room, its things, the body.
+    ;; The room's door drips (an upward drip rising out of a crack: the Ice
+    ;; Well's, Wrongwater's way in), each as (x base still-s near?): its
+    ;; column and floor in room px, as (harkfell pipes look) draws a drip;
+    ;; the seconds the body has stood still; whether the body is within two
+    ;; tiles of it.
+    ;; With the stillness door that listens at the drip ((harkfell gates):
+    ;; stone-still, stone-listen, stone-listening), the picture runs on the
+    ;; door's own clock and radius, the clock the sound's climb uses, so the
+    ;; rings land on the notes: still-s is its listening seconds while shut,
+    ;; 5 plus the seconds since it began to sink while sinking, and 'open
+    ;; once open; near? is the door's own test (the body's centre within its
+    ;; radius of the drip). Without one, world-still and a box round the drip.
+    (define (door-drips w rm ox oy)
+      (let* ((b (world-body w))
+             (c (body-center b HARKFELL-FEEL))
+             (bx (- (car c) ox)) (by (- (cdr c) oy)))
+        (map (lambda (cell)
+               (let* ((x (+ 8 (* S (car cell)))) (base (+ 14 (* S (cdr cell))))
+                      (g (global-tile rm (car cell) (cdr cell)))
+                      (st (find (lambda (s) (and (stone-still s) (equal? (stone-listen s) g)))
+                                (world-stones w))))
+                 (if st
+                     (let ((dx (- (car c) (+ (* S (car g)) (/ S 2.0))))
+                           (dy (- (cdr c) (+ (* S (cdr g)) (/ S 2.0)))))
+                       (list x base
+                             (case (stone-state st)
+                               ((open) 'open)
+                               ((sinking) (+ (stone-still st) (/ (stone-t st) 60.0)))
+                               (else (/ (stone-listening st) 60.0)))
+                             (<= (sqrt (+ (* dx dx) (* dy dy))) (stone-radius st))))
+                     (let ((near (and (< (abs (- bx x)) (* 2.5 S)) (< (abs (- by base)) (* 2 S)))))
+                       (list x base (if near (/ (world-still w) 60.0) 0.0) near)))))
+             (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))))
+
     (define (draw-play w)
       (let* ((p (world-room w))
              (rm (and p (placed-data p))))
@@ -1555,6 +1623,9 @@
               ;; D43: the upward icicle, where the room has one
               (draw-upward! rm)
               (draw-upward-drips! rm t)
+              ;; the drip door's drip, which answers you standing still
+              (for-each (lambda (d) (draw-drip-build! (car d) (cadr d) t (caddr d) (cadddr d)))
+                        (door-drips w rm ox oy))
               ;; a reedling perched on a reed tip rides the tip's sway
               (for-each (lambda (c)
                           (unless (eyes? c)
@@ -1570,6 +1641,10 @@
               (draw-underhum-sprites! rm b (world-carry w) t (underhum-phase-of w) ox oy)
               (draw-underhum-extras! rm b (world-carry w) t (underhum-phase-of w) ox oy)
               (draw-water! rm)
+              (when (wrongwater? rm)
+                (draw-wrongwater-surfaces! rm t)
+                (draw-rising-rain! rm t)
+                (draw-seventh-pool! rm (seventh-level rm (world-carry w) *moment-name* *moment-heard*)))
               (cover-thin-water! w ox oy)
               (draw-crusts!)
               (draw-snow! rm t)
@@ -1616,6 +1691,12 @@
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
                   (draw-pipes-lights! rm t)
+                  (when (wrongwater? rm)
+                    (draw-wrongwater-light! rm t)
+                    (draw-seventh-pool-light! rm (seventh-level rm (world-carry w) *moment-name* *moment-heard*)))
+                  (draw-violet-well-answer! rm t (world-carry w))
+                  (for-each (lambda (d) (draw-drip-build-light! (car d) (cadr d) t (caddr d) (cadddr d)))
+                            (door-drips w rm ox oy))
                   (draw-glints! t)
                   (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
@@ -1689,17 +1770,85 @@
                 ((and (= (room-x (car rs)) rx) (= (room-y (car rs)) ry)) (car rs))
                 (else (find (cdr rs)))))))
 
-    ;; Cache rooms in pages of up to eight full-size images. Individual
-    ;; room targets would also exhaust sokol's sampler pool at 82 rooms.
-    ;; Each page is composed in one pass, then kept until content changes.
+    ;; Cache rooms in pages of PAGE-ROOMS full-size images, PAGE-COLS a row.
+    ;; Every texture and render target holds one of sokol's 64 samplers, and
+    ;; a texture cannot be freed: individual room targets ran out at 82
+    ;; rooms, and a page per eight rooms ran out at 150 (110 fitted, measured
+    ;; 2026-10-12, scripts/gate-atlas). A pass clears its target, so a page
+    ;; grows by copying: each frame bakes up to OVERVIEW-BATCH rooms and
+    ;; draws the open page and them into a new page target, then frees the
+    ;; old one. A frame holds at most the two pages and the batch's targets.
     (define *room-colors* '())     ; ((room . (page-texture . index)) ...)
     (define *overview-pages* '())  ; render targets owning those textures
+    (define *open-page* #f)        ; (target texture rooms-in-it) while one fills
     (define OVERVIEW-BATCH 8)
+    (define PAGE-COLS 8)
+    (define PAGE-ROWS 4)
+    (define PAGE-ROOMS (* PAGE-COLS PAGE-ROWS))
+
+    ;; The rooms' coordinate labels are cached the same way. Drawn live, a
+    ;; label costs a rect per glyph pixel row, and one frame's vertex buffer
+    ;; (sokol_gp's, shared by every pass in the frame) cannot hold them all:
+    ;; at 110 rooms the atlas aborted with VALIDATE_APPENDBUF_SIZE (measured
+    ;; 2026-10-12; 104 rooms fitted). Each label is drawn once into a page of
+    ;; LABEL-BATCH, one page a frame after the rooms' pages, and the overview
+    ;; draws it as one textured quad. A pass clears its target, so a page is
+    ;; written whole in one frame.
+    (define *room-labels* '())     ; ((room . (page-texture . index)) ...)
+    (define *label-pages* '())
+    ;; A page is LABEL-COLS labels across and LABEL-ROWS down, 384 x 64: a
+    ;; 48 x 512 page came out empty and a 48 x 64 one did not (measured in
+    ;; the look harness; cause not found). 64 labels a page, one page a
+    ;; frame, stays under the 104 that one frame drew live.
+    (define LABEL-W 48)
+    (define LABEL-H 8)
+    (define LABEL-COLS 8)
+    (define LABEL-ROWS 8)
+    (define LABEL-BATCH (* LABEL-COLS LABEL-ROWS))
 
     (define (drop-overview!)
       (for-each render-target-free! *overview-pages*)
+      (for-each render-target-free! *label-pages*)
       (set! *overview-pages* '())
-      (set! *room-colors* '()))
+      (set! *open-page* #f)
+      (set! *label-pages* '())
+      (set! *room-colors* '())
+      (set! *room-labels* '()))
+
+    (define (room-label rm)
+      (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm))))
+
+    ;; One page of labels for the rooms not yet labelled (up to LABEL-BATCH),
+    ;; LABEL-COLS a row: the dark band (written as is, so it keeps its
+    ;; alpha of 0.6) and the text over it. Outside any pass.
+    (define (prepare-labels! rooms)
+      (let ((batch
+              (let next ((pending rooms) (n 0) (acc '()))
+                (cond
+                  ((or (null? pending) (= n LABEL-BATCH)) (reverse acc))
+                  ((assq (car pending) *room-labels*) (next (cdr pending) n acc))
+                  (else (next (cdr pending) (+ n 1) (cons (car pending) acc)))))))
+        (unless (null? batch)
+          (let ((page (make-render-target (* LABEL-W LABEL-COLS) (* LABEL-H LABEL-ROWS) 'nearest)))
+            (with-render-target page
+              (let draw ((rs batch) (i 0))
+                (unless (null? rs)
+                  (let ((label (room-label (car rs)))
+                        (x (* LABEL-W (modulo i LABEL-COLS))) (y (* LABEL-H (quotient i LABEL-COLS))))
+                    (with-blend-mode 'none
+                      (set-color 0.0 0.0 0.0 0.6)
+                      (draw-filled-rect x y (+ 2 (text-width-mini label 1)) 7))
+                    (set-blend-mode 'normal)
+                    (set-color 0.95 0.95 0.9)
+                    (draw-text-mini label (+ x 1) (+ y 1) 1))
+                  (draw (cdr rs) (+ i 1)))))
+            (set! *label-pages* (cons page *label-pages*))
+            (let ((texture (render-target->texture page)))
+              (let cache ((rs batch) (i 0))
+                (unless (null? rs)
+                  (set! *room-labels* (cons (cons (car rs) (cons texture i)) *room-labels*))
+                  (cache (cdr rs) (+ i 1)))))))
+        (every (lambda (rm) (assq rm *room-labels*)) rooms)))
 
     ;; A room as it stands in the overview: backdrop, foliage (still),
     ;; stones shut, solids, water.
@@ -1719,9 +1868,17 @@
       (draw-underhum-scenery! rm 0 #f)
       (draw-pipes-cues! rm 0)
       (draw-upward-drips! rm 0)
+      (for-each (lambda (cell) (draw-drip-build! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
+                (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))
       (with-additive-blend
-        (draw-pipes-lights! rm 0))
-      (draw-water! rm))
+        (draw-pipes-lights! rm 0)
+        (when (wrongwater? rm) (draw-wrongwater-light! rm 0))
+        (for-each (lambda (cell) (draw-drip-build-light! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
+                  (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm))))
+      (draw-water! rm)
+      (when (wrongwater? rm)
+        (draw-wrongwater-surfaces! rm 0)
+        (draw-rising-rain! rm 0)))
 
     ;; Outside any pass: resolve one bounded batch per frame. Every
     ;; render pass appends to sokol_gp's same per-frame vertex buffer; all
@@ -1729,33 +1886,54 @@
     ;; Call once each frame until this returns #t (all rooms are cached).
     (define (prepare-overview! rooms)
       (ensure-render!)
-      (let ((batch
+      (let* ((have (if *open-page* (caddr *open-page*) 0))
+             (room-for (min OVERVIEW-BATCH (- PAGE-ROOMS have)))
+             (batch
               (let next ((pending rooms) (n 0) (acc '()))
                 (cond
-                  ((or (null? pending) (= n OVERVIEW-BATCH)) (reverse acc))
+                  ((or (null? pending) (= n room-for)) (reverse acc))
                   ((assq (car pending) *room-colors*) (next (cdr pending) n acc))
                   (else (next (cdr pending) (+ n 1) (cons (car pending) acc)))))))
         (unless (null? batch)
           (let* ((targets (map bake-overview-room! batch))
-                 (page (make-render-target (* VIEW-W (length batch)) VIEW-H 'nearest)))
+                 (old (and *open-page* (car *open-page*)))
+                 (old-texture (and *open-page* (cadr *open-page*)))
+                 (pw (* PAGE-COLS VIEW-W)) (ph (* PAGE-ROWS VIEW-H))
+                 (page (make-render-target pw ph 'nearest)))
             (with-render-target page
               (with-blend-mode 'none
                 (set-color 1.0 1.0 1.0 1.0)
-                (let copy ((ts targets) (i 0))
+                (when old
+                  (draw-render-target old 0.0 0.0 (inexact pw) (inexact ph)))
+                (let copy ((ts targets) (i have))
                   (unless (null? ts)
-                    (draw-render-target (car ts) (inexact (* i VIEW-W)) 0.0
+                    (draw-render-target (car ts)
+                                        (inexact (* VIEW-W (modulo i PAGE-COLS)))
+                                        (inexact (* VIEW-H (quotient i PAGE-COLS)))
                                         (inexact VIEW-W) (inexact VIEW-H))
                     (copy (cdr ts) (+ i 1))))))
-            ;; The page pass has consumed the temporary room targets.
+            ;; The page pass has consumed the temporary room targets and the
+            ;; old page; the rooms that were on it now point at the new one.
             (for-each render-target-free! targets)
-            (set! *overview-pages* (cons page *overview-pages*))
-            (let ((texture (render-target->texture page)))
-              (let cache ((rs batch) (i 0))
+            (let ((texture (render-target->texture page))
+                  (n (+ have (length batch))))
+              (when old
+                (render-target-free! old)
+                (set! *overview-pages* (filter (lambda (p) (not (eq? p old))) *overview-pages*))
+                (set! *room-colors*
+                      (map (lambda (e) (if (eq? (cadr e) old-texture) (cons (car e) (cons texture (cddr e))) e))
+                           *room-colors*)))
+              (set! *overview-pages* (cons page *overview-pages*))
+              (set! *open-page* (and (< n PAGE-ROOMS) (list page texture n)))
+              (let cache ((rs batch) (i have))
                 (unless (null? rs)
                   (set! *room-colors*
                         (cons (cons (car rs) (cons texture i)) *room-colors*))
                   (cache (cdr rs) (+ i 1)))))))
-        (every (lambda (rm) (assq rm *room-colors*)) rooms)))
+        ;; the labels after the rooms, never in the same frame as a room batch
+        (and (null? batch)
+             (every (lambda (rm) (assq rm *room-colors*)) rooms)
+             (prepare-labels! rooms))))
 
     (define (bake-overview-room! rm)
       (prepare-layers! rm)
@@ -1764,7 +1942,7 @@
         (set-blend-mode 'normal)
         (draw-room-still rm)
         (draw-strips! *strips*))
-      (resolve! 0 0.0 (slot-of (if (eq? (room-region rm) 'pipes) 'sky-4 'h2))
+      (resolve! 0 0.0 (slot-of (if (memq (room-region rm) '(pipes wrongwater)) 'sky-4 'h2))
                 (room-render-light rm) 0.0 (room-daylight-pools? rm))
       (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
         (with-render-target rt
@@ -1805,15 +1983,21 @@
                   (set-color 1.0 1.0 1.0 1.0)
                   (draw-texture-region (cadr e) (inexact ox) (inexact oy)
                                        (* k VIEW-W) (* k VIEW-H)
-                                       (* (cddr e) VIEW-W) VIEW-H VIEW-W (- VIEW-H))))
+                                       (* VIEW-W (modulo (cddr e) PAGE-COLS))
+                                       (* VIEW-H (- PAGE-ROWS (quotient (cddr e) PAGE-COLS)))
+                                       VIEW-W (- VIEW-H))))
               (when labels?
-                (let ((label (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm)))))
-                  (set-color 0.0 0.0 0.0 0.6)
-                  (draw-filled-rect (+ ox 1) (+ oy 1) (+ 2 (text-width-mini label 1)) 7)
-                  (set-color 0.95 0.95 0.9)
-                  (draw-text-mini label (+ ox 2) (+ oy 2) 1)
-                  (when (room-moment rm)
-                    (draw-note-mark (- (+ ox (floor-int (* k VIEW-W))) 8) (+ oy 2)))))))
+                ;; the label from its page (prepare-labels!), once baked
+                (let ((l (assq rm *room-labels*)))
+                  (when l
+                    (set-blend-mode 'normal)
+                    (set-color 1.0 1.0 1.0 1.0)
+                    (draw-texture-region (cadr l) (inexact (+ ox 1)) (inexact (+ oy 1)) LABEL-W LABEL-H
+                                         (* LABEL-W (modulo (cddr l) LABEL-COLS))
+                                         (* LABEL-H (- LABEL-ROWS (quotient (cddr l) LABEL-COLS)))
+                                         LABEL-W (- LABEL-H))))
+                (when (room-moment rm)
+                  (draw-note-mark (- (+ ox (floor-int (* k VIEW-W))) 8) (+ oy 2))))))
           rooms)))
 
     ;; Lines of text at the top right of the rectangle x y w, cells of

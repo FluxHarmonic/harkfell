@@ -1,0 +1,31 @@
+;; world/rooms/wrongwater/x-1y7.room
+(room
+  region: wrongwater
+  at: (-1 7)
+  title: "The Hanging Tarn"
+  intent: "a tarn hangs above a dry floor, and the only way higher is up through it"
+  bed: (air 0.15 water 0.3 hang 0.6 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "#########################"
+   "#########                "
+   "#########                "
+   "#       #~~~~############"
+   "#       #~~~~############"
+   "#       #~~~~############"
+   "             ############"
+   "             ############"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The tarn (9-12, rows 4-6, 12 cells) is walled on both sides: smooth rock
+;; at column 8 hangs from the ceiling, and the shelf block (13-24, rows 4
+;; on) is the east wall. Its bottom (row 6) is two rows over the floor
+;; (standing row 8), well inside a held jump (the body's centre reaches
+;; row 5). Swim up and leap out at its top (row 4's surface) onto the shelf
+;; (standing row 3), level with the surface; the shelf runs east to the
+;; Seventh (rows 2-3). The walls are four apart, too wide to kick between,
+;; and the shelf is five rows over the floor, so the swim is the only way
+;; up. Sinking out of the bottom drops you back onto the floor you jumped
+;; from.

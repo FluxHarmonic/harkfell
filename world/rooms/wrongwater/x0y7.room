@@ -1,0 +1,28 @@
+;; world/rooms/wrongwater/x0y7.room
+(room
+  region: wrongwater
+  at: (0 7)
+  title: "The Long Drop"
+  intent: "above the highest water a dry shelf ends at a long drop, and the violet note you can hear is somewhere below"
+  bed: (air 0.15 water 0.3 hang 0.6 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "########         ########"
+   "                 ########"
+   "                    #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####"
+   "#############       #####")
+  decor: auto)
+;; The shelf from the tarn (standing row 3) runs east under a raised roof
+;; to a lip over a shaft seven wide (13-19) that drops through the whole
+;; room into the Way Out: one way, too wide to kick up and with no rough
+;; rock. H7 used to wait here; it moved to the Drowned Grove (David, after
+;; the expansion demo: too near the way in), and its tone, heard from here,
+;; comes from below. Back west, the shelf leads to the tarn's top: drop in
+;; and sink out of its bottom.

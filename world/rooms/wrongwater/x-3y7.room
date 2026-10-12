@@ -1,0 +1,32 @@
+;; world/rooms/wrongwater/x-3y7.room
+(room
+  region: wrongwater
+  at: (-3 7)
+  title: "The Inverted Fall"
+  intent: "a column of water hangs from the roof like a waterfall stopped and turned over, and the only way to the nook above is up through it"
+  bed: (air 0.15 water 0.3 hang 0.6 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########################"
+   "######        ###########"
+   "######        ###########"
+   "######~~######          #"
+   "######~~#               #"
+   "######~~#               #"
+   "######~~#               #"
+   "####                     "
+   "####                     "
+   "#########%  %############"
+   "#########%  %############")
+  things: ((mural at: (9 0) image: wrongwater))
+  start: (15 8)
+  decor: auto)
+;; The column (6-7, rows 3-6, 8 cells) is walled on both sides: col 5 hangs
+;; from the roof and col 8 is the nook block's west face. Its bottom is two
+;; rows over the floor (standing row 8), so a held jump enters it; swim up
+;; and leap out at its top (row 3) into the air above (rows 1-2) and onto the
+;; nook (8-13, standing row 2), where a mural shows Wrongwater itself: lakes
+;; over dry ground. The nook is six rows over the floor and the only wall
+;; under it is single, so the swim is the only way up. A hole (10-11) with
+;; rough sides drops into Stepping Lakes and is the climb back from there.
+;; East to Under the Well (rows 7-8).

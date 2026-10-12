@@ -1,0 +1,25 @@
+;; world/rooms/wrongwater/x-2y9.room
+(room
+  region: wrongwater
+  at: (-2 9)
+  title: "Under the Grove"
+  intent: "under the grove the icicles' roots come through the roof as pale ice, and one stretch of wall is not quite stone: a breath"
+  bed: (air 0.15 water 0.3 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("#####################  ##"
+   "####                   ##"
+   "###                    ##"
+   "##                     ##"
+   "##                     ##"
+   "##                       "
+   "++                       "
+   "++                       "
+   "#########################"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The Upward Grove's floor hole (21-22) drops in from above, one way: the
+;; hole is eight rows over this floor (standing row 7). The west wall's
+;; lower cells (0-1, rows 6-7) are a false wall into the Seventh's Rest.
+;; East to the Drowned Grove (rows 5-7).

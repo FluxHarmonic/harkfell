@@ -33,8 +33,11 @@
 (define WELL (content-room CT -2 6))
 (define LISTEN-CELL (local->global CT WELL 15 9))
 (define DOOR-CELL (local->global CT WELL 11 9))
+;; Stand beside the drip on the recess floor (14,9), inside the door's
+;; radius: (15,9) is now over the drip's pit (the door is Under the Well's
+;; (15,0)), so a body put there falls into it.
 (define (drip-world)
-  (let ((w (at-hint -2 6 15 9 '())))
+  (let ((w (at-hint -2 6 14 9 '())))
     (world-populate w
       (list (stone cell: DOOR-CELL overtone: 7 still: 5 listen: LISTEN-CELL radius: 32.0))
       '() '())))
@@ -43,7 +46,8 @@
 
 (test-group "Wrongwater: the door owns the sound clock"
   (test "no stillness door means no drip tuple"
-    (assert-false (world-drip (at-hint -2 6 15 9 '())))
+    ;; the world has its drip door now, so a world populated without stones
+    (assert-false (world-drip (world-populate (at-hint -2 6 14 9 '()) '() '() '())))
     (assert-false (world-drip #f)))
   (test "the tuple uses the listening source in absolute world pixels"
     (assert-equal '(shut -552.0 1208.0 0.0) (world-drip (drip-world))))
@@ -81,7 +85,7 @@
           (assert-equal 1 (length (answers first)))
           (assert-equal 1 (length (answers waiting)))
           (assert-equal 2 (length (answers (wait waiting 1))))))
-      '((-6 4 13 7) (-2 6 15 9) (1 8 12 8)))))
+      '((-6 4 13 7) (-2 6 14 9) (1 8 12 8)))))
 
 (define (pickup-world region)
   (let* ((source (map (lambda (e)

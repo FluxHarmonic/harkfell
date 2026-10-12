@@ -112,6 +112,24 @@
   (und-cut-3 "#a0937f" "chisel edges and worn treads")
   (und-drip "#2c3337" "the one drip's wet stone")
   (und-ochre "#8e5a36" "the Underhum's one warm accent: old ochre in the cut work")
+  ;; Wrongwater: Glasswood's ice and the Pipes' stone turned a few degrees
+  ;; off where they belong (stone toward green-grey, ice toward teal), lit
+  ;; from below. NO VIOLET: H7's colour is the only violet on screen
+  ;; (test/test-art.sgl checks every region role's hue). Slots 0..3 are the
+  ;; far cave wall, darkest at the top; the floors are the light.
+  (wrw-wall-1 "#151b1e" "the far wall high up, away from the ground's light")
+  (wrw-wall-2 "#27312f" "the far wall")
+  (wrw-wall-3 "#4a5852" "the far wall low down, lit from below")
+  (wrw-wall-4 "#cbd8cf" "the ground's light, far; the light's own colour")
+  (wrw-stone-1 "#121716" "wet joints, the dark sides")
+  (wrw-stone-2 "#3a4744" "smooth wet stone in shade")
+  (wrw-stone-3 "#7a8c84" "wet stone and undersides, lit from below")
+  (wrw-stone-4 "#dde8dc" "the floors' pale light")
+  (wrw-ice-1 "#22353c" "upward ice in shade")
+  (wrw-ice-2 "#55808a" "upward ice")
+  (wrw-ice-3 "#a8d2d0" "lit ice; a lake's upper surface")
+  (wrw-water "#3d7a78" "the hanging water, teal")
+  (wrw-brass "#c4b06a" "Wrongwater's one warm accent: brass in the light from below")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")
@@ -267,3 +285,24 @@
   moments: ()
   wander: ()
   gives: ())
+
+;; Wrongwater (0.5, topics/harkfell-wrongwater-bible and -map, approved
+;; 2026-10-11; grown to twelve 2026-10-12): rooms under the Ice Well,
+;; x-3..0 at y7..9, where the
+;; ground is dry and the lakes hang overhead. In through the drip door at
+;; the bottom of the well's recess; out one way east into the Pipes' Against
+;; the Drip. H7 lies in the Seventh. No creatures, no hazards. The bed,
+;; moments and wander lines are SOUND's (wrongwater/sound). The palette is
+;; the wrw-* roles; # and % are painted by (harkfell wrongwater look), so
+;; the region has no art sheet.
+(region wrongwater
+  name: "Wrongwater"
+  bounds: ((-3 7) (0 9))
+  overtone: 7
+  bed-channels: (air water hang drone)
+  palette: (wrw-wall-1 wrw-wall-2 wrw-wall-3 wrw-wall-4
+            wrw-stone-1 wrw-stone-2 wrw-stone-3 wrw-stone-4
+            wrw-ice-1 wrw-ice-2 wrw-ice-3 wrw-water wrw-brass fur-1 fur-2 ink)
+  tiles: wrongwater
+  roster: ()
+  gives: ((overtone 7)))
