@@ -1726,7 +1726,9 @@
                 (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))
       (with-additive-blend
         (draw-pipes-lights! rm 0)
-        (when (wrongwater? rm) (draw-wrongwater-light! rm 0)))
+        (when (wrongwater? rm) (draw-wrongwater-light! rm 0))
+        (for-each (lambda (cell) (draw-drip-build-light! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
+                  (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm))))
       (draw-water! rm)
       (when (wrongwater? rm)
         (draw-wrongwater-surfaces! rm 0)

@@ -17,8 +17,8 @@
 ;;;   (draw-drip-build-light! x base t still near?)   Ice Well's recess)
 ;;;
 ;;; The hanging lakes' underside skin and their upside-down mirror are the
-;;; resolve shader's (render.sgl, u_hang: a water pixel painted with G at
-;;; HANG-G counts its depth upward from the lake's underside).
+;;; resolve shader's (render.sgl: a water pixel painted with G 0.75,
+;;; paint-hanging-water!, counts its depth upward from the lake's underside).
 (define-library (harkfell wrongwater look)
   (import (sigil math)
           (sigil list)
@@ -330,7 +330,7 @@
       (let rows ((r 0))
         (when (< r ROOM-ROWS)
           (runs ROOM-COLS
-                (lambda (c) (and (water-char? (room-char rm c r))
+                (lambda (c) (and (hanging-water? rm c r)   ; a floor pool has its own skin
                                  (air-char? (room-char rm c (- r 1)))))
                 (lambda (c0 c1)
                   (let ((y (* 16 r)) (ph (quotient t 9)))
@@ -458,6 +458,12 @@
                               (filter (lambda (at) (<= at still)) DRIP-CLIMB-AT))))
             (else (list 'fall (- still DRIP-OPEN-S)))))
 
+    ;; How far a rising drop is above its base: the old 3 s rise (period
+    ;; 180), or near you a slower one that hangs at the top before it goes.
+    (define (rise-of period t)
+      (let ((u (modulo t period)))
+        (if (= period 180) (quotient u 6) (min 29 (quotient u 7)))))
+
     ;; Slot pass: the drop, its stain line, the rings. X, BASE: the drip's
     ;; column and the floor it rises from, as (harkfell pipes look) draws an
     ;; upward drip.
@@ -467,9 +473,7 @@
         (case (car st)
           ((rise)
            ;; near, the drop rises slowly and hangs at the top before it goes
-           (let* ((period (cadr st))
-                  (u (modulo t period))
-                  (rise (if (= period 180) (quotient u 6) (min 29 (quotient u 7)))))
+           (let ((rise (rise-of (cadr st) t)))
              (slot-rect! 'water x (- base rise) 1 2)
              (slot-rect! 'ground-4 x (- base rise) 1 1)))
           ((hang)
@@ -517,11 +521,28 @@
           (room-things-of rm 'mural))))
 
     ;; Additive pass: the drop's own violet glow, brighter while it hangs.
+    ;; Rising, it keeps the glow every upward drip has ((harkfell pipes
+    ;; look) draw-upward-drips!: a disc on the drop and one on its stain
+    ;; line), so it shows in the Ice Well's dark before the moths come.
     (define (draw-drip-build-light! x base t still near?)
       (let ((st (drip-state still near?)))
-        (when (eq? (car st) 'hang)
-          (let ((y (- base HANG-RISE)))
-            (light-rect! 0.5 (- x 1) y 3 2)
-            (for-each (lambda (age)
-                        (when (< age 0.3) (light-rect! 0.3 (- x 3) (- y 2) 7 6)))
-                      (cadr st))))))))
+        (case (car st)
+          ((rise)
+           (disc! x (- base (rise-of (cadr st) t)) 3 0.5)
+           (disc! x (- base 29) 4 0.4))
+          ((hang)
+           (let ((y (- base HANG-RISE)))
+             (disc! x (- base 29) 4 0.4)
+             (light-rect! 0.5 (- x 1) y 3 2)
+             (for-each (lambda (age)
+                         (when (< age 0.3) (light-rect! 0.3 (- x 3) (- y 2) 7 6)))
+                       (cadr st))))
+          (else (disc! x (- base 29) 4 0.4)))))
+
+    (define (disc! cx cy radius amount)
+      (paint-light! amount)
+      (let loop ((dy (- radius)))
+        (when (<= dy radius)
+          (let ((half (pixel (sqrt (- (* radius radius) (* dy dy))))))
+            (draw-filled-rect (- cx half) (+ cy dy) (+ 1 (* 2 half)) 1))
+          (loop (+ dy 1)))))))

@@ -63,7 +63,7 @@
                             (carry-of (list-ref parts 6)))))
     (let loop ((w w) (n (num (list-ref parts 7))))
       (if (= n 0)
-          (begin (display "LOOK still ") (display (world-still w)) (newline) w)
+          (begin (when hop-k (display "LOOK still ") (display (world-still w)) (newline)) w)
           (loop (cdr (world-take-news (world-tick w (input n)))) (- n 1))))))
 
 (define (selected) (string-trim (read-file-string CONTROL)))
