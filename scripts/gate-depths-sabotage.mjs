@@ -61,6 +61,7 @@ try {
       'late H7 plays the short coda once, with no credits or repeat ending'],
   ];
   for (const [label, file, before, after, expectedTest] of plants) {
+    const expectedFile = (label === 'fuse-short' || label === 'coda-repeat') ? tests[1] : tests[0];
     const original = fs.readFileSync(path.join(copy, file), 'utf8');
     plant(copy, file, before, after);
     const red = run(copy, label);
@@ -72,7 +73,9 @@ try {
       && red.report?.summary.failed > 0 && red.report.files.length === tests.length
       && red.report.files.every(file => file.outcome === 'ok')
       && red.report.failures.some(failure => failure.name === expectedTest
-        && tests.some(test => failure.file.endsWith(test)) && /expected/i.test(failure.message))
+        && (failure.file.endsWith(expectedFile)
+          || (failure.file === '' && failure.group.startsWith(`${path.basename(expectedFile, '.sgl')} > `)))
+        && /expected/i.test(failure.message))
       && !/error:.*(syntax|unbound|undefined)/i.test(red.output);
     console.log(`${useful ? 'RED' : 'FAIL'} ${label} rc=${red.status}`);
     if (!useful) failures++;
