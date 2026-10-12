@@ -125,6 +125,9 @@
                         ((string=? item "bench:a4") (bench-set-phases! 'a4))
                         ;; 0.1.1: the web's cues through the old ring, to hear and measure it
                         ((string=? item "cues:ring") (mixer-set-cue-path! 'ring))
+                        ;; Wrongwater: the Ice Well door's climb, soft (the default) or as loud as a moment
+                        ((string=? item "climb:soft") (sound-set-drip-gain! DRIP-GAIN-SOFT))
+                        ((string=? item "climb:moment") (sound-set-drip-gain! DRIP-GAIN-MOMENT))
                         ((and (> (string-length item) 7) (string=? (substring item 0 7) "moment:"))
                          (let ((name (substring item 7 (string-length item))))
                            ;; ask for the text now: on the web the page fetches it

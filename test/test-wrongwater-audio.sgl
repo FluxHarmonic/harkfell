@@ -142,6 +142,15 @@
         (assert-true (< (source-gain s T) 0.05))
         (let loop ((i 0)) (when (< i 20) (frame! (well 0.0)) (loop (+ i 1))))
         (assert-false (memq s (mixer-sources))))))
+  (test "the climb plays soft by default (0.4), and as loud as a moment (0.8) when David picks climb:moment"
+    (sound-reset!)
+    (stand 45 0.0)
+    (assert-true (< (abs (- (source-gain (sound-drip-source) T) 0.4)) 1e-6))
+    (sound-set-drip-gain! DRIP-GAIN-MOMENT)
+    (sound-reset!)
+    (stand 45 0.0)
+    (assert-true (< (abs (- (source-gain (sound-drip-source) T) 0.8)) 1e-6))
+    (sound-set-drip-gain! DRIP-GAIN-SOFT))
   (test "a door that vanishes mid-climb (a world swap) takes the climb with it"
     (sound-reset!) (set! SAID (quote ()))
     (stand 60 0.0)

@@ -77,6 +77,7 @@
           place-tau place-gusts place-gaps place-seeds place-gliding
           H7-KEEPS H7-DIP DRIP-CLIMB-AT DRIP-START-S DRIP-LAND-S DRIP-FALLBACK-S DRIP-ID
           sound-drip sound-drip-source sound-drip-nudge! sound-answers CLOCK-CUES sound-bed-opened
+          DRIP-GAIN-SOFT DRIP-GAIN-MOMENT sound-drip-gain sound-set-drip-gain!
           sound-gust sound-gust-source sound-gust-nudge! sound-seed-calls sound-loop GUST-ID GUST-GAIN GUST-LOOPS GUST-CYCLE-S GUST-SNAP-S GUST-FREEZE-S GUST-MOMENT-DIP GAP-GAIN GAP-R
           sound-opening-start! sound-opening-skip! sound-opening-state sound-hold! sound-held?
           sound-set-border-mode! sound-border-mode sound-flags sound-restore-flags! sound-audition!
@@ -1229,7 +1230,16 @@
     (define DRIP-LAND-S 5.0)
     (define DRIP-CLIMB-AT '(1.0 1.9 2.7 3.4 4.0 4.5 5.0))
     (define DRIP-FALLBACK-S 0.5)
-    (define DRIP-GAIN 0.8)
+    ;; The climb's loudness, for David to choose by ear (both on the listening
+    ;; page; ?sound=climb:soft | climb:moment in play). SOFT is the bible's
+    ;; word ("a soft cue"): -28.4 LUFS alone, about 5 dB over the recess's
+    ;; bed while you stand still. MOMENT is as loud as a moment (-22.3 LUFS),
+    ;; the first take. The default is SOFT until he rules.
+    (define DRIP-GAIN-SOFT 0.4)
+    (define DRIP-GAIN-MOMENT 0.8)
+    (define *drip-gain* DRIP-GAIN-SOFT)
+    (define (sound-drip-gain) *drip-gain*)
+    (define (sound-set-drip-gain! g) (set! *drip-gain* g))
     (define DRIP-OPEN-LO 2.5)       ; s: the open crack's plain drip, now and then
     (define DRIP-OPEN-HI 4.5)
     (define DRIP-OPEN-GAIN 0.3)
@@ -1283,7 +1293,7 @@
              (s (mixer-add! sid (drip-pull st) #t)))
         ;; the read position leads what is heard by the stream's depth (0 headless)
         (vector-set! st 2 (+ (held->frame held) (source-lead s)))
-        (source-factor! s 'dist DRIP-GAIN 0.0 now)
+        (source-factor! s 'dist *drip-gain* 0.0 now)
         (set! *drip* st)
         (*say* "sound" "drip" "climb" (number->string held))))
 
