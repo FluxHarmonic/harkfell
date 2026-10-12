@@ -96,9 +96,11 @@
     ;; the light rises from a far floor, too low to see. Far lakes hang from the
     ;; roof with their bright edge underneath, and far ice grows up from the
     ;; floor. Cave-wall slots only (sky-1..4). K picks one of three walls.
-    (define (wrongwater-backdrop-key rm)
-      (case (modulo (+ (* 2 (room-x rm)) (room-y rm) 9) 3)
-        ((0) 'wrongwater-0) ((1) 'wrongwater-1) (else 'wrongwater-2)))
+    ;; One wall for the region: every texture holds one of sokol's 64
+    ;; samplers, and textures cannot be freed, so the overview, which bakes
+    ;; every room, keeps every region's backdrops at once (measured: the atlas
+    ;; ran out of samplers at 110 rooms)
+    (define (wrongwater-backdrop-key rm) 'wrongwater-0)
 
     (define (wrongwater-backdrop-key? key)
       (memq key '(wrongwater-0 wrongwater-1 wrongwater-2)))
