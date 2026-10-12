@@ -1,4 +1,7 @@
-;; K's steady lift comes up in columns 4-6. Open sky above.
+;; K's steady lift comes up in columns 4-6. Open sky above. West of it the
+;; homeward shaft (columns 2-3, D50, beside a cliff two tiles thick) drops
+;; to K's rose stone and home; with H5 the arch's wind carries a glider
+;; over the lift to it.
 (room
   region: cloudstair
   at: (7 -2)
@@ -8,17 +11,20 @@
   light: 1
   sun: 1
   grid:
-  ("#                        "
-   "#                        "
-   "#                        "
-   "#                        "
-   "#                        "
-   "#   ^^^                  "
-   "#   ^^^                  "
-   "#   ^^^       | |        "
-   "#   ^^^      ####        "
-   "# | ^^^ |  ########  | | "
-   "####^^^##################")
-  things: ((reedling flock: 5 zone: reeds))
+  ("##                       "
+   "##                       "
+   "##                       "
+   "##                       "
+   "##                       "
+   "##  ^^^                  "
+   "##  ^^^                  "
+   "##  ^^^       | |        "
+   "##  ^^^      ####        "
+   "##  ^^^ |  ########  | | "
+   "##  ^^^##################")
+  things: ((reedling flock: 5 zone: reeds)
+           ;; the homeward wind on from the arch (D50), above the lift's seeds,
+           ;; blowing only while the arch's rose stone is open (R 12,7)
+           (air-field at: (4 1) size: (21 4) kind: homeward gate: (37 7)))
   moment: (tune: the-last-grass when: first-visit)
   decor: auto)

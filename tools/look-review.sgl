@@ -11,7 +11,7 @@
 ;;;                       one room in play: body at cell (C R), carrying
 ;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks;
 ;;;                       MODE down carries the cattail down, glide also holds
-;;;                       jump; fidgetK steps right and back until the last K ticks,
+;;;                       jump; ride stands 120 ticks then glides west; fidgetK steps right and back until the last K ticks,
 ;;;                       then stands still (prints "LOOK still N"); heardS
 ;;;                       draws as if the Seventh's Rest moment had been
 ;;;                       heard S seconds;
@@ -48,7 +48,7 @@
          ;; down; glide, it carries it and holds jump every tick (a body put
          ;; in the air then glides down).
          (mode (if (> (length parts) 8) (list-ref parts 8) "none"))
-         (down? (member mode '("down" "glide")))
+         (down? (member mode '("down" "glide" "ride")))
          ;; TAU0 (optional 10th field): the gust clock the body starts at
          (tau0 (if (> (length parts) 9) (num (list-ref parts 9)) 0))
          (_ (set-underhum-review-phase!
@@ -63,7 +63,12 @@
          (hop-k (and (> (string-length mode) 6) (string=? (substring mode 0 6) "fidget")
                      (string->number (substring mode 6 (string-length mode)))))
          (input (lambda (n)
-                  (cond ((not (and hop-k (> n hop-k))) in)
+                  (cond ((string=? mode "ride")
+                         (let ((elapsed (- (num (list-ref parts 7)) n)))
+                           (cond ((= elapsed 120) (intent h: -1 jump: #t press: #t))
+                                 ((> elapsed 120) (intent h: -1 jump: #t))
+                                 (else (intent)))))
+                        ((not (and hop-k (> n hop-k))) in)
                         ((< (modulo n 30) 4) (intent h: 1))
                         ((< 14 (modulo n 30) 19) (intent h: -1))
                         (else in))))
@@ -77,7 +82,7 @@
             ;; seconds (the harness plays no sound); otherwise none
             (let ((s (and (> (string-length mode) 5) (string=? (substring mode 0 5) "heard")
                           (string->number (substring mode 5 (string-length mode))))))
-              (set-look-sound! (and s "seventh-rest") #f s))
+              (set-look-sound! (and s "seventh-rest") #f #f s))
             w)
           (loop (cdr (world-take-news (world-tick w (input n)))) (- n 1))))))
 

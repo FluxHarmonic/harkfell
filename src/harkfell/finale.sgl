@@ -1,0 +1,214 @@
+;;; (harkfell finale) - The Underhum's ending, as numbers: when each drone
+;;; voice joins the one breath, the breath itself, the piece's sections, and
+;;; the rules for following the player. Pure; the director ((harkfell sound))
+;;; plays it, and the look can draw the orbs' pulse from the same function.
+;;;
+;;; THE FUSE (harkfell-underhum-bible, "The fundamental arrives"). At the
+;;; trigger the carried drone voices (H2..H5, and H7 when carried) breathe on
+;;; their own cycles, out of step. Each one's phase is pulled onto one common
+;;; breath over LOCK-WINDOW-S, and it is locked at its time in FINALE-LOCKS:
+;;; H2, H3, H4, H5 (then H7), one every two beats of the piece, each with a
+;;; stone bell in the piece on the same beat. The fundamental enters at
+;;; FINALE-FUNDAMENTAL-S, the downbeat of the piece's fourth bar.
+;;;
+;;; Why the director draws the breath and not motif: a drone patch's breath
+;;; is g:randi, a seeded random wander that picks a new level every
+;;; 1/breath-rate s (motif patches/beds.sgl, wander-gain). Two voices either
+;;; share a seed (and breathe as one from the start) or do not (and never
+;;; meet). Neither can converge. So finale-drone plays with breath-lo 1, and
+;;; the director sets each channel's volume to finale-breath before every
+;;; pull, on the drone player's own sample clock.
+;;;
+;;; The free cycles (2.9 to 4.9 s) are faster than the bed's breath (a new
+;;; level every 31 to 53 s): four voices locking in eight seconds cannot be
+;;; heard at the bed's pace. The common breath is one bar (3.33 s) through
+;;; the fuse, then slows to two bars and grows shallower over the next ten
+;;; seconds, so it sits under the piece instead of pumping it.
+;;;
+;;; THE PIECE (the-fundamental, the-fundamental-h7): marks calm (the fuse;
+;;; motif requires a mark named calm), theme, hold, rise, glass, pipes, sky,
+;;; home, close. 72 bpm, 4/4 at 16 rows a bar, and the sky verse in 12/8 at
+;;; 12 rows a bar of the same length, one bar a pattern, so a mark jump (at
+;;; the next row that is a multiple of 16) always lands on a barline.
+;;;   - fuse is never cut: it carries the fundamental's arrival
+;;;   - after theme, hold loops (region hold..rise) until the climb starts
+;;;   - a rise during fuse or theme waits; from theme's last pattern or during
+;;;     hold it jumps at the next bar (so it lands where hold would begin)
+;;;   - a home wish during fuse waits for fuse's last pattern, so it lands
+;;;     exactly where the fuse ends
+;;;   - the verses play in order and sky loops (region sky..home)
+;;;   - home jumps at the next bar from any section after fuse; then close
+;;;     follows and the tune ends
+;;;
+;;;   (finale-breath h t)        voice h's gain 0..1, t seconds since the fuse
+;;;   (finale-locked? h t)       has voice h joined the breath
+;;;   (finale-lock-time h)       when it does, or #f
+;;;   (finale-section marks pos) the piece's section at order position pos
+;;;   (finale-region section)    the walk's loop region as (from . to) mark names, or #f
+;;;   (finale-actions section last? rise? home?)   'jump-home | 'jump-rise | #f
+;;;                              (last?: the walk is in the section's final pattern)
+;;;   (finale-leave h t h7?)     voice h's gain as the voices leave, t seconds into close
+;;;   (finale-thin h section)    voice h's factor by section: H5 out where the mode has no F#
+;;;                              (rise, pipes), the pipes verse thinned to H4 and the fundamental
+;;;   (finale-dawn-s h7?)        seconds into close when the dawn begins
+
+(define-library (harkfell finale)
+  (import (sigil core)
+          (sigil math)
+          (sigil list))
+
+  (export FINALE-BPM FINALE-BEAT-S FINALE-BAR-S FINALE-LOCKS FINALE-FUNDAMENTAL-S
+          FINALE-FUSE-S LOCK-WINDOW-S FINALE-SECTIONS FINALE-VOICES FREE-PERIODS
+          finale-breath finale-locked? finale-lock-time finale-common-phase finale-phase finale-depth
+          finale-section finale-region finale-actions finale-leave finale-thin finale-dawn-s
+          finale-leave-schedule finale-after-fuse? section-index THIN-GAIN)
+
+  (begin
+    (define FINALE-BPM 72)
+    (define FINALE-BEAT-S (/ 60.0 FINALE-BPM))          ; 0.833 s
+    (define FINALE-BAR-S (* 4.0 FINALE-BEAT-S))          ; 3.333 s
+    (define (beats n) (* n FINALE-BEAT-S))
+    (define (bars n) (* n FINALE-BAR-S))
+
+    ;; the drone voices: 1 is the fundamental, the rest their harmonic
+    (define FINALE-VOICES '(1 2 3 4 5 7))
+    ;; each voice joins the breath on its beat: 3, 5, 7, 9 (and 11 for H7)
+    (define FINALE-LOCKS (list (cons 2 (beats 3)) (cons 3 (beats 5)) (cons 4 (beats 7))
+                               (cons 5 (beats 9)) (cons 7 (beats 11))))
+    (define FINALE-FUNDAMENTAL-S (bars 3))               ; 10.0 s: bar 4's downbeat
+    (define FINALE-FUSE-S (bars 7))                      ; 23.3 s: the fuse section
+    (define LOCK-WINDOW-S 2.0)                           ; the pull onto the breath
+
+    ;; out of step: each its own cycle and starting phase
+    (define FREE-PERIODS '((2 . 2.9) (3 . 4.3) (4 . 3.4) (5 . 4.9) (7 . 3.9)))
+    (define FREE-PHASES (quote ((2 . 2.6) (3 . 2.1) (4 . 4.0) (5 . 1.0) (7 . 5.2))))
+
+    (define TWO-PI (* 2.0 3.141592653589793))
+    (define R0 (/ 1.0 FINALE-BAR-S))                     ; one breath a bar
+    (define R1 (/ 1.0 (bars 2)))                         ; then one every two bars
+    (define T1 FINALE-FUSE-S)
+    (define T2 (+ FINALE-FUSE-S 10.0))
+    (define LO-FUSE 0.25)
+    (define LO-AFTER 0.7)
+
+    (define (ref alist k) (let ((e (assv k alist))) (and e (cdr e))))
+
+    ;; The common breath's phase: its peaks on the bar lines, one a bar until
+    ;; the fuse ends, then easing to one every two bars by T2.
+    (define (finale-common-phase t)
+      (* TWO-PI
+         (cond ((<= t T1) (* R0 t))
+               ((<= t T2) (let ((u (- t T1)))
+                            (+ (* R0 T1) (* R0 u) (/ (* (- R1 R0) u u) (* 2.0 (- T2 T1))))))
+               (else (+ (* R0 T1) (* R0 (- T2 T1)) (/ (* (- R1 R0) (- T2 T1)) 2.0) (* R1 (- t T2)))))))
+
+    (define (free-phase h t)
+      (+ (or (ref FREE-PHASES h) 0.0) (/ (* TWO-PI t) (or (ref FREE-PERIODS h) 4.0))))
+
+    (define (wrap a)
+      (let ((x (- a (* TWO-PI (floor (/ a TWO-PI))))))   ; 0 .. 2pi
+        (if (> x 3.141592653589793) (- x TWO-PI) x)))
+
+    (define (smooth x) (let ((u (max 0.0 (min 1.0 x)))) (* u u (- 3.0 (* 2.0 u)))))
+
+    (define (finale-lock-time h) (ref FINALE-LOCKS h))
+    (define (finale-locked? h t) (let ((l (finale-lock-time h))) (and l (>= t l))))
+
+    ;; Voice h's phase. Before its window it runs free; across the window its
+    ;; distance to the common phase (taken the short way round at the window's
+    ;; start, then followed continuously) closes; from its lock time it IS the
+    ;; common phase, to a whole turn.
+    (define (finale-phase h t)
+      (let ((l (finale-lock-time h)))
+        (if (not l)
+            (finale-common-phase t)
+            (let* ((t0 (- l LOCK-WINDOW-S))
+                   (d (lambda (s) (- (finale-common-phase s) (free-phase h s))))
+                   (w (smooth (/ (- t t0) LOCK-WINDOW-S))))
+              (+ (free-phase h t) (* w (+ (- (d t) (d t0)) (wrap (d t0)))))))))
+
+    ;; How deep the breath goes: deep through the fuse (it must be seen and
+    ;; heard), shallow under the piece.
+    (define (finale-depth t)
+      (cond ((<= t T1) LO-FUSE)
+            ((<= t T2) (+ LO-FUSE (* (- LO-AFTER LO-FUSE) (/ (- t T1) (- T2 T1)))))
+            (else LO-AFTER)))
+
+    ;; Voice h's gain, lo..1. The fundamental does not breathe: it is the
+    ;; ground the breath stands on.
+    (define (finale-breath h t)
+      (if (eqv? h 1)
+          1.0
+          (let ((lo (finale-depth (max 0.0 t))))
+            (+ lo (* (- 1.0 lo) (+ 0.5 (* 0.5 (cos (finale-phase h (max 0.0 t))))))))))
+
+    ;; --- the piece's sections ----------------------------------------------------
+    (define FINALE-SECTIONS '(calm theme hold rise glass pipes sky home close))
+    (define (section-index s)
+      (let loop ((ss FINALE-SECTIONS) (i 0))
+        (cond ((null? ss) #f) ((eq? (car ss) s) i) (else (loop (cdr ss) (+ i 1))))))
+
+    ;; marks: the tune's ((name . order-position) ...). The section whose mark
+    ;; is the last at or before pos.
+    (define (finale-section marks pos)
+      (let loop ((ms marks) (best #f) (bp -1))
+        (cond ((null? ms) best)
+              ((and (memq (car (car ms)) FINALE-SECTIONS) (<= (cdr (car ms)) pos) (> (cdr (car ms)) bp))
+               (loop (cdr ms) (car (car ms)) (cdr (car ms))))
+              (else (loop (cdr ms) best bp)))))
+
+    (define (finale-after-fuse? section) (and section (not (eq? section 'calm))))
+
+    ;; The loop the walk is held in: the hold until the climb, the sky until
+    ;; home, then nothing (close plays once and the tune ends).
+    (define (finale-region section)
+      (case section
+        ((calm theme hold) '(hold . rise))
+        ((rise glass pipes sky) '(sky . home))
+        (else #f)))
+
+    ;; What to do now, given the walk's section, whether the walk is in that
+    ;; section's final pattern (a jump asked there lands on the bar the next
+    ;; section would start on), and the wishes so far.
+    (define (finale-actions section last? rise? home?)
+      (cond ((and home? (or (memq section '(theme hold rise glass pipes sky))
+                            (and last? (eq? section 'calm))))
+             'jump-home)
+            ((and rise? (not home?) (or (eq? section 'hold) (and last? (eq? section 'theme))))
+             'jump-rise)
+            (else #f)))
+
+    ;; --- the voices leave (close) ------------------------------------------------
+    ;; In the opening card's reverse order, H5, H4, H3, H2, two bars apart, each
+    ;; over a bar; then the fundamental alone, which fades with the dawn. With
+    ;; H7 the fundamental goes too and H7 is the one left, held three bars
+    ;; longer than anything, then gone. (h start fade-s), seconds into close.
+    (define (finale-leave-schedule h7?)
+      (append (list (list 5 (bars 2) (bars 1)) (list 4 (bars 4) (bars 1))
+                    (list 3 (bars 6) (bars 1)) (list 2 (bars 8) (bars 1)))
+              (if h7?
+                  (list (list 1 (bars 10) (bars 2)) (list 7 (bars 15) 6.0))
+                  (list (list 1 (bars 10) 10.0)))))
+
+    (define (finale-leave h t h7?)
+      (let ((e (assv h (finale-leave-schedule h7?))))
+        (cond ((not e) 1.0)
+              ((< t (cadr e)) 1.0)
+              ((>= t (+ (cadr e) (caddr e))) 0.0)
+              (else (let ((x (/ (- t (cadr e)) (caddr e)))) (* (- 1.0 x) (- 1.0 x)))))))
+
+    ;; The dawn starts when the fundamental (or H7) is alone: when the last
+    ;; voice before it has finished leaving (H2; with H7, the fundamental).
+    (define (finale-dawn-s h7?)
+      (let ((e (assv (if h7? 1 2) (finale-leave-schedule h7?)))) (+ (cadr e) (caddr e))))
+
+    ;; Where the verse's mode has no F#, H5's F# leaves the drone: Reedfen's
+    ;; Dorian and the Pipes' Aeolian sound F natural over it (a sustained
+    ;; semitone against the carried third; the review of 5e88755). The Pipes
+    ;; verse, the song's one dark turn, also thins the rest of the drone to H4
+    ;; and the fundamental.
+    (define THIN-GAIN 0.3)
+    (define (finale-thin h section)
+      (cond ((and (eqv? h 5) (memq section '(rise pipes))) 0.0)
+            ((and (eq? section 'pipes) (not (memv h '(1 4)))) THIN-GAIN)
+            (else 1.0)))))

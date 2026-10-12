@@ -26,4 +26,5 @@
     (pattern id: 1 rows: 10))
   (order 0 1)
   (history ("claude" "2026-10-11" "Cloudstair SOUND (Opus take): the eastward gust over I's and P's gaps, one 10 s cycle locked to the simulation's tau (row r is tau 6r). The same warning as the lifts' at tau 300; at tau 360 a lower, buffeting rush and a high streaming hiss with a flutter in it, released at tau 0. Unpitched, no harmonic's note.")
-    ("david" "2026-10-11" "Approved eight-second shared cycle: warning at tau 240, rush at 300, release at the 480-tick wrap. Rescheduled the selected Opus voices without changing their instruments.")))
+    ("david" "2026-10-11" "Approved eight-second shared cycle: warning at tau 240, rush at 300, release at the 480-tick wrap. Rescheduled the selected Opus voices without changing their instruments.")
+    ("claude" "2026-10-11" "Cloudstair SOUND (Opus take), for the eight-second cycle: measured through and kept as rescheduled. The warning fills the last calm second (tau 240..299), the buffeting rush and its streaming hiss fill the three-second gust, and the release folds into the next calm by 1.5 s.")))

@@ -976,11 +976,10 @@
         ;; target ((harkfell draw)'s present-play!); the ears in the same pass,
         ;; in the fur-1 slot
         ;; the look follows the sound: the bed's wind bends the reeds, a
-        ;; moment pulls the focus
-        ;; (and the moment's heard seconds: the Seventh's Rest lights with it)
-        (set-look-sound! (sound-moment-playing)
+        ;; moment's rows control D51's haze; its heard clock lights the Rest.
+        (set-look-sound! (sound-moment-sounding)
                          (let ((e (assq 'wind (sound-bed-levels)))) (and e (cdr e)))
-                         (sound-moment-time))
+                         (/ t1 1000.0) (sound-moment-time) (sound-moment-playing))
         ;; D15: the creature curled asleep until the first input
         (set-look-waking! *waking*)
         ;; the dawn (D15), the world coming in from black by the dither, in

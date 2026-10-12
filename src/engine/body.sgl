@@ -330,7 +330,9 @@
              ;; Wind is a displacement added to steering, never accumulated
              ;; into vx, so it cannot leak beyond its authored footprint.
              (center (body-center b f))
-             (field (air-sample (tilemap-air tm) (car center) (cdr center) (body-tau b)))
+             ;; a gated field reads its gate cell in this tilemap (an open stone)
+             (field (air-sample (tilemap-air tm) (car center) (cdr center) (body-tau b)
+                                (lambda (gx gy) (not (kind-solid? (tile-at tm gx gy))))))
              (lift (if field
                        (car field)
                        (if (eq? (tile-at tm (car center) (cdr center)) 'updraft)
@@ -345,7 +347,7 @@
                        (glide (min vy (feel-glide-fall f)))
                        (else vy)))
              (wind (if (and glide field (not grounded))
-                       (min (feel-wind-cap f) (cdr field))
+                       (max (- (feel-wind-cap f)) (min (feel-wind-cap f) (cdr field)))
                        0.0))
              (b (body b gliding: glide))
              (w (feel-box-w f))

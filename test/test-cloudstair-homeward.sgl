@@ -1,0 +1,161 @@
+;;; D50: Cloudstair's arch becomes the way home. With H5 the Windworn
+;;; Arch's rose stone (R 12,7) opens and a homeward wind blows west through
+;;; the arch and on over Q, carrying a glider to the homeward shaft (Q, K,
+;;; E, columns 1-3) that drops to E's chute and A. Without H5 the wind is
+;;; still: the stone is shut, so its gated field does not blow. The shaft is
+;;; there either way (the way home, readable before H5), one way down: on
+;;; foot without H5 the steady region reach proves it (tools/cloudstair-
+;;; rooms-reach.sgl, carry with and without H5).
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine body)
+        (engine air)
+        (engine tilemap)
+        (engine worldmap)
+        (engine reach)
+        (harkfell feel)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (engine reach timed)
+        (harkfell cloudstair reach))
+
+(define F HARKFELL-FEEL)
+(define CT (load-content (read-world-source "world")))
+(define WM (content-map CT))
+(define (gcol rx c) (+ c (* 25 (- rx (worldmap-x0 WM)))))
+(define (grow ry r) (+ r (* 11 (- ry (worldmap-y0 WM)))))
+(define (room-of b)
+  (let ((c (body-center b F)))
+    (cons (+ (worldmap-x0 WM) (exact (floor (/ (car c) 400))))
+          (+ (worldmap-y0 WM) (exact (floor (/ (cdr c) 176)))))))
+
+;; From R's ridge inside the arch: jump, then keep steering west holding
+;; jump (the glide) until the body settles: with H5 the wind carries it
+;; over Q, it drops down the shaft onto the sill of the stone's niche and
+;; walks on west, onto the open stone and down. (body-at-tick-120 . end)
+(define (ride carry)
+  (let* ((tm (tiles-carrying CT carry))
+         (b0 (body (stand-body tm F (gcol 8 13) (grow -2 7)) down: #t))
+         ;; standing on top of a rock mass in K (above row 8): walk east off it
+         (on-top? (lambda (b) (and (eq? (body-mode b) 'ground) (equal? (room-of b) '(7 . -1))
+                                   (< (modulo (exact (floor (cdr (body-center b F)))) 176) 128)))))
+    (let loop ((b (body-step b0 (intent h: -1 jump: #t press: #t) tm F)) (n 1) (at120 #f))
+      (if (and (< n 900)
+               (or (< n 300) (on-top? b) (not (and (eq? (body-mode b) 'ground) (= (body-vx b) 0) (= (body-vy b) 0)))))
+          (loop (body-step b (intent h: (if (on-top? b) 1 -1) jump: (not (equal? (room-of b) (quote (7 . -1))))) tm F) (+ n 1) (if (= n 120) b at120))
+          (cons at120 b)))))
+
+(define WITH (ride '(2 4 5)))
+(define WITHOUT (ride '(2 4)))
+(define RIDGE-TOP (* 16 (grow -2 8)))       ; R's ridge top, global y
+
+(test-group "D50: the homeward wind through the Windworn Arch"
+  (test "a gated field blows only while its gate cell is open"
+    (let ((f (air-field x: 0 y: 0 w: 32 h: 32 lift: 0.3 west: 0.8 gate: (cons 100 100))))
+      (assert-equal (cons 0.0 0.0) (air-sample (list f) 10 10 0))
+      (assert-equal (cons 0.0 0.0) (air-sample (list f) 10 10 0 (lambda (x y) #f)))
+      (assert-equal (cons 0.3 -0.8) (air-sample (list f) 10 10 0 (lambda (x y) (and (= x 100) (= y 100)))))))
+  (test "with H5 the stone is open and the wind carries a glider west, aloft"
+    (let ((b (car WITH)))
+      (assert-true (< (+ (body-y b) (feel-box-h F)) RIDGE-TOP))   ; still above the ridge
+      (assert-equal '(7 . -2) (room-of b))))                      ; already over Q
+  (test "without H5 the stone is shut and the same glide comes down in R"
+    (let ((b (car WITHOUT)))
+      (assert-equal '(8 . -2) (room-of b))))
+  (test "with H5 the ride ends at home's door: down the shaft through K to E or A"
+    (assert-true (member (room-of (cdr WITH)) '((7 . 0) (7 . 1))))))
+
+;; The shaft is one way (SYSTEMS' complete-world replay on 505f690: from E
+;; local (1,7), carrying H2 H4 with the down, wall kicks up E's west wall
+;; crossed into K at tick 53 and K's lift carried the body to Q by tick
+;; 422, no H5). Any wall beside the shaft can be kicked up, so the way up
+;; must be shut, not merely hard. The rose stone (H5) is the floor of a
+;; niche cut into the cliff at K (1,7)-(1,8), the cliff thickened to two
+;; tiles above it (Q and K, column 1) as its roof, a rock sill (2,9)-(3,9)
+;; at its mouth; under the stone a one-tile hole (1,10) drops into E. A
+;; glider steering west slides down the cliff face into the niche, onto
+;; the stone. The roof and the jambs are all above the stone: from E the
+;; only cell that leads up is the hole under it.
+;;
+;; The check is spatial and so holds for any input: flood K's passable
+;; cells from the bottom-row cells that open down into E. Without H5 the
+;; flood must stay in that bottom row; with H5 it rises through the open
+;; stone. Two planted niches must leak, so the check can see a gap: the
+;; stone taken out, and the sill beside it opened with the floor under it.
+(define (swap s a b)
+  (let ((n (string-length s)) (m (string-length a)))
+    (let loop ((k 0))
+      (cond ((> (+ k m) n) (error "swap: not found" a))
+            ((string=? (substring s k (+ k m)) a) (string-append (substring s 0 k) b (substring s (+ k m) n)))
+            (else (loop (+ k 1)))))))
+(define SRC (read-world-source "world"))
+(define (with-k old new)
+  (map (lambda (e) (if (string-contains? (car e) "cloudstair/x7y-1.room") (cons (car e) (swap (cdr e) old new)) e)) SRC))
+(define (with-k* pairs)
+  (map (lambda (e) (if (string-contains? (car e) "cloudstair/x7y-1.room")
+                       (cons (car e) (let loop ((s (cdr e)) (ps pairs)) (if (null? ps) s (loop (swap s (car (car ps)) (cdr (car ps))) (cdr ps)))))
+                       e))
+       SRC))
+;; does the flood from E's openings rise above K's bottom row?
+(define (rises? ct carry)
+  (let* ((wm (content-map ct))
+         (tm (tiles-carrying ct carry))
+         (gx (lambda (c) (+ c (* 25 (- 7 (worldmap-x0 wm))))))
+         (gy (lambda (ry r) (+ r (* 11 (- ry (worldmap-y0 wm))))))
+         (open? (lambda (c r) (not (kind-solid? (tilemap-ref tm (gx c) (gy -1 r))))))
+         (seeds (filter (lambda (c) (and (open? c 10) (not (kind-solid? (tilemap-ref tm (gx c) (gy 0 0))))))
+                        (iota 25))))
+    (let loop ((todo (map (lambda (c) (cons c 10)) seeds)) (seen '()))
+      (cond ((null? todo) #f)
+            ((member (car todo) seen) (loop (cdr todo) seen))
+            ((>= (car (car todo)) 4) #t)
+            (else
+             (let* ((c (car (car todo))) (r (cdr (car todo)))
+                    (next (filter (lambda (p) (and (<= 0 (car p) 24) (<= 0 (cdr p) 10) (open? (car p) (cdr p))))
+                                  (list (cons (+ c 1) r) (cons (- c 1) r) (cons c (- r 1)) (cons c (+ r 1))))))
+               (loop (append (cdr todo) next) (cons (car todo) seen))))))))
+;; the stone taken out: its grid row with the o made air
+(define STONE-ROW
+  (let* ((src (cdr (find (lambda (e) (string-contains? (car e) "cloudstair/x7y-1.room")) SRC)))
+         (row (find (lambda (l) (and (string-contains? l "\"#") (string-contains? l "o"))) (string-split src "\n"))))
+    (let ((a (+ 1 (let q ((i 0)) (if (char=? (string-ref row i) #\") i (q (+ i 1)))))))
+      (substring row a (+ a 25)))))
+(define NO-STONE
+  (load-content (with-k STONE-ROW (list->string (map (lambda (c) (if (char=? c #\o) #\space c)) (string->list STONE-ROW))))))
+
+;; SYSTEMS' witness, its 17 input groups: (ticks h v jump press)
+(define WITNESS
+  '((1 0 0 #t #t) (5 0 0 #t #f) (8 -1 0 #t #f) (1 -1 0 #t #t) (28 1 0 #t #f) (1 1 0 #t #t)
+    (42 -1 0 #f #f) (1 -1 0 #t #t) (29 1 0 #f #f) (1 1 0 #t #t) (29 -1 0 #f #f) (1 -1 0 #t #t)
+    (63 1 0 #t #f) (85 -1 0 #t #f) (1 -1 0 #t #t) (119 1 0 #t #f) (7 0 0 #f #f)))
+(define WITNESS-SCRIPT
+  (apply append (map (lambda (g) (map (lambda (k) (intent h: (list-ref g 1) v: (list-ref g 2) jump: (list-ref g 3) press: (list-ref g 4)))
+                               (iota (car g))))
+              WITNESS)))
+(define WITNESS-BODIES
+  (let ((start (car (cloudstair-entry-phases CT (local->global CT (content-room CT 7 0) 1 7) '(2 4) #t))))
+    (map timed-node-body (timed-run (cloudstair-stepper CT) start WITNESS-SCRIPT))))
+(define WITNESS-ROOMS (map room-of WITNESS-BODIES))
+;; does the body ever reach K beyond the stone's pocket (column 4 on: the
+;; lift and the floor)? K's hole and the stone's alcove are K's grid, so a
+;; centre in them counts as room K without leaving the pocket.
+(define WITNESS-OUT
+  (and (find (lambda (b) (and (equal? (room-of b) '(7 . -1))
+                              (>= (modulo (exact (floor (car (body-center b F)))) 400) 64)))
+             WITNESS-BODIES)
+       #t))
+
+
+(test-group "D50: the homeward shaft is one way"
+  (test "without H5 nothing from E reaches K beyond the stone (its lift and floor, column 4 on)"
+    (assert-equal #f (rises? CT '(2 4))))
+  (test "with H5 the stone is open: the way leads out through it"
+    (assert-equal #t (rises? CT '(2 4 5))))
+  (test "the check sees a gap: with the stone taken out, the way leads out without H5"
+    (assert-equal #t (rises? NO-STONE '(2 4))))
+  (test "SYSTEMS' reverse witness (422 ticks from E local 1,7, H2 H4 and the down) never gets past the stone into K, nor reaches Q"
+    (assert-equal 422 (length WITNESS-SCRIPT))
+    (assert-equal #f WITNESS-OUT)
+    (assert-equal #f (and (member '(7 . -2) WITNESS-ROOMS) #t))))

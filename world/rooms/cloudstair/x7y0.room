@@ -1,4 +1,7 @@
 ;; The chute home (columns 2-3) drops through the ledge onto A's landing.
+;; Above it the homeward shaft (D50) comes down through the rose-stone door
+;; in K (open with H5), its alcove and the one-tile hole under it (column
+;; 1) onto the chute: one way, the stone sealing it from below.
 (room
   region: cloudstair
   at: (7 0)
@@ -8,10 +11,10 @@
   light: 1
   sun: 1
   grid:
-  ("#########################"
-   "#######          ########"
-   "####                #####"
-   "##                    ###"
+  ("# #######################"
+   "#   ###          ########"
+   "#                   #####"
+   "#                     ###"
    "#                       #"
    "#                        "
    "#            | |         "

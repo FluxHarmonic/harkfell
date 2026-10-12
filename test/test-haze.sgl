@@ -1,0 +1,138 @@
+;;; The haze step (D51) leaves with the music and never stacks (David on the
+;;; haze demo: "what happens when you find another musical moment? Does it
+;;; get ramped even higher? it never goes back down to the normal palette
+;;; colors"). The haze followed the moment's bookkeeping, which runs on
+;;; through the tune's quiet tail (high-fell: rows end at 22 s, the moment
+;;; is over at 29 s), and eased out by frames drawn (slower still at a low
+;;; frame rate). Now it follows sound-moment-sounding (the rows) and eases
+;;; by the clock; (harkfell haze) holds the rule, and HAZE-FRAGMENT is handed
+;;; haze-slot's answers.
+;;;
+;;;   the rule       a slot is drawn as itself or one step on, never more;
+;;;                  only sky-1..3 step, from the base backdrop
+;;;   the ease       in over HAZE-IN-S; out, every band back within 0.35 s,
+;;;                  at 60 frames a second and at 8
+;;;   two moments    on, off, on again (a second moment while the first eases
+;;;                  out): never past one step, and back to the base after
+;;;   the director   the real director, real tunes, the mixer headless, at 30
+;;;                  frames a second: high-fell in Hollow x3y2, then (past the
+;;;                  hush's 90 s) Reed Bridge's first-open-water. Each time the
+;;;                  rows end, every band is back within 0.35 s, while the
+;;;                  moment itself is still over its tail; never past one step.
+
+(import (sigil test)
+        (sigil list)
+        (engine mixer)
+        (harkfell hush)
+        (harkfell sound)
+        (harkfell haze))
+
+(sound-set-carry! (quote ()))
+
+(define SLOTS (iota 22))
+(define (one-step-at-most? bands)
+  (every (lambda (s) (let ((d (haze-slot s bands))) (or (= d s) (and (= d (+ s 1)) (<= s 2))))) SLOTS))
+(define (base? bands) (every (lambda (s) (= s (haze-slot s bands))) SLOTS))
+
+;; Run the haze over a list of (seconds . on?) spans at fps; answers
+;; (max-bands-seen . (focus . list of (t . bands))).
+(define (ease spans fps)
+  (let loop ((spans spans) (t 0.0) (focus 0.0) (mx 0) (trace '()))
+    (if (null? spans)
+        (cons mx (cons focus (reverse trace)))
+        (let* ((span (car spans)) (dt (/ 1.0 fps)))
+          (let inner ((left (car span)) (t t) (focus focus) (mx mx) (trace trace))
+            (if (<= left 1e-9)
+                (loop (cdr spans) t focus mx trace)
+                (let* ((f (haze-focus-next focus (cdr span) dt)) (b (haze-bands f)))
+                  (inner (- left dt) (+ t dt) f (max mx b) (cons (cons (+ t dt) b) trace)))))))))
+;; the time the bands are first 0 at or after t0
+(define (back-at trace t0)
+  (let ((e (find (lambda (p) (and (>= (car p) (- t0 1e-9)) (= 0 (cdr p)))) trace))) (and e (car e))))
+
+(test-group "haze: the rule"
+  (test "no band: every slot is itself"
+    (assert-equal #t (base? 0)))
+  (test "one to three bands: a slot is itself or one step on, and only sky-1..3 step"
+    (assert-equal '(#t #t #t) (map one-step-at-most? '(1 2 3))))
+  (test "the bands climb from the horizon: sky-3 first, then sky-2, then sky-1"
+    (assert-equal '((0 1 2) (0 1 3) (0 2 3) (1 2 3))
+                  (map (lambda (b) (map (lambda (s) (haze-slot s b)) '(0 1 2))) '(0 1 2 3))))
+  (test "the bands by focus: 0 to 0.25 none, then one, two, three"
+    (assert-equal '(0 0 1 2 3 3) (map haze-bands '(0.0 0.25 0.3 0.6 0.8 1.0)))))
+
+(define (out-within fps)
+  (let* ((r (ease (list (cons 2.0 #t) (cons 1.0 #f)) fps))
+         (trace (cddr r)))
+    (- (back-at trace 2.0) 2.0)))
+
+(test-group "haze: the ease, by the clock"
+  (test "in: all three bands within HAZE-IN-S"
+    (assert-equal 3 (car (ease (list (cons (+ HAZE-IN-S 0.02) #t)) 60))))
+  (test "out at 60 fps: every band back within 0.35 s"
+    (assert-equal #t (<= (out-within 60) 0.35)))
+  (test "out at 8 fps (a slow frame rate): every band back within 0.35 s and a frame"
+    (assert-equal #t (<= (out-within 8) (+ 0.35 0.125)))))
+
+(test-group "haze: two moments in a row"
+  (let* ((r (ease (list (cons 3.0 #t) (cons 0.1 #f) (cons 3.0 #t) (cons 1.0 #f)) 60))
+         (trace (cddr r)))
+    (test "never past three bands, so never past one step"
+      (assert-equal #t (<= (car r) 3))
+      (assert-equal #t (every (lambda (p) (one-step-at-most? (cdr p))) trace)))
+    (test "and back to the base within 0.35 s of the second's end"
+      (assert-equal #t (<= (- (back-at trace 6.1) 6.1) 0.35))
+      (assert-equal #t (base? (haze-bands (cadr r)))))))
+
+;; --- the real director ------------------------------------------------------------------
+(define RATE 32000)
+(define HIGH-FELL
+  (place key: "hollow:3,2" region: 'hollow bed-tune: "hollow-bed" groups: '(wind water hum drone)
+         levels: '((wind . 0.4) (hum . 0.5)) moment: "high-fell"
+         px: 1400.0 py: 400.0 rx: 3 ry: 2))
+(define REED-BRIDGE
+  (place key: "reedfen:9,3" region: 'reedfen bed-tune: "reedfen-bed" groups: '(wind water reeds drone)
+         levels: '((wind . 0.4) (water . 0.8) (reeds . 0.5)) moment: "first-open-water"
+         px: 3800.0 py: 620.0 rx: 9 ry: 3))
+
+;; At 30 frames a second: each frame the director, then the haze fed what
+;; the shell feeds it. Answers a list of (t sounding playing bands).
+(define (direct plan until)
+  (mixer-open-headless! RATE (lambda (id buf n gain) #f))
+  (sound-reset!)
+  (let loop ((f 0) (focus 0.0) (acc '()))
+    (let ((now (/ f 30.0)))
+      (if (> now until)
+          (reverse acc)
+          (begin
+            (sound-frame! now (if (= f 0) 0.0 (/ 1 30.0)) (plan now))
+            (mixer-pump! now)
+            (let* ((on (sound-moment-sounding))
+                   (focus (haze-focus-next focus on (if (= f 0) 0.0 (/ 1 30.0)))))
+              (loop (+ f 1) focus (cons (list now on (sound-moment-playing) (haze-bands focus)) acc))))))))
+
+(define RUN (direct (lambda (t) (if (< t 125.0) HIGH-FELL REED-BRIDGE)) 170.0))
+;; the frames where the music stops: sounding, then not
+(define (ends run)
+  (let loop ((r run) (prev #f) (acc '()))
+    (if (null? r)
+        (reverse acc)
+        (let ((on (cadr (car r))))
+          (loop (cdr r) on (if (and prev (not on)) (cons (car r) acc) acc))))))
+(define ENDS (ends RUN))
+(define (bands-back-after t0)
+  (let ((e (find (lambda (x) (and (>= (car x) t0) (= 0 (cadddr x)))) RUN))) (and e (- (car e) t0))))
+(define (sounded name) (and (find (lambda (x) (equal? name (cadr x))) RUN) #t))
+
+(test-group "haze: the real director, high-fell then first-open-water"
+  (test "both moments sounded, one after the other"
+    (assert-equal '(#t #t) (list (sounded "high-fell") (sounded "first-open-water")))
+    (assert-equal 2 (length ENDS)))
+  (test "each time the rows end the moment is still over its tail (the bookkeeping runs on)"
+    (assert-equal '(#t #t) (map (lambda (e) (and (caddr e) #t)) ENDS)))
+  (test "each time, every band is back within 0.35 s of the rows' end"
+    (assert-equal '(#t #t) (map (lambda (e) (<= (bands-back-after (car e)) (+ 0.35 (/ 1 30.0)))) ENDS)))
+  (test "never past one step"
+    (assert-equal #t (every (lambda (x) (one-step-at-most? (cadddr x))) RUN)))
+  (test "and the last frame is the base palette"
+    (assert-equal 0 (cadddr (car (reverse RUN))))))

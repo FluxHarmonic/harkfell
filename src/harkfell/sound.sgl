@@ -52,6 +52,9 @@
 ;;;   (sound-ears)                   #f, or up | left | right | below: the ears' point
 ;;;   (sound-lines)                  the readout's lines
 ;;;   (sound-hush) (sound-bed-levels) (sound-moment-playing)   for the gates
+;;;   (sound-moment-sounding)   the playing moment while its tune's rows still play
+;;;                             (its music heard), #f once they end, ahead of its
+;;;                             quiet tail: the look's haze step (D51) follows it
 
 (define-library (harkfell sound)
   (import (sigil math)
@@ -63,10 +66,18 @@
           (engine air)
           (engine mixer)
           (harkfell tunes)
-          (harkfell hush))
+          (harkfell hush)
+          (harkfell finale)
+          (harkfell credits))
 
   (export sound-boot! sound-frame! sound-preopen! sound-set-carry! sound-set-tone-room!
-          sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-reset!
+          ;; the Underhum's ending (harkfell-underhum-bible; (harkfell finale))
+          sound-finale-fuse! sound-finale-rise! sound-finale-home! sound-coda! sound-finale-section sound-finale-time
+          sound-finale-active? sound-finale-sounding sound-finale-flags sound-finale-restore! sound-finale-walk
+          sound-finale-players sound-bed-name sound-set-finale-listener! sound-credits-card
+          FINALE-ID FINALE-DRONE-ID FINALE-TUNE FINALE-TUNE-H7 CODA-TUNE AFTER-BED CHAMBER-KEY BOWL-KEY
+          LISTEN-ID heart-stone? FUSE-BED-OUT-S DAWN-IN-S FINALE-LEVELS
+          sound-ears sound-lines sound-hush sound-restore-hush! sound-bed-levels sound-moment-playing sound-moment-sounding sound-reset!
           sound-set-rng! strip-uncarried sound-spots-played DRONE-MOVING sound-bed-notes sound-region sound-cue-tunes sound-voice-source HUM-ID CALL-GAIN call-id
           sound-ears-flick ears-flick?
           place place? place-key place-region place-px place-py place-rx place-ry place-moment place-frogs place-levels
@@ -199,6 +210,11 @@
                                     (list spent (if (pair? wander) (car wander) '())))))
     (define (sound-region) *region*)
     (define (sound-moment-playing) (and *moment* (car *moment*)))
+    ;; The moment's music: its rows still playing. A moment is over only once
+    ;; its tail falls under QUIET-OVER (high-fell: rows end at 22 s, over at
+    ;; 29 s); the haze step (D51) leaves with the music, not the tail.
+    (define (sound-moment-sounding)
+      (and *moment* (not (player-ended? (cdr *moment*))) (car *moment*)))
     ;; D35: seconds since the playing moment's start was HEARD (its sink
     ;; holds DEPTH-S), or #f. Content times the wordmark's reveal by it.
     (define *moment-t0* 0.0)
@@ -256,7 +272,8 @@
       (set! *step-idx* #f) (set! *step-alt* #f) (set! *moved* '())
       (set! *moment-quiet* #f) (set! *opening-quiet* #f)
       (set! *gust* #f) (set! *gust-dip* #f) (set! *gliding* #f) (set! *glide-at* -100.0) (set! *seed-answer-at* -100.0)
-      (set! *seed-calls* (quote ())))
+      (set! *seed-calls* (quote ()))
+      (finale-reset!))
 
     ;; --- A4: the border, and what a save keeps ---------------------------------------
     ;; THE BORDER FALLBACK. A2 measured a region border (two full beds and a
@@ -291,7 +308,7 @@
     ;; bed, with the duck, whatever the hush says; it counts as a wandering
     ;; moment heard.
     (define (sound-audition! name)
-      (unless *moment*
+      (unless (or *moment* (finale-busy?))
         (*say* "sound" "audition" name)
         (start-moment! name #f *now*)))
     (define (sound-border-mode) *border-mode*)
@@ -393,6 +410,8 @@
 
     ;; The bed as last opened (after strip-uncarried): for the gates.
     (define *bed-opened* #f)
+    (define *bed-name* #f)         ; the bed's tune as last opened (the after-ending bed is another)
+    (define (sound-bed-name) *bed-name*)
     (define (sound-bed-notes ch)
       (if *bed-opened*
           (apply + (map (lambda (p) (length (filter (lambda (c) (and (eqv? (cell-channel c) ch) (number? (cell-note c))))
@@ -436,6 +455,7 @@
                         (opened (if quick? (quick-attack stripped fresh) stripped))
                         (p (open-tune-player opened (mixer-rate) loop: #t)))
                    (set! *bed-opened* opened)
+                   (set! *bed-name* name)
                    (set! *bed-carried* carry)
                    p)))))
 
@@ -514,7 +534,7 @@
              ;; crossing): no time alone, the two cross at once
              (low? (and through? (not pending?) (< (source-factor old-src 'fade now) THROUGH-MID)))
              (out-s (cond ((not through?) BORDER-S) (low? THROUGH-OVERLAP-S) (else THROUGH-OUT-S)))
-             (p (and bed-tune (open-bed bed-tune region (not first?)))))
+             (p (and bed-tune (open-bed (bed-for bed-tune) region (not first?)))))
         (if (not p)
             (*say* "sound" "error" "no-bed" (if bed-tune bed-tune "none"))
             (begin
@@ -635,10 +655,13 @@
       (set! *room-levels* (place-levels pl))
       (set! *wander-due* #f)
       (set! *still-wait* #f)
-      (if (not (eq? (place-region pl) *region*))
-          (enter-region! pl now)
-          (apply-room-levels! (place-levels pl) now ROOM-RAMP-S))
-      (let ((m (place-moment pl)))
+      (cond ((and (not (eq? (place-region pl) *region*)) (finale-holds-bed?))
+             ;; the ending: no bed until the dawn, which opens this one
+             (set! *region* (place-region pl)) (set! *groups* (place-groups pl)) (set! *bed-tune* (place-bed-tune pl)))
+            ((not (eq? (place-region pl) *region*)) (enter-region! pl now))
+            (else (apply-room-levels! (place-levels pl) now ROOM-RAMP-S)))
+      (finale-room! pl)
+      (let ((m (and (not (finale-busy?)) (place-moment pl))))
         (when m
           (let ((d (hush-fixed-decision *hush* (hush-key pl)))
                 (unmet (moment-unmet pl)))
@@ -657,7 +680,7 @@
                                                   (if (and (memq d '(play blocked)) (place-moment-still pl)) "still-wait" (symbol->string d)))))))
       ;; a wandering moment may be drawn for a room with no moment of its own
       ;; still to come (a fixed moment keeps its room)
-      (unless (or *moment* (room-armed? pl))
+      (unless (or *moment* (finale-busy?) (room-armed? pl))
         (maybe-wander! pl now)))
 
     ;; 'carrying when the room's moment asks for a harmonic not carried, or #f
@@ -733,7 +756,7 @@
                 ((< now (caddr w)) #f)
                 (else
                  (set! *wander-due* #f)
-                 (when (and (not *moment*) (hush-wander-ok? *hush*))
+                 (when (and (not *moment*) (not (finale-busy?)) (hush-wander-ok? *hush*))
                    (start-moment! (car w) #f now)))))))
 
     ;; A fixed moment with still: waits in its room for the stillness.
@@ -746,7 +769,7 @@
                  ;; still long enough: play if the hush allows, keep waiting
                  ;; while it blocks, give up once spent
                  (let ((d (hush-fixed-decision *hush* (cadddr w))))
-                   (cond ((and (eq? d 'play) (not *moment*))
+                   (cond ((and (eq? d 'play) (not *moment*) (not (finale-busy?)))
                           (set! *still-wait* #f)
                           (*say* "sound" "still" (car w) "play")
                           (start-moment! (car w) (cadddr w) now))
@@ -1028,7 +1051,33 @@
     ;; whose note you do not carry).
     (define CALL-GAIN 0.5)         ; -6 dB under a finding tone at the same distance
 
-    (define (call-id n) (string-append "call-h" (number->string n)))
+    (define (call-id n) (if (heart-stone? n) "call-heart" (string-append "call-h" (number->string n))))
+    (define (call-tune n) (if (heart-stone? n) "heart-call" (tone-id n)))
+
+    ;; THE HEART (harkfell-underhum-bible, "How the four homecomings open the
+    ;; way down"): the bowl's fifth stone, keyed to all of 2, 3, 4 and 5. Its
+    ;; overtone in the world's stones is the symbol heart or the list of its
+    ;; key. It hums the fundamental through the Hollow bed's own hum channel
+    ;; (no voice of its own while mute); once all four are carried it CALLS,
+    ;; the four overtones pulsing together ("heart-call"), like D45's calls.
+    (define HEART-KEY '(2 3 4 5))
+    (define (heart-stone? n) (or (eq? n 'heart) (and (pair? n) (list? n))))
+    (define (stone-n n) (if (heart-stone? n) 'heart n))
+    ;; A stone ENTRY is the heart when its overtone says so, or when it carries
+    ;; its keys as a fifth element and needs more than one: SYSTEMS' real
+    ;; heart is overtone 2 with keys (2 3 4 5) (the Cloudstair sound worker's
+    ;; review of 3ad3142), and its gates' news then names overtone 2 (or the
+    ;; chord). A keyed entry: (overtone state x y keys).
+    (define (stone-keys-of st) (and (= (length st) 5) (list? (list-ref st 4)) (list-ref st 4)))
+    (define (heart-entry? st)
+      (or (heart-stone? (car st)) (let ((k (stone-keys-of st))) (and k (> (length k) 1)))))
+    (define (entry-n st) (if (heart-entry? st) 'heart (car st)))
+    ;; Where the hearts stand (from the place's stones, every frame): news at
+    ;; one of them is the heart's, whatever overtone it names.
+    (define *heart-spots* '())
+    (define (heart-at? x y)
+      (any (lambda (h) (and (< (abs (- (car h) x)) 4.0) (< (abs (- (cadr h) y)) 4.0))) *heart-spots*))
+    (define (calls-for? n) (if (heart-stone? n) (every (lambda (h) (memv h *carry*)) HEART-KEY) (memv n *carry*)))
     (define (call-id? id) (and (>= (string-length id) 6) (string=? (substring id 0 6) "call-h")))
     ;; a voice standing still sharpens: the finding tones and the calls
     (define (listen-id? id) (or (tone-id? id) (call-id? id)))
@@ -1047,10 +1096,10 @@
                  (best '()))   ; ((n d x y) ...)
         (if (null? ss)
             (map (lambda (b) (list (car b) (caddr b) (cadddr b))) best)
-            (let* ((st (car ss)) (n (car st)) (x (caddr st)) (y (cadddr st))
+            (let* ((st (car ss)) (n (entry-n st)) (x (caddr st)) (y (cadddr st))
                    (d (sqrt (+ (expt (- x (place-px pl)) 2) (expt (- y (place-py pl)) 2))))
                    (have (assv n best)))
-              (if (and (eq? (cadr st) 'shut) (memv n *carry*) (or (not have) (< d (cadr have))))
+              (if (and (eq? (cadr st) 'shut) (calls-for? n) (or (not have) (< d (cadr have))))
                   (loop (cdr ss) (cons (list n d x y) (filter (lambda (b) (not (eqv? (car b) n))) best)))
                   (loop (cdr ss) best))))))
 
@@ -1064,7 +1113,7 @@
                    (dx (car g)) (dy (cadr g)) (d (caddr g))
                    (open? (assoc id *voices*)))
               (cond ((and (not open?) (< d TONE-OPEN-ROOMS))
-                     (when (voice-open! id (tone-id n) now)
+                     (when (voice-open! id (call-tune n) now)
                        (voice-set! id (* CALL-GAIN (tone-gain d)) (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx)) (tone-cutoff d dy) now)))
                     ((and open? (> d TONE-CLOSE-ROOMS)) (voice-fade! id now))
                     (open? (voice-set! id (* CALL-GAIN (tone-gain d)) (clamp (- MAX-PAN) MAX-PAN (* 0.6 dx)) (tone-cutoff d dy) now))
@@ -1085,8 +1134,7 @@
                          best
                          (let* ((st (car ss))
                                 (d (sqrt (+ (expt (- (caddr st) (place-px pl)) 2) (expt (- (cadddr st) (place-py pl)) 2)))))
-                           (if (and (= (length st) 4) (number? (car st)) (eq? (cadr st) 'shut)
-                                    (not (memv (car st) *carry*)) (< d bd))
+                           (if (and (number? (car st)) (eq? (cadr st) 'shut) (not (heart-entry? st)) (not (memv (car st) *carry*)) (< d bd))
                                (loop (cdr ss) (cons st d) d)
                                (loop (cdr ss) best bd))))))
              (n (and near (car (car near)))))
@@ -1106,7 +1154,7 @@
     ;; UPWARD-R. It is NOT a finding tone: H7 is in no pickup, so nothing here
     ;; enters tone-spots, and the ears never point at it. With no tone-h7 tune
     ;; written yet, the voice does not open (voice-open! needs the tune).
-    (define LOCAL-TUNES '("exit-low" "exit-high" "static-crackle" "gap-depth"))
+    (define LOCAL-TUNES '("exit-low" "exit-high" "static-crackle" "gap-depth" "heart-call" "listening-chimes"))
     (define UPWARD-ID "upward-hum")
     (define UPWARD-R 112.0)        ; px: 7 tiles, the hollow behind the fall
     (define UPWARD-GAIN 0.2)
@@ -1460,6 +1508,13 @@
             (list 'miss-h3 "miss-h3" 0.0 0.0 0.32)
             (list 'ring-h3 "ring-h3" 0.0 0.0 0.57)
             (list 'stone-slide "stone-slide" 0.0 0.0 0.72)
+            ;; the Underhum: the heart stone in the bowl, keyed to all four
+            (list 'ring-heart "ring-heart" 0.0 0.0 0.6)
+            (list 'miss-heart "miss-heart" 0.0 0.0 0.32)
+            (list 'heart-sink "heart-sink" 0.0 0.0 0.75)
+            ;; Revision 1's worn treads: a warning (as thin ice creaks) and the crack
+            (list 'tread-creak "tread-creak" 0.0 0.0 0.5)
+            (list 'tread-crack "tread-crack" 0.0 0.0 0.4)
             ;; Glasswood's falling ice: the tell first (the only warning in the
             ;; dark), then the fall and the shatter; thin ice's creak and crack
             (list 'ice-tell "ice-tell" 0.0 0.0 0.29)
@@ -1548,45 +1603,60 @@
                     *pending-cues*)))
 
     (define (news-frame! pl)
+      (set! *heart-spots* (map (lambda (st) (list (caddr st) (cadddr st))) (filter heart-entry? (place-stones pl))))
       (for-each
         (lambda (item)
           (case (car item)
             ((pickup) (let ((c (harmonic-cue "pickup-h" (cadr item)))) (gate-cue! c (spot-gain c) (caddr item) pl)))
-            ((near-miss)
-             (when (number? (cadr item))
-               (let ((c (harmonic-cue "miss-h" (cadr item))))
-                 (gate-cue! c (spot-gain c) (caddr item) pl))))
-            ((ring chord)
-             ;; CONTENT supplies the carried series; the stone answers it locally.
-             ;; The SOUND track supplies the dedicated heart cue; until then
-             ;; retain the four-voice answer without numeric symbol coercion.
-             (for-each
-               (lambda (n)
-                 (let ((c (harmonic-cue "ring-h" n)))
-                   (when (spot-ref c)
-                     (gate-cue! c (* (if (and (eq? (car item) 'ring) (number? (cadr item))) 1.0 0.3)
-                                    (spot-gain c))
-                                (caddr item) pl))))
-               (cond ((eq? (cadr item) 'heart) '(2 3 4 5))
-                     ((list? (cadr item)) (cadr item))
-                     ((eq? (car item) 'chord) (cadr item))
-                     (else (list (cadr item))))))
-            ((sink) (gate-cue! 'stone-slide (spot-gain 'stone-slide) (caddr item) pl))
+            ((ring) (let ((c (if (or (heart-stone? (cadr item)) (heart-at? (caddr item) (cadddr item))) 'ring-heart (harmonic-cue "ring-h" (cadr item))))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((near-miss) (let ((c (if (or (heart-stone? (cadr item)) (heart-at? (caddr item) (cadddr item))) 'miss-heart (harmonic-cue "miss-h" (cadr item))))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ((chord)
+             ;; CONTENT supplies the carried series; the stone answers it
+             ;; locally. At the heart it is the heart's own ring (SYSTEMS' heart
+             ;; rings as the four-voice chord).
+             (if (heart-at? (caddr item) (cadddr item))
+                 (gate-cue! 'ring-heart (spot-gain 'ring-heart) (caddr item) pl)
+                 (for-each
+                   (lambda (n)
+                     (let ((c (harmonic-cue "ring-h" n)))
+                       (when (spot-ref c)
+                         (gate-cue! c (* 0.3 (spot-gain c)) (caddr item) pl))))
+                   (cadr item))))
+            ;; the Bearers' Rest: a bench lights as you pass it carrying its
+            ;; harmonic (after the ending), and answers with that harmonic's
+            ;; ring, softly
+            ((bench) (let ((c (harmonic-cue "ring-h" (cadr item))))
+                       (when (spot-ref c) (gate-cue! c (* BENCH-GAIN (spot-gain c)) (caddr item) pl))))
+            ((sink) (let ((c (if (or (heart-stone? (cadr item)) (heart-at? (caddr item) (cadddr item))) 'heart-sink 'stone-slide))) (gate-cue! c (spot-gain c) (caddr item) pl)))
+            ;; the Underhum's ending ((harkfell world)'s news: (finale WHAT x y))
+            ((finale) (case (cadr item)
+                        ((fuse) (sound-finale-fuse! *now*))
+                        ((rise) (finale-want! 'rise))
+                        ((home) (finale-want! 'home))
+                        ((coda) (sound-coda! *now*))
+                        (else #f)))
             ;; the cattail down settles on you ((harkfell world) down-tick: (down x y))
             ((down) (gate-cue! 'down-settles (spot-gain 'down-settles) (cadr item) pl))
-            ((call) (unless *moment* (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
+            ((call) (unless (or *moment* (finale-busy?)) (cue-at! (cadr item) (spot-gain (cadr item)) (caddr item) pl)))
             ;; Glasswood's ice ((harkfell ice), and thin ice in (harkfell world)):
             ;; the icicle's tell and thin ice's creak are warnings, so they sound
             ;; even under a moment; the fall, the shatter and the crack are spot
             ;; sounds. Cues ice-tell ice-fall ice-shatter ice-creak ice-crack.
-            ((ice) (let ((c (string->symbol (string-append "ice-" (symbol->string (cadr item))))))
+            ;; the Underhum's worn treads are stone, not ice (Revision 1: thin-ice
+            ;; things in K and L; Underhum ROOMS asked): their creak and crack
+            ;; are tread-creak and tread-crack there
+            ((ice) (let ((c (if (and (eq? (place-region pl) 'underhum) (memq (cadr item) '(creak crack)))
+                                (string->symbol (string-append "tread-" (symbol->string (cadr item))))
+                                (string->symbol (string-append "ice-" (symbol->string (cadr item)))))))
                      (*say* "sound" "ice" (symbol->string (cadr item)))
-                     (when (or (memq (cadr item) '(tell creak)) (not *moment*))
+                     (*say* "sound" "ice-cue" (symbol->string c))
+                     (when (or (memq (cadr item) '(tell creak)) (not (or *moment* (finale-busy?))))
                        (cue-at! c (spot-gain c) (caddr item) pl))))
             (else #f)))
         (place-news pl)))
 
     (define (spot-ref name) (assq name SPOTS))
+    (define BENCH-GAIN 0.35)
 
     ;; Every tune the director renders as a cue (the gates check each exists).
     (define (sound-cue-tunes) (map cadr SPOTS))
@@ -1617,14 +1687,52 @@
     ;; past its 60 s at 15 frames a second).
     (define LATE-CUES
       (list 'ice-crack 'ice-fall 'ice-shatter
-            'pickup-h3 'moth-h3 'owl-h3 'vole 'miss-h4 'ring-h4
-            'pickup-h5 'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
+            'moth-h3 'owl-h3 'vole
+            'down-settles 'seed-click 'seed-chirr 'seed-answer-a 'seed-answer-b
             'gust-lift 'gust-east))
+    ;; THE STONES' AND PICKUPS' CUES ARE PREPARED EAGERLY: right after the
+    ;; movement sounds, before anything else, so a pickup's tune lands on its
+    ;; frame. Measured before (c7dcaf0, the test's budget): a pickup the bank
+    ;; had not reached sounded 1.33 to 1.37 s late, or not at all under a
+    ;; moment before that. A dev door can still land near a stone before the
+    ;; bank is through; gate-proximity-frame! then pulls that stone's cues to
+    ;; the head (and they render under a moment).
+    (define (starts? p s) (and (>= (string-length s) (string-length p)) (string=? p (substring s 0 (string-length p)))))
+    (define (gate-cue-names)
+      (filter (lambda (n) (let ((s (symbol->string n)))
+                            (or (starts? "pickup-h" s) (starts? "ring-h" s) (starts? "miss-h" s))))
+              (map car SPOTS)))
     (define *late-cues* '())
+    ;; Near a stone or an unfound pickup (inside a finding tone's range) its
+    ;; cues are wanted: to the head of the queue, rendered even under a moment.
+    (define *cues-wanted* '())
+    (define (want-cue! name)
+      (unless (or (not (spot-ref name)) (assq name *cues*) (memq name *cues-wanted*)
+                  (and *cue-job* (eq? (vector-ref *cue-job* 0) name)))
+        (set! *cues-wanted* (cons name *cues-wanted*))
+        (set! *late-cues* (filter (lambda (n) (not (eq? n name))) *late-cues*))
+        (set! *cue-queue* (cons name (filter (lambda (n) (not (eq? n name))) *cue-queue*)))))
+    (define (gate-proximity-frame! pl)
+      (for-each (lambda (sp)
+                  (when (< (caddr (geometry-to pl (cadr sp) (caddr sp))) TONE-OPEN-ROOMS)
+                    (want-cue! (harmonic-cue "pickup-h" (car sp)))))
+                (tone-spots pl))
+      (for-each (lambda (st)
+                  (when (and (eq? (cadr st) 'shut)
+                             (< (caddr (geometry-to pl (caddr st) (cadddr st))) TONE-OPEN-ROOMS))
+                    ;; the heart's cues are its own (and its overtone may be a
+                    ;; symbol or a list: no harmonic-cue for it)
+                    (if (heart-entry? st)
+                        (for-each want-cue! '(ring-heart miss-heart heart-sink))
+                        (begin (want-cue! (harmonic-cue "ring-h" (car st)))
+                               (want-cue! (harmonic-cue "miss-h" (car st)))))))
+                (place-stones pl)))
     (define (bank-order)
-      (append (filter spot-ref MOVING-CUES)
-              (filter (lambda (n) (not (memq n MOVING-CUES))) (map car SPOTS))
-              (map car GUST-LOOPS)))
+      (let ((gates (gate-cue-names)))
+        (append (filter spot-ref MOVING-CUES)
+                gates
+                (filter (lambda (n) (not (or (memq n MOVING-CUES) (memq n gates)))) (map car SPOTS))
+                (map car GUST-LOOPS))))
     (define *cue-job* #f)         ; #(name player chunks frames silent heard?) being rendered
     (define *cue-buf* (make-bytevector (* 8 CUE-BLOCK) 0))
     (define *moving-said* #f)
@@ -1784,7 +1892,7 @@
     (define *spots* 0)
     (define (sound-spots-played) *spots*)
     (define (spots-frame! pl now)
-      (if *moment*
+      (if (or *moment* (finale-busy?))
           (set! *next* '())
           (spots-frame-quiet! pl now)))
 
@@ -1886,7 +1994,7 @@
     (define (sound-surface pl) (surface pl))
 
     (define (move-cue! name gain pan)
-      (let ((c (assq name *cues*)) (g (* gain (spot-gain name) (if *moment* MOVE-IN-MOMENT 1.0))))
+      (let ((c (assq name *cues*)) (g (* gain (spot-gain name) (if (or *moment* (finale-busy?)) MOVE-IN-MOMENT 1.0))))
         (set! *moved* (cons (cons name g) *moved*))
         (when c (mixer-cue! (cdr c) g pan))))
 
@@ -1895,7 +2003,7 @@
         (when s
           (set! *step-alt* (not *step-alt*))
           (move-cue! (string->symbol (string-append "step-" (symbol->string s) (if *step-alt* "-a" "-b")))
-                     (if *moment* (/ MOVE-STEP-IN-MOMENT MOVE-IN-MOMENT) 1.0)
+                     (if (or *moment* (finale-busy?)) (/ MOVE-STEP-IN-MOMENT MOVE-IN-MOMENT) 1.0)
                      (if *step-alt* -0.08 0.08)))))
 
     (define (land! vy)
@@ -1926,6 +2034,428 @@
             (set! *step-idx* i))
           (set! *step-idx* #f)))
 
+    ;; --- the Underhum's ending ---------------------------------------------------------------
+    ;; harkfell-underhum-bible ("The fundamental arrives", "The piece and the
+    ;; climb out", "The H7 variant", "After the ending"); the numbers and the
+    ;; rules are (harkfell finale)'s.
+    ;;
+    ;; THE FUSE. SYSTEMS' news (finale fuse x y) (two seconds still in the
+    ;; chamber, or its fallbacks) starts two players at once: FINALE-DRONE-ID,
+    ;; the fused drone (finale-drone: the fundamental, H2..H5 and, when
+    ;; carried, H7), and FINALE-ID, the piece (the-fundamental, or
+    ;; the-fundamental-h7 when H7 is carried). The region's bed fades out over
+    ;; FUSE-BED-OUT-S and is CLOSED, not ducked: A2 measured two full beds and
+    ;; a moment at 5.2 ms a frame against a 4 ms budget, and the ending is 14
+    ;; channels on its own. The drone's channel volumes are set before every
+    ;; pull from finale-breath on the drone's own sample clock, so the breath
+    ;; is the same whatever the frame rate.
+    ;;
+    ;; FOLLOWING THE PLAYER. The walk's section is read from the piece's
+    ;; timeline (the newest row walked, not the one heard: the loop regions are
+    ;; the walker's), and every frame the walk is held in finale-region's loop
+    ;; and the wishes are acted on (finale-actions). A wish is SYSTEMS' news
+    ;; (finale rise|home x y) or, as a fallback, a room entered: any Underhum
+    ;; room but the chamber is the climb, the bowl is home.
+    ;;
+    ;; THE CLOSE. When the walk reaches close, the drone's voices leave on
+    ;; finale-leave's schedule (H5, H4, H3, H2, then the fundamental, or H7
+    ;; last), and when the fundamental (or H7) is alone, the dawn: the bed of
+    ;; the region you are in opens again and fades in over DAWN-IN-S. The
+    ;; ending is over when the piece has gone quiet and the last voice has
+    ;; left.
+    ;;
+    ;; AFTER. The ending is spent from the fuse on (sound-finale-flags, for the
+    ;; save; a quit and continue never replays it, D20). The Underhum's bed is
+    ;; then AFTER-BED, its drone breathing as one. A late H7 finder back in the
+    ;; chamber hears the coda once ((finale coda x y), sound-coda!).
+    (define FINALE-ID "finale")
+    (define FINALE-DRONE-ID "finale-drone")
+    (define FINALE-TUNE "the-fundamental")
+    (define FINALE-TUNE-H7 "the-fundamental-h7")
+    (define FINALE-DRONE-TUNE "finale-drone")
+    (define CODA-TUNE "underhum-coda")
+    (define UNDERHUM-BED "underhum-bed")
+    (define AFTER-BED "underhum-after")
+    (define CHAMBER-KEY "underhum:7,5")
+    (define BOWL-KEY "hollow:4,3")
+    (define FUSE-BED-OUT-S 3.0)
+    (define DAWN-IN-S 20.0)
+    ;; (channel . voice) in finale-drone, and each voice's level under the piece.
+    ;; Measured (tools/underhum-review.sh at 35829b3): at 1.0 and 0.8 the ending
+    ;; came to -15 LUFS with peaks at -1.3 dBFS, 6 dB over the shipped moments
+    ;; (-20 to -22), the drone alone about -16; halved, the drone sits near -22
+    ;; and the ending a little above a moment.
+    (define FINALE-CHANNELS '((1 . 1) (2 . 2) (3 . 3) (4 . 4) (5 . 5) (6 . 7)))
+    (define FINALE-LEVELS '((1 . 0.5) (2 . 0.4) (3 . 0.4) (4 . 0.4) (5 . 0.4) (7 . 0.4)))
+    (define THIN-RATE 0.6)         ; per second: the pipes verse thins a voice over about a second
+
+    (define-struct fin
+      (piece) (drone) (h7) (marks)
+      (rise mutable: #t) (home mutable: #t)  ; the wishes, not yet acted on
+      (homing mutable: #t)                   ; a home jump asked: no rise may replace it
+      (walk mutable: #t)                     ; the walk's section (the walker's newest row)
+      (play mutable: #t)                     ; the section being rendered
+      (heard mutable: #t) (heard-at mutable: #t)
+      (close-t mutable: #t)                  ; the drone's clock when the walk entered close, or #f
+      (dawn mutable: #t)                     ; when the dawn began, or #f
+      (quiet) (ended)                        ; flags: the piece gone quiet; its source ended
+      (told mutable: #t)                     ; the marks the listener has been told, newest first
+      (thin))                                ; the pipes verse's factor per channel, eased
+
+    (define *fin* #f)
+    (define *ended* #f)              ; the ending has happened (from its fuse)
+    (define *ended-with* '())        ; what was carried then
+    (define *coda-done* #f)
+    (define *coda-want* #f)          ; asked during a moment: plays when it is over
+    (define *finale-ahead* '())      ; ((name . player-or-#f) ...) opened ahead in the Underhum
+
+    (define (sound-finale-active?) (and *fin* #t))
+
+    ;; WHAT IS HEARD, TOLD. SYSTEMS' light, credits, night and dawn follow the
+    ;; music as heard, not a clock of their own (the leader's plan for
+    ;; depths/systems: shell-finale-mark!). The listener is called once for
+    ;; each, as it is heard: fuse, fundamental (the low D arrives:
+    ;; FINALE-FUNDAMENTAL-S into the fuse, on the drone's clock), each section
+    ;; (theme hold rise glass pipes sky home close; hold or sky once however
+    ;; often they loop), dawn, and done.
+    (define *finale-listener* (lambda (what) #f))
+    (define (sound-set-finale-listener! proc) (set! *finale-listener* (or proc (lambda (what) #f))))
+    (define (tell! st what)
+      (unless (memq what (fin-told st))
+        (set-fin-told! st (cons what (fin-told st)))
+        (*say* "sound" "finale" "heard" (symbol->string what))
+        (*finale-listener* what)))
+    ;; The ending holds the beds back until its dawn, and the moments, spot
+    ;; sounds and the cue bank's work until it is over, as a moment does: its
+    ;; close still plays after the dawn (a Hollow wandering moment drawn then
+    ;; would start over the credits' music).
+    ;; Only while its piece is still a mixer source: a mixer reopened mid-piece
+    ;; (a world reload; the next test file of a suite) drops it, and the
+    ;; ending must not hold the beds and moments for ever (the d45d8c6 class,
+    ;; the Cloudstair sound worker's review of 3ad3142).
+    (define (finale-live?) (and *fin* (mixer-find FINALE-ID) #t))
+    (define (finale-holds-bed?) (and (finale-live?) (not (fin-dawn *fin*))))
+    (define (finale-busy?) (finale-live?))
+    ;; the Underhum's bed after the ending: its drone breathing as one
+    (define (bed-for name) (if (and *ended* (equal? name UNDERHUM-BED)) AFTER-BED name))
+
+    (define (sound-finale-flags) (list *ended* *ended-with* *coda-done*))
+    ;; From a save: (ended ended-with coda), any of them missing or #f.
+    (define (sound-finale-restore! . flags)
+      (let ((get (lambda (i) (and (> (length flags) i) (list-ref flags i)))))
+        (set! *ended* (and (get 0) #t))
+        (set! *ended-with* (let ((w (get 1))) (if (list? w) (filter number? w) '())))
+        (set! *coda-done* (and (get 2) #t))))
+
+    (define (finale-reset!)
+      (when *fin*
+        (for-each (lambda (id) (when (mixer-find id) (mixer-remove! id))) (list FINALE-ID FINALE-DRONE-ID))
+        (player-close! (fin-piece *fin*)) (player-close! (fin-drone *fin*)))
+      (for-each (lambda (e) (when (cdr e) (player-close! (cdr e)))) *finale-ahead*)
+      (set! *fin* #f) (set! *ended* #f) (set! *ended-with* '()) (set! *coda-done* #f) (set! *coda-want* #f) (set! *finale-ahead* '()) (set! *bed-name* #f))
+
+    ;; finale-drone as opened: H7's notes dropped when it is not carried (a
+    ;; muted channel still synthesises, as strip-uncarried says for the beds)
+    (define (finale-drone-tune h7?)
+      (let ((t (tune-parsed FINALE-DRONE-TUNE)))
+        (and t (if h7?
+                   t
+                   (tune-with-patterns t
+                     (map (lambda (p)
+                            (tune-pattern p cells: (filter (lambda (c) (not (and (eqv? (cell-channel c) 6) (number? (cell-note c)))))
+                                                           (tune-pattern-cells p))))
+                          (tune-patterns t)))))))
+
+    (define (finale-open name)
+      (cond ((member name '("drone" "drone-h7"))
+             (let ((t (finale-drone-tune (string=? name "drone-h7"))))
+               (and t (guard (e (#t (*say* "sound" "error" "open" FINALE-DRONE-TUNE) #f))
+                        (open-tune-player t (mixer-rate) loop: #t)))))
+            (else (open name #f))))
+
+    ;; Opened ahead, one a frame, while in the Underhum before the ending: a
+    ;; tune's open is a frame-thread stall, and the fuse is the last frame to
+    ;; spend one on.
+    (define (finale-ahead-names)
+      (let ((h7? (and (memv 7 *carry*) #t)))
+        (list (if h7? FINALE-TUNE-H7 FINALE-TUNE) (if h7? "drone-h7" "drone"))))
+    ;; a name still to open whose text is in (on the web the page fetches it)
+    (define (finale-ahead-next)
+      (find (lambda (n) (and (not (assoc n *finale-ahead*))
+                             (tune-text (if (member n '("drone" "drone-h7")) FINALE-DRONE-TUNE n))))
+            (finale-ahead-names)))
+    (define (finale-ahead-due?)
+      (and (eq? *region* 'underhum) (not *ended*) (not *fin*) (finale-ahead-next) #t))
+    (define (finale-open-ahead!)
+      (let ((n (finale-ahead-next)))
+        (when n
+          (set! *finale-ahead* (cons (cons n (finale-open n)) *finale-ahead*))
+          (*say* "sound" "finale" "ahead" n))))
+    (define (finale-take! name)
+      (let ((e (assoc name *finale-ahead*)))
+        (if (and e (cdr e))
+            (begin (set! *finale-ahead* (filter (lambda (x) (not (eq? x e))) *finale-ahead*)) (cdr e))
+            (finale-open name))))
+
+    ;; THE FUSE. Once a playthrough; the second is said and ignored.
+    (define (sound-finale-fuse! now)
+      (cond (*fin* #f)
+            (*ended* (*say* "sound" "finale" "fuse-ignored"))
+            (else
+             (let* ((h7? (and (memv 7 *carry*) #t))
+                    (piece (finale-take! (if h7? FINALE-TUNE-H7 FINALE-TUNE)))
+                    (drone (finale-take! (if h7? "drone-h7" "drone"))))
+               (if (not (and piece drone))
+                   (begin (when piece (player-close! piece)) (when drone (player-close! drone))
+                          (*say* "sound" "error" "no-finale"))
+                   (finale-start! piece drone h7? now))))))
+
+    (define (finale-start! piece drone h7? now)
+      (let ((st (fin piece: piece drone: drone h7: h7? marks: (tune-marks (player-tune piece))
+                     rise: #f home: #f homing: #f walk: 'calm play: 'calm heard: 'calm heard-at: now
+                     close-t: #f dawn: #f told: '() quiet: (vector #f) ended: (vector #f) thin: (make-vector 7 1.0))))
+        (set! *fin* st)
+        (set! *credits-t0* #f)
+        (set! *ended* #t)
+        ;; players opened ahead for the other version (H7 found meanwhile)
+        (for-each (lambda (e) (when (cdr e) (player-close! (cdr e)))) *finale-ahead*)
+        (set! *finale-ahead* '())
+        (set! *ended-with* (if h7? '(2 3 4 5 7) '(2 3 4 5)))
+        (set! *wander-due* #f) (set! *still-wait* #f)
+        (when *moment* (fade-moment! now))
+        (bed-away! now FUSE-BED-OUT-S)
+        (finale-hold! st 'calm)
+        (mixer-add! FINALE-DRONE-ID (finale-drone-pull st) #t)
+        (let ((s (mixer-add! FINALE-ID (watch-pull piece (fin-quiet st)) #t)))
+          (source-on-end! s (lambda (t) (vector-set! (fin-ended st) 0 #t) (vector-set! (fin-quiet st) 0 #t))))
+        (*say* "sound" "finale" "fuse" (if h7? "h7" "no-h7"))))
+
+    ;; The bed leaves (the fuse): faded out and closed, under an id of its own.
+    (define (bed-away! now secs)
+      (let ((src *bed-src*) (p *bed-player*))
+        (when src
+          (set! *outs* (+ *outs* 1))
+          (let ((out-id (string-append BED-ID "-out-" (number->string *outs*))))
+            (mixer-rename! BED-ID out-id)
+            (source-factor! src 'fade 0.0 secs now)
+            (mixer-at! (+ now secs) (lambda () (when (mixer-find out-id) (mixer-remove! out-id)) (player-close! p)))))
+        (set! *bed-src* #f) (set! *bed-player* #f) (set! *levels* '())))
+
+    (define (drone-t st) (/ (player-rendered (fin-drone st)) (* 1.0 (mixer-rate))))
+
+    ;; The volumes are set at most BREATH-CHUNK frames apart: a channel's
+    ;; volume steps (motif does not smooth it), and a native pull can be 4096
+    ;; frames (the review: a breath step every 0.13 s would be heard).
+    (define BREATH-CHUNK 256)
+    (define (finale-drone-pull st)
+      (lambda (out off n)
+        (let loop ((done 0) (more #t))
+          (if (or (>= done n) (not more))
+              more
+              (let ((k (min BREATH-CHUNK (- n done))))
+                (finale-breathe! st k)
+                (loop (+ done k) (player-pull! (fin-drone st) out (+ off (* 8 done)) k)))))))
+
+    ;; Each voice's volume for the next k frames: its level, its breath, the
+    ;; verse's thinning (eased at THIN-RATE, or H5's faster THIN5-RATE, so the
+    ;; F# is gone by the verse's second beat) and, in close, its leaving.
+    (define THIN5-RATE 3.0)
+    (define (finale-breathe! st k)
+      (let* ((d (fin-drone st)) (t (drone-t st))
+             (secs (/ k (* 1.0 (mixer-rate))))
+             (close (fin-close-t st)))
+        (for-each
+          (lambda (cv)
+            (let* ((ch (car cv)) (h (cdr cv))
+                   (step (* (if (eqv? h 5) THIN5-RATE THIN-RATE) secs))
+                   (want (finale-thin h (fin-play st)))
+                   (th0 (vector-ref (fin-thin st) ch))
+                   (th (+ th0 (max (- step) (min step (- want th0))))))
+              (vector-set! (fin-thin st) ch th)
+              (player-set-channel-volume! d ch
+                (* (cdr (assv h FINALE-LEVELS)) (finale-breath h t) th
+                   (if close (finale-leave h (- t close) (fin-h7 st)) 1.0)))))
+          FINALE-CHANNELS)))
+
+    ;; The walk's order position (its newest row) and the one at depth frames.
+    (define (walk-pos p)
+      (let ((tl (player-timeline p))) (if (pair? tl) (vector-ref (car tl) 0) 0)))
+    (define (pos-at p depth)
+      (let ((pp (player-position p depth))) (if pp (car pp) 0)))
+
+    ;; Is the walk in its section's last bar: the last pattern before the next
+    ;; mark, past that pattern's last barline? A mark jump asked there lands on
+    ;; the next section's first row.
+    (define (last-bar? p marks)
+      (let ((tl (player-timeline p)))
+        (and (pair? tl)
+             (let* ((pos (vector-ref (car tl) 0)) (row (vector-ref (car tl) 1))
+                    (t (player-tune p))
+                    (pat (tune-find-pattern t (list-ref (tune-order t) pos))))
+               (and pat
+                    (any (lambda (m) (= (cdr m) (+ pos 1))) marks)
+                    (let ((bar (* (car (tune-meter t)) (cdr (tune-meter t)))))
+                      (>= row (* bar (quotient (- (tune-pattern-rows pat) 1) bar)))))))))
+
+    (define (finale-hold! st section)
+      (let ((r (finale-region section)) (p (fin-piece st)))
+        (if r
+            (player-set-region! p (tune-mark (player-tune p) (car r)) (tune-mark (player-tune p) (cdr r)))
+            (player-set-region! p #f #f))))
+
+    ;; A wish: the climb started, or home reached. Kept until the walk can act
+    ;; on it (finale-actions), dropped when it is already past.
+    (define (finale-want! what)
+      (let ((st *fin*))
+        (when st
+          (*say* "sound" "finale" "want" (symbol->string what))
+          (case what
+            ((rise) (unless (or (fin-homing st) (memq (fin-walk st) '(rise glass pipes sky home close))) (set-fin-rise! st #t)))
+            ((home) (unless (memq (fin-walk st) '(home close)) (set-fin-home! st #t)))
+            (else #f)))))
+    (define (sound-finale-rise!) (finale-want! 'rise))
+    (define (sound-finale-home!) (finale-want! 'home))
+
+    ;; The fallbacks: a room entered after the fuse. The climb is a room ABOVE
+    ;; the chamber's row (the Ringing Stair, the gallery, the Throat: row 4):
+    ;; Revision 1 of the rooms (13) adds rooms beside and below it (I, J, K,
+    ;; L, M), and going down into them is not the climb.
+    (define CHAMBER-ROW 5)
+    (define (key-row k)
+      (and (string? k)
+           (let loop ((i (- (string-length k) 1)))
+             (cond ((< i 0) #f)
+                   ((char=? (string-ref k i) #\,) (string->number (substring k (+ i 1) (string-length k))))
+                   (else (loop (- i 1)))))))
+    (define (finale-room! pl)
+      (when *fin*
+        (let* ((k (place-key pl)) (row (key-row k)))
+          (cond ((equal? k BOWL-KEY) (finale-want! 'home))
+                ((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) (finale-want! 'rise))
+                (else #f)))))
+
+    (define (leave-end h7?)
+      (let ((l (car (reverse (finale-leave-schedule h7?))))) (+ (cadr l) (caddr l))))
+
+    (define (finale-frame! pl now)
+      (when (and *coda-want* (not *moment*)) (sound-coda! now))
+      (let ((st *fin*))
+        (when st
+          (let* ((p (fin-piece st))
+                 (src (mixer-find FINALE-ID))
+                 (marks (fin-marks st))
+                 (walk (or (finale-section marks (walk-pos p)) 'calm))
+                 (play (or (finale-section marks (pos-at p 0)) 'calm))
+                 (heard (or (finale-section marks (pos-at p (if src (source-lead src) 0))) 'calm)))
+            (set-fin-walk! st walk)
+            (set-fin-play! st play)
+            (finale-hold! st walk)
+            (case (finale-actions walk (last-bar? p marks) (fin-rise st) (fin-home st))
+              ((jump-home) (when (player-jump-to-mark! p 'home)
+                             (set-fin-home! st #f) (set-fin-rise! st #f) (set-fin-homing! st #t)
+                             (*say* "sound" "finale" "jump" "home" (symbol->string walk))))
+              ((jump-rise) (when (player-jump-to-mark! p 'rise)
+                             (set-fin-rise! st #f)
+                             (*say* "sound" "finale" "jump" "rise" (symbol->string walk))))
+              (else #f))
+            (when (and (fin-rise st) (memq walk '(rise glass pipes sky home close))) (set-fin-rise! st #f))
+            (when (and (fin-home st) (memq walk '(home close))) (set-fin-home! st #f))
+            (unless (eq? heard (fin-heard st))
+              (set-fin-heard! st heard) (set-fin-heard-at! st now)
+              (*say* "sound" "finale" "section" (symbol->string heard)))
+            (tell! st (if (eq? heard 'calm) 'fuse heard))
+            (when (and (not *credits-t0*) (memq heard '(rise glass pipes sky home close)))
+              (set! *credits-t0* now))
+            (let ((ft (sound-finale-time)))
+              (when (and ft (>= ft FINALE-FUNDAMENTAL-S)) (tell! st 'fundamental)))
+            (when (and (eq? play 'close) (not (fin-close-t st)))
+              (set-fin-close-t! st (drone-t st)))
+            (let ((c (fin-close-t st)))
+              (when (and c (not (fin-dawn st)) (>= (drone-t st) (+ c (finale-dawn-s (fin-h7 st)))))
+                (set-fin-dawn! st now)
+                (tell! st 'dawn)
+                (finale-dawn! now))
+              (when (and c (vector-ref (fin-quiet st) 0) (>= (drone-t st) (+ c (leave-end (fin-h7 st)))))
+                (finale-end! st now)))))))
+
+    ;; The dawn: the bed of the region you are in comes back with the wind.
+    (define (finale-dawn! now)
+      (*say* "sound" "finale" "dawn")
+      (set! *carry-changed* #f)
+      (when (and *region* *bed-tune* (not *bed-src*))
+        (open-region-bed! *region* *groups* *bed-tune* *room-levels* now)
+        (when *bed-src* (source-factor! *bed-src* 'fade 1.0 DAWN-IN-S now))))
+
+    (define (finale-end! st now)
+      (when (mixer-find FINALE-DRONE-ID) (mixer-remove! FINALE-DRONE-ID))
+      (player-close! (fin-drone st))
+      (when (vector-ref (fin-ended st) 0) (player-close! (fin-piece st)))
+      (when (and (mixer-find FINALE-ID) (not (vector-ref (fin-ended st) 0)))
+        (let ((s (mixer-find FINALE-ID)))
+          (source-factor! s 'fade 0.0 1.0 now)
+          (mixer-at! (+ now 1.0) (lambda () (when (eq? (mixer-find FINALE-ID) s) (mixer-remove! FINALE-ID)) (player-close! (fin-piece st))))))
+      (unless (fin-dawn st) (tell! st 'dawn) (finale-dawn! now))
+      (tell! st 'done)
+      (set! *fin* #f)
+      (set! *hush* (hush-ended *hush*))
+      (*say* "sound" "finale" "end"))
+
+    ;; For LOOK and SYSTEMS (the credits, the night, the dawn): the section as
+    ;; HEARD, (SECTION . SECONDS-IN-IT), SECTION fuse theme hold rise glass
+    ;; pipes sky home close dawn; #f outside the ending.
+    (define (sound-finale-section)
+      (let ((st *fin*))
+        (and st (cons (cond ((fin-dawn st) 'dawn) ((eq? (fin-heard st) 'calm) 'fuse) (else (fin-heard st)))
+                      (max 0.0 (- *now* (or (fin-dawn st) (fin-heard-at st))))))))
+    ;; THE CREDITS for LOOK: (CARD-INDEX . ALPHA), or #f. The cards' clock
+    ;; starts when the climb's music is first heard (rise, or home for a fast
+    ;; climber whose piece jumps straight there); the last card waits for the
+    ;; dawn ((harkfell credits)). CREDITS holds the cards' lines.
+    (define *credits-t0* #f)       ; *now* when rise or home was first heard
+    (define (sound-credits-card)
+      (let ((st *fin*))
+        (and st *credits-t0*
+             ;; before the dawn has begun the last card waits for it: its time
+             ;; is not known yet, so it is "not yet" (the test caught the last
+             ;; card at its clock turn, 59 s before the dawn)
+             (credits-at (- *now* *credits-t0*)
+                         (if (fin-dawn st) (- (fin-dawn st) *credits-t0*) 1e9)))))
+
+    ;; The ending's players, (piece . drone), or #f: for the gates.
+    (define (sound-finale-players) (and *fin* (cons (fin-piece *fin*) (fin-drone *fin*))))
+    ;; The walk's section, for the gates.
+    (define (sound-finale-walk) (and *fin* (fin-walk *fin*)))
+    ;; Seconds since the fuse as HEARD, on the drone's own clock: the orbs'
+    ;; pulse is (finale-breath h (sound-finale-time)).
+    (define (sound-finale-time)
+      (let ((st *fin*))
+        (and st (let ((s (mixer-find FINALE-DRONE-ID)))
+                  (max 0.0 (/ (- (player-rendered (fin-drone st)) (if s (source-lead s) 0)) (* 1.0 (mixer-rate))))))))
+    ;; While the piece's rows still play (the haze's rule, D51: it clears when
+    ;; the rows end, not the tail).
+    (define (sound-finale-sounding) (and *fin* (not (player-ended? (fin-piece *fin*)))))
+
+    ;; THE CODA: a late H7 finder in the chamber, once.
+    (define (sound-coda! now)
+      (cond ((not (and *ended* (not *fin*) (not *coda-done*) (memv 7 *carry*) (not (memv 7 *ended-with*))))
+             (set! *coda-want* #f)
+             (*say* "sound" "finale" "coda-ignored"))
+            (*moment* (set! *coda-want* #t) (*say* "sound" "finale" "coda-waits"))
+            (else
+             (set! *coda-done* #t) (set! *coda-want* #f)
+             (*say* "sound" "finale" "coda")
+             (start-moment! CODA-TUNE #f now))))
+
+    ;; THE LISTENING PLACE: its chimes from the sparkling tile, until the fuse.
+    (define LISTEN-ID "listen-chimes")
+    (define LISTEN-R 420.0)        ; px: a little over a room, so it is heard from H's door
+    (define LISTEN-GAIN 0.3)
+    (define (listen-frame! pl now)
+      (let ((at (place-listen pl)))
+        (if (and (pair? at) (not *ended*))
+            (local-voice! LISTEN-ID "listening-chimes" (car at) (cadr at) LISTEN-R LISTEN-GAIN pl now)
+            (voice-fade! LISTEN-ID now))))
+
     ;; --- boot and the frame ----------------------------------------------------------------------
     ;; moments: the fixed moments' tune names the world holds (opened ahead,
     ;; one per frame after boot, like the cues).
@@ -1933,16 +2463,25 @@
 
     (define (sound-boot! moments say)
       (set! *say* say)
+      ;; an ending whose piece the mixer no longer has is over
+      (when (and *fin* (not (mixer-find FINALE-ID)))
+        (player-close! (fin-piece *fin*)) (player-close! (fin-drone *fin*))
+        (set! *fin* #f))
+      ;; a moment whose source the mixer no longer has is over
+      (when (and *moment* (not (mixer-find MOMENT-ID)))
+        (set! *moment* #f)
+        (set! *moment-key* #f))
       (set! *to-open* moments)
       ;; a boot renders every cue afresh (a second boot, a world reloaded, starts
       ;; from nothing: the late-cue gate relies on it)
       (when *cue-job* (player-close! (vector-ref *cue-job* 1)))
       (set! *cue-job* #f) (set! *cues* (quote ())) (set! *loops* (quote ())) (set! *pending-cues* (quote ()))
-      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ()))
+      (set! *loops-wanted* (quote ())) (set! *loops-failed* (quote ())) (set! *cues-wanted* (quote ()))
       (set! *cue-queue* (filter (lambda (n) (not (memq n LATE-CUES))) (bank-order)))
       (set! *late-cues* (filter (lambda (n) (memq n LATE-CUES)) (bank-order)))
       (set! *moving-said* #f) (set! *all-said* #f)
-      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) LOCAL-TUNES (map cadr SPOTS) (map cadr GUST-LOOPS))))
+      (for-each tune-text (append (list OPENING-TUNE) moments (list TONE-TUNE) LOCAL-TUNES (map cadr SPOTS) (map cadr GUST-LOOPS)
+                                  (list FINALE-TUNE FINALE-TUNE-H7 FINALE-DRONE-TUNE CODA-TUNE AFTER-BED))))
 
     ;; One piece of deferred work a frame: a cue render or a moment open,
     ;; whichever has its text; never while a moment plays.
@@ -1984,6 +2523,8 @@
              (set! *cue-wait* #f)
              (bank-news!)
              'block)
+            ;; the Underhum: the ending's players, opened ahead while you are down there
+            ((finale-ahead-due?) (finale-open-ahead!) 'open)
             ((and (pair? *to-open*) (tune-text (car *to-open*)))
              (set! *open-wait* #f)
              (sound-preopen! (car *to-open*))
@@ -2010,19 +2551,30 @@
     (define (in-frame-more?)
       (let ((n 1)) (lambda () (set! n (+ n 1)) (<= n CUE-BLOCKS-PER-FRAME))))
     ;; more?: a thunk, #t while there is time for another step.
-    ;; While a moment plays only a gust loop a gust room is waiting for
-    ;; renders (and the cue ahead of it, finished first): the warning must
-    ;; not wait for a moment to end.
+    ;; While a moment plays only what something is waiting for renders: a
+    ;; gust loop a gust room asked for, or a gate cue the player has just
+    ;; caused (a pickup, a ring) that the bank had not reached (and the cue
+    ;; ahead of it, finished first). The warning must not wait for a moment
+    ;; to end, and a pickup must not be dropped because one is playing
+    ;; (David's D50 playtest: taking H5 soon after the demo door, during a
+    ;; moment, was silent: pickup-h5 is a late cue, the bank was paused, and
+    ;; the pending cue was dropped after PENDING-S).
     (define (sound-work! more?)
       (if (moment-busy?)
-          (when (loop-wanted?) (loop-work! more?))
+          (when (urgent-work?) (urgent-work! more?))
           (boot-work! more?)))
-    (define (loop-work! more?)
+    (define (gate-wanted?) (any (lambda (p) (not (assq (car p) *cues*))) *pending-cues*))
+    (define (cue-wanted?) (any (lambda (n) (not (assq n *cues*))) *cues-wanted*))
+    (define (urgent-work?) (or (loop-wanted?) (gate-wanted?) (cue-wanted?)))
+    (define (urgent-work! more?)
       (let loop ()
         (when (or *cue-job*
-                  (and (pair? *cue-queue*) (loop-ref (car *cue-queue*)) (tune-text (cue-tune-of (car *cue-queue*)))))
+                  (and (pair? *cue-queue*)
+                       (or (loop-ref (car *cue-queue*)) (assq (car *cue-queue*) *pending-cues*)
+                           (memq (car *cue-queue*) *cues-wanted*))
+                       (tune-text (cue-tune-of (car *cue-queue*)))))
           (render-next-cue!)
-          (when (and (loop-wanted?) (more?)) (loop)))))
+          (when (and (urgent-work?) (more?)) (loop)))))
     ;; Is the bank still rendering (the game gives it more time while it is)?
     (define (sound-bank-busy?) (or *cue-job* (pair? *cue-queue*) (pair? *late-cues*)))
     ;; A rendered cue by name ((engine mixer) make-cue), or #f: for the tests.
@@ -2062,7 +2614,7 @@
             (enter-room! pl now)))
         ;; what is carried changed: the bed reopens with its drone notes (not a
         ;; visit: no hush count, no moment decision; review LOW)
-        (when (and *carry-changed* *region* *bed-tune*)
+        (when (and *carry-changed* *region* *bed-tune* (not (finale-holds-bed?)))
           (set! *carry-changed* #f)
           (open-region-bed! *region* *groups* *bed-tune* *room-levels* now))
         (when (> (place-returns pl) *returns*)
@@ -2077,19 +2629,27 @@
         (hum-frame! pl now)
         (upward-frame! pl now)
         (local-frame! pl now)
+        (listen-frame! pl now)
         (gust-frame! pl now)
+        (gate-proximity-frame! pl)
         (news-frame! pl)
         (movement-frame! pl)
         (pending-cues-frame!)
-        (spots-frame! pl now)))
+        (spots-frame! pl now))
+      (finale-frame! pl now))
 
-    (define (moment-busy?) (and *moment* #t))
+    ;; A moment is busy only while the mixer still has its source: a mixer
+    ;; reopened under a playing moment (a test file after one that left a
+    ;; moment playing; a world reload) must not leave the bank paused for good.
+    ;; The ending holds the bank as a moment does, on the same terms
+    ;; (finale-busy? needs the piece's source).
+    (define (moment-busy?) (or (and *moment* (mixer-find MOMENT-ID) #t) (finale-busy?)))
 
     (define TEXT-WAIT-S 3.0)
     (define *waiting* #f)          ; (key . since): a room entry waiting for its texts
 
     (define (texts-ready? pl)
-      (and (or (not (place-bed-tune pl)) (tune-text (place-bed-tune pl)))
+      (and (or (not (place-bed-tune pl)) (tune-text (bed-for (place-bed-tune pl))))
            (or (not (place-moment pl)) (tune-text (place-moment pl)))))
 
     (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))

@@ -1,0 +1,19 @@
+;; tools/underhum-review.jobs: the Underhum listening page's static recordings (tools/cloudstair-render.sgl).
+;; Gains are in-play: the chamber's bed: levels (hum 1.0 air 1.0 water 0 drone 0.7), the drone at its moving
+;; level (x 0.35) unless still, the bed ducked 6 dB (0.5) when still or under a moment, the cues at their SPOTS
+;; gains, a call at CALL-GAIN x TONE-GAIN (0.32) beside its stone.
+(job "bed-chamber-moving" 45 (layer "underhum-bed" 1 (2 3 4 5) ((1 . 1.0) (2 . 1.0) (3 . 0) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245))))
+(job "bed-chamber-still" 45 (layer "underhum-bed" 0.5 (2 3 4 5) ((1 . 1.0) (2 . 1.0) (3 . 0) (4 . 0.7) (5 . 0.7) (6 . 0.7) (7 . 0.7) (8 . 0.7))))
+(job "bed-chamber-h7" 45 (layer "underhum-bed" 0.5 (2 3 4 5 7) ((1 . 1.0) (2 . 1.0) (3 . 0) (4 . 0.7) (5 . 0.7) (6 . 0.7) (7 . 0.7) (8 . 0.7))))
+(job "bed-roots" 60 (layer "underhum-bed" 1 (2 3 4 5) ((1 . 0.7) (2 . 0.3) (3 . 0.5) (4 . 0.21) (5 . 0.21) (6 . 0.21) (7 . 0.21) (8 . 0.21))))
+(job "chamber-listening-place" 30 (layer "underhum-bed" 1 (2 3 4 5) ((1 . 1.0) (2 . 1.0) (3 . 0) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245))) (layer "listening-chimes" 0.3 () ()))
+(job "after-bed-chamber" 45 (layer "underhum-after" 0.5 (2 3 4 5) ((1 . 1.0) (2 . 1.0) (3 . 0) (4 . 0.7) (5 . 0.7) (6 . 0.7) (7 . 0.7) (8 . 0.7))))
+(job "coda" 44 (layer "underhum-after" 0.5 (2 3 4 5 7) ((1 . 1.0) (2 . 1.0) (3 . 0) (4 . 0.7) (5 . 0.7) (6 . 0.7) (7 . 0.7) (8 . 0.7))) (layer "underhum-coda" 1.0 () () 1.0))
+(job "bowl-heart-calling" 24 (layer "hollow-bed" 1 (2 3 4 5) ((1 . 0.3) (2 . 0.1) (3 . 1.0) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245))) (layer "heart-call" 0.32 () ()))
+(job "bowl-heart-opens" 10 (layer "hollow-bed" 1 (2 3 4 5) ((1 . 0.3) (2 . 0.1) (3 . 1.0) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245))) (layer "ring-heart" 0.6 () () 1.0) (layer "heart-sink" 0.75 () () 1.67))
+(job "cue-ring-heart" 6 (layer "ring-heart" 0.6 () ()))
+(job "cue-miss-heart" 3 (layer "miss-heart" 0.32 () ()))
+(job "cue-heart-sink" 4 (layer "heart-sink" 0.75 () ()))
+(job "heart-call-alone" 12 (layer "heart-call" 0.5 () ()))
+(job "listening-chimes-alone" 26 (layer "listening-chimes" 0.5 () ()))
+(job "alone-the-fundamental" 260 (layer "the-fundamental" 1.0 () ()))
