@@ -1,7 +1,7 @@
 (tune version: 1 name: "drip-climb" tempo: 125 speed: 5 channels: 8
   (bus reverb: zitarev size: 0.85 damp: 0.4 mix: 0.3)
   (instruments
-    (instrument id: 1 name: "the 8th, D4" patch: (drone-fm level: 0.3 index: 0.7 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.18 release: 1.6) volume: 20 gain: 1 send: 0.45)
+    (instrument id: 1 name: "the 8th, D4" patch: (drone-fm level: 0.3 index: 1.2 index-wander: 0 mod: 3 breath-lo: 1 attack: 0.18 release: 1.6) volume: 20 gain: 1 send: 0.45)
     (instrument id: 2 name: "the 9th, E4" patch: (drone-fm level: 0.3 index: 0.7 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.18 release: 1.6 cents: 3.91) volume: 22 gain: 1 send: 0.45)
     (instrument id: 3 name: "the 10th, F#4" patch: (drone-fm level: 0.3 index: 0.7 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.18 release: 1.6 cents: -13.686) volume: 24 gain: 1 send: 0.45)
     (instrument id: 4 name: "the 11th, G#4 49 cents flat" patch: (drone-fm level: 0.3 index: 0.7 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.18 release: 1.6 cents: -48.682) volume: 26 gain: 1 send: 0.45)
