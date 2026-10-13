@@ -62,7 +62,8 @@
              (let loop ((v v) (acc (cons "(" acc)))
                (cond ((null? v) (cons ")" acc))
                      ((pair? v) (loop (cdr v) (value-tokens (car v) acc)))
-                     (else (error "wire: improper list" v)))))
+                     ;; a dotted tail: "." then the tail value, then ")"
+                     (else (cons ")" (value-tokens v (cons "." acc)))))))
             (else (error "wire: cannot encode" v))))
 
     (define (wire-join tokens)
@@ -79,10 +80,15 @@
       (let ((t (car tokens)))
         (cond ((string=? t "(")
                (let loop ((rest (cdr tokens)) (acc '()))
-                 (if (string=? (car rest) ")")
-                     (cons (reverse acc) (cdr rest))
-                     (let ((r (wire-read-value rest)))
-                       (loop (cdr r) (cons (car r) acc))))))
+                 (cond
+                   ((string=? (car rest) ")")
+                    (cons (reverse acc) (cdr rest)))
+                   ((string=? (car rest) ".")
+                    (let ((r (wire-read-value (cdr rest))))
+                      (cons (append (reverse acc) (car r)) (cdr (cdr r)))))
+                   (else
+                    (let ((r (wire-read-value rest)))
+                      (loop (cdr r) (cons (car r) acc)))))))
               ((string=? t "T") (cons #t (cdr tokens)))
               ((string=? t "F") (cons #f (cdr tokens)))
               (else

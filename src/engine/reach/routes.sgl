@@ -5,7 +5,7 @@
           (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed)
           (engine reach prof) (engine reach wire) (engine reach pool))
 
-  (export timed-route-finder route-task-handler)
+  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST)
 
   (begin
     (define (still? node)
@@ -70,6 +70,19 @@
         (if (null? cs)
             h
             (loop (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291)))))
+
+    ;; One hash of a set of values (nodes, keys, cells): their exact wire
+    ;; encodings, sorted, so the order they were found in does not count.
+    (define (route-set-digest values)
+      (let loop ((ss (list-sort string<? (map (lambda (v) (wire-join (wire-value v))) values)))
+                 (h 0))
+        (if (null? ss)
+            h
+            (loop (cdr ss)
+                  (let chars ((cs (string->list (car ss))) (h (modulo (+ (* h 131) 7) 4294967291)))
+                    (if (null? cs)
+                        h
+                        (chars (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291))))))))
 
     ;; What a trace or proof is, for comparing two computations of it.
     (define (node-sig n)

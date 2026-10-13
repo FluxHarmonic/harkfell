@@ -255,6 +255,15 @@
                                  'reachable-rooms reached)))))
               (when search-incomplete (set! complete #f))
               (prof-report (list 'profile-complete carry down))
+              ;; HARKFELL_ROUTE_DIGEST=1: the full reached-state sets, as
+              ;; order-free hashes of their exact encodings, for comparing builds.
+              (when ROUTE-DIGEST
+                (log (list 'region-sets 'carry carry 'down down
+                           'landings (length (dict-keys landings))
+                           (route-set-digest (dict-keys landings))
+                           'covered (length (dict-keys covered))
+                           (route-set-digest (dict-keys covered))
+                           'traps (length traps) (route-set-digest traps))))
               (set! failures (+ failures entry-fails (length unreached) (length traps)
                                 (if complete 0 1)))
               (log (list 'region 'carry carry 'down down 'entry-phases AIR-PERIOD
