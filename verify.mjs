@@ -214,6 +214,7 @@ if (!pageWs) { console.log("SETUP-FAILED: no chrome page target after 20 s"); sh
 const ws = new WebSocket(pageWs);
 let msgId = 0; const pending = new Map();
 let lines = [];
+let startupTrace = null;
 const errors = [];
 function send(method, params = {}) {
   return new Promise((res, rej) => { const id = ++msgId; pending.set(id, { res, rej }); ws.send(JSON.stringify({ id, method, params })); });
@@ -224,6 +225,9 @@ ws.addEventListener("message", (ev) => {
   if (msg.method === "Runtime.consoleAPICalled") {
     const text = (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
     lines.push(text);
+    if (startupTrace && (text.startsWith("harkfell: frame ") || text.startsWith("harkfell: sound cues-moving"))) {
+      startupTrace.push({ at: Date.now(), line: text });
+    }
     if (msg.params.type === "error") errors.push("console.error: " + text);
     else if (LEGS.includes("samplers") && /SAMPLER_POOL_EXHAUSTED|VALIDATE_APPENDBUF|ABORTING|panic|Aborted\(/i.test(text)) {
       errors.push("graphics abort: " + text);
@@ -898,12 +902,18 @@ if (LEGS.includes("cues")) {
 const THROTTLE = Number(opt("--cpu-throttle", "4"));
 if (LEGS.includes("startup")) {
   ran.add("startup");
+  const startupSince = Date.now();
+  startupTrace = [];
   await send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
   await open("trace&frame=on&new");
-  await evaluate(`(() => { window.__under = {}; const A = window.SigilWasmAudio;
+  await evaluate(`(() => { window.__under = {}; window.__underChanges = []; window.__underChangeCount = 0; const A = window.SigilWasmAudio;
     window.__poll = setInterval(() => { if (!A) return;
       for (let id = 0; id < 256; id++) { const n = A.sinkUnderrunsSounding(id);
-        if (n > (window.__under[id] || 0)) window.__under[id] = n; } }, 100); return true; })()`);
+        if (n > (window.__under[id] || 0)) {
+          window.__under[id] = n;
+          window.__underChangeCount++;
+          if (window.__underChanges.length < 64) window.__underChanges.push({ at: Date.now(), sink: id, frames: n });
+        } } }, 100); return true; })()`);
   await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 30000, "startup: frame start");
   await sleep(3000);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
@@ -926,6 +936,12 @@ if (LEGS.includes("startup")) {
   (ready && total === 0 ? pass : fail)("startup",
     `cpu x${THROTTLE}; movement cues ready before control: ${ready} (${readyAt >= 0 ? lines[readyAt] : "no cues-moving line"}); ` +
     `sounding underruns ${total} frames, per sink ${under}`);
+  if (!ready || total !== 0) {
+    const changes = JSON.parse(await evaluate(`JSON.stringify({ samples: window.__underChanges, count: window.__underChangeCount })`));
+    const relative = ({ at, ...sample }) => ({ ms: at - startupSince, ...sample });
+    console.log("DIAGNOSTIC startup " + JSON.stringify({ phases: startupTrace.map(relative), changes: changes.samples.map(relative), changeCount: changes.count }));
+  }
+  startupTrace = null;
 }
 
 if (LEGS.includes("errors")) {
