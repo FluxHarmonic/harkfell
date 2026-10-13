@@ -340,10 +340,22 @@
                          (pair? (cdr (cdr (cdr reports)))) (car (cdr (cdr (cdr reports))))))
             (rank (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
                        (pair? (cdddr reports)) (pair? (cdr (cdddr reports)))
-                       (car (cdr (cdddr reports))))))
+                       (car (cdr (cdddr reports)))))
+            ;; also-goal? (optional, after rank): (also-goal? node target) -> #t
+            ;; ends the search at node as if it were at target. The caller must
+            ;; know node reaches target by an actual route (the region drain's
+            ;; states proven to return home): the arrival returned is node.
+            (also-goal? (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
+                             (pair? (cdddr reports)) (pair? (cdr (cdddr reports)))
+                             (pair? (cddr (cdddr reports)))
+                             (car (cddr (cdddr reports))))))
         (define (cell-of node)
           (and (still? node)
                (rest-cell (tiles-for (timed-node-data node)) f (timed-node-body node))))
+        ;; At the target cell, or a state the caller has proven reaches it.
+        (define (at-goal? node target)
+          (and node (or (equal? (cell-of node) target)
+                        (and also-goal? (also-goal? node target) #t))))
         (define (distance-for graph target)
           (let ((prior (find (lambda (e) (and (eq? (car e) graph)
                                              (equal? (cadr e) target))) distance-cache)))
@@ -635,10 +647,10 @@
         (define (observe* trace target)
           (for-each (lambda (node) (when (still? node) (note-record! node) (record! node))) trace)
           (let* ((end (last-node trace))
-                 (goal (if (and end (equal? (cell-of end) target))
+                 (goal (if (at-goal? end target)
                            end
                            (find (lambda (node)
-                                   (and node (equal? (cell-of node) target)))
+                                   (at-goal? node target))
                                  trace))))
             (when (and end (not (still? end))) (note-record! end) (record! end))
             ;; A suggestion can overshoot a real standing goal or fail after
@@ -941,7 +953,7 @@
                 (and (not halted) (pair? nodes)
                      (let ((next (car nodes)))
                        (cond
-                         ((equal? (cell-of next) target) next)
+                         ((at-goal? next target) next)
                          (else
                           (when (eligible? next) (push! next depth))
                           (loop (cdr nodes))))))))
@@ -1041,7 +1053,7 @@
                                (try (cdr edges)))))))))
             (set! digest 0)
             (let ((found
-            (if (equal? (cell-of start) target)
+            (if (at-goal? start target)
                 start
                 (begin
                   (push! start 0)

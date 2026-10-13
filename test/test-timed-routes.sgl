@@ -571,3 +571,23 @@
       (assert-true (same-members? (cdr first-order) (cdr other-order)))
       (assert-true (same-members? (cdr other-order) (cdr first-order)))
       (assert-true (> (length (cdr first-order)) (length (cdr start-guide-only)))))))
+
+(test-group "timed routes: a caller's proven states end a search"
+  ;; (7,2) is unreachable here (the suggestion lands at TARGET), so the plain
+  ;; search fails. Told that the actual arrival at TARGET is proven to reach
+  ;; (7,2), the search ends there and returns that arrival.
+  (test "also-goal? returns the proven arrival; without it the search fails"
+    (let* ((proven? (lambda (node target)
+                      (and (equal? target '(7 . 2))
+                           (equal? (rest-cell TM F (timed-node-body node)) TARGET))))
+           (finder (lambda (also)
+                     (apply timed-route-finder step (lambda (carry) TM) F
+                            (lambda (node) (guide '(7 . 2)))
+                            (lambda (node) (timed-shelter? TM F step node))
+                            (timed-waiter TM F step) 20 (lambda (node) #t) (lambda () #t)
+                            (list #f (lambda (node) '()) #f #f #f also))))
+           (plain ((finder #f) START '(7 . 2)))
+           (told ((finder proven?) START '(7 . 2))))
+      (assert-false plain)
+      (assert-true told)
+      (assert-equal (timed-key END) (timed-key told)))))
