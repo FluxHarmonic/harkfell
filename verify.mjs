@@ -225,7 +225,8 @@ ws.addEventListener("message", (ev) => {
   if (msg.method === "Runtime.consoleAPICalled") {
     const text = (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
     lines.push(text);
-    if (startupTrace && (text.startsWith("harkfell: frame ") || text.startsWith("harkfell: sound cues-moving"))) {
+    if (startupTrace && startupTrace.length < 128 &&
+        (text.startsWith("harkfell: frame ") || text.startsWith("harkfell: sound "))) {
       startupTrace.push({ at: Date.now(), line: text });
     }
     if (msg.params.type === "error") errors.push("console.error: " + text);
@@ -907,6 +908,17 @@ if (LEGS.includes("startup")) {
   await send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
   await open("trace&frame=on&new");
   await evaluate(`(() => { window.__under = {}; window.__underChanges = []; window.__underChangeCount = 0; const A = window.SigilWasmAudio;
+    window.__startupTasks = []; window.__startupTaskCount = 0;
+    window.__startupObserver = null;
+    if (window.PerformanceObserver?.supportedEntryTypes.includes('longtask')) {
+      window.__startupObserver = new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          window.__startupTaskCount++;
+          if (window.__startupTasks.length < 64) window.__startupTasks.push({ at: performance.timeOrigin + entry.startTime, duration: entry.duration });
+        }
+      });
+      window.__startupObserver.observe({ type: 'longtask', buffered: true });
+    }
     window.__poll = setInterval(() => { if (!A) return;
       for (let id = 0; id < 256; id++) { const n = A.sinkUnderrunsSounding(id);
         if (n > (window.__under[id] || 0)) {
@@ -937,10 +949,13 @@ if (LEGS.includes("startup")) {
     `cpu x${THROTTLE}; movement cues ready before control: ${ready} (${readyAt >= 0 ? lines[readyAt] : "no cues-moving line"}); ` +
     `sounding underruns ${total} frames, per sink ${under}`);
   if (!ready || total !== 0) {
-    const changes = JSON.parse(await evaluate(`JSON.stringify({ samples: window.__underChanges, count: window.__underChangeCount })`));
+    const changes = JSON.parse(await evaluate(`JSON.stringify({ samples: window.__underChanges, count: window.__underChangeCount,
+      longTasks: window.__startupTasks, longTaskCount: window.__startupTaskCount, longTasksAvailable: !!window.__startupObserver })`));
     const relative = ({ at, ...sample }) => ({ ms: at - startupSince, ...sample });
-    console.log("DIAGNOSTIC startup " + JSON.stringify({ phases: startupTrace.map(relative), changes: changes.samples.map(relative), changeCount: changes.count }));
+    console.log("DIAGNOSTIC startup " + JSON.stringify({ phases: startupTrace.map(relative), changes: changes.samples.map(relative), changeCount: changes.count,
+      longTasks: changes.longTasks.map(relative), longTaskCount: changes.longTaskCount, longTasksAvailable: changes.longTasksAvailable }));
   }
+  await evaluate(`window.__startupObserver?.disconnect()`);
   startupTrace = null;
 }
 
