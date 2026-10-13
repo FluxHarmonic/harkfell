@@ -5,7 +5,8 @@
           (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed)
           (engine reach prof) (engine reach wire) (engine reach pool))
 
-  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST)
+  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST
+          route-rest-memo)
 
   (begin
     (define (still? node)
@@ -70,6 +71,35 @@
         (if (null? cs)
             h
             (loop (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291)))))
+
+    ;; advance, remembering its NO-INTENT steps from still states: the shelter
+    ;; certificate, the waiter's cycle proof, invariant-rest? and every wait
+    ;; step through the same few rest states, each proof from its own start.
+    ;; A step is a function of the state's timed-key (body-step resets events),
+    ;; so a remembered step is the step. At most cap states are kept; past
+    ;; that the memory starts again empty. HARKFELL_ROUTE_MEMO=0: advance.
+    (define (route-rest-memo advance cap)
+      (if (not ROUTE-MEMO)
+          advance
+          (let ((memo #{}) (n 0))
+            (lambda (node in)
+              (if (and (eq? in NO-INTENT) node (still? node))
+                  (let* ((k (timed-key node)) (prior (dict-ref memo k #f)))
+                    (if prior
+                        (begin
+                          (prof-inc! 'rest-memo-hit)
+                          (when ROUTE-CHECK
+                            (unless (equal? (node-sig (car prior)) (node-sig (advance node in)))
+                              (error "route check: a remembered rest step differs" k)))
+                          (car prior))
+                        (let ((next (advance node in)))
+                          (prof-inc! 'rest-memo-miss)
+                          (when (>= n cap) (set! memo #{}) (set! n 0))
+                          ;; boxed, so a hazard (#f) is remembered too
+                          (set! memo (dict-set memo k (list next)))
+                          (set! n (+ n 1))
+                          next)))
+                  (advance node in))))))
 
     ;; One hash of a set of values (nodes, keys, cells): their exact wire
     ;; encodings, sorted, so the order they were found in does not count.

@@ -21,6 +21,10 @@
         (content ct rooms: rooms wmap: (make-worldmap rooms 25 11 16)
                     start: '(hollow (7 2) (4 3)))))
 
+    ;; Rest states remembered per process by route-rest-memo (about 600 bytes
+    ;; each); a bound on memory, not on the search.
+    (define REST-MEMO-CAP 300000)
+
     (define (still? node)
       (and node
            (let ((b (timed-node-body node)))
@@ -106,7 +110,7 @@
     ;; (engine reach routes)' wait and replay requests.
     (define (cloudstair-region-worker source)
       (let* ((ct (cloudstair-region-content source))
-             (advance (cloudstair-stepper ct)))
+             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP)))
         (route-task-handler advance
                             (cloudstair-shelter-checker ct advance)
                             (cloudstair-waiter ct advance))))
@@ -130,7 +134,7 @@
                  (lambda (anchors steps kind cell)
                    (when (= (modulo anchors 100) 0)
                      (log (list 'candidate-geometry 'anchors anchors 'steps steps))))))
-             (advance (cloudstair-stepper ct))
+             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
              (tiles-for (cloudstair-tile-provider ct))
              (wait (cloudstair-waiter ct (prof-advance 'tick-waiter advance)))
              (shelter? (cloudstair-shelter-checker ct (prof-advance 'tick-shelter advance)))
