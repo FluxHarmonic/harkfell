@@ -949,7 +949,13 @@
       (when (and *world*
                  (memq (frame-phase *frame*) '(start-in start start-out))
                  (not (eq? *world* *front-prepared-world*)))
-        (prepare-play! *world*)
+        (warm-play! *world*)
+        ;; Warm the sharp-fit intermediate too, entirely offscreen. Its
+        ;; scratch destination is cleared by the next room draw.
+        (let ((f (view-fit win-w win-h VIEW-W VIEW-H)))
+          (ensure-targets! f)
+          (with-render-target (room-index-rt)
+            (view-present! *presenter* (room-color-rt) f)))
         (set! *front-prepared-world* *world*))
       (case (frame-phase *frame*)
         ((start-in start start-out)
