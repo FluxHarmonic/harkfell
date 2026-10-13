@@ -292,7 +292,7 @@
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete! . reports)
       (let ((distance-cache '()) (invariant-rests #{})
-            (replays #{}) (waits #{}) (rest-stages #{}) (requested #{}) (cert-pending #{}) (graph-ids (quote ())) (digest 0)
+            (replays #{}) (waits #{}) (rest-stages #{}) (requested #{}) (cert-pending #{}) (guide-keys #{}) (graph-ids (quote ())) (digest 0)
             (pool (and ROUTE-MEMO (pair? reports) (pair? (cdr reports))
                        (pair? (cddr reports)) (caddr reports)))
             ;; learn! (optional, after pool): (learn! 'shelter node bool) and
@@ -471,6 +471,7 @@
                   (when (pair? scripts)
                     (want! node (list 'recover (length scripts)) (car scripts))
                     (loop (cdr scripts))))
+                (when (guide-known? node)
                 (let* ((graph (guides node)) (gid (graph-id graph))
                        (edges (numbered-edges graph cell)))
                   (define (want-edges! stage)
@@ -499,7 +500,7 @@
                                  (learn-stage! node phase proof)
                                  (when proof (want-edges! (car proof)))))
                              (pose-worker node))))))
-                    (list AIR-GUST 0))))))
+                    (list AIR-GUST 0)))))))
         ;; Is everything node's expansion will ask for in: its waits, its
         ;; replays, and the certificates asked for its replays' still nodes?
         (define (node-ready? node)
@@ -516,6 +517,7 @@
                        (or (null? scripts)
                            (and (have? node (list 'recover (length scripts)))
                                 (loop (cdr scripts)))))
+                     (or (not (guide-known? node))
                      (let* ((graph (guides node)) (gid (graph-id graph))
                             (edges (numbered-edges graph cell)))
                        (define (edges-ready? stage)
@@ -527,11 +529,24 @@
                                        (and known
                                             (let ((proof (if (pair? known) known (dict-ref waits k))))
                                               (or (not proof) (edges-ready? (car proof)))))))
-                                   (list AIR-GUST 0))))))))
+                                   (list AIR-GUST 0)))))))))
         ;; Before the sequential loop expands node: ask for its work first,
         ;; then for the guesses' (later expansions), and wait only until
         ;; node's own answers are in. The guesses keep the workers busy while
         ;; this process observes, records and pushes.
+        ;; guides is a function of (carry, down) by contract, but computing a
+        ;; new one is work with output (logs, and in the world check the memo a
+        ;; later guide reuses). The sequential path asks for guides through
+        ;; guide-of, which notes the (carry . down) it served; prefetches and
+        ;; guesses only use guides already served, so they never compute one
+        ;; earlier than the search itself would.
+        (define (guide-key node)
+          (cons (timed-node-data node) (body-down (timed-node-body node))))
+        (define (guide-of node)
+          (let ((g (guides node)))
+            (set! guide-keys (dict-set guide-keys (guide-key node) #t))
+            g))
+        (define (guide-known? node) (dict-contains? guide-keys (guide-key node)))
         (define (prefetch! node guesses)
           (request-node! node #t)
           (for-each (lambda (g) (request-node! g #f)) guesses)
@@ -558,7 +573,7 @@
         (define (remaining node target)
           (let ((cell (cell-of node)))
             (if cell
-                (let* ((graph (guides node)) (tm (graph-tm graph))
+                (let* ((graph (guide-of node)) (tm (graph-tm graph))
                        (dist (distance-for graph target)))
                   (or (vector-ref dist (cell-index tm (car cell) (cdr cell))) 100000))
                 100000)))
@@ -752,7 +767,7 @@
                                                 target)
                                        (+ depth 1) still?)
                                (recover (cdr scripts)))))
-                    (let* ((graph (guides node)) (tm (graph-tm graph))
+                    (let* ((graph (guide-of node)) (tm (graph-tm graph))
                            (gid (graph-id graph))
                            (dist (distance-for graph target))
                            ;; Each edge is (to-cell witness . i): i, its place in
