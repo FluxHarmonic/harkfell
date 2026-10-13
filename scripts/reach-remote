@@ -98,8 +98,12 @@ leg() {
   (
     cd "$dir"
     s=$(date +%s.%N)
-    env "${envs[@]}" timeout "$limit" ./build/release/bin/harkfell "$@" > "$HOME/work/out/$name.log" 2>&1 < /dev/null
-    r=$?
+    # Each output line gets its arrival second in front ("<epoch> <line>"),
+    # stamped by bash itself, so a log shows progress over time; strip the
+    # first field to recover exactly what harkfell printed.
+    env "${envs[@]}" timeout "$limit" ./build/release/bin/harkfell "$@" 2>&1 < /dev/null \
+      | while IFS= read -r line; do printf "%(%s)T %s\n" -1 "$line"; done > "$HOME/work/out/$name.log"
+    r=${PIPESTATUS[0]}
     e=$(date +%s.%N)
     echo "$name rc=$r wall=$(awk -v a="$s" -v b="$e" 'BEGIN{printf "%.1f", b-a}')s commit=$commit env=${envs[*]} args=$*" > "$HOME/work/out/$name.result"
   ) &

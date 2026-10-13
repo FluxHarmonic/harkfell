@@ -8,7 +8,7 @@
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
-  (export cloudstair-region-content cloudstair-region-check
+  (export cloudstair-region-content cloudstair-region-check cloudstair-region-worker
           cloudstair-reached-rooms cloudstair-entrance-probe)
 
   (begin
@@ -101,7 +101,19 @@
                   (set! cache (dict-set cache key reached))
                   reached))))))
 
-    (define (cloudstair-region-check source profiles bound log)
+    ;; A worker for cloudstair-region-check's pool: the same content, advance,
+    ;; shelter certificates and waiter as the check builds, answering
+    ;; (engine reach routes)' wait and replay requests.
+    (define (cloudstair-region-worker source)
+      (let* ((ct (cloudstair-region-content source))
+             (advance (cloudstair-stepper ct)))
+        (route-task-handler advance
+                            (cloudstair-shelter-checker ct advance)
+                            (cloudstair-waiter ct advance))))
+
+    ;; pool (optional): an (engine reach pool) of cloudstair-region-worker
+    ;; processes. It changes how long the searches take, not what they find.
+    (define (cloudstair-region-check source profiles bound log . pool)
       (log '(candidate-geometry starting actual-replay-required))
       (let* ((ct (cloudstair-region-content source))
              (home (start-cell ct))
@@ -154,7 +166,7 @@
                                        'expanded expanded 'pending pending 'depth depth
                                        'at (cell-of node) 'carry (timed-node-data node)
                                        'tau (body-tau (timed-node-body node)))))
-                          proposals))))
+                          proposals (and (pair? pool) (car pool))))))
               (unless prior (set! route-cache (cons (cons record! route) route-cache)))
               (route start target))))
         (for-each

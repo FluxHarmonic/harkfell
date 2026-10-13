@@ -50,9 +50,11 @@
           (harkfell cloudstair region)
           (harkfell cloudstair timing)
           (harkfell cloudstair progression)
-          (harkfell source))
+          (harkfell source)
+          (engine reach pool)
+          (only (sigil process) getenv executable-path))
 
-  (export room-check-main arg-value)
+  (export room-check-main reach-worker-main arg-value)
 
   (begin
     (define (say . parts) (display (apply string-append parts)) (newline))
@@ -61,6 +63,24 @@
     (define (arg-value args flag)
       (let ((m (member flag args)))
         (and m (pair? (cdr m)) (cadr m))))
+
+    ;; Worker processes for the regional search: --workers N, else
+    ;; HARKFELL_REACH_WORKERS, else none. Workers change the time, not
+    ;; the result ((engine reach pool)).
+    (define (reach-worker-count args)
+      (let ((v (or (arg-value args "--workers") (getenv "HARKFELL_REACH_WORKERS"))))
+        (or (and v (string->number v)) 0)))
+
+    ;; harkfell --reach-worker cloudstair-region [--world DIR]: one pool
+    ;; worker, request lines on stdin, answers on stdout, nothing else
+    ;; printed there. Ends at end of input.
+    (define (reach-worker-main args)
+      (let* ((dir (or (arg-value args "--world") "world"))
+             (ct (load-content (read-world-source dir))))
+        (cond ((member "cloudstair-region" args)
+               (pool-serve (cloudstair-region-worker ct))
+               0)
+              (else (display "reach-worker: unknown kind" (current-error-port)) 2))))
 
     (define (now-s) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
 
@@ -146,11 +166,20 @@
                          " failures (regional/world reach NOT established)")
                     (if (= failures 0) 0 1)))
                 ((member "--cloudstair-region" args)
-                  (let ((failures
+                  (let* ((n (reach-worker-count args))
+                         (pool (and (> n 0)
+                                    (make-pool (list (executable-path) "--reach-worker"
+                                                     "cloudstair-region" "--world" dir)
+                                               n)))
+                         (failures
                           (cloudstair-region-check ct
                             (if (member "--quick" args) (list (cons '(2 4) #t))
                                 (cloudstair-diagnostic-profiles))
-                            10000 (lambda (record) (write record) (newline)))))
+                            (let ((b (arg-value args "--region-bound")))
+                              (or (and b (string->number b)) 10000))
+                            (lambda (record) (write record) (newline))
+                            pool)))
+                    (when pool (pool-close! pool))
                     (say (if (= failures 0) "PASS" "FAIL")
                          " Cloudstair regional replay: " (number->string failures)
                          " failures (final full-world progression NOT established)")
