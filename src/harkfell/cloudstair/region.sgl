@@ -25,6 +25,18 @@
     ;; each); a bound on memory, not on the search.
     (define REST-MEMO-CAP 300000)
 
+    ;; A learned certificate, recomputed and compared under
+    ;; HARKFELL_ROUTE_CHECK=1 (an error on any difference).
+    (define (cert-sig v)
+      (if (pair? v)
+          (list (timed-key (car v)) (body-events (timed-node-body (car v))) (cdr v))
+          v))
+    (define (checked v recompute)
+      (when ROUTE-CHECK
+        (unless (equal? (cert-sig v) (cert-sig (recompute)))
+          (error "route check: a learned certificate differs")))
+      v)
+
     (define (still? node)
       (and node
            (let ((b (timed-node-body node)))
@@ -136,8 +148,30 @@
                      (log (list 'candidate-geometry 'anchors anchors 'steps steps))))))
              (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
              (tiles-for (cloudstair-tile-provider ct))
-             (wait (cloudstair-waiter ct (prof-advance 'tick-waiter advance)))
-             (shelter? (cloudstair-shelter-checker ct (prof-advance 'tick-shelter advance)))
+             (wait0 (cloudstair-waiter ct (prof-advance (quote tick-waiter) advance)))
+             (shelter0? (cloudstair-shelter-checker ct (prof-advance (quote tick-shelter) advance)))
+             ;; Certificates a pool worker computed (its shelter? of a pose, its
+             ;; wait from a node) are filed here and answered as this process
+             ;; would have computed them; both are functions of their key.
+             (learned #{}) (learned-count 0)
+             (learn! (lambda (kind node . rest)
+                       (when (>= learned-count REST-MEMO-CAP)
+                         (set! learned #{}) (set! learned-count 0))
+                       (let ((k (if (eq? kind (quote shelter))
+                                    (cons (quote shelter) (pose-key node))
+                                    (cons (car rest) (timed-key node)))))
+                         (unless (dict-contains? learned k)
+                           (set! learned (dict-set learned k
+                                                   (if (eq? kind (quote shelter)) (car rest) (cadr rest))))
+                           (set! learned-count (+ learned-count 1))))))
+             (shelter? (if (not (and (pair? pool) (car pool))) shelter0?
+                         (lambda (node)
+                           (let ((k (cons (quote shelter) (pose-key node))))
+                             (if (dict-contains? learned k) (checked (dict-ref learned k) (lambda () (shelter0? node))) (shelter0? node))))))
+             (wait (if (not (and (pair? pool) (car pool))) wait0
+                     (lambda (node tau)
+                       (let ((k (cons tau (timed-key node))))
+                         (if (dict-contains? learned k) (checked (dict-ref learned k) (lambda () (wait0 node tau))) (wait0 node tau))))))
              (proposals (cloudstair-route-proposals ct))
              (targets (apply append
                         (map (lambda (p)
@@ -170,7 +204,7 @@
                                        'expanded expanded 'pending pending 'depth depth
                                        'at (cell-of node) 'carry (timed-node-data node)
                                        'tau (body-tau (timed-node-body node)))))
-                          proposals (and (pair? pool) (car pool))))))
+                          proposals (and (pair? pool) (car pool)) learn!))))
               (unless prior (set! route-cache (cons (cons record! route) route-cache)))
               (route start target))))
         (for-each

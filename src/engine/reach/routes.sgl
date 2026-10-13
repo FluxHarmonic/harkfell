@@ -5,8 +5,8 @@
           (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed)
           (engine reach prof) (engine reach wire) (engine reach pool))
 
-  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST
-          route-rest-memo)
+  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST ROUTE-CHECK
+          route-rest-memo pose-key)
 
   (begin
     (define (still? node)
@@ -137,12 +137,47 @@
                  (append (make-list 120 (intent v: v))
                          (make-list 180 NO-INTENT))) '(-1 1)))))
 
+    ;; The pose with tau removed: a key for certificates that hold at every
+    ;; phase of one actual rest, never a simulated arrival.
+    (define (pose-key node)
+      (timed-key (timed-node node body: (body (timed-node-body node) tau: 0))))
+
+    ;; A still shelter whose every field but tau stays put, tick for tick,
+    ;; through two whole cycles of real NO-INTENT steps (invariant-rest?).
+    (define (route-invariant-proof advance shelter? node)
+      (let ((key (pose-key node)))
+        (and (shelter? node)
+             (let loop ((node node) (left (* 2 AIR-PERIOD)))
+               (if (= left 0)
+                   #t
+                   (begin
+                     (prof-inc! 'tick-inv)
+                     (let ((next (advance node NO-INTENT)))
+                       (and (timed-wait? node next)
+                            (equal? key (pose-key next))
+                            (loop next (- left 1))))))))))
+
     ;; --- Worker side --------------------------------------------------------
     ;; A worker holds the same advance, shelter? and wait as the search (built
     ;; from the same content), answers one request line with one line:
     ;;   "W <node> <phase>"   -> "W <stage-node> <ticks>" | "W F"   (a wait)
     ;;   "P <node> <script>"  -> "P <n> <node>..."  (a compressed replay)
     (define (route-task-handler advance shelter? wait)
+      (let ((invariants #{}))   ; pose -> invariant-rest proof, this worker
+      ;; A still node's certificates: shelter?, invariant-rest?, its wait to
+      ;; phase 0 (record!'s align), as tokens.
+      (define (certify node)
+        (let* ((key (pose-key node))
+               (inv (if (dict-contains? invariants key)
+                        (dict-ref invariants key)
+                        (let ((v (route-invariant-proof advance shelter? node)))
+                          (set! invariants (dict-set invariants key v))
+                          v)))
+               (proof (wait node 0)))
+          (append (list (if (shelter? node) "T" "F") (if inv "T" "F"))
+                  (if proof
+                      (append (wire-node (car proof)) (list (number->string (cdr proof))))
+                      (list "F")))))
       (lambda (line)
         (let* ((toks (wire-tokens line)) (kind (car toks))
                (r (wire-read-node (cdr toks))) (node (car r)) (rest (cdr r)))
@@ -154,12 +189,18 @@
                                       (append (wire-node (car proof))
                                               (list (number->string (cdr proof))))
                                       (list "F"))))))
+            ;; "P <node> <script>" -> "P <n> <node>... <m> <cert>...": the
+            ;; compressed replay, then for each of its m still nodes, in order,
+            ;; the certificates observe and record! will ask of it.
             ((string=? kind "P")
-             (let ((trace (route-compress
-                            (route-replay advance shelter? node (wire-read-script (car rest))))))
+             (let* ((trace (route-compress
+                             (route-replay advance shelter? node (wire-read-script (car rest)))))
+                    (stills (filter still? trace)))
                (wire-join (append (list "P" (number->string (length trace)))
-                                  (apply append (map wire-node trace))))))
-            (else (error "route worker: bad request" kind))))))
+                                  (apply append (map wire-node trace))
+                                  (list (number->string (length stills)))
+                                  (apply append (map certify stills))))))
+            (else (error "route worker: bad request" kind)))))))
 
     (define (read-proof line)
       (let ((toks (cdr (wire-tokens line))))
@@ -168,14 +209,27 @@
             (let ((r (wire-read-node toks)))
               (cons (car r) (string->number (cadr r)))))))
 
+    ;; A "P" response: (trace . certs), certs one (shelter? invariant? proof)
+    ;; per still node of trace, in order.
     (define (read-trace line)
       (let loop ((toks (cddr (wire-tokens line)))
                  (n (string->number (cadr (wire-tokens line)))) (acc '()))
         (if (= n 0)
-            (reverse acc)
+            (let certs ((toks (cdr toks)) (m (string->number (car toks))) (cs '()))
+              (if (= m 0)
+                  (cons (reverse acc) (reverse cs))
+                  (let* ((shelter (string=? (car toks) "T"))
+                         (inv (string=? (cadr toks) "T"))
+                         (toks (cddr toks)))
+                    (if (string=? (car toks) "F")
+                        (certs (cdr toks) (- m 1) (cons (list shelter inv #f) cs))
+                        (let ((r (wire-read-node toks)))
+                          (certs (cddr r) (- m 1)
+                                 (cons (list shelter inv
+                                             (cons (car r) (string->number (cadr r))))
+                                       cs)))))))
             (let ((r (wire-read-node toks)))
               (loop (cdr r) (- n 1) (cons (car r) acc))))))
-
     (define (distances graph target)
       (let* ((tm (graph-tm graph)) (n (* (tilemap-cols tm) (tilemap-rows tm)))
              (incoming (make-vector n '())) (dist (make-vector n #f)))
@@ -213,9 +267,14 @@
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete! . reports)
       (let ((distance-cache '()) (invariant-rests #{})
-            (replays #{}) (waits #{}) (rest-stages #{}) (graph-ids (quote ())) (digest 0)
+            (replays #{}) (waits #{}) (rest-stages #{}) (requested #{}) (graph-ids (quote ())) (digest 0)
             (pool (and ROUTE-MEMO (pair? reports) (pair? (cdr reports))
-                       (pair? (cddr reports)) (caddr reports))))
+                       (pair? (cddr reports)) (caddr reports)))
+            ;; learn! (optional, after pool): (learn! 'shelter node bool) and
+            ;; (learn! 'wait node phase proof) hand the caller certificates a
+            ;; worker computed, for the caller's own shelter? and wait.
+            (learn! (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
+                         (pair? (cdr (cdr (cdr reports)))) (car (cdr (cdr (cdr reports)))))))
         (define (cell-of node)
           (and (still? node)
                (rest-cell (tiles-for (timed-node-data node)) f (timed-node-body node))))
@@ -319,16 +378,45 @@
                 (reverse acc)
                 (number (cdr es) (+ i 1)
                         (cons (cons (caar es) (cons (cdar es) i)) acc)))))
-        (define (prefetch! node cell)
-          (let ((asked #{}))
+        ;; File a worker's certificates for the still nodes of a replay: each
+        ;; is a function of the node (invariant-rest? of its pose), so filing
+        ;; one is the same as computing it here.
+        (define (learn-certs! stills certs)
+          (for-each
+            (lambda (node cert)
+              (let ((shelter (car cert)) (inv (cadr cert)) (proof (caddr cert))
+                    (key (rotation-key node)))
+                (when ROUTE-CHECK
+                  (unless (eq? inv (route-invariant-proof advance shelter? node))
+                    (error "route check: a worker's invariant-rest certificate differs" key)))
+                (unless (dict-contains? invariant-rests key)
+                  (set! invariant-rests (dict-set invariant-rests key inv)))
+                (let ((wk (cons 0 (timed-key node))))
+                  (unless (dict-contains? waits wk)
+                    (set! waits (dict-set waits wk proof))
+                    (learn-stage! node 0 proof)))
+                (when learn!
+                  (learn! 'shelter node shelter)
+                  (learn! 'wait node 0 proof))))
+            stills certs))
+        ;; Ask the pool for every wait and replay expanding node could need
+        ;; that is neither known nor already asked for. urgent: ahead of the
+        ;; queue (the node about to be expanded), else behind it (a guess at
+        ;; a later expansion; its answers are kept by exact key either way).
+        (define (request-node! node urgent?)
+          (let ((cell (cell-of node))
+                (submit! (if urgent? pool-submit-urgent! pool-submit!)))
             (define (want! stage key script)
               (let ((k (cons key (timed-key stage))))
-                (unless (or (dict-contains? replays k) (dict-contains? asked k))
-                  (set! asked (dict-set asked k #t))
+                (unless (or (dict-contains? replays k) (dict-contains? requested k))
+                  (set! requested (dict-set requested k #t))
                   (prof-inc! 'pool-replay)
-                  (pool-submit! pool
+                  (submit! pool
                     (wire-join (append (list "P") (wire-node stage) (list (wire-script script))))
-                    (lambda (line) (set! replays (dict-set replays k (read-trace line))))))))
+                    (lambda (line)
+                      (let ((got (read-trace line)))
+                        (set! replays (dict-set replays k (car got)))
+                        (learn-certs! (filter still? (car got)) (cdr got))))))))
             (if (not cell)
                 (let loop ((scripts RECOVER-SCRIPTS))
                   (when (pair? scripts)
@@ -346,21 +434,52 @@
                     (lambda (phase)
                       (let* ((k (cons phase (timed-key node)))
                              (known (or (dict-contains? waits k) (rest-stage node phase))))
-                        (if known
-                            (let ((proof (if (pair? known) known (dict-ref waits k))))
-                              (when proof (want-edges! (car proof))))
-                            (begin
-                              (prof-inc! 'pool-wait)
-                              (pool-submit! pool
-                                (wire-join (append (list "W") (wire-node node)
-                                                   (list (number->string phase))))
-                                (lambda (line)
-                                  (let ((proof (read-proof line)))
-                                    (set! waits (dict-set waits k proof))
-                                    (learn-stage! node phase proof)
-                                    (when proof (want-edges! (car proof))))))))))
-                    (list AIR-GUST 0))))
-            (prof-time 'time-pool (lambda () (pool-drain! pool)))))
+                        (cond
+                          (known
+                           (let ((proof (if (pair? known) known (dict-ref waits k))))
+                             (when proof (want-edges! (car proof)))))
+                          ((not (dict-contains? requested k))
+                           (set! requested (dict-set requested k #t))
+                           (prof-inc! 'pool-wait)
+                           (submit! pool
+                             (wire-join (append (list "W") (wire-node node)
+                                                (list (number->string phase))))
+                             (lambda (line)
+                               (let ((proof (read-proof line)))
+                                 (set! waits (dict-set waits k proof))
+                                 (learn-stage! node phase proof)
+                                 (when proof (want-edges! (car proof))))))))))
+                    (list AIR-GUST 0))))))
+        ;; Is every wait and replay node's expansion will ask for known?
+        (define (node-ready? node)
+          (let ((cell (cell-of node)))
+            (define (have? stage key) (dict-contains? replays (cons key (timed-key stage))))
+            (if (not cell)
+                (let loop ((scripts RECOVER-SCRIPTS))
+                  (or (null? scripts)
+                      (and (have? node (list 'recover (length scripts)))
+                           (loop (cdr scripts)))))
+                (let* ((graph (guides node)) (gid (graph-id graph))
+                       (edges (numbered-edges graph cell)))
+                  (define (edges-ready? stage)
+                    (every (lambda (e) (have? stage (list gid cell (cdr (cdr e))))) edges))
+                  (and (edges-ready? node)
+                       (every (lambda (phase)
+                                (let* ((k (cons phase (timed-key node)))
+                                       (known (or (dict-contains? waits k) (rest-stage node phase))))
+                                  (and known
+                                       (let ((proof (if (pair? known) known (dict-ref waits k))))
+                                         (or (not proof) (edges-ready? (car proof)))))))
+                              (list AIR-GUST 0)))))))
+        ;; Before the sequential loop expands node: ask for its work first,
+        ;; then for the guesses' (later expansions), and wait only until
+        ;; node's own answers are in. The guesses keep the workers busy while
+        ;; this process observes, records and pushes.
+        (define (prefetch! node guesses)
+          (request-node! node #t)
+          (for-each (lambda (g) (request-node! g #f)) guesses)
+          (prof-time 'time-pool
+            (lambda () (pool-drain-until! pool (lambda () (node-ready? node))))))
         ;; Keys with tau removed describe poses for waiting certificates,
         ;; never simulated arrivals.
         ;; Hidden fields and product state must remain identical on every
@@ -376,16 +495,7 @@
                              (prof-time 'time-inv
                                (lambda ()
                                  (prof-inc! 'inv-miss)
-                                 (and (shelter? node)
-                                      (let loop ((node node) (left (* 2 AIR-PERIOD)))
-                                        (if (= left 0)
-                                            #t
-                                            (begin
-                                              (prof-inc! 'tick-inv)
-                                              (let ((next (advance node NO-INTENT)))
-                                                (and (timed-wait? node next)
-                                                     (equal? key (rotation-key next))
-                                                     (loop next (- left 1))))))))))))
+                                 (route-invariant-proof advance shelter? node)))))
                        (set! invariant-rests (dict-set invariant-rests key proved))
                        proved)))))
         (define (remaining node target)
@@ -563,7 +673,17 @@
                                                    (try (cdr families)))))))
                                    (depart (cdr phases)))))))))
             (define (expand node depth)
-              (when pool (prefetch! node (cell-of node)))
+              (when pool
+                ;; guesses: the heads of the queue the next pop prefers, then
+                ;; of the other (turn has already flipped for the next pop)
+                (prefetch! node
+                  (let ((head (lambda (q)
+                                (and (> (vector-ref q 1) 0)
+                                     (vector-ref (vector-ref (vector-ref q 0) 0) 0)))))
+                    (filter (lambda (x) x)
+                            (if (eq? turn 'physical)
+                                (list (head physical) (head guided))
+                                (list (head guided) (head physical)))))))
               (or (authored node depth) (expand-spatial node depth)))
             (define (expand-spatial node depth)
               (let ((cell (cell-of node)))
@@ -641,6 +761,10 @@
                               (set! seen (dict-set seen key depth))
                               (set! count (+ count 1))
                               (when ROUTE-DIGEST (set! digest (digest-step digest "E" node)))
+                              (when (and ROUTE-DIGEST (= (modulo count 250) 0))
+                                (write (list (quote route-digest-at) (quote target) target
+                                             (quote expanded) count (quote hash) digest))
+                                (newline))
                               ;; Stale duplicate entries cost no expansion. Switch
                               ;; priorities only after a genuine state expansion.
                               (set! turn (if (eq? turn 'physical) 'guided 'physical))
