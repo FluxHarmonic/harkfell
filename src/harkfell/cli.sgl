@@ -259,8 +259,14 @@
                                                n)))
                          (failures
                           (cloudstair-region-check ct
-                            (if (member "--quick" args) (list (cons '(2 4) #t))
-                                (cloudstair-diagnostic-profiles))
+                            ;; --carry 2,3,4: one entry profile, that carry with
+                            ;; down (the 0.4 entries are (2 4) and (2 3 4));
+                            ;; --quick: (2 4) with down; else the diagnostic set
+                            (let ((cv (arg-value args "--carry")))
+                              (cond (cv (list (cons (list-sort < (filter integer? (map string->number (string-split cv ","))))
+                                                    #t)))
+                                    ((member "--quick" args) (list (cons '(2 4) #t)))
+                                    (else (cloudstair-diagnostic-profiles))))
                             (let ((b (arg-value args "--region-bound")))
                               (or (and b (string->number b)) 10000))
                             (lambda (record) (write record) (newline))
