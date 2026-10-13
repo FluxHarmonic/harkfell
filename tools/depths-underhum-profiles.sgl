@@ -1,0 +1,20 @@
+;;; Actual authored regional profiles affected by the K classification.
+;;; This checks bounded coverage/return, not full-world acquisition.
+(import (harkfell source)
+        (harkfell content)
+        (harkfell depths reach))
+
+(define (line datum)
+  (write datum)
+  (newline))
+
+(define failures
+  (depths-region-check
+    (load-content (read-world-source "world"))
+    'underhum
+    (list (cons '(2 3 4 5) #f) (cons '(2 3 4 5) #t))
+    line))
+
+(line (list 'underhum-affected-profiles 'failures failures))
+(unless (= failures 0)
+  (error "Underhum affected profiles failed" failures))
