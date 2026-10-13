@@ -69,6 +69,13 @@
     ;; state. Observation only.
     (define ROUTE-DIGEST
       (equal? (getenv "HARKFELL_ROUTE_DIGEST") "1"))
+    ;; HARKFELL_ROUTE_REPORT=1: a search that ends without its target prints
+    ;; why it stopped, the reached states nearest the target per cell, the
+    ;; frontier's makeup, and how far along the guide's own path the actual
+    ;; states got (route-report lines). Observation only: it reads what the
+    ;; search already computed and never changes what it pushes or expands.
+    (define ROUTE-REPORT
+      (equal? (getenv "HARKFELL_ROUTE_REPORT") "1"))
     (define (digest-step h tag node)
       (let loop ((cs (string->list (wire-join (cons tag (wire-node node)))))
                  (h h))
@@ -646,11 +653,122 @@
           (let ((queued #{}) (seen #{}) (count 0) (halted #f)
                 (physical (vector (make-vector 64 #f) 0 2))
                 (guided (vector (make-vector 64 #f) 0 5))
-                (turn 'physical) (serial 0))
-            (define (stop!)
+                (turn 'physical) (serial 0)
+                (stop-why #f) (cell-stats #{}) (cell-taus #{}))
+            (define (stop! why)
               (unless halted
                 (set! halted #t)
+                (set! stop-why why)
                 (incomplete!)))
+            ;; HARKFELL_ROUTE_REPORT: per cell (#f for a moving state), a
+            ;; vector #(pushed expanded distinct-taus min-depth best-remaining
+            ;; best-node best-depth) over every state pushed.
+            (define (stats-of cell)
+              (or (dict-ref cell-stats cell #f)
+                  (let ((v (vector 0 0 0 #f #f #f #f)))
+                    (set! cell-stats (dict-set cell-stats cell v))
+                    v)))
+            (define (report-push! node depth left)
+              (let* ((cell (cell-of node)) (v (stats-of cell))
+                     (tk (cons cell (body-tau (timed-node-body node)))))
+                (vector-set! v 0 (+ (vector-ref v 0) 1))
+                (unless (dict-contains? cell-taus tk)
+                  (set! cell-taus (dict-set cell-taus tk #t))
+                  (vector-set! v 2 (+ (vector-ref v 2) 1)))
+                (when (or (not (vector-ref v 3)) (< depth (vector-ref v 3)))
+                  (vector-set! v 3 depth))
+                (when (or (not (vector-ref v 4)) (< left (vector-ref v 4)))
+                  (vector-set! v 4 left)
+                  (vector-set! v 5 node)
+                  (vector-set! v 6 depth))))
+            (define (report-expand! node)
+              (let ((v (stats-of (cell-of node))))
+                (vector-set! v 1 (+ (vector-ref v 1) 1))))
+            (define (state-summary node depth)
+              (let ((b (timed-node-body node)))
+                (list 'cell (cell-of node) 'tau (body-tau b) 'depth depth
+                      'carry (timed-node-data node) 'down (body-down b)
+                      'mode (body-mode b) 'v (cons (body-vx b) (body-vy b)))))
+            (define (manhattan cell)
+              (if cell
+                  (+ (abs (- (car cell) (car target))) (abs (- (cdr cell) (cdr target))))
+                  100000))
+            (define (top n xs)
+              (let take ((xs xs) (n n) (acc '()))
+                (if (or (null? xs) (= n 0)) (reverse acc) (take (cdr xs) (- n 1) (cons (car xs) acc)))))
+            (define (tally xs)
+              ;; ((value . count) ...), most frequent first
+              (let ((d (let count ((xs xs) (d #{}))
+                         (if (null? xs) d
+                             (count (cdr xs) (dict-set d (car xs) (+ 1 (dict-ref d (car xs) 0))))))))
+                (list-sort (lambda (a b) (> (cdr a) (cdr b))) (dict-entries d))))
+            (define (route-report!)
+              (let* ((live
+                       ;; the physical heap's entries the search would still expand
+                       (let ((heap (vector-ref physical 0)))
+                         (let scan ((i 0) (acc '()))
+                           (if (>= i (vector-ref physical 1)) acc
+                               (let* ((e (vector-ref heap i)) (k (timed-key (vector-ref e 0))))
+                                 (scan (+ i 1)
+                                       (if (and (= (dict-ref queued k) (vector-ref e 1))
+                                                (not (and (dict-contains? seen k)
+                                                          (<= (dict-ref seen k) (vector-ref e 1)))))
+                                           (cons e acc) acc)))))))
+                     (cells (filter car (dict-entries cell-stats)))
+                     (near (list-sort
+                             (lambda (a b)
+                               (let ((ra (vector-ref (cdr a) 4)) (rb (vector-ref (cdr b) 4)))
+                                 (or (< ra rb)
+                                     (and (= ra rb) (< (manhattan (car a)) (manhattan (car b)))))))
+                             cells))
+                     (graph (guide-of start))
+                     (tm (graph-tm graph))
+                     (dist (distance-for graph target))
+                     (dist-at (lambda (cell) (vector-ref dist (cell-index tm (car cell) (cdr cell))))))
+                (write (list 'route-report 'target target 'expanded count 'stop stop-why
+                             'heaps (list (vector-ref physical 1) (vector-ref guided 1))
+                             'live (length live) 'cells-reached (length cells)
+                             'start (state-summary start 0)
+                             'guide-hops-from-start (and (cell-of start) (dist-at (cell-of start)))))
+                (newline)
+                ;; the guide's own path: from the start cell, one hop nearer each step
+                (when (and (cell-of start) (dist-at (cell-of start)))
+                  (let walk ((cell (cell-of start)) (acc '()))
+                    (let* ((d (dist-at cell)) (v (dict-ref cell-stats cell #f))
+                           (here (list cell d (if v (vector-ref v 0) 0) (if v (vector-ref v 1) 0)
+                                       (if v (vector-ref v 2) 0)))
+                           (next (find (lambda (e) (let ((dn (dist-at (car e)))) (and dn (= dn (- d 1)))))
+                                       (graph-edges-from graph cell))))
+                      (if (or (= d 0) (not next))
+                          (begin
+                            (write (list 'route-report-guide-path '(cell hops-left pushed expanded taus)
+                                         (reverse (cons here acc))))
+                            (newline))
+                          (walk (car next) (cons here acc))))))
+                (for-each
+                  (lambda (e)
+                    (let ((v (cdr e)))
+                      (write (list 'route-report-near 'cell (car e) 'guide-hops (vector-ref v 4)
+                                   'manhattan (manhattan (car e))
+                                   'pushed (vector-ref v 0) 'expanded (vector-ref v 1)
+                                   'taus (vector-ref v 2) 'min-depth (vector-ref v 3)
+                                   'best (state-summary (vector-ref v 5) (vector-ref v 6))))
+                      (newline)))
+                  (top 15 near))
+                (let ((by-cell (tally (map (lambda (e) (cell-of (vector-ref e 0))) live))))
+                  (write (list 'route-report-frontier 'live (length live)
+                               'distinct-cells (length by-cell)
+                               'distinct-cell-taus
+                               (length (tally (map (lambda (e) (cons (cell-of (vector-ref e 0))
+                                                                     (body-tau (timed-node-body (vector-ref e 0)))))
+                                                   live)))
+                               'by-cell (top 15 by-cell)
+                               'by-guide-hops (list-sort (lambda (a b) (< (car a) (car b)))
+                                                         (tally (map (lambda (e) (- (vector-ref e 5) (vector-ref e 1))) live)))
+                               'by-depth (list-sort (lambda (a b) (< (car a) (car b)))
+                                                    (tally (map (lambda (e) (vector-ref e 1)) live)))
+                               'by-carry (tally (map (lambda (e) (timed-node-data (vector-ref e 0))) live))))
+                  (newline))))
             (define (physical-distance node)
               (let ((cell (cell-of node)))
                 (if cell
@@ -695,7 +813,7 @@
                     ((or (> depth 2048)
                          (>= (vector-ref physical 1) (* 8 (max 1 bound)))
                          (>= (vector-ref guided 1) (* 8 (max 1 bound))))
-                     (stop!))
+                     (stop! (if (> depth 2048) 'depth-2048 'frontier)))
                     (else
                      (set! queued (dict-set queued key depth))
                      (let* ((distance (physical-distance node))
@@ -703,7 +821,9 @@
                                            (+ depth (remaining node target)))))
                        (set! serial (+ serial 1))
                        (push-entry! physical entry)
-                       (push-entry! guided entry)))))))
+                       (push-entry! guided entry)
+                       (when ROUTE-REPORT
+                         (report-push! node depth (- (vector-ref entry 5) depth)))))))))
             (define (pop! queue)
               (let* ((heap (vector-ref queue 0))
                      (size (- (vector-ref queue 1) 1))
@@ -851,10 +971,11 @@
                              ((< (dict-ref queued key) depth) (search))
                              ((and (dict-contains? seen key)
                                    (<= (dict-ref seen key) depth)) (search))
-                             ((>= count bound) (stop!) #f)
+                             ((>= count bound) (stop! 'expansions) #f)
                              (else
                               (set! seen (dict-set seen key depth))
                               (set! count (+ count 1))
+                              (when ROUTE-REPORT (report-expand! node))
                               (when ROUTE-DIGEST (prof-time (quote time-digest) (lambda () (set! digest (digest-step digest "E" node)))))
                               (when (and ROUTE-DIGEST (= (modulo count 250) 0))
                                 (write (list (quote route-digest-at) (quote target) target
@@ -870,6 +991,7 @@
                                 (prof-report (list 'target target 'count count)))
                               (or (prof-time 'time-expand (lambda () (expand node depth)))
                                   (search)))))))))))
+              (when (and ROUTE-REPORT (not found)) (route-report!))
               (when ROUTE-DIGEST
                 (write (list (quote route-digest) (quote target) target (quote expanded) count
                              (quote found) (and found (wire-join (wire-node found)))
