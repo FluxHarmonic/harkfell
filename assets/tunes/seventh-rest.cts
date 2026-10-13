@@ -9,7 +9,8 @@
     (instrument id: 26 name: "glass voice, A#" patch: (drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 1.1 cents: 40.528) volume: 36 gain: 0.6 send: 0.45)
     (instrument id: 27 name: "glass voice, C" patch: (drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 1.1 cents: -31.174) volume: 36 gain: 0.6 send: 0.45)
     (instrument id: 28 name: "glass voice, C#" patch: (drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 1.1 cents: -11.731) volume: 36 gain: 0.6 send: 0.45)
-    (instrument id: 31 name: "the series, D" patch: (drone-fm level: 0.3 index: 0.6 index-wander: 0.2 index-rate: 0.08 mod: 1 breath-lo: 1 attack: 1.6 release: 3 seed: 31) volume: 24 gain: 0.6 send: 0.45)
+    (instrument id: 31 name: "the series, D" patch: (drone-fm level: 0.3 index: 0.6 index-wander: 0.2 index-rate: 0.08 mod: 4 breath-lo: 1 attack: 1.6 release: 3 seed: 31) volume: 24 gain: 0.6 send: 0.45)
+    (instrument id: 32 name: "the series, D4" patch: (drone-fm level: 0.3 index: 1.5 index-wander: 0.2 index-rate: 0.08 mod: 4 breath-lo: 1 attack: 1.6 release: 3 seed: 32) volume: 24 gain: 0.6 send: 0.45)
     (instrument id: 33 name: "the series, F#" patch: (drone-fm level: 0.3 index: 0.6 index-wander: 0.2 index-rate: 0.08 mod: 1 breath-lo: 1 attack: 1.6 release: 3 cents: -13.686 seed: 33) volume: 24 gain: 0.6 send: 0.45)
     (instrument id: 35 name: "the series, A" patch: (drone-fm level: 0.3 index: 0.6 index-wander: 0.2 index-rate: 0.08 mod: 1 breath-lo: 1 attack: 1.6 release: 3 cents: 1.955 seed: 35) volume: 24 gain: 0.6 send: 0.45)
     (instrument id: 37 name: "the series, C" patch: (drone-fm level: 0.3 index: 0.6 index-wander: 0.2 index-rate: 0.08 mod: 1 breath-lo: 1 attack: 1.6 release: 3 cents: -31.174 seed: 37) volume: 24 gain: 0.6 send: 0.45)
@@ -19,9 +20,9 @@
   (patterns
     (pattern id: 0 rows: 112
       (row 0 (8 "D-2" 41 26 "000"))
-      (row 4 (2 "D-3" 31 18 "000"))
+      (row 4 (2 "D-3" 31 16 "000"))
       (row 8 (3 "A-3" 35 18 "000"))
-      (row 12 (4 "D-4" 31 18 "000"))
+      (row 12 (4 "D-4" 32 18 "000"))
       (row 16 (5 "F#4" 33 18 "000"))
       (row 20 (6 "A-4" 35 17 "000"))
       (row 24 (1 "C-6" 57 22 "000") (7 "C-5" 37 20 "000"))
@@ -51,4 +52,5 @@
       (row 110 (8 "===" 0 0 "000")))
     (pattern id: 1 rows: 26))
   (order 0 1)
-  (history ("claude" "2026-10-12" "Wrongwater SOUND: L, The Seventh's Rest, the hidden pocket behind the false wall, carrying: 7 (David asked for music with the pool lighting violet). Over the fundamental the seven-harmonic chord grows one partial at a time, 2 3 4 5 6 7 (D3 A3 D4 F#4 A4 C5), as the room's mural shows it, and a stone bell strikes H7's octave. Then a glass voice sings in the series and keeps coming home to C6, H7 itself: the note that sounded wrong everywhere else is the resting tone here. It ends on D and its seventh alone. Every off-ET degree is a drone-fm voice with the partial's cents (motif's bell and flute kinds ignore cents:). H7 does not dip under it (H7-KEEPS). About 25 s; a silent 6 s pattern lets it ring out.")))
+  (history ("claude" "2026-10-12" "Wrongwater SOUND: L, The Seventh's Rest, the hidden pocket behind the false wall, carrying: 7 (David asked for music with the pool lighting violet). Over the fundamental the seven-harmonic chord grows one partial at a time, 2 3 4 5 6 7 (D3 A3 D4 F#4 A4 C5), as the room's mural shows it, and a stone bell strikes H7's octave. Then a glass voice sings in the series and keeps coming home to C6, H7 itself: the note that sounded wrong everywhere else is the resting tone here. It ends on D and its seventh alone. Every off-ET degree is a drone-fm voice with the partial's cents (motif's bell and flute kinds ignore cents:). H7 does not dip under it (H7-KEEPS). About 25 s; a silent 6 s pattern lets it ring out.")
+    ("claude" "2026-10-13" "Underhum SOUND, for the A4 speaker rule (D10): the series D voices kept under 0.25 of their energy above 300 Hz (D3 0.006, D4 0.022). Both now carry the stopped-pipe partials of a mod-4 FM, 3 and 5 times D over a fundamental that stays the strongest partial: D3 keeps index 0.6 (0.389), D4 gets its own voice, 32, at index 1.5 (0.392). D3 row volume 18 -> 16 holds its loudness (-29.5 LUFS against -29.9); D4 -27.7 against -27.0; the whole -15.7 against -15.5. Notes, timing and the chord unchanged.")))
