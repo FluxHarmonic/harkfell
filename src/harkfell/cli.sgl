@@ -266,14 +266,22 @@
                             (lambda (record) (write record) (newline))
                             pool)))
                     (when pool (pool-close! pool))
-                    ;; HARKFELL_REGION_LANDING_BOUND is a measurement: say so on
-                    ;; the verdict line and exit 2, never 0 or 1
-                    (let ((measure (let ((v (getenv "HARKFELL_REGION_LANDING_BOUND")))
-                                     (and v (string->number v)))))
+                    ;; Measurement knobs (a raised landing bound, the return memo off,
+                    ;; the baseline order) can change which states are touched: say so
+                    ;; on the verdict line and exit 2, never 0 or 1. The gate's own
+                    ;; claim, with the return memo on: every retained landing is
+                    ;; proven to return (return trials stop at proven states).
+                    (let* ((knob (lambda (name) (let ((v (getenv name))) (and v (not (equal? v "")) v))))
+                           (measure (or (and (knob "HARKFELL_REGION_LANDING_BOUND")
+                                             (string->number (knob "HARKFELL_REGION_LANDING_BOUND")))
+                                        (equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0")
+                                        (equal? (knob "HARKFELL_ROUTE_ORDER") "baseline"))))
                       (say (if (= failures 0) "PASS" "FAIL")
                            " Cloudstair regional replay: " (number->string failures)
                            " failures (final full-world progression NOT established)"
-                           (if measure " [landing-bound override: NOT a gate verdict]" ""))
+                           (if (equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0")
+                               "" " [return memo: every retained landing proven to return]")
+                           (if measure " [diagnostic knob set: NOT a gate verdict]" ""))
                       (cond (measure 2) ((= failures 0) 0) (else 1)))))
                 ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct))))
                   (let* ((n (reach-worker-count args))

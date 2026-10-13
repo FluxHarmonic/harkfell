@@ -235,32 +235,33 @@
     ;; Until 2026-10-13 the world seeded a guide from home and the cell of the
     ;; first search state that asked, so its moves depended on search order.
     (define (cloudstair-guide-builder tiles-for seeds log tag . pool)
-      (let ((guides '()))
+      ;; guides: ((carry . down) . graph), each graph without its REUSE memo and
+      ;; one object for its whole life (callers key caches by identity).
+      ;; bases: (down . (tm . memo)), the latest guide's memo per down, the only
+      ;; memo REUSE ever reads; an older one is dropped when replaced.
+      (let ((guides '()) (bases '()))
         (lambda (carry down)
           (let* ((key (cons carry down)) (prior (assoc key guides)))
             (if prior (cdr prior)
                 (let* ((tm (cloudstair-guide-tm tiles-for carry))
-                       (base (find (lambda (entry) (eq? (cdar entry) down)) guides))
+                       (base (let ((b (assq down bases))) (and b (cdr b))))
                        (starts (seeds carry down)))
                   (log (list tag 'carry carry 'down down 'starting))
-                  (let ((graph
-                          (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down
-                            (and base (graph-memo (cdr base)))
-                            (if base (tilemap-changes (graph-tm (cdr base)) tm) '())
-                            (lambda (anchors steps kind cell)
-                              (when (= (modulo anchors 100) 0)
-                                (log (list tag 'carry carry 'down down
-                                           'anchors anchors 'steps steps))))
-                            ;; with a pool, its workers expand the anchors and walk
-                            ;; the candidates REUSE cannot supply
-                            (and ROUTE-MEMO (pair? pool) (car pool)
-                                 (make-geometry-remote (car pool) (list carry down starts))))))
-                    ;; The base's REUSE memo has served: only the latest guide per
-                    ;; down is ever a base, so keep the base's graph and drop its
-                    ;; memo (memory; a later need simply rebuilds).
-                    (when base
-                      (set! guides (map (lambda (e) (if (eq? e base) (cons (car e) (reach-graph (cdr e) memo: #f)) e))
-                                        guides)))
+                  (let* ((full
+                           (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down
+                             (and base (cdr base))
+                             (if base (tilemap-changes (car base) tm) '())
+                             (lambda (anchors steps kind cell)
+                               (when (= (modulo anchors 100) 0)
+                                 (log (list tag 'carry carry 'down down
+                                            'anchors anchors 'steps steps))))
+                             ;; with a pool, its workers expand the anchors and walk
+                             ;; the candidates REUSE cannot supply
+                             (and ROUTE-MEMO (pair? pool) (car pool)
+                                  (make-geometry-remote (car pool) (list carry down starts)))))
+                         (graph (reach-graph full memo: #f)))
+                    (set! bases (cons (cons down (cons tm (graph-memo full)))
+                                      (filter (lambda (b) (not (eq? (car b) down))) bases)))
                     (set! guides (cons (cons key graph) guides))
                     (log (list tag 'carry carry 'down down
                                'complete 'stats (graph-stats graph)))
@@ -444,7 +445,7 @@
              (search-incomplete #f)
              (landing-bound (or LANDING-BOUND-OVERRIDE bound))
              ;; States proven to return home this profile, by exact timed key
-             ;; (the key memo-key gives; under ROUTE_CHECK also by timed-key).
+             ;; (the key memo-key gives; also by timed-key, for the exact-key check).
              (return-proven #{}) (return-proven-exact #{}) (memo-stops 0) (n-checked 0) (plain-bound #f))
         (when LANDING-BOUND-OVERRIDE
           (log (list (quote landing-bound-override) landing-bound (quote gate-bound) bound
@@ -604,6 +605,17 @@
                                             (set! return-proven (dict-set return-proven (memo-key (cdr entry)) #t))
                                             (set! return-proven-exact
                                                   (dict-set return-proven-exact (timed-key (cdr entry)) #t)))))
+                                       ;; HARKFELL_ROUTE_REPORT: what the drain holds, after every
+                                       ;; return search (memory diagnosis; observation only)
+                                       (when ROUTE-REPORT
+                                         (let ((finder (find (lambda (e) (eq? (car e) record!)) route-cache)))
+                                           (log (list (quote region-sizes) (quote checked) n-checked
+                                                      (quote landings) (length (dict-keys landings))
+                                                      (quote rotations) (length (dict-keys rotations))
+                                                      (quote covered) (length (dict-keys covered))
+                                                      (quote proven) (length (dict-keys return-proven))
+                                                      (quote finder) (and finder ((cdr finder) (quote sizes) #f))
+                                                      (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))))))
                                        (when (= 0 (modulo n-checked 50))
                                          (log (list (quote region-drain) (quote checked) n-checked
                                                     (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
