@@ -7,7 +7,7 @@
           (engine reach) (engine reach timed) (engine reach routes)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes)
-          (only (harkfell cloudstair region) cloudstair-fingerprint cloudstair-carry-guides
+          (only (harkfell cloudstair region) cloudstair-fingerprint cloudstair-carry-guides cloudstair-guide-seeds
                 cloudstair-guide-server)
           (only (engine reach pool) pool-verify!))
 
@@ -77,7 +77,7 @@
         ;; One guide per (carry, down), shared with the region check.
         ;; With a pool, its workers expand the guides' anchors and walk their
         ;; candidates, whatever REUSE cannot supply.
-        (define guide-for (cloudstair-carry-guides tiles-for cell-of home log (quote world-candidates)
+        (define guide-for (cloudstair-carry-guides tiles-for (cloudstair-guide-seeds ct) log (quote world-candidates)
                                                    (and (pair? pool) (car pool))))
         (define route
           (timed-route-finder advance tiles-for HARKFELL-FEEL guide-for shelter? wait

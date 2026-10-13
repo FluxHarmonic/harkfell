@@ -531,3 +531,43 @@
       (assert-equal (length (cdr plain)) (length (cdr ordered)))
       (assert-true (same-members? (cdr plain) (cdr ordered)))
       (assert-true (same-members? (cdr ordered) (cdr plain))))))
+
+(test-group "timed routes: guides chosen by state make the order irrelevant on exhaustion"
+  ;; As the world check's guides are now seeded from the content alone, the
+  ;; moves guide here is a function of the node's carry: without stone 5 the
+  ;; start's guide; with it, a guide whose edge from TARGET walks back left.
+  ;; Every step acquires stone 5. Two orders (no rank, and a rank that puts
+  ;; carry-5 states first) must record exactly the same states, and more
+  ;; than the start's guide alone records (so the carry's guide was used).
+  (test "an exhausted search records the same states in either order"
+    (let* ((take (lambda (node in) (timed-node (step node in) data: '(2 4 5))))
+           (moves (guide '(7 . 2)))
+           (back (append (make-list 30 (intent h: -1)) (make-list 30 NO-INTENT)))
+           (open-moves
+             (let ((edges (make-vector 32 '())))
+               (vector-set! edges (cell-index TM (car TARGET) (cdr TARGET))
+                            (list (cons (cell-index TM 7 2) (witness from: TARGET script: back))))
+               (reach-graph tm: TM cells: (standable-cells TM) starts: (list TARGET) edges: edges)))
+           (by-carry (lambda (node) (if (memv 5 (timed-node-data node)) open-moves moves)))
+           (explore
+             (lambda (guides rank)
+               (let* ((recorded '())
+                      (route (apply timed-route-finder take (lambda (carry) TM) F guides
+                               (lambda (node) (timed-shelter? TM F take node))
+                               (timed-waiter TM F take) 50
+                               (lambda (node) (set! recorded (cons (timed-key node) recorded)))
+                               (lambda () #t)
+                               (if rank
+                                   (list #f (lambda (node) '()) #f #f rank)
+                                   (list #f (lambda (node) '()))))))
+                 (cons (route START '(7 . 2)) recorded))))
+           (first-order (explore by-carry #f))
+           (other-order (explore by-carry (lambda (node target) (if (memv 5 (timed-node-data node)) 0 9))))
+           (start-guide-only (explore (lambda (node) moves) #f))
+           (same-members? (lambda (xs ys) (every (lambda (x) (member x ys)) xs))))
+      (assert-false (car first-order))
+      (assert-false (car other-order))
+      (assert-equal (length (cdr first-order)) (length (cdr other-order)))
+      (assert-true (same-members? (cdr first-order) (cdr other-order)))
+      (assert-true (same-members? (cdr other-order) (cdr first-order)))
+      (assert-true (> (length (cdr first-order)) (length (cdr start-guide-only)))))))
