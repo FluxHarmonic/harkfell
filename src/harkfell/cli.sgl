@@ -52,9 +52,10 @@
           (harkfell cloudstair progression)
           (harkfell source)
           (engine reach pool)
+          (engine reach timed)
           (only (sigil process) getenv executable-path))
 
-  (export room-check-main reach-worker-main arg-value)
+  (export room-check-main reach-worker-main reach-bench-main arg-value)
 
   (begin
     (define (say . parts) (display (apply string-append parts)) (newline))
@@ -74,6 +75,55 @@
     ;; harkfell --reach-worker cloudstair-region [--world DIR]: one pool
     ;; worker, request lines on stdin, answers on stdout, nothing else
     ;; printed there. Ends at end of input.
+    ;; harkfell --reach-bench [--world DIR]: what one tick of the Cloudstair
+    ;; regional stepper costs natively, and its parts. Diagnostic only.
+    (define (reach-bench-main args)
+      (let* ((dir (or (arg-value args "--world") "world"))
+             (ct (cloudstair-region-content (load-content (read-world-source dir))))
+             (advance (cloudstair-stepper ct))
+             (tiles-for (cloudstair-tile-provider ct))
+             (tm (tiles-for '(2 4)))
+             (wm (content-map ct))
+             (entries (cloudstair-entry-phases ct (start-cell ct) '(2 4) #t))
+             (root (car entries))
+             (b0 (timed-node-body root))
+             (gap (append (make-list 45 (intent h: 1)) (list (intent h: 1 jump: #t press: #t))
+                          (make-list 46 (intent h: 1 jump: #t)) (make-list 28 NO-INTENT))))
+        (define (clock) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
+        (define (bench name n thunk)
+          (let ((t0 (clock)))
+            (let loop ((i 0)) (when (< i n) (thunk) (loop (+ i 1))))
+            (let ((dt (- (clock) t0)))
+              (write (list 'bench name 'n n 'seconds dt 'us-per (/ (* 1e6 dt) n)))
+              (newline))))
+        (write (list 'bench-setup 'air-fields (length (tilemap-air tm))
+                     'rooms (length (content-rooms ct)) 'cols (tilemap-cols tm) 'rows (tilemap-rows tm)))
+        (newline)
+        (bench 'advance-gap-script (* 100 (length gap))
+               (let ((node root) (s gap))
+                 (lambda ()
+                   (when (or (null? s) (not node)) (set! node root) (set! s gap))
+                   (set! node (advance node (car s)))
+                   (set! s (cdr s)))))
+        (bench 'body-step-gap-script (* 100 (length gap))
+               (let ((b b0) (s gap))
+                 (lambda ()
+                   (when (null? s) (set! b b0) (set! s gap))
+                   (set! b (body-step b (car s) tm HARKFELL-FEEL))
+                   (set! s (cdr s)))))
+        (bench 'advance-still 20000 (lambda () (advance root NO-INTENT)))
+        (bench 'body-step-still 20000 (lambda () (body-step b0 NO-INTENT tm HARKFELL-FEEL)))
+        (let ((c (body-center b0 HARKFELL-FEEL)))
+          (bench 'air-sample 20000
+                 (lambda () (air-sample (tilemap-air tm) (car c) (cdr c) 310
+                                        (lambda (gx gy) (not (kind-solid? (tile-at tm gx gy)))))))
+          (bench 'room-at-px 20000 (lambda () (worldmap-room-at-px wm (car c) (cdr c)))))
+        (bench 'timed-key 20000 (lambda () (timed-key root)))
+        (bench 'rest-key 20000
+               (lambda () (timed-key (timed-node root body: (body b0 tau: 0)))))
+        (bench 'body-copy 20000 (lambda () (body b0 tau: 3)))
+        0))
+
     (define (reach-worker-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
              (ct (load-content (read-world-source dir))))
