@@ -1,0 +1,72 @@
+;;; Exercise the real authored motion through the route finder without any
+;;; frozen edges. These diagnostic seeds prove proposal replay, not world
+;;; access to the seeds; regional/world acceptance still starts outside.
+(import (sigil list) (sigil test)
+        (engine body) (engine tilemap) (engine worldmap) (engine reach)
+        (engine reach timed) (engine reach routes)
+        (harkfell source) (harkfell content) (harkfell check) (harkfell feel)
+        (harkfell cloudstair reach) (harkfell cloudstair inputs)
+        (harkfell cloudstair routes))
+
+(define CT (load-content (read-world-source "world")))
+(define F HARKFELL-FEEL)
+(define TM (tiles-carrying CT '(2 4)))
+(define STEP (cloudstair-stepper CT))
+(define PROPOSALS (cloudstair-route-proposals CT))
+(define EMPTY
+  (reach-graph tm: TM cells: (standable-cells TM)
+    edges: (make-vector (* (tilemap-cols TM) (tilemap-rows TM)) '())))
+(define (last-node trace)
+  (and (pair? trace) (car (reverse trace))))
+(define (route-from start target)
+  (let ((route
+          (timed-route-finder STEP (cloudstair-tile-provider CT) F
+            (lambda (node) EMPTY) (cloudstair-shelter-checker CT STEP)
+            (cloudstair-waiter CT STEP) 40
+            (lambda (node) #t) (lambda () #t) #f PROPOSALS)))
+    (route start target)))
+
+(test-group "authored proposals use actual departures"
+  (test "both pulsed lifts wait and replay from the arrival's actual offset"
+    (for-each
+      (lambda (room-x room-y)
+        (let* ((cell (local->global CT (content-room CT room-x room-y) 10 7))
+               (seed (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 173))
+               (start (timed-node seed body:
+                        (body (timed-node-body seed)
+                              x: (+ 0.25 (body-x (timed-node-body seed))))))
+               ;; The expected witness includes every real waiting tick.
+               (departure (last-node (timed-run STEP start (make-list 127 NO-INTENT))))
+               (fresh (last-node (timed-run STEP departure
+                                   (cloudstair-lift-inputs departure))))
+               (target (and fresh (rest-cell TM F (timed-node-body fresh))))
+               (arrival (and target (route-from start target))))
+          (assert-true target)
+          (assert-true arrival)
+          (assert-equal (timed-key fresh) (timed-key arrival))
+          (let* ((center (body-center (timed-node-body arrival) F))
+                 (room (worldmap-room-at-px (content-map CT) (car center) (cdr center))))
+            (assert-equal room-x (placed-x room))
+            (assert-equal (- room-y 1) (placed-y room)))))
+      '(8 9) '(0 -1)))
+  (test "the east gap uses the same standing family as the timing gate"
+    (let* ((cell (local->global CT (content-room CT 11 0) 6 7))
+           (start (list-ref (cloudstair-entry-phases CT cell '(2 4) #t) 173))
+           (departure (last-node (timed-run STEP start (make-list 127 NO-INTENT))))
+           (fresh (last-node (timed-run STEP departure
+                               (cloudstair-gap-inputs 1 departure))))
+           (target (and fresh (rest-cell TM F (timed-node-body fresh))))
+           (arrival (and target (route-from start target)))
+           (far (local->global CT (content-room CT 11 0) 13 6)))
+      (assert-true target)
+      (assert-true (>= (car target) (car far)))
+      (assert-true arrival)
+      (assert-equal (timed-key fresh) (timed-key arrival))))
+  (test "no down or a different resting cell offers no authored lift"
+    (let* ((room (content-room CT 8 0))
+           (cell (local->global CT room 10 7))
+           (bare (car (cloudstair-entry-phases CT cell '(2 4) #f)))
+           (other (car (cloudstair-entry-phases CT
+                         (local->global CT room 9 7) '(2 4) #t))))
+      (assert-equal '() (PROPOSALS bare))
+      (assert-equal '() (PROPOSALS other)))))

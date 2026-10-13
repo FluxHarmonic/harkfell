@@ -45,6 +45,10 @@
     ;; wait: actual node, target phase -> (actual node . real elapsed ticks).
     ;; record! receives genuine safe catches and nonhazard terminal states.
     ;; incomplete! is called at a hard bound; callers must never report PASS.
+    ;; reports optionally supplies a progress callback (or #f), then a
+    ;; node -> input-family list callback. A family generates inputs from
+    ;; the actual departure node after any proved wait. These receive the
+    ;; same physical replay as the spatial suggestions.
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete! . reports)
       (let ((distance-cache '()) (invariant-rests #{}))
@@ -143,7 +147,7 @@
         ;; Neither priority supplies a simulated arrival or an accepted edge.
         ;; Optional reports receive actual node, target, count, pending, depth.
         (define (report node target count pending depth)
-          (when (and (pair? reports)
+          (when (and (pair? reports) (car reports)
                      (or (= count 1) (= (modulo count 250) 0)))
             ((car reports) node target count pending depth)))
         (lambda (start target)
@@ -241,7 +245,35 @@
                          (else
                           (when (eligible? next) (push! next depth))
                           (loop (cdr nodes))))))))
+            (define (progress? node end)
+              (and (cell-of end)
+                   (not (or (equal? (timed-key node) (timed-key end))
+                            (and (equal? (rotation-key node) (rotation-key end))
+                                 (invariant-rest? node))))))
+            (define (authored node depth)
+              (and (pair? reports) (pair? (cdr reports))
+                   (let ((families ((cadr reports) node)))
+                     (and (pair? families)
+                          (let depart ((phases (list 'actual AIR-GUST 0)))
+                            (and (not halted) (pair? phases)
+                                 (or
+                                   (let* ((proof (and (not (eq? (car phases) 'actual))
+                                                      (wait node (car phases))))
+                                          (stage (if (eq? (car phases) 'actual) node
+                                                     (and proof (car proof)))))
+                                     (and stage
+                                          (let try ((families families))
+                                            (and (not halted) (pair? families)
+                                                 (or
+                                                   (resume
+                                                     (observe (replay stage ((car families) stage)) target)
+                                                     (+ depth 1)
+                                                     (lambda (end) (progress? node end)))
+                                                   (try (cdr families)))))))
+                                   (depart (cdr phases)))))))))
             (define (expand node depth)
+              (or (authored node depth) (expand-spatial node depth)))
+            (define (expand-spatial node depth)
               (let ((cell (cell-of node)))
                 (if (not cell)
                     (let recover
@@ -293,11 +325,7 @@
                                                    ;; cell. Frozen labels never rule them out.
                                                    ;; Clock-only changes continue unless a real
                                                    ;; invariant waiting cycle covers that phase.
-                                                   (and (cell-of end)
-                                                        (not (or (equal? (timed-key node) (timed-key end))
-                                                                 (and (equal? (rotation-key node)
-                                                                              (rotation-key end))
-                                                                      (invariant-rest? node)))))))))
+                                                   (progress? node end)))))
                                         (depart (cdr phases)))))
                                (try (cdr edges)))))))))
             (if (equal? (cell-of start) target)

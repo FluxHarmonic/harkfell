@@ -6,7 +6,7 @@
           (engine body) (engine air) (engine tilemap) (engine worldmap)
           (engine reach) (engine reach timed) (engine reach routes)
           (harkfell content) (harkfell check) (harkfell feel)
-          (harkfell cloudstair reach))
+          (harkfell cloudstair reach) (harkfell cloudstair routes))
 
   (export cloudstair-region-content cloudstair-region-check
           cloudstair-reached-rooms cloudstair-entrance-probe)
@@ -122,6 +122,7 @@
              (tiles-for (cloudstair-tile-provider ct))
              (wait (cloudstair-waiter ct advance))
              (shelter? (cloudstair-shelter-checker ct advance))
+             (proposals (cloudstair-route-proposals ct))
              (targets (apply append
                         (map (lambda (p)
                                (room-standable-cells ct (placed-data p) tm))
@@ -150,7 +151,8 @@
                             (log (list 'regional-search 'target target
                                        'expanded expanded 'pending pending 'depth depth
                                        'at (cell-of node) 'carry (timed-node-data node)
-                                       'tau (body-tau (timed-node-body node)))))))))
+                                       'tau (body-tau (timed-node-body node)))))
+                          proposals))))
               (unless prior (set! route-cache (cons (cons record! route) route-cache)))
               (route start target))))
         (for-each

@@ -25,6 +25,45 @@
                       (lambda (node) (timed-shelter? TM F advance node))
                       (timed-waiter TM F advance) bound record! incomplete!))
 
+(test-group "timed routes: additional input families"
+  (test "an authored input family can supply a missing physical suggestion"
+    (let* ((graph (reach-graph tm: TM cells: (standable-cells TM)
+                              edges: (make-vector 32 '())))
+           (route (timed-route-finder step (lambda (carry) TM) F
+                    (lambda (node) graph)
+                    (lambda (node) (timed-shelter? TM F step node))
+                    (timed-waiter TM F step) 20
+                    (lambda (node) #t) (lambda () #t) #f
+                    (lambda (node) (list (lambda (departure) SCRIPT)))))
+           (arrival (route START TARGET)))
+      (assert-true arrival)
+      (assert-equal (timed-key END) (timed-key arrival))))
+  (test "an added family cannot turn failed physics into an arrival"
+    (let* ((closed (lambda (node in) #f))
+           (graph (reach-graph tm: TM cells: (standable-cells TM)
+                              edges: (make-vector 32 '())))
+           (route (timed-route-finder closed (lambda (carry) TM) F
+                    (lambda (node) graph) (lambda (node) #f)
+                    (lambda (node phase) #f) 20
+                    (lambda (node) #t) (lambda () #t) #f
+                    (lambda (node) (list (lambda (departure) SCRIPT))))))
+      (assert-false (route START TARGET))))
+  (test "additional inputs preserve a mid-flight acquisition's full state"
+    (let* ((take (lambda (node in)
+                   (timed-node (step node in) data: '(2 4 5))))
+           (graph (reach-graph tm: TM cells: (standable-cells TM)
+                              edges: (make-vector 32 '())))
+           (route (timed-route-finder take (lambda (carry) TM) F
+                    (lambda (node) graph)
+                    (lambda (node) (timed-shelter? TM F take node))
+                    (timed-waiter TM F take) 20
+                    (lambda (node) #t) (lambda () #t) #f
+                    (lambda (node) (list (lambda (departure) SCRIPT)))))
+           (arrival (route START TARGET)))
+      (assert-true arrival)
+      (assert-equal (timed-key (timed-node END data: '(2 4 5)))
+                    (timed-key arrival)))))
+
 (test-group "timed routes: suggestions require actual replay"
   (test "arrival is the actual full body and phase, rather than a cell seed"
     (let* ((route (finder (guide TARGET) step 20 (lambda (node) #t) (lambda () #t)))

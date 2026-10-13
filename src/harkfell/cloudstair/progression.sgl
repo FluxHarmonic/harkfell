@@ -6,7 +6,7 @@
           (engine body) (engine air) (engine tilemap)
           (engine reach) (engine reach timed) (engine reach routes)
           (harkfell content) (harkfell check) (harkfell feel)
-          (harkfell cloudstair reach))
+          (harkfell cloudstair reach) (harkfell cloudstair routes))
 
   (export cloudstair-world-check)
 
@@ -80,7 +80,8 @@
                          'expanded expanded 'pending pending 'depth depth
                          'at (cell-of node) 'carry (timed-node-data node)
                          'down (body-down (timed-node-body node))
-                         'tau (body-tau (timed-node-body node)))))))
+                         'tau (body-tau (timed-node-body node)))))
+            (cloudstair-route-proposals ct)))
         (define (from-history target)
           (let try ((starts history))
             (and complete (pair? starts)

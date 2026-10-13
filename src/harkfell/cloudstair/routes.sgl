@@ -1,0 +1,38 @@
+;;; Offer authored inputs only from a matching actual resting cell. These
+;;; proposals never supply an arrival, acquisition, phase or body offset.
+(define-library (harkfell cloudstair routes)
+  (import (sigil list)
+          (engine body) (engine reach) (engine reach timed) (engine worldmap)
+          (harkfell content) (harkfell feel)
+          (harkfell cloudstair reach) (harkfell cloudstair inputs))
+
+  (export cloudstair-route-proposals)
+
+  (begin
+    (define (cloudstair-route-proposals ct)
+      (let ((wm (content-map ct))
+            (tiles-for (cloudstair-tile-provider ct)))
+        (define (cell x y c r)
+          (cons (+ c (* 25 (- x (worldmap-x0 wm))))
+                (+ r (* 11 (- y (worldmap-y0 wm))))))
+        (define (gap h)
+          (lambda (node) (cloudstair-gap-inputs h node)))
+        (define families
+          (list (cons (cell 8 0 10 7) cloudstair-lift-inputs)
+                (cons (cell 9 -1 10 7) cloudstair-lift-inputs)
+                (cons (cell 11 0 6 7) (gap 1))
+                (cons (cell 11 0 16 6) (gap -1))
+                (cons (cell 12 -1 1 7) (gap 1))
+                (cons (cell 12 -1 11 6) (gap -1))
+                (cons (cell 12 -1 10 6) (gap 1))
+                (cons (cell 12 -1 20 5) (gap -1))))
+        (lambda (node)
+          (let ((b (timed-node-body node)))
+            (if (and (body-down b)
+                     (eq? (body-mode b) 'ground)
+                     (= (body-vx b) 0) (= (body-vy b) 0))
+                (let* ((actual (rest-cell (tiles-for (timed-node-data node))
+                                          HARKFELL-FEEL b))
+                       (family (and actual (assoc actual families))))
+                  (if family (list (cdr family)) '()))
+                '())))))))
