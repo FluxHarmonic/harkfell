@@ -476,10 +476,11 @@
                (let ((hit (proven-key node)))
                  (and hit
                       (begin
-                        ;; HARKFELL_ROUTE_CHECK: the hit must be proven at its exact key
-                        (when (and ROUTE-CHECK
-                                   (not (dict-contains? return-proven-exact (timed-key hit))))
-                          (error "route check: a proven-return hit is not proven at its exact key"
+                        ;; Always checked (one lookup per hit, never true in honest code,
+                        ;; where memo-key is the exact key): the hit must be proven at its
+                        ;; exact timed key.
+                        (when (not (dict-contains? return-proven-exact (timed-key hit)))
+                          (error "return memo: a proven-return hit is not proven at its exact key"
                                  (timed-key hit)))
                         #t)))))
         ;; ROUTE_CHECK's end-to-end check of a memo stop: the same landing, searched
