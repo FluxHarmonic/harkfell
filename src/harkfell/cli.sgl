@@ -227,6 +227,30 @@
                          " Cloudstair authored timing: " (number->string failures)
                          " failures (regional/world reach NOT established)")
                     (if (= failures 0) 0 1)))
+                ;; Diagnostic: chain searches through waypoint cells (carry (2 4), down).
+                ((and (member "--cloudstair-region" args) (member "--waypoints" args))
+                  (let* ((n (reach-worker-count args))
+                         (cells (filter-map
+                                  (lambda (a)
+                                    (let ((parts (string-split a ",")))
+                                      (and (= (length parts) 2)
+                                           (string->number (car parts)) (string->number (cadr parts))
+                                           (cons (string->number (car parts)) (string->number (cadr parts))))))
+                                  (cdr (member "--waypoints" args))))
+                         (pool (and (> n 0)
+                                    (make-pool (list (executable-path) "--reach-worker"
+                                                     "cloudstair-region" "--world" dir)
+                                               n)))
+                         (rc (cloudstair-region-waypoints ct '(2 4) #t
+                               (let ((b (arg-value args "--region-bound")))
+                                 (or (and b (string->number b)) 10000))
+                               cells
+                               (lambda (record) (write record) (newline))
+                               pool)))
+                    (when pool (pool-close! pool))
+                    (say (if (= rc 0) "WAYPOINTS-REACHED" "WAYPOINTS-FAILED")
+                         " (diagnostic only; no verdict)")
+                    rc))
                 ((member "--cloudstair-region" args)
                   (let* ((n (reach-worker-count args))
                          (pool (and (> n 0)

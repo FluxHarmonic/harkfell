@@ -10,6 +10,7 @@
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
   (export cloudstair-region-content cloudstair-region-check cloudstair-region-worker
+          cloudstair-region-waypoints
           cloudstair-fingerprint
           cloudstair-reached-rooms cloudstair-entrance-probe)
 
@@ -158,6 +159,66 @@
                                          (list (start-cell ct)) witness-lands? #t #f 'serve))))
                 (geometry line))
               (routes line)))))
+
+    ;; A diagnostic, never a verdict: from the profile's actual root, search
+    ;; to each waypoint cell in turn, each search starting at the previous
+    ;; search's actual arrival (body, phase and carry). The finder, guide,
+    ;; certificates and bound are cloudstair-region-check's. Arrivals prove
+    ;; a physical route through every waypoint; a failed leg names the gap.
+    ;; Logs (waypoint i cell from ... arrival ... expanded-bound? ...).
+    (define (cloudstair-region-waypoints source carry down bound waypoints log . pool)
+      (let* ((ct (cloudstair-region-content source))
+             (verified (and (pair? pool) (car pool)
+                            (pool-verify! (car pool) "I" (string-append "I " (cloudstair-fingerprint ct)))))
+             (home (start-cell ct))
+             (candidate
+               (reach-graph
+                (reach-search-down (region-candidate-tm ct) HARKFELL-FEEL
+                 (list home) witness-lands? #t
+                 (lambda (anchors steps kind cell) #t)
+                 (and ROUTE-MEMO (pair? pool) (car pool) (make-geometry-remote (car pool))))
+                memo: #f))
+             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
+             (tiles-for (cloudstair-tile-provider ct))
+             (certs (route-certificate-cache (cloudstair-shelter-checker ct advance)
+                                             (cloudstair-waiter ct advance)
+                                             (and (pair? pool) (car pool) #t) REST-MEMO-CAP))
+             (shelter? (vector-ref certs 0))
+             (wait (vector-ref certs 1))
+             (incomplete #f))
+        (define (cell-of node)
+          (and (still? node) (rest-cell (tiles-for (timed-node-data node))
+                                     HARKFELL-FEEL (timed-node-body node))))
+        (define (summary node)
+          (let ((b (timed-node-body node)))
+            (list 'cell (cell-of node) 'tau (body-tau b) 'carry (timed-node-data node)
+                  'down (body-down b))))
+        (log (list 'waypoints 'carry carry 'down down 'bound bound 'cells waypoints))
+        (let* ((entries (cloudstair-entry-phases ct home carry down))
+               (root (let ((proof (wait (car entries) 0))) (and proof (car proof))))
+               (route (timed-route-finder advance tiles-for HARKFELL-FEEL
+                        (lambda (node) candidate) shelter? wait bound
+                        (lambda (node) #t) (lambda () (set! incomplete #t))
+                        (lambda (node target expanded pending depth)
+                          (log (list 'waypoint-search 'target target 'expanded expanded
+                                     'pending pending 'depth depth 'at (cell-of node)
+                                     'tau (body-tau (timed-node-body node)))))
+                        (cloudstair-route-proposals ct) (and (pair? pool) (car pool))
+                        (vector-ref certs 2))))
+          (if (not root)
+              (begin (log '(waypoints no-root)) 1)
+              (let chain ((at root) (cells waypoints) (i 0))
+                (cond
+                  ((null? cells) (log (list 'waypoints 'all-reached i)) 0)
+                  (else
+                   (set! incomplete #f)
+                   (let ((arrival (route at (car cells))))
+                     (log (list 'waypoint i 'cell (car cells) 'from (summary at)
+                                'arrival (and arrival (summary arrival))
+                                'bound-hit incomplete))
+                     (if arrival
+                         (chain arrival (cdr cells) (+ i 1))
+                         (begin (log (list 'waypoints 'failed-at i (car cells))) 1))))))))))
 
     ;; pool (optional): an (engine reach pool) of cloudstair-region-worker
     ;; processes. It changes how long the searches take, not what they find.

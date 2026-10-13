@@ -74,8 +74,12 @@
     ;; frontier's makeup, and how far along the guide's own path the actual
     ;; states got (route-report lines). Observation only: it reads what the
     ;; search already computed and never changes what it pushes or expands.
+    ;; HARKFELL_ROUTE_REPORT=probe adds the probe (route-report-probe): the
+    ;; first unreached guide-path edge replayed at every departure phase.
     (define ROUTE-REPORT
-      (equal? (getenv "HARKFELL_ROUTE_REPORT") "1"))
+      (and (member (getenv "HARKFELL_ROUTE_REPORT") (list "1" "probe")) #t))
+    (define ROUTE-PROBE
+      (equal? (getenv "HARKFELL_ROUTE_REPORT") "probe"))
     (define (digest-step h tag node)
       (let loop ((cs (string->list (wire-join (cons tag (wire-node node)))))
                  (h h))
@@ -732,19 +736,20 @@
                              'guide-hops-from-start (and (cell-of start) (dist-at (cell-of start)))))
                 (newline)
                 ;; the guide's own path: from the start cell, one hop nearer each step
-                (when (and (cell-of start) (dist-at (cell-of start)))
-                  (let walk ((cell (cell-of start)) (acc '()))
-                    (let* ((d (dist-at cell)) (v (dict-ref cell-stats cell #f))
-                           (here (list cell d (if v (vector-ref v 0) 0) (if v (vector-ref v 1) 0)
-                                       (if v (vector-ref v 2) 0)))
-                           (next (find (lambda (e) (let ((dn (dist-at (car e)))) (and dn (= dn (- d 1)))))
-                                       (graph-edges-from graph cell))))
-                      (if (or (= d 0) (not next))
-                          (begin
-                            (write (list 'route-report-guide-path '(cell hops-left pushed expanded taus)
-                                         (reverse (cons here acc))))
-                            (newline))
-                          (walk (car next) (cons here acc))))))
+                (let ((path
+                        (if (and (cell-of start) (dist-at (cell-of start)))
+                            (let walk ((cell (cell-of start)) (acc '()))
+                              (let* ((d (dist-at cell)) (v (dict-ref cell-stats cell #f))
+                                     (here (list cell d (if v (vector-ref v 0) 0) (if v (vector-ref v 1) 0)
+                                                 (if v (vector-ref v 2) 0)))
+                                     (next (find (lambda (e) (let ((dn (dist-at (car e)))) (and dn (= dn (- d 1)))))
+                                                 (graph-edges-from graph cell))))
+                                (if (or (= d 0) (not next))
+                                    (reverse (cons here acc))
+                                    (walk (car next) (cons here acc)))))
+                            '())))
+                  (write (list 'route-report-guide-path '(cell hops-left pushed expanded taus) path))
+                  (newline)
                 (for-each
                   (lambda (e)
                     (let ((v (cdr e)))
@@ -754,7 +759,7 @@
                                    'taus (vector-ref v 2) 'min-depth (vector-ref v 3)
                                    'best (state-summary (vector-ref v 5) (vector-ref v 6))))
                       (newline)))
-                  (top 15 near))
+                  near)
                 (let ((by-cell (tally (map (lambda (e) (cell-of (vector-ref e 0))) live))))
                   (write (list 'route-report-frontier 'live (length live)
                                'distinct-cells (length by-cell)
@@ -762,13 +767,59 @@
                                (length (tally (map (lambda (e) (cons (cell-of (vector-ref e 0))
                                                                      (body-tau (timed-node-body (vector-ref e 0)))))
                                                    live)))
-                               'by-cell (top 15 by-cell)
+                               'by-cell by-cell
                                'by-guide-hops (list-sort (lambda (a b) (< (car a) (car b)))
                                                          (tally (map (lambda (e) (- (vector-ref e 5) (vector-ref e 1))) live)))
                                'by-depth (list-sort (lambda (a b) (< (car a) (car b)))
                                                     (tally (map (lambda (e) (vector-ref e 1)) live)))
                                'by-carry (tally (map (lambda (e) (timed-node-data (vector-ref e 0))) live))))
-                  (newline))))
+                  (newline)
+                  ;; Last, so nothing above depends on it: the furthest cell on
+                  ;; the guide path an actual state reached, and the path's next
+                  ;; cell. Replay every guide edge between them from the best
+                  ;; state there, departing at each phase of the cycle (the
+                  ;; search departs only at its actual phase, AIR-GUST and 0).
+                  ;; Raw replays and waits: no memo is filled and nothing is
+                  ;; recorded, so later searches are unchanged. A diagnostic
+                  ;; error is reported, never raised.
+                  (when ROUTE-PROBE (guard (e (#t (write (list 'route-report-probe 'error
+                                             (if (error-object? e) (error-object-message e) e)))
+                                (newline)))
+                    (let furthest ((p path) (last #f))
+                      (cond
+                        ((pair? p) (furthest (cdr p) (if (> (caddr (car p)) 0) p last)))
+                        ((and last (pair? (cdr last)))
+                         (let* ((from (car (car last))) (to (car (cadr last)))
+                                (node (vector-ref (dict-ref cell-stats from) 5))
+                                (edges (filter (lambda (e) (equal? (car e) to)) (numbered-edges graph from)))
+                                (waitable 0) (reaching '()) (landed #{}))
+                           (let phase ((ph 0))
+                             (when (< ph AIR-PERIOD)
+                               (let* ((proof (if (= ph (body-tau (timed-node-body node)))
+                                                 (cons node 0)
+                                                 (wait node ph)))
+                                      (stage (and proof (car proof))))
+                                 (when stage
+                                   (set! waitable (+ waitable 1))
+                                   (for-each
+                                     (lambda (e)
+                                       (let ((ends (filter (lambda (c) c)
+                                                           (map (lambda (n) (and n (cell-of n)))
+                                                                (replay stage (witness-script (cadr e)))))))
+                                         (for-each (lambda (c) (set! landed (dict-set landed c (+ 1 (dict-ref landed c 0)))))
+                                                   ends)
+                                         (when (member to ends)
+                                           (set! reaching (cons (list ph (cddr e)) reaching)))))
+                                     edges)))
+                               (phase (+ ph 1))))
+                           (write (list 'route-report-probe 'from from 'to to
+                                        'state (state-summary node (vector-ref (dict-ref cell-stats from) 6))
+                                        'edges (length edges) 'phases-waitable waitable
+                                        'phases-reaching (length reaching) (top 40 (reverse reaching))
+                                        'still-cells-seen (top 20 (list-sort (lambda (a b) (> (cdr a) (cdr b)))
+                                                                             (dict-entries landed)))))
+                           (newline)))
+                        (else #f)))))))))
             (define (physical-distance node)
               (let ((cell (cell-of node)))
                 (if cell
