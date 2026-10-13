@@ -247,6 +247,86 @@
                    (loop (append (cdr front) (map car next))
                          (append parents (map (lambda (e) (cons (car e) (cons c (cdr e)))) next)))))))))
 
+    ;; The spatial room-check (gate 3 of section 8) on ct: every room's
+    ;; reach and traps, per carry set a player can hold. scope labels the
+    ;; verdict line ("" for the whole world).
+    (define (spatial-room-check ct args keys t0 scope)
+      (let* ((g (if (member "--verbose" args)
+                    (content-reach ct (lambda (n steps kind cell)
+                                        (say "  anchor " (number->string n) " kind " (number->string kind)
+                                             " cell " (number->string (car cell)) "," (number->string (cdr cell))
+                                             " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
+                    (content-reach ct)))
+             (t1 (now-s))
+             (rps (reach-problems ct g))
+             (rooms (map placed-data (content-rooms ct)))
+             (shown (if (null? keys)
+                        rooms
+                        (filter (lambda (rm) (member (room-label rm) keys)) rooms))))
+        (when g
+          (say "reach: " (reach-summary g) ", " (number->string (exact (round (- t1 t0)))) " s")
+          (when (member "--verbose" args)
+            (for-each (lambda (e)
+                        (say "  rejected by the replay: ("
+                             (number->string (caar e)) "," (number->string (cdar e)) ") -> ("
+                             (number->string (cadr e)) "," (number->string (cddr e)) ")"))
+                      (apply append (map (lambda (e) (graph-rejected (cset-graph e))) g)))))
+        (for-each (lambda (p) (say (problem->string p))) rps)
+        (let ((pk (arg-value args "--path"))
+              (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
+          (when (and g pk pc)
+            (let* ((k (parse-room-key pk))
+                   (rm (and k (content-room ct (cadr k) (caddr k))))
+                   (xy (map string->number (string-split pc ","))))
+              (if (and rm (= (length xy) 2) (car xy) (cadr xy))
+                  (begin
+                    (say "path to " pk " (" pc "):")
+                    (let* ((hv (arg-value args "--have"))
+                           (carry (if hv (list-sort < (filter integer? (map string->number (string-split hv ",")))) '()))
+                           (e (find (lambda (x) (equal? (cset-carry x) carry)) g)))
+                      (if e
+                          (print-path ct (cset-graph e) (local->global ct rm (car xy) (cadr xy)))
+                          (say "--have: no carry set " (carry-label carry) " is one a player can hold"))))
+                  (say "--path: no room " pk " or no cell " pc)))))
+        (when (and g (not (member "--path" args)))
+          (for-each (lambda (rm)
+                      (newline)
+                      (for-each say (room-report ct g rm)))
+                    shown))
+        (newline)
+        (if (null? rps)
+            (begin
+              (say "PASS room-check" scope ": " (number->string (length rooms)) " rooms, parse seams map reach green")
+              0)
+            (begin
+              (say "FAIL room-check" scope ": " (number->string (length rps)) " reach problems")
+              1))))
+
+    ;; --outside-cloudstair: the spatial room-check on every room outside
+    ;; Cloudstair. Cloudstair's 22 rooms (where every pulsed air field is,
+    ;; which the spatial search cannot prove) are removed and their slots
+    ;; become solid rock, so its one border (Cloudstair (7,1) over Hollow
+    ;; (7,2)) is sealed. A route or a return through Cloudstair is then not
+    ;; counted, which can only add failures; Cloudstair itself is the regional
+    ;; replay's. Nothing in the search changes.
+    (define (outside-cloudstair-check ct args keys t0)
+      (let* ((wm (content-map ct))
+             (outside (filter (lambda (p) (not (eq? (room-region (placed-data p)) 'cloudstair)))
+                              (content-rooms ct)))
+             (ct* (content ct rooms: outside
+                           wmap: (make-worldmap outside (worldmap-cols wm) (worldmap-rows wm)
+                                                (worldmap-size wm)))))
+        (say "outside Cloudstair: " (number->string (length outside)) " rooms; "
+             (number->string (- (length (content-rooms ct)) (length outside)))
+             " Cloudstair rooms removed, their slots solid")
+        (cond ((not (start-cell ct*))
+               (say "FAIL room-check outside Cloudstair: the world's start is not outside Cloudstair")
+               1)
+              ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct*))))
+               (say "FAIL room-check outside Cloudstair: a pulsed air field outside Cloudstair, which the spatial check cannot prove")
+               1)
+              (else (spatial-room-check ct* args keys t0 " outside Cloudstair")))))
+
     (define (room-check-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
              (keys (filter (lambda (a) (and (parse-room-key a) (not (equal? a dir)))) args)))
@@ -262,6 +342,8 @@
                 ((not (null? ps))
                   (say "FAIL room-check: " (number->string (length ps)) " problems before reach (reach not run)")
                   1)
+                ((member "--outside-cloudstair" args)
+                  (outside-cloudstair-check ct args keys t0))
                 ((member "--parse-only" args)
                   (say "PASS room-check --parse-only: " (number->string (length (content-rooms ct)))
                        " rooms, parse seams map green (reach NOT run)")
@@ -367,54 +449,4 @@
                          " room-check: " (number->string failures)
                          " exact world replay failures (timing/profile/sabotage gates also required)")
                     (if (= failures 0) 0 1)))
-                (else
-                  (let* ((g (if (member "--verbose" args)
-                                (content-reach ct (lambda (n steps kind cell)
-                                                    (say "  anchor " (number->string n) " kind " (number->string kind)
-                                                         " cell " (number->string (car cell)) "," (number->string (cdr cell))
-                                                         " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
-                                (content-reach ct)))
-                         (t1 (now-s))
-                         (rps (reach-problems ct g))
-                         (rooms (map placed-data (content-rooms ct)))
-                         (shown (if (null? keys)
-                                    rooms
-                                    (filter (lambda (rm) (member (room-label rm) keys)) rooms))))
-                    (when g
-                      (say "reach: " (reach-summary g) ", " (number->string (exact (round (- t1 t0)))) " s")
-                      (when (member "--verbose" args)
-                        (for-each (lambda (e)
-                                    (say "  rejected by the replay: ("
-                                         (number->string (caar e)) "," (number->string (cdar e)) ") -> ("
-                                         (number->string (cadr e)) "," (number->string (cddr e)) ")"))
-                                  (apply append (map (lambda (e) (graph-rejected (cset-graph e))) g)))))
-                    (for-each (lambda (p) (say (problem->string p))) rps)
-                    (let ((pk (arg-value args "--path"))
-                          (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
-                      (when (and g pk pc)
-                        (let* ((k (parse-room-key pk))
-                               (rm (and k (content-room ct (cadr k) (caddr k))))
-                               (xy (map string->number (string-split pc ","))))
-                          (if (and rm (= (length xy) 2) (car xy) (cadr xy))
-                              (begin
-                                (say "path to " pk " (" pc "):")
-                                (let* ((hv (arg-value args "--have"))
-                                       (carry (if hv (list-sort < (filter integer? (map string->number (string-split hv ",")))) '()))
-                                       (e (find (lambda (x) (equal? (cset-carry x) carry)) g)))
-                                  (if e
-                                      (print-path ct (cset-graph e) (local->global ct rm (car xy) (cadr xy)))
-                                      (say "--have: no carry set " (carry-label carry) " is one a player can hold"))))
-                              (say "--path: no room " pk " or no cell " pc)))))
-                    (when (and g (not (member "--path" args)))
-                      (for-each (lambda (rm)
-                                  (newline)
-                                  (for-each say (room-report ct g rm)))
-                                shown))
-                    (newline)
-                    (if (null? rps)
-                        (begin
-                          (say "PASS room-check: " (number->string (length rooms)) " rooms, parse seams map reach green")
-                          0)
-                        (begin
-                          (say "FAIL room-check: " (number->string (length rps)) " reach problems")
-                          1)))))))))))
+                (else (spatial-room-check ct args keys t0 "")))))))))
