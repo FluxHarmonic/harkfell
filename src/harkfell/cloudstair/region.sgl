@@ -207,7 +207,7 @@
                         (vector-ref certs 2))))
           (if (not root)
               (begin (log '(waypoints no-root)) 1)
-              (let chain ((at root) (cells waypoints) (i 0))
+              (let next-leg ((at root) (cells waypoints) (i 0))
                 (cond
                   ((null? cells) (log (list 'waypoints 'all-reached i)) 0)
                   (else
@@ -217,7 +217,7 @@
                                 'arrival (and arrival (summary arrival))
                                 'bound-hit incomplete))
                      (if arrival
-                         (chain arrival (cdr cells) (+ i 1))
+                         (next-leg arrival (cdr cells) (+ i 1))
                          (begin (log (list 'waypoints 'failed-at i (car cells))) 1))))))))))
 
     ;; pool (optional): an (engine reach pool) of cloudstair-region-worker
