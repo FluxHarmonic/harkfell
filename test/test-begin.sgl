@@ -36,6 +36,9 @@
 (define SRC (read-world-source "world"))
 (define DIR (string-append "/tmp/harkfell-test-begin-" (number->string (current-jiffy))))
 (shell-boot!)
+;; A preceding door test may have set ?carry=. These are begun games,
+;; so initialize the shared shell's door override before taking snapshots.
+(shell-set-carry! '())
 (set-store-root! DIR)
 (store-remove! SAVE-KEY)
 (shell-load-content! SRC)

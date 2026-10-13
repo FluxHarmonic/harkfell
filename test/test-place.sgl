@@ -62,8 +62,8 @@
 (define OLD-SAVE
   (list 'harkfell-save 1 (list 'room 'hollow 4 3) (list 'cell 15 8) (list 'carry 2) (list 'stones)
         (list 'moments "hollow:4,3") (list 'played 50.5) (list 'revealed #t)))
-(define BOWL-FRESH (world-place (world-in 4 3) CT))
 (sound-reset!)
+(define BOWL-FRESH (world-place (world-in 4 3) CT))
 (restore-extras! (restored-moments (save-restore CT OLD-SAVE)) 50.5)
 (define BOWL-CONTINUED (world-place (world-in 4 3) CT))
 (sound-reset!)
