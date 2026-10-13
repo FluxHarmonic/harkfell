@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Build one or more commits' native releases on ONE azoth runner, then run
+# reach legs against them side by side (each leg is single-threaded unless
+# it asks for workers), and fetch every leg's log.
+#
+#   scripts/reach-remote LEGS-FILE
+#
+# LEGS-FILE is bash, sourced on the runner, calling `leg` once per leg:
+#
+#   leg NAME COMMIT TIMEOUT-SECS [VAR=VALUE ...] -- HARKFELL-ARGS...
+#
+#   leg base 500d6d1 3600 -- --room-check --cloudstair-region --quick
+#   leg prof 643f29f 3600 HARKFELL_REACH_PROF=1 -- --room-check --cloudstair-region --quick
+#
+# Every COMMIT must be reachable from a local ref. Each distinct commit is
+# checked out and built once (sequentially, before any leg starts: a leg
+# running beside a native compile has been OOM-killed on these runners).
+# Then all legs start together, each in its own commit's checkout (so it
+# reads that tree's world/), with `timeout` and its wall time recorded.
+# Logs land in build/reach-remote-<stamp>.logs/<NAME>.log, with a summary.
+#
+# Exit: 0 every build and leg ran (a leg's own FAIL is in its log);
+# 1 a build failed; 125 refused or SETUP-FAILED; 126/127 from azoth-remote.
+# Environment: AZOTH_REMOTE, REACH_REMOTE_TIMEOUT (whole job, default 14400).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+say() { printf 'reach-remote: %s\n' "$*" >&2; }
+
+LEGS=${1:-}
+[ -n "$LEGS" ] && [ -f "$LEGS" ] || { say "usage: scripts/reach-remote LEGS-FILE"; exit 125; }
+REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
+[ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
+
+# The commits the legs name, resolved here so the runner gets full shas.
+commits=$(awk '$1 == "leg" { print $3 }' "$LEGS" | sort -u)
+[ -n "$commits" ] || { say "no legs in $LEGS"; exit 125; }
+resolved=""
+for c in $commits; do
+  full=$(git rev-parse --verify --quiet "$c^{commit}") || { say "REFUSED: $c is not a commit here"; exit 125; }
+  resolved="$resolved $c=$full"
+done
+SIGIL_V=$(git show HEAD:package.sgl | sed -n 's/^ *sigil: *"\([0-9][0-9.]*\)".*/\1/p' | head -1)
+STAMP=$(date +%Y%m%dT%H%M%S)
+say "legs $LEGS; commits$resolved; sigil $SIGIL_V"
+
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/reach-remote.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
+. scripts/remote-sigil-toolchain
+stage_remote_sigil "$STAGE" "$SIGIL_V"
+# A bundle of every local branch plus HEAD carries all named commits.
+git bundle create "$STAGE/src.bundle" HEAD --branches 2>/dev/null
+for pair in $resolved; do
+  git bundle verify "$STAGE/src.bundle" >/dev/null 2>&1 || { say "SETUP-FAILED: bundle"; exit 125; }
+  git merge-base --is-ancestor "${pair#*=}" HEAD 2>/dev/null || \
+    git branch --contains "${pair#*=}" | grep -q . || { say "REFUSED: ${pair%%=*} is on no local branch"; exit 125; }
+done
+cp "$LEGS" "$STAGE/legs.sh"
+printf '%s\n' $resolved > "$STAGE/commits.txt"
+
+cat > "$STAGE/remote.sh" <<'EOF'
+#!/usr/bin/env bash
+# ON THE RUNNER, in ~/work. Args: <sigil version>
+set -uo pipefail
+cd "$HOME/work"
+SIGIL_V=$1
+mkdir -p out
+t() { date +%s; }
+T0=$(t)
+echo "remote: runner $(ip -4 -br addr show eth0 | awk '{print $3}') nproc=$(nproc) load=$(cut -d' ' -f1-3 /proc/loadavg) mem=$(awk '/MemAvailable/{print $2}' /proc/meminfo)kB"
+. ./remote-sigil-toolchain || exit 125
+use_remote_sigil "$SIGIL_V" || exit 125
+git clone --quiet --no-checkout src.bundle repo || { echo "SETUP-FAILED: clone"; exit 125; }
+RC=0
+while IFS== read -r short full; do
+  [ -n "$full" ] || continue
+  dir="$HOME/work/c-$short"
+  git -C repo worktree add --quiet --detach "$dir" "$full" || { echo "SETUP-FAILED: checkout $short"; exit 125; }
+  ts=$(t)
+  ( cd "$dir" && sigil deps install > "$HOME/work/out/deps-$short.log" 2>&1 \
+      && scripts/dev sigil build --config release > "$HOME/work/out/build-$short.log" 2>&1 )
+  r=$?
+  echo "=== BUILD $short rc=$r $(( $(t) - ts ))s oom_kill=$(awk '/oom_kill /{print $2}' /proc/vmstat)"
+  sed 's/\x1b\[[0-9;]*m//g' "out/build-$short.log" | tail -3
+  [ $r -eq 0 ] || RC=1
+done < commits.txt
+[ $RC -eq 0 ] || { echo "remote: a build failed; no legs run"; exit 1; }
+sha_of() { awk -F= -v s="$1" '$1 == s { print $2 }' commits.txt; }
+NAMES=()
+PIDS=()
+leg() {
+  local name=$1 commit=$2 limit=$3; shift 3
+  local envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  [ "${1:-}" = "--" ] && shift
+  local dir="$HOME/work/c-$commit"
+  [ -x "$dir/build/release/bin/harkfell" ] || { echo "SETUP-FAILED: leg $name: no binary for $commit"; return; }
+  NAMES+=("$name")
+  (
+    cd "$dir"
+    s=$(date +%s.%N)
+    env "${envs[@]}" timeout "$limit" ./build/release/bin/harkfell "$@" > "$HOME/work/out/$name.log" 2>&1 < /dev/null
+    r=$?
+    e=$(date +%s.%N)
+    echo "$name rc=$r wall=$(awk -v a="$s" -v b="$e" 'BEGIN{printf "%.1f", b-a}')s commit=$commit env=${envs[*]} args=$*" > "$HOME/work/out/$name.result"
+  ) &
+  PIDS+=($!)
+  echo "=== LEG $name started: commit $commit timeout $limit env ${envs[*]} args $*"
+}
+. ./legs.sh
+( while sleep 300; do for n in "${NAMES[@]}"; do printf "%s %ss: " "$n" $(( $(t) - T0 )); grep -a "regional-search\|^(prof\|RED\|PASS\|FAIL\|^(region\|^(coverage" "out/$n.log" 2>/dev/null | tail -1 | cut -c1-400; echo; done; done ) &
+MON=$!
+wait "${PIDS[@]}"
+kill $MON 2>/dev/null
+for n in "${NAMES[@]}"; do cat "out/$n.result" 2>/dev/null || echo "$n NO-RESULT"; done | tee out/summary.txt
+echo "remote: total $(( $(t) - T0 ))s, rc=$RC"
+exit $RC
+EOF
+
+T0=$(date +%s)
+set +e
+"$REMOTE" --label "harkfell reach-remote $STAMP" --timeout "${REACH_REMOTE_TIMEOUT:-14400}" --detach \
+  --put "$STAGE/src.bundle:src.bundle" --put "$STAGE/remote.sh:remote.sh" --put "$STAGE/legs.sh:legs.sh" \
+  --put "$STAGE/commits.txt:commits.txt" \
+  --put "scripts/remote-sigil-toolchain:remote-sigil-toolchain" --put "$STAGE/sigil-delivered:sigil-delivered" \
+  --get "out:$STAGE/fetched" -- bash remote.sh "$SIGIL_V"
+rc=$?
+set -e
+say "remote rc=$rc in $(( $(date +%s) - T0 ))s"
+if [ -d "$STAGE/fetched" ]; then
+  LOGS="build/reach-remote-$STAMP.logs"
+  mkdir -p "$LOGS"
+  cp -r "$STAGE/fetched/." "$LOGS/"
+  cp "$LEGS" "$LOGS/legs.sh"
+  say "logs in $LOGS"
+fi
+exit $rc
