@@ -226,7 +226,7 @@ ws.addEventListener("message", (ev) => {
     const text = (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
     lines.push(text);
     if (startupTrace && startupTrace.length < 128 &&
-        (text.startsWith("harkfell: frame ") || text.startsWith("harkfell: sound "))) {
+        (text.startsWith("harkfell: frame ") || text.startsWith("harkfell: sound ") || text.startsWith("harkfell: work frame "))) {
       startupTrace.push({ at: msg.params.timestamp ?? Date.now(), line: text });
     }
     if (msg.params.type === "error") errors.push("console.error: " + text);

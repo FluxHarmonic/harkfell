@@ -170,7 +170,7 @@
           (shell-playtest-after-frame! (gles3-canvas-width) (gles3-canvas-height))
           (set! *work-ms* (- (now-ms) w0))
           (when (and *trace* (> *work-ms* 50.0))
-            (say "frame" "work"
+            (say "work" "frame"
                  "world" (number->string world-ms)
                  "director" (number->string (car audio-times))
                  "pump" (number->string (cadr audio-times))
