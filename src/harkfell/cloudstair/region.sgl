@@ -2,7 +2,7 @@
 ;;; only. Every accepted route starts at an actual body, retains acquisitions
 ;;; and phase, and has an independently replayed physical route back out.
 (define-library (harkfell cloudstair region)
-  (import (sigil list)
+  (import (sigil list) (only (sigil process) getenv)
           (engine body) (engine air) (engine tilemap) (engine worldmap)
           (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
           (engine reach geopool) (only (engine reach pool) pool-verify!)
@@ -26,6 +26,15 @@
 
     ;; Rest states remembered per process by route-rest-memo (about 600 bytes
     ;; each); a bound on memory, not on the search.
+    ;; HARKFELL_REGION_LANDING_BOUND=N: a measurement knob, never a gate.
+    ;; The check gives up (incomplete, so FAIL) once its retained landings
+    ;; reach bound; this raises only that limit, to measure where the
+    ;; region would finish. The search bound is unchanged, and a run with it
+    ;; set logs (landing-bound-override ...) and is not a gate verdict.
+    (define LANDING-BOUND-OVERRIDE
+      (let ((v (getenv "HARKFELL_REGION_LANDING_BOUND")))
+        (and v (string->number v))))
+
     (define REST-MEMO-CAP 120000)
     ;; A worker proves each pose pinned to it once, so it needs fewer.
     (define WORKER-REST-CAP 60000)
@@ -351,7 +360,11 @@
                                        (eq? (room-region (placed-data p)) 'cloudstair))
                                      (content-rooms ct)))))
              (route-cache '()) (entry-rooms (cloudstair-entrance-probe source)) (failures 0)
-             (search-incomplete #f))
+             (search-incomplete #f)
+             (landing-bound (or LANDING-BOUND-OVERRIDE bound)))
+        (when LANDING-BOUND-OVERRIDE
+          (log (list (quote landing-bound-override) landing-bound (quote gate-bound) bound
+                     (quote not-a-gate-verdict))))
         (log (list 'candidate-geometry 'complete 'stats (graph-stats candidate)))
         (prof-report 'candidate-geometry-complete)
         (define (cell-of node)
@@ -424,7 +437,7 @@
                         (when (= (modulo target-count 20) 0)
                           (log (list 'coverage 'carry carry 'targets target-count
                                      'landings landing-count 'unreached (length unreached))))
-                        (if (or (>= landing-count bound) (not complete))
+                        (if (or (>= landing-count landing-bound) (not complete))
                             (set! complete #f)
                             (begin
                               (unless (or (dict-contains? covered target)
@@ -443,7 +456,7 @@
                                                  (not (dict-contains? checked (car entry))))
                                                (dict-entries landings))))
                           (cond ((not complete) #f)
-                                ((>= landing-count bound) (set! complete #f))
+                                ((>= landing-count landing-bound) (set! complete #f))
                                 ((null? pending) #t)
                                 (else
                                  (for-each
