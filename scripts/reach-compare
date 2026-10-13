@@ -1,0 +1,61 @@
+#!/bin/sh
+# Compare two reach legs' logs from scripts/reach-remote, verdict line for
+# verdict line, and report each leg's throughput.
+#
+#   scripts/reach-compare A.log B.log [--prefix]
+#
+# A leg log is "<epoch> <line>" per line (reach-remote stamps them). The
+# compared stream is every line that carries a result: search progress
+# (regional-search, world-search), per-search and running digests
+# (route-digest, route-digest-at), coverage, region and region-sets lines,
+# RED lines, candidate-geometry completion, and the PASS/FAIL summary.
+# (prof) counters, worker chatter and timing are not compared.
+#
+# Without --prefix the two streams must be identical (finished legs).
+# With --prefix (legs stopped by a time limit) the shorter stream must be a
+# prefix of the longer, and at least one digest must be shared.
+# Exit 0 SAME, 1 DIFFER (first difference printed), 2 SETUP-FAILED.
+set -eu
+A=${1:-}; B=${2:-}; MODE=${3:-}
+[ -f "$A" ] && [ -f "$B" ] || { echo "SETUP-FAILED: usage: scripts/reach-compare A.log B.log [--prefix]"; exit 2; }
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/reach-compare.XXXXXX")
+trap 'rm -rf "$TMP"' EXIT
+
+stream() {
+  # drop the stamp, keep result lines only
+  sed 's/^[0-9]* //' "$1" | grep -a -E '^\((regional-search|world-search|route-digest|route-digest-at|coverage|world-coverage|region |region-sets|RED|candidate-geometry complete|world-candidates [^ ]* [^ ]* [^ ]* complete|world-acquisition|world-return|world-replay|world-bowl)|^(PASS|FAIL) ' || true
+}
+stream "$A" > "$TMP/a"; stream "$B" > "$TMP/b"
+na=$(wc -l < "$TMP/a"); nb=$(wc -l < "$TMP/b")
+[ "$na" -gt 0 ] && [ "$nb" -gt 0 ] || { echo "SETUP-FAILED: a stream is empty (a=$na b=$nb lines): nothing to compare"; exit 2; }
+
+throughput() {
+  # seconds between the first and last running digest, and expansions in between
+  sed -n 's/^\([0-9]*\) (route-digest-at target \(([^)]*)\) expanded \([0-9]*\).*/\1 \3/p' "$1" > "$TMP/t"
+  if [ "$(wc -l < "$TMP/t")" -ge 2 ]; then
+    awk 'NR==1 {t0=$1; e0=$2} {t=$1; e=$2} END { if (e>e0) printf "%d expansions in %d s (%.2f s each) between its first and last running digest\n", e-e0, t-t0, (t-t0)/(e-e0); else print "one search only" }' "$TMP/t"
+  else
+    echo "fewer than two running digests"
+  fi
+}
+echo "A: $A: $na result lines; $(throughput "$A")"
+echo "B: $B: $nb result lines; $(throughput "$B")"
+
+if [ "$MODE" = "--prefix" ]; then
+  n=$na; [ "$nb" -lt "$n" ] && n=$nb
+  head -n "$n" "$TMP/a" > "$TMP/a.p"; head -n "$n" "$TMP/b" > "$TMP/b.p"
+  shared=$(grep -c '^(route-digest' "$TMP/a.p" || true)
+  if cmp -s "$TMP/a.p" "$TMP/b.p"; then
+    [ "$shared" -gt 0 ] || { echo "SETUP-FAILED: the shared prefix ($n lines) holds no digest"; exit 2; }
+    echo "SAME: the first $n result lines are identical ($shared digests among them)"
+    exit 0
+  fi
+else
+  if cmp -s "$TMP/a" "$TMP/b"; then
+    echo "SAME: all $na result lines are identical"
+    exit 0
+  fi
+fi
+echo "DIFFER: first difference:"
+diff "$TMP/a" "$TMP/b" | head -6 | cut -c1-300
+exit 1
