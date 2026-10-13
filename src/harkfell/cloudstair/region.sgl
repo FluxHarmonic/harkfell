@@ -5,7 +5,8 @@
   (import (sigil list) (only (sigil process) getenv) (only (sigil gc) gc-stats)
           (engine body) (engine air) (engine tilemap) (engine worldmap)
           (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
-          (engine reach geopool) (only (engine reach pool) pool-verify!)
+          (engine reach geopool) (engine reach wire)
+          (only (engine reach pool) pool-verify! pool-submit! pool-drain-until! pool-drain! pool-size)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
@@ -35,6 +36,14 @@
     ;; turns it off, for measuring what it changes).
     (define RETURN-MEMO
       (not (equal? (getenv "HARKFELL_REGION_RETURN_MEMO") "0")))
+
+    ;; With a worker pool the return drain runs whole searches on the workers
+    ;; in rounds (HARKFELL_REGION_PARALLEL_DRAIN=0: one at a time, here).
+    ;; The return memo's key for a proven state: its exact timed key.
+    (define (return-memo-key node) (timed-key node))
+
+    (define PARALLEL-DRAIN
+      (not (equal? (getenv "HARKFELL_REGION_PARALLEL_DRAIN") "0")))
 
     (define LANDING-BOUND-OVERRIDE
       (let ((v (getenv "HARKFELL_REGION_LANDING_BOUND")))
@@ -162,9 +171,13 @@
                                          (cloudstair-shelter-checker ct advance)
                                          (cloudstair-waiter ct advance)
                                          (cloudstair-fingerprint ct)))
-             (geometry #f) (guides #f))
+             (geometry #f) (guides #f) (drain #f))
         (lambda (line)
           (cond
+            ;; the parallel return drain's whole searches and proven keys
+            ((and (> (string-length line) 1) (memv (string-ref line 0) (list #\D #\Q)))
+             (unless drain (set! drain (cloudstair-drain-server ct)))
+             (drain line))
             ;; per-(carry, down) guides: cloudstair-guide-builder's requests
             ((and (> (string-length line) 1) (char=? (string-ref line 0) #\S))
              (unless guides (set! guides (cloudstair-guide-server ct)))
@@ -335,6 +348,102 @@
                                (loop (cdr ps)
                                      (if (and total (or (not best) (< total best))) total best))))))))))))
 
+    ;; A pool worker's side of the parallel return drain (cloudstair-region-check):
+    ;;   "D <bound> <node>"   one whole return search from node to home with this
+    ;;                        worker's own finder, stopping also at proven states.
+    ;;                        Answer: "D <found> <at-home> <incomplete> <checked> <n>"
+    ;;                        then n records "<shelter> <node> <aligned rest or F>":
+    ;;                        each distinct node the search recorded, in order, with
+    ;;                        the two values the parent's record*! computes.
+    ;;   "Q <n> <key>..."     add proven keys (exact timed keys).
+    ;; The finder, guide, rank and certificates are the check's, built here once
+    ;; from the same content; the proven set is the parent's, frozen per round.
+    (define (cloudstair-drain-server ct)
+      (let* ((home (start-cell ct))
+             (tiles-for (cloudstair-tile-provider ct))
+             (advance (route-rest-memo (cloudstair-stepper ct) WORKER-REST-CAP))
+             (shelter? (cloudstair-shelter-checker ct advance))
+             (wait (cloudstair-waiter ct advance))
+             (proposals (cloudstair-route-proposals ct))
+             (proven #{}) (proven-exact #{}) (recorded (quote ())) (incomplete #f) (finders #f))
+        (define (cell-of node)
+          (and (still? node) (rest-cell (tiles-for (timed-node-data node))
+                                     HARKFELL-FEEL (timed-node-body node))))
+        (define (align node) (let ((proof (wait node 0))) (and proof (car proof))))
+        ;; As the check's proven-return?: memo key lookups, and every hit
+        ;; checked at its exact key (a failure ends this worker, an error in
+        ;; the check).
+        (define (proven-return? node target)
+          (and RETURN-MEMO (equal? target home) (still? node)
+               (let ((hit (if (dict-contains? proven (return-memo-key node))
+                              node
+                              (let ((rest (align node)))
+                                (and rest (dict-contains? proven (return-memo-key rest)) rest)))))
+                 (and hit
+                      (begin
+                        (unless (dict-contains? proven-exact (timed-key hit))
+                          (error "return memo: a proven-return hit is not proven at its exact key"
+                                 (timed-key hit)))
+                        #t)))))
+        (define (setup! bound)
+          (unless finders
+            (let* ((candidate (reach-graph (reach-search-down (region-candidate-tm ct) HARKFELL-FEEL
+                                                              (list home) witness-lands? #t)
+                                           memo: #f))
+                   (rank (cloudstair-carry-rank
+                           (cloudstair-guide-builder tiles-for (cloudstair-guide-seeds ct)
+                                                     (lambda (record) #t) (quote rank-candidates))
+                           (content-pickup-cells ct) cell-of))
+                   (finder (timed-route-finder advance tiles-for HARKFELL-FEEL (lambda (node) candidate)
+                             shelter? wait bound
+                             (lambda (node) (set! recorded (cons node recorded)))
+                             (lambda () (set! incomplete #t))
+                             #f proposals #f #f rank proven-return?))
+                   (plain (timed-route-finder advance tiles-for HARKFELL-FEEL (lambda (node) candidate)
+                            shelter? wait bound (lambda (node) #t) (lambda () #t)
+                            #f proposals #f #f rank)))
+              (set! finders (cons finder plain)))))
+        (lambda (line)
+          (let ((toks (wire-tokens line)))
+            (cond
+              ((string=? (car toks) "Q")
+               (let loop ((n (string->number (cadr toks))) (ts (cddr toks)))
+                 (when (> n 0)
+                   (let ((r (wire-read-value ts)))
+                     (set! proven (dict-set proven (car (car r)) #t))
+                     (set! proven-exact (dict-set proven-exact (cdr (car r)) #t))
+                     (loop (- n 1) (cdr r)))))
+               "Q")
+              ((string=? (car toks) "D")
+               (let ((bound (string->number (cadr toks)))
+                     (start (car (wire-read-node (cddr toks)))))
+                 (setup! bound)
+                 (set! recorded '())
+                 (set! incomplete #f)
+                 (let* ((back ((car finders) start home))
+                        (at-home (and back (equal? (cell-of back) home)))
+                        ;; ROUTE_CHECK: a memo stop must be a real return by itself
+                        (checked (cond ((or (not ROUTE-CHECK) (not back) at-home) "N")
+                                       (((cdr finders) start home) "T")
+                                       (else "F")))
+                        (records
+                          (let loop ((ns (reverse recorded)) (seen #{}) (acc '()))
+                            (cond ((null? ns) (reverse acc))
+                                  ((dict-contains? seen (timed-key (car ns))) (loop (cdr ns) seen acc))
+                                  (else
+                                   (let ((node (car ns)))
+                                     (loop (cdr ns) (dict-set seen (timed-key node) #t)
+                                           (cons (list (and (shelter? node) #t) node (align node)) acc))))))))
+                   (set! recorded '())
+                   (wire-join
+                     (append (list "D" (if back "T" "F") (if at-home "T" "F") (if incomplete "T" "F") checked
+                                   (number->string (length records)))
+                             (apply append
+                                    (map (lambda (r) (append (list (if (car r) "T" "F"))
+                                                             (wire-node (cadr r)) (wire-node (caddr r))))
+                                         records)))))))
+              (else (error "drain worker: bad request" (car toks))))))))
+
     ;; A diagnostic, never a verdict: from the profile's actual root, search
     ;; to each waypoint cell in turn, each search starting at the previous
     ;; search's actual arrival (body, phase and carry). The finder, guide,
@@ -491,7 +600,7 @@
         ;; no-input ticks), is proven: the route is the actual replay to it plus
         ;; its proven return. A landing returns iff it reaches some proven
         ;; state, so trap verdicts from exhaustion are unchanged.
-        (define (memo-key node) (timed-key node))
+        (define (memo-key node) (return-memo-key node))
         (define (proven-key node)
           ;; the proven key node itself or its aligned rest holds, or #f
           (and (still? node)
@@ -557,6 +666,98 @@
                       (unless (dict-contains? landings key)
                         (set! landings (dict-set landings key rest))
                         (set! landing-count (+ landing-count 1)))))))
+              ;; record*! with the two values a drain worker computed for node
+              ;; (its shelter answer and its aligned rest): the same effect.
+              (define (apply-record! node shelter rest-aligned)
+                (let ((cell (cell-of node)))
+                  (when cell (set! covered (dict-set covered cell #t))))
+                (let ((rotation (and shelter
+                                     (timed-key (timed-node node body:
+                                                  (body (timed-node-body node) tau: 0))))))
+                  (unless (and rotation (dict-contains? rotations rotation))
+                    (let* ((rest (or rest-aligned node)) (key (timed-key rest)))
+                      (when rotation (set! rotations (dict-set rotations rotation #t)))
+                      (unless (dict-contains? landings key)
+                        (set! landings (dict-set landings key rest))
+                        (set! landing-count (+ landing-count 1)))))))
+              ;; The parallel drain's pass over pending landings: rounds of
+              ;; 2 per worker, each a whole return search on a worker against
+              ;; the proven set frozen at the round's start; answers merge in
+              ;; landing order, then the round's proven keys go to every
+              ;; worker. A search never reads the landings it records, so
+              ;; merging after the round equals recording during it, and no
+              ;; result depends on timing. Returns when the pass is done.
+              (define (parallel-pass! pending checked-add!)
+                (let* ((p (car pool)) (r (* 2 (pool-size p))))
+                  (let round ((ps pending))
+                    (when (and complete (pair? ps) (< landing-count landing-bound))
+                      (let* ((batch (let take ((xs ps) (n r) (acc '()))
+                                      (if (or (null? xs) (= n 0)) (reverse acc)
+                                          (take (cdr xs) (- n 1) (cons (car xs) acc)))))
+                             (answers (make-vector (length batch) #f)))
+                        (let submit ((es batch) (i 0))
+                          (when (pair? es)
+                            (let ((slot i))
+                              (pool-submit! p (wire-join (append (list "D" (number->string bound))
+                                                                 (wire-node (cdr (car es)))))
+                                            (lambda (line) (vector-set! answers slot line))))
+                            (submit (cdr es) (+ i 1))))
+                        (pool-drain-until! p (lambda () (let all ((i 0)) (or (= i (vector-length answers))
+                                                                            (and (vector-ref answers i) (all (+ i 1)))))))
+                        (let merge ((es batch) (i 0) (fresh '()))
+                          (cond
+                            ((or (null? es) (not complete))
+                             ;; the round's proven keys, to every worker before the next round
+                             (when (pair? fresh)
+                               (let ((line (wire-join (append (list "Q" (number->string (length fresh)))
+                                                              (apply append (map wire-value (reverse fresh)))))))
+                                 (let each ((w 0))
+                                   (when (< w (pool-size p))
+                                     (pool-submit! p line (lambda (answer) #t) w)
+                                     (each (+ w 1))))
+                                 (pool-drain! p)))
+                             (round (let skip ((xs ps) (n (length batch))) (if (= n 0) xs (skip (cdr xs) (- n 1))))))
+                            (else
+                             (let* ((entry (car es))
+                                    (toks (wire-tokens (vector-ref answers i)))
+                                    (found (string=? (list-ref toks 1) "T"))
+                                    (at-home (string=? (list-ref toks 2) "T"))
+                                    (incomplete (string=? (list-ref toks 3) "T"))
+                                    (checked (list-ref toks 4))
+                                    (n (string->number (list-ref toks 5))))
+                               (checked-add! (car entry))
+                               ;; the search's landings, in its own order
+                               (let records ((k n) (ts (list-tail toks 6)))
+                                 (when (> k 0)
+                                   (let* ((sh (string=? (car ts) "T"))
+                                          (a (wire-read-node (cdr ts)))
+                                          (b (wire-read-node (cdr a))))
+                                     (apply-record! (car a) sh (car b))
+                                     (records (- k 1) (cdr b)))))
+                               (when (string=? checked "F")
+                                 (error "route check: a proven-return stop is not a real return"
+                                        (timed-key (cdr entry))))
+                               (let ((fresh
+                                       (cond ((not found)
+                                              (set! traps (cons (timed-key (cdr entry)) traps))
+                                              fresh)
+                                             (else
+                                              (unless at-home (set! memo-stops (+ memo-stops 1)))
+                                              (set! return-proven (dict-set return-proven (memo-key (cdr entry)) #t))
+                                              (set! return-proven-exact
+                                                    (dict-set return-proven-exact (timed-key (cdr entry)) #t))
+                                              (cons (cons (memo-key (cdr entry)) (timed-key (cdr entry))) fresh)))))
+                                 (when incomplete
+                                   (set! search-incomplete #t)
+                                   (set! complete #f)
+                                   (log (list 'RED 'regional-return-bound 'carry carry 'bound bound)))
+                                 (when (= 0 (modulo n-checked 50))
+                                   (log (list (quote region-drain) (quote checked) n-checked
+                                              (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
+                                              (quote memo-stops) memo-stops (quote traps) (length traps)
+                                              (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))
+                                              (quote parallel) (pool-size p))))
+                                 (merge (cdr es) (+ i 1) fresh)))))))))))
               (set! search-incomplete #f)
               (set! return-proven #{}) (set! return-proven-exact #{}) (set! memo-stops 0) (set! n-checked 0)
               (for-each
@@ -600,6 +801,11 @@
                                 ((>= landing-count landing-bound) (set! complete #f))
                                 ((null? pending) #t)
                                 (else
+                                 (if (and PARALLEL-DRAIN (pair? pool) (car pool))
+                                     (parallel-pass! pending
+                                                     (lambda (key)
+                                                       (set! checked (dict-set checked key #t))
+                                                       (set! n-checked (+ n-checked 1))))
                                  (for-each
                                    (lambda (entry)
                                      (when complete
@@ -642,7 +848,7 @@
                                          (set! complete #f)
                                          (log (list 'RED 'regional-return-bound 'carry carry
                                                     'bound bound)))))
-                                   pending)
+                                   pending))
                                  (drain)))))))
                   ;; Artificial negative profiles must fail at the legal
                   ;; entrance, rather than being spawned past its seal.
