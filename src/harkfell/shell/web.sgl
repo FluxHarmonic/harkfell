@@ -150,8 +150,10 @@
              (ms (string->number payload))
              (w0 (now-ms)))
         (shell-set-frame-stamp! ms)
-        (let ((ticks (shell-frame! dt)))
-          (audio-frame! (* 1000.0 dt) *work-ms*)
+        (let* ((ticks (shell-frame! dt))
+               (world-ms (and *trace* (- (now-ms) w0)))
+               (audio-times (audio-frame! (* 1000.0 dt) *work-ms* *trace*))
+               (audio-done (and *trace* (now-ms))))
           (when (and *trace* (not (= (world-returns (shell-world)) *returns*)))
             (set! *returns* (world-returns (shell-world)))
             (say "returns" (number->string *returns*)))
@@ -166,7 +168,14 @@
           (gles3-resize-to-display)
           (shell-present! (gles3-canvas-width) (gles3-canvas-height) ticks)
           (shell-playtest-after-frame! (gles3-canvas-width) (gles3-canvas-height))
-          (set! *work-ms* (- (now-ms) w0)))))
+          (set! *work-ms* (- (now-ms) w0))
+          (when (and *trace* (> *work-ms* 50.0))
+            (say "frame" "work"
+                 "world" (number->string world-ms)
+                 "director" (number->string (car audio-times))
+                 "pump" (number->string (cadr audio-times))
+                 "deferred" (number->string (caddr audio-times))
+                 "present" (number->string (- (now-ms) audio-done)))))))
 
     ;; "A,B,C" -> a list of numbers (#f for a field that is not one).
     (define (fields payload)

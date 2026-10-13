@@ -227,7 +227,7 @@ ws.addEventListener("message", (ev) => {
     lines.push(text);
     if (startupTrace && startupTrace.length < 128 &&
         (text.startsWith("harkfell: frame ") || text.startsWith("harkfell: sound "))) {
-      startupTrace.push({ at: Date.now(), line: text });
+      startupTrace.push({ at: msg.params.timestamp ?? Date.now(), line: text });
     }
     if (msg.params.type === "error") errors.push("console.error: " + text);
     else if (LEGS.includes("samplers") && /SAMPLER_POOL_EXHAUSTED|VALIDATE_APPENDBUF|ABORTING|panic|Aborted\(/i.test(text)) {

@@ -522,8 +522,12 @@
         (lambda () (< (wall-ms) until))))
     (define (sounding?) (any source-live? (mixer-sources)))
 
-    (define (audio-frame! frame-ms work-ms)
-      (let ((now (audio-now)))
+    ;; Optional measurement is used only by the web trace. Normal callers
+    ;; keep the same pump/work ordering and budget.
+    (define (audio-frame! frame-ms work-ms . measured)
+      (let* ((measure? (and (pair? measured) (car measured)))
+             (t0 (and measure? (wall-ms)))
+             (now (audio-now)))
         (cond
           ((or (bench-running?) (bench-done?))
             (begin (shell-take-news!) (shell-take-body-events!) (when (bench-running?) (bench-frame! now frame-ms work-ms))))
@@ -536,9 +540,13 @@
                     (pl (world-place (shell-world) (shell-content) (shell-take-news!))))
                 (sound-frame! now dt (and pl (place pl moves: moves)))))))
         (set! *last* now)
-        (mixer-pump! now)
-        (unless (or *paused-at* (bench-running?) (bench-done?))
-          (sound-work! (work-more? (if (sounding?) WORK-MS-SOUNDING WORK-MS-QUIET))))))
+        (let ((t1 (and measure? (wall-ms))))
+          (mixer-pump! now)
+          (let ((t2 (and measure? (wall-ms))))
+            (unless (or *paused-at* (bench-running?) (bench-done?))
+              (sound-work! (work-more? (if (sounding?) WORK-MS-SOUNDING WORK-MS-QUIET))))
+            (and measure?
+                 (list (- t1 t0) (- t2 t1) (- (wall-ms) t2)))))))
 
     (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
 
