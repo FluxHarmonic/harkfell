@@ -22,12 +22,13 @@
     ;; Rest states each process remembers (route-rest-memo); a bound on
     ;; memory, not on the search.
     (define WORLD-REST-CAP 120000)
+    (define WORLD-WORKER-REST-CAP 60000)
 
     ;; A worker for cloudstair-world-check's pool: the same content, advance,
     ;; shelter certificates and waiter, answering (engine reach routes)'
     ;; wait, replay and certificate requests.
     (define (cloudstair-world-worker ct)
-      (let ((advance (route-rest-memo (cloudstair-stepper ct) WORLD-REST-CAP)))
+      (let ((advance (route-rest-memo (cloudstair-stepper ct) WORLD-WORKER-REST-CAP)))
         (route-task-handler advance
                             (cloudstair-shelter-checker ct advance)
                             (cloudstair-waiter ct advance)

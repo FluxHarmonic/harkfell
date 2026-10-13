@@ -26,6 +26,8 @@
     ;; Rest states remembered per process by route-rest-memo (about 600 bytes
     ;; each); a bound on memory, not on the search.
     (define REST-MEMO-CAP 120000)
+    ;; A worker proves each pose pinned to it once, so it needs fewer.
+    (define WORKER-REST-CAP 60000)
 
     (define (still? node)
       (and node
@@ -140,7 +142,7 @@
     ;; guide search, answering (engine reach geopool)'s anchor expansions.
     (define (cloudstair-region-worker source)
       (let* ((ct (cloudstair-region-content source))
-             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
+             (advance (route-rest-memo (cloudstair-stepper ct) WORKER-REST-CAP))
              (routes (route-task-handler advance
                                          (cloudstair-shelter-checker ct advance)
                                          (cloudstair-waiter ct advance)
