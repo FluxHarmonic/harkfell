@@ -656,7 +656,7 @@
         (lambda (start target)
           (let ((queued #{}) (seen #{}) (count 0) (halted #f)
                 (physical (vector (make-vector 64 #f) 0 2 3))
-                (guided (vector (make-vector 64 #f) 0 5 6))
+                (guided (vector (make-vector 64 #f) 0 6 1))
                 (turn 'physical) (serial 0)
                 (stop-why #f) (cell-stats #{}) (cell-taus #{}))
             (define (stop! why)
@@ -828,10 +828,13 @@
                     100000)))
             ;; Each queue is #(heap size score tie): entries compare by score,
             ;; then tie, then Manhattan distance, then age. The physical queue
-            ;; (score depth + distance) breaks ties on distance; the guided queue
-            ;; (score depth + guide hops) on guide hops left, so among equal
-            ;; estimates it expands the state furthest along the guide first.
-            ;; Order only: a search that exhausts explores the same states.
+            ;; scores depth + distance and breaks ties on distance. The guided
+            ;; queue is greedy along the guide: it scores guide hops left and
+            ;; breaks ties on depth, so the state furthest along the guide goes
+            ;; first however many hops it took. (Scoring depth + hops let every
+            ;; phase variant on a shortest path outrank a state one hop longer
+            ;; but further along.) Order only: a search that exhausts explores
+            ;; the same states.
             (define (before? queue a b)
               (let ((score (vector-ref queue 2)) (tie (vector-ref queue 3)))
                 (or (< (vector-ref a score) (vector-ref b score))
