@@ -986,6 +986,7 @@
         ;; or the queue), so a worker's notes are the notes; they are applied
         ;; here, in the drain's own order, exactly as REUSE applies a memo's.
         (define remote (and (pair? log) (pair? (cdr log)) (vector? (cadr log)) (cadr log)))
+        (define serving (and (pair? log) (pair? (cdr log)) (eq? (cadr log) (quote serve))))
         (define requested-anchors (make-vector nk #f))
         (define (request-queued!)
           ;; every queued anchor will be expanded; ask for those not asked
@@ -1007,17 +1008,6 @@
             (for-each (lambda (n) (apply note! k n)) (reverse notes))))
 
 
-        (if (and (pair? log) (pair? (cdr log)) (eq? (cadr log) 'serve))
-            ;; a worker: expand anchor k from rep, as expand! would
-            (lambda (k rep)
-              (let ((s0 steps))
-                (rect-start! rep)
-                (set! *notes* '())
-                (expand-kind k (key-kind k) rep)
-                (let ((notes *notes*))
-                  (set! *notes* #f)
-                  (list notes (rect-take!) (- steps s0)))))
-        (begin
         ;; the anchors, from the starts
         (for-each (lambda (c)
                     (let ((k (key K-STAND (car c) (cdr c))))
@@ -1025,6 +1015,7 @@
                         (vector-set! reps k (standing (car c) (cdr c)))
                         (set! queue (cons k queue)))))
                   starts)
+        (unless serving
         (let drain ()
           (unless (null? queue)
             (let ((k (car queue)))
@@ -1036,7 +1027,7 @@
                   (begin
                     (set! queue (cdr queue))
                     (expand! k)))
-              (drain))))
+              (drain)))))
 
         ;; standing-to-standing candidates: from each stand anchor, a
         ;; breadth-first walk over non-stand anchors (at most PATH-HOPS
@@ -1134,11 +1125,75 @@
                               (every (cdr es)))))
                    p)))
 
+
+          ;; --- REMOTE walks (and a worker's side of them) ---------------------
+          ;; A walk reads the drained anchor graph (reps, hops) and nothing a
+          ;; walk changes, so a worker loaded with this graph walks exactly as
+          ;; walk-from would here; its step and repair counts are added in.
+          (define (expand-one k rep)
+            (let ((s0 steps))
+              (rect-start! rep)
+              (set! *notes* '())
+              (expand-kind k (key-kind k) rep)
+              (let ((notes *notes*))
+                (set! *notes* #f)
+                (list notes (rect-take!) (- steps s0)))))
+          (define (load-graph! rep-list hop-list)
+            (let clear ((i 0))
+              (when (< i nk)
+                (vector-set! reps i #f)
+                (vector-set! hops i '())
+                (clear (+ i 1))))
+            (for-each (lambda (e) (vector-set! reps (car e) (cdr e))) rep-list)
+            (for-each (lambda (e) (vector-set! hops (car e) (cdr e))) hop-list))
+          (define (walk-one k)
+            (let ((s0 steps) (r0 repaired))
+              (let ((r (walk-from k)))
+                (list (car r) (cadr r)
+                      (map (lambda (e)
+                             (let ((w (cadr e)))
+                               (list (car e) (witness-from w) (witness-script w)
+                                     (witness-hops w) (caddr e))))
+                           (caddr r))
+                      (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6)
+                      (- steps s0) (- repaired r0)))))
+          (define walk-remote? (and remote (> (vector-length remote) 2) (not prior-cand)))
+          (define (prepare-remote-walks!)
+            (when walk-remote?
+              ((vector-ref remote 2)
+               (let loop ((k 0) (acc '()))
+                 (if (= k nk) (reverse acc)
+                     (loop (+ k 1) (if (vector-ref reps k) (cons (cons k (vector-ref reps k)) acc) acc))))
+               (let loop ((k 0) (acc '()))
+                 (if (= k nk) (reverse acc)
+                     (loop (+ k 1) (if (pair? (vector-ref hops k)) (cons (cons k (vector-ref hops k)) acc) acc)))))
+              (let loop ((k 0))
+                (when (< k nk)
+                  (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
+                    ((vector-ref remote 3) k))
+                  (loop (+ k 1))))))
+          (define (remote-walk k)
+            (let ((r ((vector-ref remote 4) k)))
+              (set! steps (+ steps (list-ref r 7)))
+              (set! repaired (+ repaired (list-ref r 8)))
+              (list (car r) (cadr r)
+                    (map (lambda (e)
+                           (list (car e)
+                                 (witness from: (list-ref e 1) origin: (vector-ref reps k)
+                                          script: (list-ref e 2) hops: (list-ref e 3))
+                                 (list-ref e 4)))
+                         (caddr r))
+                    (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6))))
+
+          (if serving
+              (vector expand-one load-graph! walk-one)
+          (begin
+          (prepare-remote-walks!)
           (let each ((k 0))
             (when (< k nkeys)
               (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
                 (let* ((old (walk-reused k))
-                       (r (or old (walk-from k)))
+                       (r (or old (if walk-remote? (remote-walk k) (walk-from k))))
                        (i (let ((c (key-cell k))) (cell-index tm (car c) (cdr c)))))
                   (when old (set! reused-cands (+ reused-cands 1)))
                   (vector-set! cand-memo k r)

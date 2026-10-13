@@ -130,6 +130,9 @@
         (cond ((member "cloudstair-region" args)
                (pool-serve (cloudstair-region-worker ct))
                0)
+              ((member "cloudstair-world" args)
+               (pool-serve (cloudstair-world-worker ct))
+               0)
               (else (display "reach-worker: unknown kind" (current-error-port)) 2))))
 
     (define (now-s) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
@@ -235,9 +238,16 @@
                          " failures (final full-world progression NOT established)")
                     (if (= failures 0) 0 1)))
                 ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct))))
-                  (let ((failures
+                  (let* ((n (reach-worker-count args))
+                         (pool (and (> n 0)
+                                    (make-pool (list (executable-path) "--reach-worker"
+                                                     "cloudstair-world" "--world" dir)
+                                               n)))
+                         (failures
                           (cloudstair-world-check ct 50000
-                            (lambda (record) (write record) (newline)))))
+                            (lambda (record) (write record) (newline))
+                            pool)))
+                    (when pool (pool-close! pool))
                     (say (if (= failures 0) "PASS" "FAIL")
                          " room-check: " (number->string failures)
                          " exact world replay failures (timing/profile/sabotage gates also required)")

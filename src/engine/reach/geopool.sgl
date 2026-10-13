@@ -1,12 +1,18 @@
-;;; Spatial anchor expansions on worker processes, for (engine reach)'s
-;;; drain. An expansion reads only its representative, so a worker that
-;;; built the same search (same tilemap, feel, starts, down) returns exactly
-;;; the notes, rectangle and step count the drain would have produced; the
-;;; drain applies them in its own order ((engine reach) REMOTE).
+;;; The spatial guide search on worker processes, for (engine reach)'s
+;;; REMOTE: anchor expansions during the drain, then the candidate walks.
+;;; An expansion reads only its representative and a walk only the drained
+;;; anchor graph, so a worker that built the same search (same tilemap,
+;;; feel, starts, down) and holds the same graph returns exactly what the
+;;; search would compute itself; the search applies the answers in its own
+;;; order.
 ;;;
-;;;   (make-geometry-remote pool)    the #(request! await) (engine reach) takes
-;;;   (geometry-task-handler expand) a worker's answer to "X <k> <rep>", given
-;;;                                  the expander (engine reach) returns for 'serve
+;;;   (make-geometry-remote pool)    the #(request! await load! request-walk!
+;;;                                  await-walk) (engine reach) takes
+;;;   (geometry-task-handler serve)  a worker's answers, given the vector
+;;;                                  (engine reach) returns for 'serve:
+;;;     "X <k> <rep>"     -> "X <notes rect steps>"   expand anchor k
+;;;     "L <reps> <hops>" -> "L"                      load the drained graph
+;;;     "G <k>"           -> "G <walk result>"        walk from stand anchor k
 (define-library (engine reach geopool)
   (import (sigil list) (sigil string)
           (engine body) (engine reach) (engine reach wire) (engine reach pool))
@@ -14,30 +20,72 @@
   (export make-geometry-remote geometry-task-handler)
 
   (begin
+    (define (script-value script) (string->symbol (wire-script script)))
+    (define (value-script v) (wire-read-script (symbol->string v)))
+
     ;; A note (kind cell side b rev) as a value: the body's fields, and the
     ;; reversed script as a symbol holding its run-length token.
     (define (note-value n)
       (list (list-ref n 0) (list-ref n 1) (list-ref n 2)
-            (wire-body-value (list-ref n 3))
-            (string->symbol (wire-script (list-ref n 4)))))
+            (wire-body-value (list-ref n 3)) (script-value (list-ref n 4))))
 
     (define (value-note v)
       (list (list-ref v 0) (list-ref v 1) (list-ref v 2)
-            (read-body-value (list-ref v 3))
-            (wire-read-script (symbol->string (list-ref v 4)))))
+            (read-body-value (list-ref v 3)) (value-script (list-ref v 4))))
 
-    (define (geometry-task-handler expand)
+    ;; The drained graph: reps ((k . body) ...), hops ((k (to . rev) ...) ...).
+    (define (graph-value reps hops)
+      (list (map (lambda (e) (cons (car e) (wire-body-value (cdr e)))) reps)
+            (map (lambda (e)
+                   (cons (car e) (map (lambda (h) (cons (car h) (script-value (cdr h)))) (cdr e))))
+                 hops)))
+
+    (define (value-graph v)
+      (list (map (lambda (e) (cons (car e) (read-body-value (cdr e)))) (car v))
+            (map (lambda (e)
+                   (cons (car e) (map (lambda (h) (cons (car h) (value-script (cdr h)))) (cdr e))))
+                 (cadr v))))
+
+    ;; A walk's answer: (rect deps edges rej nc nr nu steps repairs), each
+    ;; edge (index from script hops end-cell) with the script as a symbol.
+    (define (walk-value r)
+      (append (list (car r) (cadr r)
+                    (map (lambda (e)
+                           (list (list-ref e 0) (list-ref e 1) (script-value (list-ref e 2))
+                                 (list-ref e 3) (list-ref e 4)))
+                         (caddr r)))
+              (cdddr r)))
+
+    (define (value-walk v)
+      (append (list (car v) (cadr v)
+                    (map (lambda (e)
+                           (list (list-ref e 0) (list-ref e 1) (value-script (list-ref e 2))
+                                 (list-ref e 3) (list-ref e 4)))
+                         (caddr v)))
+              (cdddr v)))
+
+    (define (geometry-task-handler serve)
       (lambda (line)
-        (let* ((toks (wire-tokens line))
-               (k (string->number (cadr toks)))
-               (rep (read-body-value (car (wire-read-value (cddr toks)))))
-               (r (expand k rep)))
-          (wire-join (append (list "X")
-                             (wire-value (list (map note-value (car r)) (cadr r) (caddr r))))))))
+        (let* ((toks (wire-tokens line)) (kind (car toks)))
+          (cond
+            ((string=? kind "X")
+             (let* ((k (string->number (cadr toks)))
+                    (rep (read-body-value (car (wire-read-value (cddr toks)))))
+                    (r ((vector-ref serve 0) k rep)))
+               (wire-join (cons "X" (wire-value (list (map note-value (car r)) (cadr r) (caddr r)))))))
+            ((string=? kind "L")
+             (let ((g (value-graph (car (wire-read-value (cdr toks))))))
+               ((vector-ref serve 1) (car g) (cadr g))
+               "L"))
+            ((string=? kind "G")
+             (wire-join (cons "G" (wire-value (walk-value ((vector-ref serve 2)
+                                                           (string->number (cadr toks))))))))
+            (else (error "geometry worker: bad request" kind))))))
 
     (define (make-geometry-remote pool)
-      (let ((results #{}))
+      (let ((results #{}) (walks #{}))
         (vector
+          ;; request! k rep urgent?
           (lambda (k rep urgent?)
             ((if urgent? pool-submit-urgent! pool-submit!) pool
              (wire-join (append (list "X" (number->string k)) (wire-value (wire-body-value rep))))
@@ -45,10 +93,31 @@
                (let ((v (car (wire-read-value (cdr (wire-tokens line))))))
                  (set! results (dict-set results k
                                          (list (map value-note (car v)) (cadr v) (caddr v))))))))
+          ;; await k
           (lambda (k)
             (pool-drain-until! pool (lambda () (dict-contains? results k)))
             (unless (dict-contains? results k)
               (error "geometry pool: no answer for anchor" k))
             (let ((r (dict-ref results k)))
               (set! results (dict-remove results k))
+              r))
+          ;; load! reps hops: the drained graph, to every worker, before walks
+          (lambda (reps hops)
+            (let ((line (wire-join (cons "L" (wire-value (graph-value reps hops))))))
+              (let loop ((i 0))
+                (when (< i (pool-size pool))
+                  (pool-submit! pool line (lambda (answer) #t) i)
+                  (loop (+ i 1))))))
+          ;; request-walk! k
+          (lambda (k)
+            (pool-submit! pool (string-append "G " (number->string k))
+              (lambda (line)
+                (set! walks (dict-set walks k (value-walk (car (wire-read-value (cdr (wire-tokens line))))))))))
+          ;; await-walk k
+          (lambda (k)
+            (pool-drain-until! pool (lambda () (dict-contains? walks k)))
+            (unless (dict-contains? walks k)
+              (error "geometry pool: no walk from anchor" k))
+            (let ((r (dict-ref walks k)))
+              (set! walks (dict-remove walks k))
               r)))))))

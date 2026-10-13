@@ -8,7 +8,7 @@
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
-  (export cloudstair-world-check)
+  (export cloudstair-world-check cloudstair-world-worker)
 
   (begin
     (define (still? node)
@@ -17,11 +17,29 @@
              (and (eq? (body-mode b) 'ground)
                   (= (body-vx b) 0) (= (body-vy b) 0)))))
 
-    (define (cloudstair-world-check ct bound log)
+    ;; Rest states each process remembers (route-rest-memo); a bound on
+    ;; memory, not on the search.
+    (define WORLD-REST-CAP 300000)
+
+    ;; A worker for cloudstair-world-check's pool: the same content, advance,
+    ;; shelter certificates and waiter, answering (engine reach routes)'
+    ;; wait, replay and certificate requests.
+    (define (cloudstair-world-worker ct)
+      (let ((advance (route-rest-memo (cloudstair-stepper ct) WORLD-REST-CAP)))
+        (route-task-handler advance
+                            (cloudstair-shelter-checker ct advance)
+                            (cloudstair-waiter ct advance))))
+
+    ;; pool (optional): an (engine reach pool) of cloudstair-world-worker
+    ;; processes. It changes how long the searches take, not what they find.
+    (define (cloudstair-world-check ct bound log . pool)
       (let* ((tiles-for (cloudstair-tile-provider ct))
-             (advance (cloudstair-stepper ct))
-             (shelter? (cloudstair-shelter-checker ct advance))
-             (wait (cloudstair-waiter ct advance))
+             (advance (route-rest-memo (cloudstair-stepper ct) WORLD-REST-CAP))
+             (certs (route-certificate-cache (cloudstair-shelter-checker ct advance)
+                                             (cloudstair-waiter ct advance)
+                                             (and (pair? pool) (car pool) #t) WORLD-REST-CAP))
+             (shelter? (vector-ref certs 0))
+             (wait (vector-ref certs 1))
              (home (start-cell ct))
              (initial-body (and home (real-stand-body (tiles-for '()) HARKFELL-FEEL
                                                      (car home) (cdr home))))
@@ -81,7 +99,7 @@
                          'at (cell-of node) 'carry (timed-node-data node)
                          'down (body-down (timed-node-body node))
                          'tau (body-tau (timed-node-body node)))))
-            (cloudstair-route-proposals ct)))
+            (cloudstair-route-proposals ct) (and (pair? pool) (car pool)) (vector-ref certs 2)))
         (define (from-history target)
           (let try ((starts history))
             (and complete (pair? starts)

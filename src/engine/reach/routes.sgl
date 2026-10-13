@@ -6,7 +6,7 @@
           (engine reach prof) (engine reach wire) (engine reach pool))
 
   (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST ROUTE-CHECK
-          route-rest-memo pose-key)
+          route-rest-memo pose-key route-certificate-cache)
 
   (begin
     (define (still? node)
@@ -100,6 +100,45 @@
                           (set! n (+ n 1))
                           next)))
                   (advance node in))))))
+
+    ;; For a caller with a pool: its shelter? and wait answering first from
+    ;; certificates the workers computed (filed by the finder's learn!).
+    ;; Both are functions of their key (shelter? of the pose, wait of the
+    ;; full node and phase), so an answer filed is the answer computed.
+    ;; HARKFELL_ROUTE_CHECK=1 recomputes every filed answer it gives.
+    ;; Returns #(shelter? wait learn!); without a pool, the originals and #f.
+    (define (route-certificate-cache shelter0? wait0 pool? cap)
+      (if (not pool?)
+          (vector shelter0? wait0 #f)
+          (let ((learned #{}) (n 0))
+            (define (sig v)
+              (if (pair? v)
+                  (list (timed-key (car v)) (body-events (timed-node-body (car v))) (cdr v))
+                  v))
+            (define (checked v recompute)
+              (when ROUTE-CHECK
+                (unless (equal? (sig v) (sig (recompute)))
+                  (error "route check: a learned certificate differs")))
+              v)
+            (vector
+              (lambda (node)
+                (let ((k (cons 'shelter (pose-key node))))
+                  (if (dict-contains? learned k)
+                      (checked (dict-ref learned k) (lambda () (shelter0? node)))
+                      (shelter0? node))))
+              (lambda (node tau)
+                (let ((k (cons tau (timed-key node))))
+                  (if (dict-contains? learned k)
+                      (checked (dict-ref learned k) (lambda () (wait0 node tau)))
+                      (wait0 node tau))))
+              (lambda (kind node . rest)
+                (when (>= n cap) (set! learned #{}) (set! n 0))
+                (let ((k (if (eq? kind 'shelter)
+                             (cons 'shelter (pose-key node))
+                             (cons (car rest) (timed-key node)))))
+                  (unless (dict-contains? learned k)
+                    (set! learned (dict-set learned k (if (eq? kind 'shelter) (car rest) (cadr rest))))
+                    (set! n (+ n 1)))))))))
 
     ;; One hash of a set of values (nodes, keys, cells): their exact wire
     ;; encodings, sorted, so the order they were found in does not count.
