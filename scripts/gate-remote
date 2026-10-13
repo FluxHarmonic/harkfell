@@ -6,6 +6,8 @@
 #   scripts/gate-remote depths-focused dev build and focused systems tests
 #   scripts/gate-remote depths-full integrated suite, release, reach, sound/look and web gates
 #   scripts/gate-remote depths-followup suite/sound, affected look and unfinished web/A3 gates
+#   scripts/gate-remote depths-diagnostics startup, look palette/pools and Underhum reach;
+#                                  GATE_POOL_RED names the authored overlay control
 #   scripts/gate-remote depths-water-paths dev build, path tests and wet/dry route diagnostics
 #   scripts/gate-remote depths-water-check also focused systems tests and strict water fixtures
 #   scripts/gate-remote release     release build (its --replay trace kept as
@@ -41,7 +43,7 @@ cd "$(dirname "$0")/.."
 say() { printf 'gate-remote: %s\n' "$*" >&2; }
 
 JOB=${1:-}
-case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|depths-followup|review|sabotage) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|depths-followup|review|sabotage"; exit 125 ;; esac
+case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|depths-followup|depths-diagnostics|review|sabotage) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|depths-followup|depths-diagnostics|review|sabotage"; exit 125 ;; esac
 
 REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
 [ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
@@ -61,6 +63,16 @@ say "job $JOB on HEAD $SHA ($FULL), sigil $SIGIL_V"
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/gate-remote.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 git bundle create "$STAGE/src.bundle" HEAD 2>/dev/null
+CONTROL_PUT=()
+if [ "$JOB" = depths-diagnostics ]; then
+  [ -n "${GATE_POOL_RED:-}" ] && [ -f "$GATE_POOL_RED" ] || {
+    say "SETUP-FAILED: GATE_POOL_RED must name the authored rejected-overlay control"
+    exit 125
+  }
+  cp "$GATE_POOL_RED" "$STAGE/reedfen-overlay-map.png"
+  say "authored overlay control $(sha256sum "$STAGE/reedfen-overlay-map.png")"
+  CONTROL_PUT=(--put "$STAGE/reedfen-overlay-map.png:reedfen-overlay-map.png")
+fi
 
 cat > "$STAGE/remote.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -99,6 +111,21 @@ step() {
   return $r
 }
 case "$JOB" in
+  depths-diagnostics)
+    if step build-web scripts/dev sigil build --config web; then
+      step web-startup scripts/dev node verify.mjs build/web --legs startup,errors
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi
+    if step build-dev scripts/dev sigil build; then
+      step look-palette guix shell imagemagick -- scripts/gate-look --palette
+      step overlay-control sha256sum "$HOME/work/reedfen-overlay-map.png"
+      step look-pools env GATE_POOL_RED="$HOME/work/reedfen-overlay-map.png" guix shell imagemagick -- scripts/gate-look --pools
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      step underhum-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
+    fi ;;
   depths-followup)
     if step build-dev scripts/dev sigil build; then
       step suite scripts/dev sigil test --report ../out/suite.json
@@ -258,6 +285,7 @@ T0=$(date +%s)
 set +e
 "$REMOTE" --label "harkfell $JOB $SHA" --timeout "${GATE_TIMEOUT:-14400}" --detach \
   --put "$STAGE/src.bundle:src.bundle" --put "$STAGE/remote.sh:remote.sh" --put "$AUDIT:audit-helpers.awk" \
+  "${CONTROL_PUT[@]}" \
   --get "out:$STAGE/fetched" -- bash remote.sh "$JOB" "$FULL" "$SHA" "$SIGIL_V"
 rc=$?
 set -e
@@ -272,7 +300,7 @@ if [ -d "$STAGE/fetched" ]; then
     [ "$(basename "$item")" = web ] && continue
     cp -a "$item" "$LOGS/"
   done
-  if { [ "$JOB" = web ] || [ "$JOB" = depths-full ] || [ "$JOB" = depths-followup ]; } && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
+  if { [ "$JOB" = web ] || [ "$JOB" = depths-full ] || [ "$JOB" = depths-followup ] || [ "$JOB" = depths-diagnostics ]; } && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
     STAMP=$(grep -o 'version: "[^"]*"' "$STAGE/fetched/web/index.html" | head -1 | cut -d'"' -f2)
     if [ "$STAMP" = "$SHA" ] && [ ! -e "build/remote-web-$SHA" ]; then
       mv "$STAGE/fetched/web" "build/remote-web-$SHA"; printf '%s\n' "$FULL" > "build/remote-web-$SHA/BUILD-SHA"
