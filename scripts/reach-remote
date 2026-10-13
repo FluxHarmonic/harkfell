@@ -127,7 +127,7 @@ leg() {
   echo "=== LEG $name started: commit $commit timeout $limit env ${envs[*]} args $*"
 }
 . ./legs.sh
-( while sleep 300; do for n in "${NAMES[@]}"; do printf "%s %ss: " "$n" $(( $(t) - T0 )); grep -a "regional-search\|^(prof\|RED\|PASS\|FAIL\|^(region\|^(coverage" "out/$n.log" 2>/dev/null | tail -1 | cut -c1-400; echo; done; done ) &
+( while sleep 300; do for n in "${NAMES[@]}"; do printf "%s %ss: " "$n" $(( $(t) - T0 )); grep -aE "^[0-9]+ [(](regional-search|world-search|world-candidates|candidate-geometry|prof|region|coverage|world-coverage)|RED|PASS|FAIL" "out/$n.log" 2>/dev/null | tail -1 | cut -c1-400; echo; done; done ) &
 MON=$!
 wait "${PIDS[@]}"
 kill $MON 2>/dev/null
