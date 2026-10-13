@@ -57,6 +57,11 @@
       (let ((v (getenv "HARKFELL_REGION_DRAIN_ROUNDS"))) (and v (string->number v))))
     (define PARALLEL-DRAIN
       (not (equal? (getenv "HARKFELL_REGION_PARALLEL_DRAIN") "0")))
+    ;; HARKFELL_REGION_CELL_RETURNS=1 (diagnostic, a weaker claim): one return
+    ;; search per (cell, carry, down) group of retained landings, from the
+    ;; group's first pending landing in drain order. The group's other
+    ;; landings are marked checked and counted, never proven.
+    (define CELL-RETURNS (equal? (getenv "HARKFELL_REGION_CELL_RETURNS") "1"))
 
     (define LANDING-BOUND-OVERRIDE
       (let ((v (getenv "HARKFELL_REGION_LANDING_BOUND")))
@@ -696,7 +701,7 @@
                    (root (align (car entries) 0))
                    (entry-fails 0) (unreached '()) (traps '())
                    (landings #{}) (rotations #{}) (landing-count 0) (complete (and root #t))
-                   (covered #{})
+                   (covered #{}) (cell-done #{}) (cell-skips 0)
                    (target-count 0))
               (define (record! node)
                 (prof-inc! 'record-call)
@@ -821,7 +826,10 @@
                                               (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
                                               (quote memo-stops) memo-stops (quote traps) (length traps)
                                               (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))
-                                              (quote parallel) (if p (pool-size p) (quote local)))))
+                                              (quote parallel) (if p (pool-size p) (quote local))))
+                                   (when CELL-RETURNS
+                                     (log (list (quote region-cells) (quote groups) (length (dict-keys cell-done))
+                                                (quote skipped) cell-skips))))
                                  (merge (cdr es) (+ i 1) fresh)))))))))))
               (set! search-incomplete #f)
               (set! return-proven #{}) (set! return-proven-exact #{}) (set! memo-stops 0) (set! n-checked 0)
@@ -858,11 +866,30 @@
                     ;; Directed return from each genuine retained landing.
                     ;; New landings from return trials also create obligations.
                     (let ((checked #{}))
+                      ;; CELL-RETURNS: keep the first pending landing of each
+                      ;; (cell, carry, down) group not yet searched; mark the
+                      ;; rest checked (counted in cell-skips, never proven). A
+                      ;; landing with no rest cell is always kept.
+                      (define (cell-select! pending)
+                        (if (not CELL-RETURNS) pending
+                            (let loop ((ps pending) (acc (quote ())))
+                              (if (null? ps) (reverse acc)
+                                  (let* ((n (cdr (car ps))) (c (cell-of n))
+                                         (g (list c (timed-node-data n) (body-down (timed-node-body n)))))
+                                    (cond ((not c) (loop (cdr ps) (cons (car ps) acc)))
+                                          ((dict-contains? cell-done g)
+                                           (set! checked (dict-set checked (car (car ps)) #t))
+                                           (set! cell-skips (+ cell-skips 1))
+                                           (loop (cdr ps) acc))
+                                          (else
+                                           (set! cell-done (dict-set cell-done g #t))
+                                           (loop (cdr ps) (cons (car ps) acc)))))))))
                       (let drain ()
-                        (let ((pending (home-first
-                                        (filter (lambda (entry)
-                                                  (not (dict-contains? checked (car entry))))
-                                                (dict-entries landings)))))
+                        (let ((pending (cell-select!
+                                        (home-first
+                                         (filter (lambda (entry)
+                                                   (not (dict-contains? checked (car entry))))
+                                                 (dict-entries landings))))))
                           (cond ((not complete) #f)
                                 ((>= landing-count landing-bound) (set! complete #f))
                                 ((null? pending) #t)
@@ -909,7 +936,10 @@
                                          (log (list (quote region-drain) (quote checked) n-checked
                                                     (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
                                                     (quote memo-stops) memo-stops (quote traps) (length traps)
-                                                    (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0))))))
+                                                    (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))))
+                                         (when CELL-RETURNS
+                                           (log (list (quote region-cells) (quote groups) (length (dict-keys cell-done))
+                                                      (quote skipped) cell-skips))))
                                        (when search-incomplete
                                          (set! complete #f)
                                          (log (list 'RED 'regional-return-bound 'carry carry
@@ -929,6 +959,9 @@
                                  'reachable-rooms reached)))))
               (when search-incomplete (set! complete #f))
               (prof-report (list 'profile-complete carry down))
+              (when CELL-RETURNS
+                (log (list 'region-cells 'carry carry 'down down 'groups (length (dict-keys cell-done))
+                           'skipped cell-skips 'searched n-checked 'complete complete)))
               ;; HARKFELL_ROUTE_DIGEST=1: the full reached-state sets, as
               ;; order-free hashes of their exact encodings, for comparing builds.
               (when ROUTE-DIGEST

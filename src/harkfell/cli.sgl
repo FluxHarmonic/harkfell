@@ -278,12 +278,17 @@
                                         (equal? (knob "HARKFELL_ROUTE_ORDER") "baseline")
                                         (knob "HARKFELL_REGION_TARGETS") (knob "HARKFELL_REGION_DRAIN_ROUNDS")
                                         (knob "HARKFELL_REGION_DRAIN_ROUND")
-                                        (equal? (knob "HARKFELL_REGION_PARALLEL_DRAIN") "local"))))
+                                        (equal? (knob "HARKFELL_REGION_PARALLEL_DRAIN") "local")
+                                        (equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1"))))
                       (say (if (= failures 0) "PASS" "FAIL")
                            " Cloudstair regional replay: " (number->string failures)
                            " failures (final full-world progression NOT established)"
-                           (if (equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0")
-                               "" " [return memo: every retained landing proven to return]")
+                           ;; the claim the drain supports: per cell group with
+                           ;; HARKFELL_REGION_CELL_RETURNS, else per retained landing
+                           (cond ((equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1")
+                                  " [cell returns: one retained landing per reached (cell, carry, down) proven to return]")
+                                 ((equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0") "")
+                                 (else " [return memo: every retained landing proven to return]"))
                            (if measure " [diagnostic knob set: NOT a gate verdict]" ""))
                       (cond (measure 2) ((= failures 0) 0) (else 1)))))
                 ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct))))
