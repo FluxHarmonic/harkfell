@@ -5,11 +5,12 @@
   (import (sigil list)
           (engine body) (engine air) (engine tilemap) (engine worldmap)
           (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
-          (engine reach geopool)
+          (engine reach geopool) (only (engine reach pool) pool-verify!)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
   (export cloudstair-region-content cloudstair-region-check cloudstair-region-worker
+          cloudstair-fingerprint
           cloudstair-reached-rooms cloudstair-entrance-probe)
 
   (begin
@@ -24,7 +25,7 @@
 
     ;; Rest states remembered per process by route-rest-memo (about 600 bytes
     ;; each); a bound on memory, not on the search.
-    (define REST-MEMO-CAP 300000)
+    (define REST-MEMO-CAP 120000)
 
     (define (still? node)
       (and node
@@ -106,6 +107,23 @@
                   (set! cache (dict-set cache key reached))
                   reached))))))
 
+    ;; A hash of what a check is built from (tiles with every stone shut and
+    ;; every stone open, air fields, start, pickups, rooms): a pool worker must
+    ;; report the same one as the check before any of its answers is used.
+    (define (cloudstair-fingerprint ct)
+      (let ((shut (tiles-carrying ct (quote ()))) (open (tiles-carrying ct (quote (2 3 4 5)))))
+        (number->string
+          (route-set-digest
+            (list (list (tilemap-cols shut) (tilemap-rows shut) (tilemap-size shut)
+                        (vector->list (tilemap-cells shut)) (vector->list (tilemap-cells open))
+                        (map (lambda (f) (list (air-field-x f) (air-field-y f) (air-field-w f)
+                                               (air-field-h f) (air-field-lift f) (air-field-east f)
+                                               (air-field-west f) (air-field-pulsed f)
+                                               (air-field-gate f)))
+                             (tilemap-air shut))
+                        (start-cell ct) (content-pickup-cells ct)
+                        (length (content-rooms ct))))))))
+
     ;; The spatial guide's tilemap: every stone open, pulsed lifts steady
     ;; (candidates only; every accepted route is replayed on actual fields).
     (define (region-candidate-tm ct)
@@ -125,7 +143,8 @@
              (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
              (routes (route-task-handler advance
                                          (cloudstair-shelter-checker ct advance)
-                                         (cloudstair-waiter ct advance)))
+                                         (cloudstair-waiter ct advance)
+                                         (cloudstair-fingerprint ct)))
              (geometry #f))
         (lambda (line)
           (if (and (> (string-length line) 1) (memv (string-ref line 0) (list #\X #\L #\G)))
@@ -143,17 +162,25 @@
     (define (cloudstair-region-check source profiles bound log . pool)
       (log '(candidate-geometry starting actual-replay-required))
       (let* ((ct (cloudstair-region-content source))
+             ;; a pool's workers must have built exactly this content
+             (verified (and (pair? pool) (car pool)
+                            (pool-verify! (car pool) "I" (string-append "I " (cloudstair-fingerprint ct)))))
              (home (start-cell ct))
              (tm (tiles-carrying ct '(2 3 4 5)))
              (candidate-tm (region-candidate-tm ct))
+             ;; The guide graph without its REUSE memo (every anchor's notes and
+             ;; walk, which this check never reads): a smaller live heap makes
+             ;; every later collection, and so every physics tick, cheaper.
              (candidate
-               (reach-search-down candidate-tm HARKFELL-FEEL
+               (reach-graph
+                (reach-search-down candidate-tm HARKFELL-FEEL
                  (list home) witness-lands? #t
                  (lambda (anchors steps kind cell)
                    (when (= (modulo anchors 100) 0)
                      (log (list 'candidate-geometry 'anchors anchors 'steps steps))))
                  ;; with a pool, anchors are expanded on its workers
-                 (and (pair? pool) (car pool) (make-geometry-remote (car pool)))))
+                 (and ROUTE-MEMO (pair? pool) (car pool) (make-geometry-remote (car pool))))
+                memo: #f))
              (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
              (tiles-for (cloudstair-tile-provider ct))
              (wait0 (cloudstair-waiter ct (prof-advance (quote tick-waiter) advance)))

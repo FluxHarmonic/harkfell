@@ -6,7 +6,9 @@
           (engine body) (engine air) (engine tilemap)
           (engine reach) (engine reach timed) (engine reach routes)
           (harkfell content) (harkfell check) (harkfell feel)
-          (harkfell cloudstair reach) (harkfell cloudstair routes))
+          (harkfell cloudstair reach) (harkfell cloudstair routes)
+          (only (harkfell cloudstair region) cloudstair-fingerprint)
+          (only (engine reach pool) pool-verify!))
 
   (export cloudstair-world-check cloudstair-world-worker)
 
@@ -19,7 +21,7 @@
 
     ;; Rest states each process remembers (route-rest-memo); a bound on
     ;; memory, not on the search.
-    (define WORLD-REST-CAP 300000)
+    (define WORLD-REST-CAP 120000)
 
     ;; A worker for cloudstair-world-check's pool: the same content, advance,
     ;; shelter certificates and waiter, answering (engine reach routes)'
@@ -28,12 +30,15 @@
       (let ((advance (route-rest-memo (cloudstair-stepper ct) WORLD-REST-CAP)))
         (route-task-handler advance
                             (cloudstair-shelter-checker ct advance)
-                            (cloudstair-waiter ct advance))))
+                            (cloudstair-waiter ct advance)
+                            (cloudstair-fingerprint ct))))
 
     ;; pool (optional): an (engine reach pool) of cloudstair-world-worker
     ;; processes. It changes how long the searches take, not what they find.
     (define (cloudstair-world-check ct bound log . pool)
       (let* ((tiles-for (cloudstair-tile-provider ct))
+             (verified (and (pair? pool) (car pool)
+                            (pool-verify! (car pool) "I" (string-append "I " (cloudstair-fingerprint ct)))))
              (advance (route-rest-memo (cloudstair-stepper ct) WORLD-REST-CAP))
              (certs (route-certificate-cache (cloudstair-shelter-checker ct advance)
                                              (cloudstair-waiter ct advance)

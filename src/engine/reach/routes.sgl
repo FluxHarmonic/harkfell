@@ -5,7 +5,7 @@
           (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed)
           (engine reach prof) (engine reach wire) (engine reach pool))
 
-  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST ROUTE-CHECK
+  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST ROUTE-CHECK ROUTE-MEMO
           route-rest-memo pose-key route-certificate-cache)
 
   (begin
@@ -24,6 +24,10 @@
     ;; HARKFELL_ROUTE_CHECK=1: every reused wait and replay (memo or worker)
     ;; is also simulated here and must match field for field, or the run
     ;; stops with an error. Slow; for differential legs.
+    ;; Entries the finder's replay and wait memos hold before starting again
+    ;; empty: a bound on memory (a smaller heap also makes collections cheaper).
+    (define ROUTE-MEMO-CAP 200000)
+
     (define ROUTE-CHECK
       (equal? (getenv "HARKFELL_ROUTE_CHECK") "1"))
 
@@ -113,7 +117,7 @@
           (let ((learned #{}) (n 0))
             (define (sig v)
               (if (pair? v)
-                  (list (timed-key (car v)) (body-events (timed-node-body (car v))) (cdr v))
+                  (cons (node-sig (car v)) (cdr v))
                   v))
             (define (checked v recompute)
               (when ROUTE-CHECK
@@ -154,8 +158,10 @@
                         (chars (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291))))))))
 
     ;; What a trace or proof is, for comparing two computations of it.
+    ;; Compared by exact encoding (wire): every field, events, and the sign
+    ;; of zero, which equal? and dict keys do not distinguish.
     (define (node-sig n)
-      (and n (list (timed-key n) (body-events (timed-node-body n)))))
+      (and n (wire-join (wire-node n))))
     (define (trace-sig trace) (map node-sig trace))
     (define (proof-sig proof) (and proof (cons (node-sig (car proof)) (cdr proof))))
 
@@ -204,7 +210,7 @@
     ;;   "C <node>"           -> "C <shelter?> <invariant?> <wait to 0>"
     ;;                           (a still node's certificates: what observe
     ;;                           and record! ask of it)
-    (define (route-task-handler advance shelter? wait)
+    (define (route-task-handler advance shelter? wait . fingerprint)
       (let ((invariants #{}))   ; pose -> invariant-rest proof, this worker
       (define (proof-tokens proof)
         (if proof
@@ -212,8 +218,13 @@
             (list "F")))
       (lambda (line)
         (let* ((toks (wire-tokens line)) (kind (car toks))
-               (r (wire-read-node (cdr toks))) (node (car r)) (rest (cdr r)))
+               (r (if (string=? kind "I") (cons #f (quote ())) (wire-read-node (cdr toks))))
+               (node (car r)) (rest (cdr r)))
           (cond
+            ;; "I" -> "I <fingerprint>": what this worker built, for the parent to
+            ;; compare with its own before trusting any answer
+            ((string=? kind "I")
+             (string-append "I " (if (pair? fingerprint) (car fingerprint) "none")))
             ((string=? kind "W")
              (wire-join (cons "W" (proof-tokens (wait node (string->number (car rest)))))))
             ((string=? kind "P")
@@ -292,7 +303,7 @@
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete! . reports)
       (let ((distance-cache '()) (invariant-rests #{})
-            (replays #{}) (waits #{}) (rest-stages #{}) (requested #{}) (cert-pending #{}) (guide-keys #{}) (graph-ids (quote ())) (digest 0)
+            (replays #{}) (waits #{}) (rest-stages #{}) (requested #{}) (cert-pending #{}) (guide-keys #{}) (memo-size 0) (graph-ids (quote ())) (digest 0)
             (pool (and ROUTE-MEMO (pair? reports) (pair? (cdr reports))
                        (pair? (cddr reports)) (caddr reports)))
             ;; learn! (optional, after pool): (learn! 'shelter node bool) and
@@ -328,7 +339,8 @@
         ;; certificate caches only skip proofs whose result is fixed by the
         ;; node's own NO-INTENT ticks. So an expansion asks each phase once,
         ;; not once per edge.
-        ;; A rest whose invariance this finder has proved (invariant-rest?:
+        ;; A rest whose invariance is proved (invariant-rest?, here or filed from
+        ;; a worker's identical test of the same pose:
         ;; still, a shelter, every field but tau unchanged through a full
         ;; two-cycle NO-INTENT replay) waits to a phase by genuine ticks that
         ;; reproduce, state for state, that proof's own steps: the waiter
@@ -337,7 +349,9 @@
         ;; pose) was simulated; later waits from the same pose reuse it.
         (define (rest-stage node phase)
           (let ((key (rotation-key node)))
-            (and (eq? #t (dict-ref invariant-rests key #f))
+            (and (<= 0 phase) (< phase AIR-PERIOD)
+                 (<= 0 (body-tau (timed-node-body node))) (< (body-tau (timed-node-body node)) AIR-PERIOD)
+                 (eq? #t (dict-ref invariant-rests key #f))
                  (let ((stage (dict-ref rest-stages (cons phase key) #f)))
                    (and stage
                         (let ((delta (modulo (- phase (body-tau (timed-node-body node)))
@@ -363,6 +377,7 @@
                       proof)
                     (let ((proof (timed-wait node phase)))
                       (set! waits (dict-set waits k proof))
+                      (set! memo-size (+ memo-size 1))
                       (learn-stage! node phase proof)
                       proof)))))
         ;; A small number per guide graph (eq?), for replay memo keys.
@@ -392,6 +407,7 @@
                       prior)
                     (let ((trace (route-compress (timed-replay node script key))))
                       (set! replays (dict-set replays k trace))
+                      (set! memo-size (+ memo-size 1))
                       trace)))))
         ;; With a worker pool: before the sequential loop expands node, ask
         ;; the workers for every wait and replay that loop could request and
@@ -417,6 +433,7 @@
             (let ((wk (cons 0 (timed-key node))))
               (unless (dict-contains? waits wk)
                 (set! waits (dict-set waits wk proof))
+                (set! memo-size (+ memo-size 1))
                 (learn-stage! node 0 proof)))
             (when learn!
               (learn! 'shelter node shelter)
@@ -444,7 +461,7 @@
                (wire-join (cons "C" (wire-node node)))
                (lambda (line)
                  (set! cert-pending (dict-remove cert-pending (timed-key node)))
-                 (learn-cert! node (read-cert line)))
+                 (prof-time (quote time-decode) (lambda () (learn-cert! node (read-cert line)))))
                (pose-worker node)))))
         ;; Ask the pool for every wait, replay and certificate expanding node
         ;; could need that is neither known nor already asked for. urgent:
@@ -461,8 +478,9 @@
                   (submit! pool
                     (wire-join (append (list "P") (wire-node stage) (list (wire-script script))))
                     (lambda (line)
-                      (let ((trace (read-trace line)))
+                      (let ((trace (prof-time (quote time-decode) (lambda () (read-trace line)))))
                         (set! replays (dict-set replays k trace))
+                        (set! memo-size (+ memo-size 1))
                         (for-each (lambda (n) (request-cert! n urgent?))
                                   (filter still? trace))))))))
             (when (still? node) (request-cert! node urgent?))
@@ -497,6 +515,7 @@
                              (lambda (line)
                                (let ((proof (read-proof line)))
                                  (set! waits (dict-set waits k proof))
+                                 (set! memo-size (+ memo-size 1))
                                  (learn-stage! node phase proof)
                                  (when proof (want-edges! (car proof)))))
                              (pose-worker node))))))
@@ -548,10 +567,10 @@
             g))
         (define (guide-known? node) (dict-contains? guide-keys (guide-key node)))
         (define (prefetch! node guesses)
-          (request-node! node #t)
-          (for-each (lambda (g) (request-node! g #f)) guesses)
+          (prof-time (quote time-request) (lambda () (request-node! node #t)))
+          (prof-time (quote time-request) (lambda () (for-each (lambda (g) (request-node! g #f)) guesses)))
           (prof-time 'time-pool
-            (lambda () (pool-drain-until! pool (lambda () (node-ready? node))))))
+            (lambda () (pool-drain-until! pool (lambda () (prof-time (quote time-ready) (lambda () (node-ready? node))))))))
         ;; Keys with tau removed describe poses for waiting certificates,
         ;; never simulated arrivals.
         ;; Hidden fields and product state must remain identical on every
@@ -580,7 +599,7 @@
         (define (observe trace target)
           (prof-time 'time-observe (lambda () (observe* trace target))))
         (define (note-record! node)
-          (when ROUTE-DIGEST (set! digest (digest-step digest "R" node))))
+          (when ROUTE-DIGEST (prof-time (quote time-digest) (lambda () (set! digest (digest-step digest "R" node))))))
         (define (observe* trace target)
           (for-each (lambda (node) (when (still? node) (note-record! node) (record! node))) trace)
           (let* ((end (last-node trace))
@@ -745,6 +764,10 @@
                                                    (try (cdr families)))))))
                                    (depart (cdr phases)))))))))
             (define (expand node depth)
+              ;; Bound the memos' memory: past ROUTE-MEMO-CAP entries they start
+              ;; again empty (anything dropped is simply computed again).
+              (when (> memo-size ROUTE-MEMO-CAP)
+                (set! replays #{}) (set! waits #{}) (set! requested #{}) (set! memo-size 0))
               (when pool
                 ;; guesses: the heads of the queue the next pop prefers, then
                 ;; of the other (turn has already flipped for the next pop)
@@ -832,7 +855,7 @@
                              (else
                               (set! seen (dict-set seen key depth))
                               (set! count (+ count 1))
-                              (when ROUTE-DIGEST (set! digest (digest-step digest "E" node)))
+                              (when ROUTE-DIGEST (prof-time (quote time-digest) (lambda () (set! digest (digest-step digest "E" node)))))
                               (when (and ROUTE-DIGEST (= (modulo count 250) 0))
                                 (write (list (quote route-digest-at) (quote target) target
                                              (quote expanded) count (quote hash) digest))

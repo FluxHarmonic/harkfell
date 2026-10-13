@@ -90,7 +90,8 @@
           (engine tilemap)
           (engine collide)
           (engine air)
-          (engine body))
+          (engine body)
+          (only (sigil process) getenv))
 
   (export make-intent* NOTHING
           standable? standable-cells stand-body real-stand-body rest-cell body-cell
@@ -208,6 +209,30 @@
       (script default: '())
       (hops default: 1)
       (origin default: #f))
+
+    ;; HARKFELL_ROUTE_CHECK=1: every anchor expansion and walk a worker
+    ;; answered is also computed here, the original way, and compared (an
+    ;; error on any difference); the local result is the one used.
+    (define REACH-CHECK (equal? (getenv "HARKFELL_ROUTE_CHECK") "1"))
+    (define (check-body-sig b)
+      (list (map number->string (list (body-x b) (body-y b) (body-vx b) (body-vy b)))
+            (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b)
+            (body-facing b) (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b)
+            (body-cut b) (body-events b) (body-brittle b) (body-down b) (body-tau b)
+            (body-gliding b)))
+    (define (check-script-sig s)
+      (map (lambda (i) (list (intent-h i) (intent-v i) (intent-jump i) (intent-press i))) s))
+    (define (check-notes-sig notes)
+      (map (lambda (n) (list (list-ref n 0) (list-ref n 1) (list-ref n 2)
+                             (check-body-sig (list-ref n 3)) (check-script-sig (list-ref n 4))))
+           notes))
+    (define (check-walk-sig r)
+      (list (car r) (cadr r)
+            (map (lambda (e) (let ((w (cadr e)))
+                               (list (car e) (witness-from w) (check-script-sig (witness-script w))
+                                     (witness-hops w) (caddr e))))
+                 (caddr r))
+            (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6)))
 
     (define SETTLE-MAX 180)
 
@@ -997,6 +1022,16 @@
                         ((vector-ref remote 0) k (vector-ref reps k) #t)))
                     (reverse queue)))
         (define (expand-remote! k)
+          (if REACH-CHECK
+              ;; the original expansion, then the worker's compared with it
+              (let* ((r ((vector-ref remote 1) k)) (s0 steps))
+                (expand! k)
+                (let ((mine (vector-ref exp-memo k)))
+                  (unless (and (equal? (check-notes-sig (caddr mine)) (check-notes-sig (car r)))
+                               (equal? (cadr mine) (cadr r))
+                               (= (- steps s0) (caddr r)))
+                    (error "route check: a worker's anchor expansion differs" k))))
+              (begin
           (set! expanded (+ expanded 1))
           (when (pair? log)
             (when (car log) ((car log) expanded steps (key-kind k) (key-cell k))))
@@ -1005,7 +1040,7 @@
                  (notes (car r)))
             (set! steps (+ steps (caddr r)))
             (vector-set! exp-memo k (list (rep-sig rep) (cadr r) notes))
-            (for-each (lambda (n) (apply note! k n)) (reverse notes))))
+            (for-each (lambda (n) (apply note! k n)) (reverse notes))))))
 
 
         ;; the anchors, from the starts
@@ -1173,9 +1208,17 @@
                     ((vector-ref remote 3) k))
                   (loop (+ k 1))))))
           (define (remote-walk k)
-            (let ((r ((vector-ref remote 4) k)))
-              (set! steps (+ steps (list-ref r 7)))
-              (set! repaired (+ repaired (list-ref r 8)))
+            (if REACH-CHECK
+                (let* ((r ((vector-ref remote 4) k)) (s0 steps) (r0 repaired) (mine (walk-from k)))
+                  (unless (and (equal? (check-walk-sig mine) (check-walk-sig (remote-walk-result k r)))
+                               (= (- steps s0) (list-ref r 7)) (= (- repaired r0) (list-ref r 8)))
+                    (error "route check: a worker's candidate walk differs" k))
+                  mine)
+                (let ((r ((vector-ref remote 4) k)))
+                  (set! steps (+ steps (list-ref r 7)))
+                  (set! repaired (+ repaired (list-ref r 8)))
+                  (remote-walk-result k r))))
+          (define (remote-walk-result k r)
               (list (car r) (cadr r)
                     (map (lambda (e)
                            (list (car e)
@@ -1183,7 +1226,7 @@
                                           script: (list-ref e 2) hops: (list-ref e 3))
                                  (list-ref e 4)))
                          (caddr r))
-                    (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6))))
+                    (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6)))
 
           (if serving
               (vector expand-one load-graph! walk-one)

@@ -53,7 +53,8 @@
           (harkfell source)
           (engine reach pool)
           (engine reach timed)
-          (only (sigil process) getenv executable-path))
+          (only (sigil process) getenv executable-path)
+          (sigil gc))
 
   (export room-check-main reach-worker-main reach-bench-main arg-value)
 
@@ -90,11 +91,19 @@
              (gap (append (make-list 45 (intent h: 1)) (list (intent h: 1 jump: #t press: #t))
                           (make-list 46 (intent h: 1 jump: #t)) (make-list 28 NO-INTENT))))
         (define (clock) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
+        ;; --ballast MB: hold that much live data (small lists, like the search's
+        ;; keys) while benchmarking, to see what a large heap does to a tick.
+        (define ballast
+          (let ((mb (let ((v (arg-value args "--ballast"))) (or (and v (string->number v)) 0))))
+            (let loop ((n (quotient (* mb 1048576) 300)) (acc (quote ())))
+              (if (<= n 0) acc (loop (- n 1) (cons (timed-key root) acc))))))
+        (define (gc-ns) (+ (cdr (assq (quote minor-time-ns) (gc-stats))) (cdr (assq (quote major-time-ns) (gc-stats)))))
         (define (bench name n thunk)
-          (let ((t0 (clock)))
+          (let ((t0 (clock)) (g0 (gc-ns)))
             (let loop ((i 0)) (when (< i n) (thunk) (loop (+ i 1))))
             (let ((dt (- (clock) t0)))
-              (write (list 'bench name 'n n 'seconds dt 'us-per (/ (* 1e6 dt) n)))
+              (write (list (quote bench) name (quote n) n (quote seconds) dt (quote us-per) (/ (* 1e6 dt) n)
+                           (quote gc-seconds) (/ (- (gc-ns) g0) 1e9) (quote ballast-lists) (length ballast)))
               (newline))))
         (write (list 'bench-setup 'air-fields (length (tilemap-air tm))
                      'rooms (length (content-rooms ct)) 'cols (tilemap-cols tm) 'rows (tilemap-rows tm)))

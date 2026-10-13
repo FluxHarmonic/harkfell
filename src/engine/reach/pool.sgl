@@ -27,7 +27,7 @@
   (import (sigil list) (sigil string) (sigil io) (sigil process) (sigil async))
 
   (export make-pool pool? pool-size pool-submit! pool-submit-urgent! pool-drain!
-          pool-drain-until! pool-close! pool-serve pool-requests)
+          pool-drain-until! pool-close! pool-serve pool-requests pool-verify!)
 
   (begin
     (define POOL-DEPTH 3)
@@ -145,13 +145,30 @@
     (define (pool-drain! pool)
       (pool-drain-until! pool (lambda () #f)))
 
-    ;; Answers still in flight are collected (and their continuations run)
-    ;; first, so no worker is left blocked writing to a full pipe.
+    ;; Ask every worker line and require answer from each: a worker built
+    ;; from something else than this process is refused before its first
+    ;; real request.
+    (define (pool-verify! pool line answer)
+      (let ((got (make-vector (pool-size pool) #f)))
+        (let loop ((i 0))
+          (when (< i (pool-size pool))
+            (let ((i i)) (pool-submit! pool line (lambda (a) (vector-set! got i a)) i))
+            (loop (+ i 1))))
+        (pool-drain! pool)
+        (let loop ((i 0))
+          (when (< i (pool-size pool))
+            (unless (equal? (vector-ref got i) answer)
+              (error "pool: a worker was built from something else" i (vector-ref got i) answer))
+            (loop (+ i 1))))
+        #t))
+
+    ;; Answers still in flight are not wanted (the search is over; they were
+    ;; guesses), so the workers are killed rather than drained: a leftover
+    ;; guess can neither delay the verdict nor fail it.
     (define (pool-close! pool)
-      (pool-drain! pool)
       (vector-for-each
         (lambda (w)
-          (process-pipe-close-stdin! (vector-ref w 0))
+          (process-kill! (vector-ref w 0))
           (process-wait (vector-ref w 0)))
         (pool-workers pool)))
 
