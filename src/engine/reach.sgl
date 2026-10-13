@@ -98,7 +98,7 @@
           witness witness? witness-from witness-script witness-hops witness-origin
           reach-search-down reach-search-down*
           reach-graph reach-graph? reach-search reach-search* graph-memo tilemap-changes graph-stand-scripts
-          graph-same-edges?
+          graph-same-edges? graph-digest
           graph-tm graph-cells graph-edges graph-starts graph-stats
           graph-edges-from graph-rejected graph-waters cell-index index-cell
           replay-witness witness-lands? witness-bodies witness-trace graph-walk-rect settle-cell
@@ -396,6 +396,28 @@
                 ((equal? (norm (vector-ref ea i)) (norm (vector-ref eb i))) (loop (+ i 1)))
                 (else i)))))
 
+    ;; A hash of a graph's edges, witness for witness as graph-same-edges?
+    ;; compares them (target, hops, script): two runs' guides compare by it.
+    (define (graph-digest g)
+      (let ((eg (reach-graph-edges g)))
+        (define (edge-key e)
+          (string-append (number->string (car e)) ":" (number->string (witness-hops (cdr e))) ":"
+                         (apply string-append (map (lambda (in) (string-append (number->string (intent-code* in)) ","))
+                                                   (witness-script (cdr e))))))
+        (let cells ((i 0) (h 0))
+          (if (>= i (vector-length eg))
+              h
+              (cells (+ i 1)
+                     (let keys ((ks (list-sort string<? (map edge-key (vector-ref eg i)))) (h h))
+                       (if (null? ks)
+                           h
+                           (keys (cdr ks)
+                                 (let chars ((cs (string->list (string-append (number->string i) ">" (car ks))))
+                                             (h (modulo (+ (* h 131) 7) 4294967291)))
+                                   (if (null? cs)
+                                       h
+                                       (chars (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291))))))))))))
+
     (define (intent-code* in)
       (intent-slot (intent-h in) (intent-v in) (intent-jump in) (intent-press in)))
 
@@ -557,11 +579,21 @@
                    (or (and (<= c0 (car (car cs)) c1) (<= r0 (cdr (car cs)) r1))
                        (loop (cdr cs)))))))
 
+        ;; The air fields by value. A field is a struct, and equal? on structs
+        ;; is identity, so the list itself never matches another tilemap's:
+        ;; guides built by steadying lifts get fresh fields each time, and
+        ;; REUSE then matched no anchor at all.
+        (define air-sig
+          (map (lambda (fl)
+                 (list (air-field-x fl) (air-field-y fl) (air-field-w fl) (air-field-h fl)
+                       (air-field-lift fl) (air-field-east fl) (air-field-west fl)
+                       (air-field-pulsed fl) (air-field-gate fl)))
+               (tilemap-air tm)))
         ;; What makes two representatives the same state.
         (define (rep-sig b)
           (list (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b) (body-facing b)
                 (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b) (body-cut b) (body-brittle b)
-                (body-down b) (body-tau b) (body-gliding b) f (tilemap-air tm)))
+                (body-down b) (body-tau b) (body-gliding b) f air-sig))
 
         (define (standing c r)
           (body (stand-body tm f c r) down: down))

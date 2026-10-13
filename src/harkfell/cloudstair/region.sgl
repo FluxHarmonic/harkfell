@@ -226,6 +226,22 @@
                     (set! guides (cons (cons key graph) guides))
                     (log (list tag 'carry carry 'down down
                                'complete 'stats (graph-stats graph)))
+                    ;; HARKFELL_ROUTE_DIGEST: the guide's edges as a hash, so two
+                    ;; runs' guides compare exactly. Observation only.
+                    (when ROUTE-DIGEST
+                      (log (list tag 'carry carry 'down down 'digest (graph-digest graph))))
+                    ;; HARKFELL_ROUTE_CHECK: a guide built with REUSE must be the
+                    ;; guide a fresh search builds: the same edges and the same
+                    ;; counts (work counters aside: steps, repairs, reuse). Slow: a check leg.
+                    (when (and ROUTE-CHECK base)
+                      (let* ((fresh (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down #f '()))
+                             (strip (lambda (stats)
+                                      (filter (lambda (e) (not (memq (car e) (quote (steps repairs reused reused-walks)))))
+                                              stats))))
+                        (unless (and (eq? #t (graph-same-edges? graph fresh))
+                                     (equal? (strip (graph-stats graph)) (strip (graph-stats fresh))))
+                          (error "route check: a guide built with REUSE differs from a fresh one" carry down))
+                        (log (list tag 'carry carry 'down down 'reuse-checked))))
                     graph)))))))
 
     ;; (lambda (node) guide): the guide for the node's own (carry, down),
