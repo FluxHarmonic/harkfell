@@ -112,7 +112,15 @@
                              (graph-waters graph))))
               (log (list region 'carry carry 'down down 'admitted (and admitted #t)
                          'requires-down requires-down
-                         'bad-cells bad 'water-traps (map car water-traps)
+                         'bad-cells bad
+                         'bad-cells-detail
+                         (map (lambda (cell)
+                                (list 'cell cell
+                                      'forward (seen? fwd cell)
+                                      'return (seen? back cell)
+                                      'modeled-down-only (and (member cell requires-down) #t)))
+                              bad)
+                         'water-traps (map car water-traps)
                          'stats (graph-stats graph)))
               (when (or (pair? bad) (pair? water-traps))
                 (set! failures (+ failures 1)))))
