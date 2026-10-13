@@ -16,6 +16,7 @@
 ;;;                       draws as if the Seventh's Rest moment had been
 ;;;                       heard S seconds;
 ;;;                       TAU0 is where the gust clock starts (default 0)
+;;;                       C "start" (any R) puts it where ?room= would
 ;;;   room:...:MODE:TAU0:PHASE  the Underhum's finale state for the frame: none,
 ;;;                       listening or fused (the look's review override)
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
@@ -42,7 +43,10 @@
 
 (define (review-world ct parts)
   (let* ((rm (content-room ct (num (list-ref parts 2)) (num (list-ref parts 3))))
-         (g (local->global ct rm (num (list-ref parts 4)) (num (list-ref parts 5))))
+         ;; C "start": where the ?room= door puts the body (room-start-cell)
+         (g (if (string=? (list-ref parts 4) "start")
+                (room-start-cell ct rm)
+                (local->global ct rm (num (list-ref parts 4)) (num (list-ref parts 5)))))
          (wm (content-map ct))
          ;; MODE (optional 9th field): down, the body carries the cattail
          ;; down; glide, it carries it and holds jump every tick (a body put

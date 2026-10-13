@@ -62,6 +62,8 @@ say "job $JOB on HEAD $SHA ($FULL), sigil $SIGIL_V"
 
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/gate-remote.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
+. scripts/remote-sigil-toolchain
+stage_remote_sigil "$STAGE" "$SIGIL_V"
 git bundle create "$STAGE/src.bundle" HEAD 2>/dev/null
 CONTROL_PUT=()
 if [ "$JOB" = depths-diagnostics ]; then
@@ -86,9 +88,8 @@ T0=$(t)
 echo "remote: job $JOB, runner $(ip -4 -br addr show eth0 | awk '{print $3}') nproc=$(nproc) load=$(cut -d' ' -f1-3 /proc/loadavg)"
 git clone --quiet src.bundle checkout || { echo "SETUP-FAILED: clone"; exit 125; }
 git -C checkout checkout --quiet "$FULL" || { echo "SETUP-FAILED: checkout $FULL"; exit 125; }
-"$HOME/.sigil/bin/sigil" cli use "$SIGIL_V" >/dev/null 2>&1 || { echo "SETUP-FAILED: sigil cli use $SIGIL_V"; exit 125; }
-export PATH="$HOME/.sigil/bin:$PATH"
-echo "remote: sigil $(sigil --version 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+. ./remote-sigil-toolchain || exit 125
+use_remote_sigil "$SIGIL_V" || exit 125
 cd checkout
 sigil deps install > ../out/deps.log 2>&1 || { echo "SETUP-FAILED: deps install"; tail -20 ../out/deps.log; exit 125; }
 guix shell -m manifest.scm -- true > ../out/guix.log 2>&1 || { echo "SETUP-FAILED: guix environment"; tail -20 ../out/guix.log; exit 125; }
@@ -286,6 +287,7 @@ set +e
 "$REMOTE" --label "harkfell $JOB $SHA" --timeout "${GATE_TIMEOUT:-14400}" --detach \
   --put "$STAGE/src.bundle:src.bundle" --put "$STAGE/remote.sh:remote.sh" --put "$AUDIT:audit-helpers.awk" \
   "${CONTROL_PUT[@]}" \
+  --put "scripts/remote-sigil-toolchain:remote-sigil-toolchain" --put "$STAGE/sigil-delivered:sigil-delivered" \
   --get "out:$STAGE/fetched" -- bash remote.sh "$JOB" "$FULL" "$SHA" "$SIGIL_V"
 rc=$?
 set -e

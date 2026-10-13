@@ -2,14 +2,19 @@
 ;;; only. Every accepted route starts at an actual body, retains acquisitions
 ;;; and phase, and has an independently replayed physical route back out.
 (define-library (harkfell cloudstair region)
-  (import (sigil list)
+  (import (sigil list) (only (sigil process) getenv) (only (sigil gc) gc-stats)
           (engine body) (engine air) (engine tilemap) (engine worldmap)
-          (engine reach) (engine reach timed) (engine reach routes)
+          (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
+          (engine reach geopool) (engine reach wire)
+          (only (engine reach pool) pool-verify! pool-submit! pool-drain-until! pool-drain! pool-size)
           (harkfell content) (harkfell check) (harkfell feel)
-          (harkfell cloudstair reach))
+          (harkfell cloudstair reach) (harkfell cloudstair routes))
 
-  (export cloudstair-region-content cloudstair-region-check
-          cloudstair-reached-rooms cloudstair-entrance-probe)
+  (export cloudstair-region-content cloudstair-region-check cloudstair-region-worker
+          cloudstair-region-waypoints cloudstair-carry-guides cloudstair-guide-server cloudstair-guide-seeds
+          cloudstair-fingerprint
+          cloudstair-reached-rooms cloudstair-entrance-probe
+          set-cell-returns! set-landing-cap!)
 
   (begin
     (define (cloudstair-region-content ct)
@@ -20,6 +25,62 @@
                            (content-rooms ct))))
         (content ct rooms: rooms wmap: (make-worldmap rooms 25 11 16)
                     start: '(hollow (7 2) (4 3)))))
+
+    ;; Rest states remembered per process by route-rest-memo (about 600 bytes
+    ;; each); a bound on memory, not on the search.
+    ;; HARKFELL_REGION_LANDING_BOUND=N: a measurement knob, never a gate.
+    ;; The check gives up (incomplete, so FAIL) once its retained landings
+    ;; reach bound; this raises only that limit, to measure where the
+    ;; region would finish. The search bound is unchanged, and a run with it
+    ;; set logs (landing-bound-override ...) and is not a gate verdict.
+    ;; The return drain's proven-return memo (HARKFELL_REGION_RETURN_MEMO=0
+    ;; turns it off, for measuring what it changes).
+    (define RETURN-MEMO
+      (not (equal? (getenv "HARKFELL_REGION_RETURN_MEMO") "0")))
+
+    ;; With a worker pool the return drain runs whole searches on the workers
+    ;; in rounds (HARKFELL_REGION_PARALLEL_DRAIN=0: one at a time, here).
+    ;; The return memo's key for a proven state: its exact timed key.
+    (define (return-memo-key node) (timed-key node))
+
+    ;; "local": the same rounds, searched by a drain server in this process
+    ;; instead of the workers (for checking the pool against it).
+    (define PARALLEL-DRAIN-MODE (or (getenv "HARKFELL_REGION_PARALLEL_DRAIN") ""))
+    ;; Landings per drain round (each round searches against the proven set
+    ;; frozen at its start, so results never depend on the number of workers).
+    (define DRAIN-ROUND
+      (or (let ((v (getenv "HARKFELL_REGION_DRAIN_ROUND"))) (and v (string->number v))) 6))
+    ;; Diagnostics (never a gate): only the first K targets; stop the drain
+    ;; after N rounds.
+    (define TARGETS-LIMIT
+      (let ((v (getenv "HARKFELL_REGION_TARGETS"))) (and v (string->number v))))
+    (define DRAIN-ROUNDS-LIMIT
+      (let ((v (getenv "HARKFELL_REGION_DRAIN_ROUNDS"))) (and v (string->number v))))
+    (define PARALLEL-DRAIN
+      (not (equal? (getenv "HARKFELL_REGION_PARALLEL_DRAIN") "0")))
+    ;; Cell returns (the 0.4 gate's drain, a claim per cell): one return
+    ;; search per (cell, carry, down) group of retained landings, from the
+    ;; group's first pending landing in drain order. The group's other
+    ;; landings are marked checked and counted, never proven. Set by the
+    ;; gate flag --cell-returns (set-cell-returns!), or by the diagnostic
+    ;; knob HARKFELL_REGION_CELL_RETURNS=1: the same switch either way.
+    (define CELL-RETURNS (equal? (getenv "HARKFELL_REGION_CELL_RETURNS") "1"))
+    (define (set-cell-returns! on) (set! CELL-RETURNS on))
+
+    (define LANDING-BOUND-OVERRIDE
+      (let ((v (getenv "HARKFELL_REGION_LANDING_BOUND")))
+        (and v (string->number v))))
+    ;; The gate's landing cap (--landing-cap N, set-landing-cap!): retained
+    ;; landings at or over it stop the check, incomplete, so FAIL. Separate
+    ;; from the search bound (--region-bound), which bounds each search's
+    ;; expansions; without a cap the search bound is also the landing cap.
+    ;; The diagnostic knob HARKFELL_REGION_LANDING_BOUND overrides both.
+    (define LANDING-CAP #f)
+    (define (set-landing-cap! n) (set! LANDING-CAP n))
+
+    (define REST-MEMO-CAP 120000)
+    ;; A worker proves each pose pinned to it once, so it needs fewer.
+    (define WORKER-REST-CAP 60000)
 
     (define (still? node)
       (and node
@@ -101,45 +162,539 @@
                   (set! cache (dict-set cache key reached))
                   reached))))))
 
-    (define (cloudstair-region-check source profiles bound log)
-      (log '(candidate-geometry starting actual-replay-required))
+    ;; A hash of what a check is built from (tiles with every stone shut and
+    ;; every stone open, air fields, start, pickups, rooms): a pool worker must
+    ;; report the same one as the check before any of its answers is used.
+    (define (cloudstair-fingerprint ct)
+      (let ((shut (tiles-carrying ct (quote ()))) (open (tiles-carrying ct (quote (2 3 4 5)))))
+        (number->string
+          (route-set-digest
+            (list (list (tilemap-cols shut) (tilemap-rows shut) (tilemap-size shut)
+                        (vector->list (tilemap-cells shut)) (vector->list (tilemap-cells open))
+                        (map (lambda (f) (list (air-field-x f) (air-field-y f) (air-field-w f)
+                                               (air-field-h f) (air-field-lift f) (air-field-east f)
+                                               (air-field-west f) (air-field-pulsed f)
+                                               (air-field-gate f)))
+                             (tilemap-air shut))
+                        (start-cell ct) (content-pickup-cells ct) (content-stone-cells ct)
+                        (length (content-rooms ct))))))))
+
+    ;; The spatial guide's tilemap: every stone open, pulsed lifts steady
+    ;; (candidates only; every accepted route is replayed on actual fields).
+    (define (region-candidate-tm ct)
+      (let ((tm (tiles-carrying ct '(2 3 4 5))))
+        (tilemap tm air:
+          (filter-map (lambda (field)
+                        (and (> (air-field-lift field) 0)
+                             (air-field field pulsed: #f)))
+                      (tilemap-air tm)))))
+
+    ;; A worker for cloudstair-region-check's pool: the same content, advance,
+    ;; shelter certificates and waiter as the check builds, answering
+    ;; (engine reach routes)' wait and replay requests; and the same spatial
+    ;; guide search, answering (engine reach geopool)'s anchor expansions.
+    (define (cloudstair-region-worker source)
       (let* ((ct (cloudstair-region-content source))
-             (home (start-cell ct))
-             (tm (tiles-carrying ct '(2 3 4 5)))
-             (candidate-tm
-               (tilemap tm air:
-                 (filter-map (lambda (field)
-                               (and (> (air-field-lift field) 0)
-                                    (air-field field pulsed: #f)))
-                             (tilemap-air tm))))
-             (candidate
-               (reach-search-down candidate-tm HARKFELL-FEEL
-                 (list home) witness-lands? #t
-                 (lambda (anchors steps kind cell)
-                   (when (= (modulo anchors 100) 0)
-                     (log (list 'candidate-geometry 'anchors anchors 'steps steps))))))
-             (advance (cloudstair-stepper ct))
+             (advance (route-rest-memo (cloudstair-stepper ct) WORKER-REST-CAP))
+             (routes (route-task-handler advance
+                                         (cloudstair-shelter-checker ct advance)
+                                         (cloudstair-waiter ct advance)
+                                         (cloudstair-fingerprint ct)))
+             (geometry #f) (guides #f) (drain #f))
+        (lambda (line)
+          (cond
+            ;; the parallel return drain's whole searches and proven keys
+            ((and (> (string-length line) 1) (memv (string-ref line 0) (list #\D #\Q #\R)))
+             (unless drain (set! drain (cloudstair-drain-server ct)))
+             (drain line))
+            ;; per-(carry, down) guides: cloudstair-guide-builder's requests
+            ((and (> (string-length line) 1) (char=? (string-ref line 0) #\S))
+             (unless guides (set! guides (cloudstair-guide-server ct)))
+             (guides line))
+            ((and (> (string-length line) 1) (memv (string-ref line 0) (list #\X #\L #\G)))
+              (begin
+                (unless geometry
+                  (set! geometry
+                    (geometry-task-handler
+                      (reach-search-down (region-candidate-tm ct) HARKFELL-FEEL
+                                         (list (start-cell ct)) witness-lands? #t #f 'serve))))
+                (geometry line)))
+            (else (routes line))))))
+
+    ;; A guide's tilemap: carry's tiles with every lifting field steady.
+    (define (cloudstair-guide-tm tiles-for carry)
+      (let ((tm (tiles-for carry)))
+        (tilemap tm air:
+          (filter-map
+            (lambda (field)
+              (and (> (air-field-lift field) 0)
+                   (air-field field pulsed: #f)))
+            (tilemap-air tm)))))
+
+    ;; A worker's side of the builder's pool: it answers "S" geometry
+    ;; requests by building the named (carry down starts) search itself.
+    (define (cloudstair-guide-server ct)
+      (let ((tiles-for (cloudstair-tile-provider ct)))
+        (geometry-spec-handler
+          (lambda (spec)
+            (reach-search-down* (cloudstair-guide-tm tiles-for (car spec)) HARKFELL-FEEL
+                                (caddr spec) witness-lands? (cadr spec) #f (quote ()) #f (quote serve))))))
+
+    ;; The global cells of the rooms' things of kind (for example 'down).
+    (define (content-thing-cells ct kind)
+      (apply append
+        (map (lambda (p)
+               (let ((rm (placed-data p)))
+                 (filter-map (lambda (t)
+                               (let ((a (thing-at t)))
+                                 (and a (local->global ct rm (car a) (cdr a)))))
+                             (room-things-of rm kind))))
+             (content-rooms ct))))
+
+    ;; Where a (carry, down) state can begin, from the content alone: home;
+    ;; the pickup of each stone carried (touching one acquires it); and, with
+    ;; down, every down-touch cell. A guide seeded here depends on (carry,
+    ;; down) only, never on which search state first asks for it, so the
+    ;; moves it supplies are a function of the state and a different search
+    ;; order explores the same states when a search exhausts.
+    (define (cloudstair-guide-seeds ct)
+      (let ((home (start-cell ct))
+            (pickups (content-pickup-cells ct))
+            (downs (content-thing-cells ct (quote down))))
+        (lambda (carry down)
+          (let add ((cells (append (filter-map (lambda (p) (and (memv (car p) carry) (cdr p))) pickups)
+                                   (if down downs (quote ()))))
+                    (acc (list home)))
+            (cond ((null? cells) (reverse acc))
+                  ((member (car cells) acc) (add (cdr cells) acc))
+                  (else (add (cdr cells) (cons (car cells) acc))))))))
+
+    ;; Spatial guides per (carry, down): carry's tiles with every lifting
+    ;; field steady (suggestions only; an accepted edge replays the actual
+    ;; pulsed field), searched from (seeds carry down), REUSING the memo of
+    ;; the latest guide with the same down. (build carry down) returns the
+    ;; guide, building it once per (carry, down); tag names its log lines.
+    ;; Until 2026-10-13 the world seeded a guide from home and the cell of the
+    ;; first search state that asked, so its moves depended on search order.
+    (define (cloudstair-guide-builder tiles-for seeds log tag . pool)
+      ;; guides: ((carry . down) . graph), each graph without its REUSE memo and
+      ;; one object for its whole life (callers key caches by identity).
+      ;; bases: (down . (tm . memo)), the latest guide's memo per down, the only
+      ;; memo REUSE ever reads; an older one is dropped when replaced.
+      (let ((guides '()) (bases '()))
+        (lambda (carry down)
+          (let* ((key (cons carry down)) (prior (assoc key guides)))
+            (if prior (cdr prior)
+                (let* ((tm (cloudstair-guide-tm tiles-for carry))
+                       (base (let ((b (assq down bases))) (and b (cdr b))))
+                       (starts (seeds carry down)))
+                  (log (list tag 'carry carry 'down down 'starting))
+                  (let* ((full
+                           (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down
+                             (and base (cdr base))
+                             (if base (tilemap-changes (car base) tm) '())
+                             (lambda (anchors steps kind cell)
+                               (when (= (modulo anchors 100) 0)
+                                 (log (list tag 'carry carry 'down down
+                                            'anchors anchors 'steps steps))))
+                             ;; with a pool, its workers expand the anchors and walk
+                             ;; the candidates REUSE cannot supply
+                             (and ROUTE-MEMO (pair? pool) (car pool)
+                                  (make-geometry-remote (car pool) (list carry down starts)))))
+                         (graph (reach-graph full memo: #f)))
+                    (set! bases (cons (cons down (cons tm (graph-memo full)))
+                                      (filter (lambda (b) (not (eq? (car b) down))) bases)))
+                    (set! guides (cons (cons key graph) guides))
+                    (log (list tag 'carry carry 'down down
+                               'complete 'stats (graph-stats graph)))
+                    ;; HARKFELL_ROUTE_DIGEST: the guide's edges as a hash, so two
+                    ;; runs' guides compare exactly. Observation only.
+                    (when ROUTE-DIGEST
+                      (log (list tag 'carry carry 'down down 'digest (graph-digest graph))))
+                    ;; HARKFELL_ROUTE_CHECK: a guide built with REUSE must be the
+                    ;; guide a fresh search builds: the same edges and the same
+                    ;; counts (work counters aside: steps, repairs, reuse). Slow: a check leg.
+                    (when (and ROUTE-CHECK base)
+                      (let* ((fresh (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down #f '()))
+                             (strip (lambda (stats)
+                                      (filter (lambda (e) (not (memq (car e) (quote (steps repairs reused reused-walks)))))
+                                              stats))))
+                        (unless (and (eq? #t (graph-same-edges? graph fresh))
+                                     (equal? (strip (graph-stats graph)) (strip (graph-stats fresh))))
+                          (error "route check: a guide built with REUSE differs from a fresh one" carry down))
+                        (log (list tag 'carry carry 'down down 'reuse-checked))))
+                    graph)))))))
+
+    ;; (lambda (node) guide): the guide for the node's own (carry, down),
+    ;; seeded by cloudstair-guide-seeds. The world check's guides.
+    (define (cloudstair-carry-guides tiles-for seeds log tag . pool)
+      (let ((build (apply cloudstair-guide-builder tiles-for seeds log tag pool)))
+        (lambda (node)
+          (build (timed-node-data node) (body-down (timed-node-body node))))))
+
+    ;; The region check's guided-queue score, (rank node target): guide hops
+    ;; from the node's cell to target in the guide for the node's own
+    ;; (carry, down). When that guide has no path (a door this carry cannot
+    ;; open), the least over the pickups of a stone the carry lacks of: hops
+    ;; to the pickup in this guide, plus hops from the pickup to the target
+    ;; in the guide for carry plus that stone. #f when neither has a path.
+    ;; It only orders the search (see timed-route-finder's rank).
+    (define (cloudstair-carry-rank build pickups cell-of)
+      (let ((dists #{}) (last-target #f))
+        (define (hops graph key from target)
+          ;; key names graph (its carry and down) for the distance cache
+          (let* ((k (cons key target))
+                 (d (or (dict-ref dists k #f)
+                        (let ((d (guide-distances graph target)))
+                          (set! dists (dict-set dists k d))
+                          d)))
+                 (tm (graph-tm graph)))
+            (vector-ref d (cell-index tm (car from) (cdr from)))))
+        (lambda (node target)
+          ;; distances for one target at a time: the region seeks its targets
+          ;; in turn, and a vector per (guide, target) would add up
+          (unless (equal? target last-target)
+            (set! dists #{})
+            (set! last-target target))
+          (let* ((cell (cell-of node))
+                 (carry (timed-node-data node))
+                 (down (body-down (timed-node-body node))))
+            (and cell
+                 (let ((g (build carry down)))
+                   (or (hops g (cons carry down) cell target)
+                       (let loop ((ps pickups) (best #f))
+                         (if (null? ps)
+                             best
+                             (let* ((stone (car (car ps))) (pc (cdr (car ps)))
+                                    (total
+                                      (and (not (memv stone carry))
+                                           (let ((to-pickup (hops g (cons carry down) cell pc)))
+                                             (and to-pickup
+                                                  (let* ((more (carry-union carry (list stone)))
+                                                         (g2 (build more down))
+                                                         (on (hops g2 (cons more down) pc target)))
+                                                    (and on (+ to-pickup on))))))))
+                               (loop (cdr ps)
+                                     (if (and total (or (not best) (< total best))) total best))))))))))))
+
+    ;; A pool worker's side of the parallel return drain (cloudstair-region-check):
+    ;;   "D <bound> <node>"   one whole return search from node to home with this
+    ;;                        worker's own finder, stopping also at proven states.
+    ;;                        Answer: "D <found> <at-home> <incomplete> <checked> <n>"
+    ;;                        then n records "<shelter> <node> <aligned rest or F>":
+    ;;                        each distinct node the search recorded, in order, with
+    ;;                        the two values the parent's record*! computes.
+    ;;   "Q <n> <key>..."     add proven keys (exact timed keys).
+    ;; The finder, guide, rank and certificates are the check's, built here once
+    ;; from the same content; the proven set is the parent's, frozen per round.
+    (define (cloudstair-drain-server ct)
+      (let* ((home (start-cell ct))
              (tiles-for (cloudstair-tile-provider ct))
-             (wait (cloudstair-waiter ct advance))
+             (advance (route-rest-memo (cloudstair-stepper ct) WORKER-REST-CAP))
              (shelter? (cloudstair-shelter-checker ct advance))
-             (targets (apply append
-                        (map (lambda (p)
-                               (room-standable-cells ct (placed-data p) tm))
-                             (filter (lambda (p)
-                                       (eq? (room-region (placed-data p)) 'cloudstair))
-                                     (content-rooms ct)))))
-             (route-cache '()) (entry-rooms (cloudstair-entrance-probe source)) (failures 0)
-             (search-incomplete #f))
-        (log (list 'candidate-geometry 'complete 'stats (graph-stats candidate)))
+             (wait (cloudstair-waiter ct advance))
+             (proposals (cloudstair-route-proposals ct))
+             (proven #{}) (proven-exact #{}) (recorded (quote ())) (incomplete #f) (finders #f)
+             (plain-incomplete #f))
         (define (cell-of node)
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
+        (define (align node) (let ((proof (wait node 0))) (and proof (car proof))))
+        ;; As the check's proven-return?: memo key lookups, and every hit
+        ;; checked at its exact key (a failure ends this worker, an error in
+        ;; the check).
+        (define (proven-return? node target)
+          (and RETURN-MEMO (equal? target home) (still? node)
+               (let ((hit (if (dict-contains? proven (return-memo-key node))
+                              node
+                              (let ((rest (align node)))
+                                (and rest (dict-contains? proven (return-memo-key rest)) rest)))))
+                 (and hit
+                      (begin
+                        (unless (dict-contains? proven-exact (timed-key hit))
+                          (error "return memo: a proven-return hit is not proven at its exact key"
+                                 (timed-key hit)))
+                        #t)))))
+        (define (setup! bound)
+          (unless finders
+            (let* ((candidate (reach-graph (reach-search-down (region-candidate-tm ct) HARKFELL-FEEL
+                                                              (list home) witness-lands? #t)
+                                           memo: #f))
+                   (rank (cloudstair-carry-rank
+                           (cloudstair-guide-builder tiles-for (cloudstair-guide-seeds ct)
+                                                     (lambda (record) #t) (quote rank-candidates))
+                           (content-pickup-cells ct) cell-of))
+                   (finder (timed-route-finder advance tiles-for HARKFELL-FEEL (lambda (node) candidate)
+                             shelter? wait bound
+                             (lambda (node) (set! recorded (cons node recorded)))
+                             (lambda () (set! incomplete #t))
+                             #f proposals #f #f rank proven-return?))
+                   (plain (timed-route-finder advance tiles-for HARKFELL-FEEL (lambda (node) candidate)
+                            shelter? wait bound (lambda (node) #t) (lambda () (set! plain-incomplete #t))
+                            #f proposals #f #f rank)))
+              (set! finders (cons finder plain)))))
+        (lambda (line)
+          (let ((toks (wire-tokens line)))
+            (cond
+              ;; a new profile: its proven set starts empty, as the parent's does
+              ((string=? (car toks) "R")
+               (set! proven #{})
+               (set! proven-exact #{})
+               "R")
+              ((string=? (car toks) "Q")
+               (let loop ((n (string->number (cadr toks))) (ts (cddr toks)))
+                 (when (> n 0)
+                   (let ((r (wire-read-value ts)))
+                     (set! proven (dict-set proven (car (car r)) #t))
+                     (set! proven-exact (dict-set proven-exact (cdr (car r)) #t))
+                     (loop (- n 1) (cdr r)))))
+               "Q")
+              ((string=? (car toks) "D")
+               (let ((bound (string->number (cadr toks)))
+                     (start (car (wire-read-node (cddr toks)))))
+                 (setup! bound)
+                 (set! recorded '())
+                 (set! incomplete #f)
+                 ;; the finder's own diagnostics (digests, reports, profiles) go
+                 ;; to a discarded port: this process's stdout carries only answers
+                 (let* ((back (parameterize ((current-output-port (open-output-string)))
+                                ((car finders) start home)))
+                        (at-home (and back (equal? (cell-of back) home)))
+                        ;; ROUTE_CHECK: a memo stop must be a real return by itself
+                        (checked (cond ((or (not ROUTE-CHECK) (not back) at-home) "N")
+                                       ((begin (set! plain-incomplete #f)
+                                               (parameterize ((current-output-port (open-output-string)))
+                                                 ((cdr finders) start home)))
+                                        "T")
+                                       (plain-incomplete "B")
+                                       (else "F")))
+                        (records
+                          (let loop ((ns (reverse recorded)) (seen #{}) (acc '()))
+                            (cond ((null? ns) (reverse acc))
+                                  ((dict-contains? seen (timed-key (car ns))) (loop (cdr ns) seen acc))
+                                  (else
+                                   (let ((node (car ns)))
+                                     (loop (cdr ns) (dict-set seen (timed-key node) #t)
+                                           (cons (list (and (shelter? node) #t) node (align node)) acc))))))))
+                   (set! recorded '())
+                   (wire-join
+                     (append (list "D" (if back "T" "F") (if at-home "T" "F") (if incomplete "T" "F") checked
+                                   (number->string (length records)))
+                             (apply append
+                                    (map (lambda (r) (append (list (if (car r) "T" "F"))
+                                                             (wire-node (cadr r)) (wire-node (caddr r))))
+                                         records)))))))
+              (else (error "drain worker: bad request" (car toks))))))))
+
+    ;; A diagnostic, never a verdict: from the profile's actual root, search
+    ;; to each waypoint cell in turn, each search starting at the previous
+    ;; search's actual arrival (body, phase and carry). The finder, guide,
+    ;; certificates and bound are cloudstair-region-check's. Arrivals prove
+    ;; a physical route through every waypoint; a failed leg names the gap.
+    ;; Logs (waypoint i cell from ... arrival ... expanded-bound? ...).
+    (define (cloudstair-region-waypoints source carry down bound waypoints log . pool)
+      (let* ((ct (cloudstair-region-content source))
+             (verified (and (pair? pool) (car pool)
+                            (pool-verify! (car pool) "I" (string-append "I " (cloudstair-fingerprint ct)))))
+             (home (start-cell ct))
+             (candidate
+               (reach-graph
+                (reach-search-down (region-candidate-tm ct) HARKFELL-FEEL
+                 (list home) witness-lands? #t
+                 (lambda (anchors steps kind cell) #t)
+                 (and ROUTE-MEMO (pair? pool) (car pool) (make-geometry-remote (car pool))))
+                memo: #f))
+             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
+             (tiles-for (cloudstair-tile-provider ct))
+             (certs (route-certificate-cache (cloudstair-shelter-checker ct advance)
+                                             (cloudstair-waiter ct advance)
+                                             (and (pair? pool) (car pool) #t) REST-MEMO-CAP))
+             (shelter? (vector-ref certs 0))
+             (wait (vector-ref certs 1))
+             (incomplete #f))
+        (define (cell-of node)
+          (and (still? node) (rest-cell (tiles-for (timed-node-data node))
+                                     HARKFELL-FEEL (timed-node-body node))))
+        ;; Guide hops scored per (carry, down); moves from the region's guide.
+        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for (cloudstair-guide-seeds ct) log (quote rank-candidates)
+                                                                     (and (pair? pool) (car pool)))
+                                            (content-pickup-cells ct) cell-of))
+        (define (summary node)
+          (let ((b (timed-node-body node)))
+            (list 'cell (cell-of node) 'tau (body-tau b) 'carry (timed-node-data node)
+                  'down (body-down b))))
+        (log (list 'waypoints 'carry carry 'down down 'bound bound 'cells waypoints))
+        (let* ((entries (cloudstair-entry-phases ct home carry down))
+               (root (let ((proof (wait (car entries) 0))) (and proof (car proof))))
+               (route (timed-route-finder advance tiles-for HARKFELL-FEEL
+                        (lambda (node) candidate) shelter? wait bound
+                        (lambda (node) #t) (lambda () (set! incomplete #t))
+                        (lambda (node target expanded pending depth)
+                          (log (list 'waypoint-search 'target target 'expanded expanded
+                                     'pending pending 'depth depth 'at (cell-of node)
+                                     'tau (body-tau (timed-node-body node)))))
+                        (cloudstair-route-proposals ct) (and (pair? pool) (car pool))
+                        (vector-ref certs 2) rank)))
+          (if (not root)
+              (begin (log '(waypoints no-root)) 1)
+              (let next-leg ((at root) (cells waypoints) (i 0))
+                (cond
+                  ((null? cells) (log (list 'waypoints 'all-reached i)) 0)
+                  (else
+                   (set! incomplete #f)
+                   (let ((arrival (route at (car cells))))
+                     (log (list 'waypoint i 'cell (car cells) 'from (summary at)
+                                'arrival (and arrival (summary arrival))
+                                'bound-hit incomplete))
+                     (if arrival
+                         (next-leg arrival (cdr cells) (+ i 1))
+                         (begin (log (list 'waypoints 'failed-at i (car cells))) 1))))))))))
+
+    ;; pool (optional): an (engine reach pool) of cloudstair-region-worker
+    ;; processes. It changes how long the searches take, not what they find.
+    (define (cloudstair-region-check source profiles bound log . pool)
+      (log '(candidate-geometry starting actual-replay-required))
+      (let* ((ct (cloudstair-region-content source))
+             ;; a pool's workers must have built exactly this content
+             (verified (and (pair? pool) (car pool)
+                            (pool-verify! (car pool) "I" (string-append "I " (cloudstair-fingerprint ct)))))
+             (home (start-cell ct))
+             (tm (tiles-carrying ct '(2 3 4 5)))
+             (candidate-tm (region-candidate-tm ct))
+             ;; The guide graph without its REUSE memo (every anchor's notes and
+             ;; walk, which this check never reads): a smaller live heap makes
+             ;; every later collection, and so every physics tick, cheaper.
+             (candidate
+               (reach-graph
+                (reach-search-down candidate-tm HARKFELL-FEEL
+                 (list home) witness-lands? #t
+                 (lambda (anchors steps kind cell)
+                   (when (= (modulo anchors 100) 0)
+                     (log (list 'candidate-geometry 'anchors anchors 'steps steps))))
+                 ;; with a pool, anchors are expanded on its workers
+                 (and ROUTE-MEMO (pair? pool) (car pool) (make-geometry-remote (car pool))))
+                memo: #f))
+             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
+             (tiles-for (cloudstair-tile-provider ct))
+             (wait0 (cloudstair-waiter ct (prof-advance (quote tick-waiter) advance)))
+             (shelter0? (cloudstair-shelter-checker ct (prof-advance (quote tick-shelter) advance)))
+             ;; With a pool: shelter? and wait answer first from certificates
+             ;; its workers computed ((engine reach routes) route-certificate-cache).
+             (certs (route-certificate-cache shelter0? wait0
+                                             (and (pair? pool) (car pool) #t) REST-MEMO-CAP))
+             (shelter? (vector-ref certs 0))
+             (wait (vector-ref certs 1))
+             (learn! (vector-ref certs 2))
+             (proposals (cloudstair-route-proposals ct))
+             (targets (let ((all
+                             (apply append
+                                (map (lambda (p)
+                                       (room-standable-cells ct (placed-data p) tm))
+                                     (filter (lambda (p)
+                                               (eq? (room-region (placed-data p)) 'cloudstair))
+                                             (content-rooms ct))))))
+                        (if TARGETS-LIMIT
+                            (let first ((xs all) (n TARGETS-LIMIT) (acc (quote ())))
+                              (if (or (null? xs) (= n 0)) (reverse acc) (first (cdr xs) (- n 1) (cons (car xs) acc))))
+                            all)))
+             (route-cache '()) (entry-rooms (cloudstair-entrance-probe source)) (failures 0)
+             (search-incomplete #f)
+             (landing-bound (or LANDING-BOUND-OVERRIDE LANDING-CAP bound))
+             ;; States proven to return home this profile, by exact timed key
+             ;; (the key memo-key gives; also by timed-key, for the exact-key check).
+             (return-proven #{}) (return-proven-exact #{}) (memo-stops 0) (n-checked 0) (plain-bound #f))
+        (when LANDING-BOUND-OVERRIDE
+          (log (list (quote landing-bound-override) landing-bound (quote gate-bound) bound
+                     (quote not-a-gate-verdict))))
+        (when (and LANDING-CAP (not LANDING-BOUND-OVERRIDE))
+          (log (list (quote landing-cap) LANDING-CAP (quote search-bound) bound)))
+        (when CELL-RETURNS
+          (log (list (quote cell-returns) #t)))
+        (log (list 'candidate-geometry 'complete 'stats (graph-stats candidate)))
+        (prof-report 'candidate-geometry-complete)
+        (define (cell-of node)
+          (and (still? node) (rest-cell (tiles-for (timed-node-data node))
+                                     HARKFELL-FEEL (timed-node-body node))))
+        ;; The drain proves landings nearest home first (guide hops to home in
+        ;; the candidate guide; ties keep the landings' own order), so a later
+        ;; return finds proven states near it to stop at. Order only: the same
+        ;; landings are checked; which proven states exist when is what changes.
+        (define home-hops (guide-distances candidate home))
+        (define (home-first entries)
+          (let ((hops (lambda (e)
+                        (let ((c (cell-of (cdr e))))
+                          (or (and c (vector-ref home-hops (cell-index (graph-tm candidate) (car c) (cdr c))))
+                              100000)))))
+            (map caddr
+                 (list-sort (lambda (a b) (or (< (car a) (car b))
+                                              (and (= (car a) (car b)) (< (cadr a) (cadr b)))))
+                            (let number ((es entries) (i 0) (acc (quote ())))
+                              (if (null? es) (reverse acc)
+                                  (number (cdr es) (+ i 1) (cons (list (hops (car es)) i (car es)) acc))))))))
+        ;; The guided queue scores guide hops left in a guide for the node's
+        ;; own (carry, down), so a door the carry cannot open scores as shut,
+        ;; and a target behind it scores by way of the pickup that opens it.
+        ;; Moves still come from candidate (the guide below), so this orders
+        ;; the search and never changes what it can reach on exhaustion.
+        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for (cloudstair-guide-seeds ct) log (quote rank-candidates)
+                                                                     (and (pair? pool) (car pool)))
+                                            (content-pickup-cells ct) cell-of))
         ;; Normalize TIME only by real no-input ticks from a certified rest.
         ;; The arrival's position, momentum, ability and carry are never set.
         (define (align node tau)
           (let ((proof (wait node tau)))
             (and proof (car proof))))
+        ;; --- The return drain's proven-return memo ---------------------------
+        ;; A landing whose return search reaches home is proven to return, at
+        ;; its exact timed key. A later return search stops at a still state
+        ;; whose own key, or the key of its certified wait to phase 0 (real
+        ;; no-input ticks), is proven: the route is the actual replay to it plus
+        ;; its proven return. A landing returns iff it reaches some proven
+        ;; state, so trap verdicts from exhaustion are unchanged.
+        (define (memo-key node) (return-memo-key node))
+        ;; the drain's in-process server for HARKFELL_REGION_PARALLEL_DRAIN=local
+        (define local-drain #f)
+        (define (local-drain-server)
+          (unless local-drain (set! local-drain (cloudstair-drain-server ct)))
+          local-drain)
+        (define drain-rounds 0)
+        ;; a new profile's drain starts from an empty proven set on every worker
+        ;; (and the in-process server), as this process's own does
+        (define (drain-reset!)
+          (when (and PARALLEL-DRAIN (not (equal? PARALLEL-DRAIN-MODE "local")) (pair? pool) (car pool))
+            (let each ((w 0))
+              (when (< w (pool-size (car pool)))
+                (pool-submit! (car pool) "R 0" (lambda (answer) #t) w)
+                (each (+ w 1))))
+            (pool-drain! (car pool)))
+          (when local-drain (local-drain "R 0")))
+        (define (proven-key node)
+          ;; the proven key node itself or its aligned rest holds, or #f
+          (and (still? node)
+               (if (dict-contains? return-proven (memo-key node))
+                   node
+                   (let ((rest (align node 0)))
+                     (and rest (dict-contains? return-proven (memo-key rest)) rest)))))
+        (define (proven-return? node target)
+          (and RETURN-MEMO (equal? target home)
+               (let ((hit (proven-key node)))
+                 (and hit
+                      (begin
+                        ;; Always checked (one lookup per hit, never true in honest code,
+                        ;; where memo-key is the exact key): the hit must be proven at its
+                        ;; exact timed key.
+                        (when (not (dict-contains? return-proven-exact (timed-key hit)))
+                          (error "return memo: a proven-return hit is not proven at its exact key"
+                                 (timed-key hit)))
+                        #t)))))
+        ;; ROUTE_CHECK's end-to-end check of a memo stop: the same landing, searched
+        ;; again without the memo (recording nothing), must reach home itself.
+        (define plain-return
+          (timed-route-finder advance tiles-for HARKFELL-FEEL
+            (lambda (node) candidate) shelter? wait bound (lambda (node) #t) (lambda () (set! plain-bound #t))
+            #f proposals (and (pair? pool) (car pool)) learn! rank))
         (define (seek start target record!)
+          (prof-inc! 'seek)
           (let ((prior (find (lambda (entry) (eq? (car entry) record!)) route-cache)))
             (let ((route
                     (if prior (cdr prior)
@@ -150,7 +705,8 @@
                             (log (list 'regional-search 'target target
                                        'expanded expanded 'pending pending 'depth depth
                                        'at (cell-of node) 'carry (timed-node-data node)
-                                       'tau (body-tau (timed-node-body node)))))))))
+                                       'tau (body-tau (timed-node-body node)))))
+                          proposals (and (pair? pool) (car pool)) learn! rank proven-return?))))
               (unless prior (set! route-cache (cons (cons record! route) route-cache)))
               (route start target))))
         (for-each
@@ -160,9 +716,12 @@
                    (root (align (car entries) 0))
                    (entry-fails 0) (unreached '()) (traps '())
                    (landings #{}) (rotations #{}) (landing-count 0) (complete (and root #t))
-                   (covered #{})
+                   (covered #{}) (cell-done #{}) (cell-skips 0)
                    (target-count 0))
               (define (record! node)
+                (prof-inc! 'record-call)
+                (prof-time 'time-record (lambda () (record*! node))))
+              (define (record*! node)
                 (let ((cell (cell-of node)))
                   (when cell (set! covered (dict-set covered cell #t))))
                 (let ((rotation (and (shelter? node)
@@ -174,7 +733,132 @@
                       (unless (dict-contains? landings key)
                         (set! landings (dict-set landings key rest))
                         (set! landing-count (+ landing-count 1)))))))
+              ;; A landing whose return search did not reach home: counted, and
+              ;; named (cell, phase, carry) so a FAIL says where. exhausted is
+              ;; #f when the search stopped at its bound (then the run is also
+              ;; incomplete, with its own RED line), so not a proven trap.
+              (define (trap! node exhausted)
+                (set! traps (cons (timed-key node) traps))
+                (log (list 'RED (if exhausted 'region-trap 'region-return-incomplete)
+                           'carry carry 'down down 'cell (cell-of node)
+                           'tau (body-tau (timed-node-body node)) 'data (timed-node-data node)
+                           'exhausted exhausted)))
+              ;; record*! with the two values a drain worker computed for node
+              ;; (its shelter answer and its aligned rest): the same effect.
+              (define (apply-record! node shelter rest-aligned)
+                (let ((cell (cell-of node)))
+                  (when cell (set! covered (dict-set covered cell #t))))
+                (let ((rotation (and shelter
+                                     (timed-key (timed-node node body:
+                                                  (body (timed-node-body node) tau: 0))))))
+                  (unless (and rotation (dict-contains? rotations rotation))
+                    (let* ((rest (or rest-aligned node)) (key (timed-key rest)))
+                      (when rotation (set! rotations (dict-set rotations rotation #t)))
+                      (unless (dict-contains? landings key)
+                        (set! landings (dict-set landings key rest))
+                        (set! landing-count (+ landing-count 1)))))))
+              ;; The parallel drain's pass over pending landings: rounds of
+              ;; DRAIN-ROUND landings, each a whole return search on a worker against
+              ;; the proven set frozen at the round's start; answers merge in
+              ;; landing order, then the round's proven keys go to every
+              ;; worker. A search never reads the landings it records, so
+              ;; merging after the round equals recording during it, and no
+              ;; result depends on timing. Returns when the pass is done.
+              (define (parallel-pass! pending checked-add!)
+                ;; the round's searches run on the pool's workers, or ("local") on a
+                ;; drain server in this process: the same code, for checking
+                (let* ((p (and (not (equal? PARALLEL-DRAIN-MODE "local")) (car pool)))
+                       (local (and (not p) (local-drain-server)))
+                       (r DRAIN-ROUND))
+                  (let round ((ps pending))
+                    (when (and complete DRAIN-ROUNDS-LIMIT (>= drain-rounds DRAIN-ROUNDS-LIMIT))
+                      ;; diagnostic: the drain stops here, so the run is incomplete
+                      (log (list (quote drain-rounds-limit) DRAIN-ROUNDS-LIMIT (quote not-a-gate-verdict)))
+                      (set! complete #f))
+                    (when (and complete (pair? ps) (< landing-count landing-bound))
+                      (set! drain-rounds (+ drain-rounds 1))
+                      (let* ((batch (let take ((xs ps) (n r) (acc '()))
+                                      (if (or (null? xs) (= n 0)) (reverse acc)
+                                          (take (cdr xs) (- n 1) (cons (car xs) acc)))))
+                             (answers (make-vector (length batch) #f)))
+                        (let submit ((es batch) (i 0))
+                          (when (pair? es)
+                            (let ((slot i)
+                                  (line (wire-join (append (list "D" (number->string bound))
+                                                           (wire-node (cdr (car es)))))))
+                              (if p
+                                  (pool-submit! p line (lambda (answer) (vector-set! answers slot answer)))
+                                  (vector-set! answers slot (local line))))
+                            (submit (cdr es) (+ i 1))))
+                        (when p
+                          (pool-drain-until! p (lambda () (let all ((i 0)) (or (= i (vector-length answers))
+                                                                              (and (vector-ref answers i) (all (+ i 1))))))))
+                        (let merge ((es batch) (i 0) (fresh '()))
+                          (cond
+                            ((or (null? es) (not complete))
+                             ;; the round's proven keys, to every worker before the next round
+                             (when (pair? fresh)
+                               (let ((line (wire-join (append (list "Q" (number->string (length fresh)))
+                                                              (apply append (map wire-value (reverse fresh)))))))
+                                 (if p
+                                     (begin
+                                       (let each ((w 0))
+                                         (when (< w (pool-size p))
+                                           (pool-submit! p line (lambda (answer) #t) w)
+                                           (each (+ w 1))))
+                                       (pool-drain! p))
+                                     (local line))))
+                             (round (let skip ((xs ps) (n (length batch))) (if (= n 0) xs (skip (cdr xs) (- n 1))))))
+                            (else
+                             (let* ((entry (car es))
+                                    (toks (wire-tokens (vector-ref answers i)))
+                                    (found (string=? (list-ref toks 1) "T"))
+                                    (at-home (string=? (list-ref toks 2) "T"))
+                                    (incomplete (string=? (list-ref toks 3) "T"))
+                                    (checked (list-ref toks 4))
+                                    (n (string->number (list-ref toks 5))))
+                               (checked-add! (car entry))
+                               ;; the search's landings, in its own order
+                               (let records ((k n) (ts (list-tail toks 6)))
+                                 (when (> k 0)
+                                   (let* ((sh (string=? (car ts) "T"))
+                                          (a (wire-read-node (cdr ts)))
+                                          (b (wire-read-node (cdr a))))
+                                     (apply-record! (car a) sh (car b))
+                                     (records (- k 1) (cdr b)))))
+                               (when (string=? checked "B")
+                                 (error "route check: a proven-return stop could not be re-verified (bound)"
+                                        (timed-key (cdr entry))))
+                               (when (string=? checked "F")
+                                 (error "route check: a proven-return stop is not a real return"
+                                        (timed-key (cdr entry))))
+                               (let ((fresh
+                                       (cond ((not found)
+                                              (trap! (cdr entry) (not incomplete))
+                                              fresh)
+                                             (else
+                                              (unless at-home (set! memo-stops (+ memo-stops 1)))
+                                              (set! return-proven (dict-set return-proven (memo-key (cdr entry)) #t))
+                                              (set! return-proven-exact
+                                                    (dict-set return-proven-exact (timed-key (cdr entry)) #t))
+                                              (cons (cons (memo-key (cdr entry)) (timed-key (cdr entry))) fresh)))))
+                                 (when incomplete
+                                   (set! search-incomplete #t)
+                                   (set! complete #f)
+                                   (log (list 'RED 'regional-return-bound 'carry carry 'bound bound)))
+                                 (when (= 0 (modulo n-checked 50))
+                                   (log (list (quote region-drain) (quote checked) n-checked
+                                              (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
+                                              (quote memo-stops) memo-stops (quote traps) (length traps)
+                                              (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))
+                                              (quote parallel) (if p (pool-size p) (quote local))))
+                                   (when CELL-RETURNS
+                                     (log (list (quote region-cells) (quote groups) (length (dict-keys cell-done))
+                                                (quote skipped) cell-skips))))
+                                 (merge (cdr es) (+ i 1) fresh)))))))))))
               (set! search-incomplete #f)
+              (set! return-proven #{}) (set! return-proven-exact #{}) (set! memo-stops 0) (set! n-checked 0)
+              (drain-reset!)
               (for-each
                 (lambda (entry)
                   (let ((rest (align entry 0)))
@@ -189,7 +873,11 @@
                         (when (= (modulo target-count 20) 0)
                           (log (list 'coverage 'carry carry 'targets target-count
                                      'landings landing-count 'unreached (length unreached))))
-                        (if (or (>= landing-count bound) (not complete))
+                        ;; HARKFELL_ROUTE_REPORT: the process's resident memory here
+                        (when ROUTE-REPORT
+                          (log (list (quote region-memory) (quote targets) target-count
+                                     (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0))))))
+                        (if (or (>= landing-count landing-bound) (not complete))
                             (set! complete #f)
                             (begin
                               (unless (or (dict-contains? covered target)
@@ -203,25 +891,88 @@
                     ;; Directed return from each genuine retained landing.
                     ;; New landings from return trials also create obligations.
                     (let ((checked #{}))
+                      ;; CELL-RETURNS: keep the first pending landing of each
+                      ;; (cell, carry, down) group not yet searched; mark the
+                      ;; rest checked (counted in cell-skips, never proven). A
+                      ;; landing with no rest cell is always kept.
+                      (define (cell-select! pending)
+                        ;; (only while the drain will run this pass: after an early
+                        ;; stop nothing is selected, so no group counts as done unsearched)
+                        (if (or (not CELL-RETURNS) (not complete) (>= landing-count landing-bound))
+                            pending
+                            (let loop ((ps pending) (acc (quote ())))
+                              (if (null? ps) (reverse acc)
+                                  (let* ((n (cdr (car ps))) (c (cell-of n))
+                                         (g (list c (timed-node-data n) (body-down (timed-node-body n)))))
+                                    (cond ((not c) (loop (cdr ps) (cons (car ps) acc)))
+                                          ((dict-contains? cell-done g)
+                                           (set! checked (dict-set checked (car (car ps)) #t))
+                                           (set! cell-skips (+ cell-skips 1))
+                                           (loop (cdr ps) acc))
+                                          (else
+                                           (set! cell-done (dict-set cell-done g #t))
+                                           (loop (cdr ps) (cons (car ps) acc)))))))))
                       (let drain ()
-                        (let ((pending (filter (lambda (entry)
-                                                 (not (dict-contains? checked (car entry))))
-                                               (dict-entries landings))))
+                        (let ((pending (cell-select!
+                                        (home-first
+                                         (filter (lambda (entry)
+                                                   (not (dict-contains? checked (car entry))))
+                                                 (dict-entries landings))))))
                           (cond ((not complete) #f)
-                                ((>= landing-count bound) (set! complete #f))
+                                ((>= landing-count landing-bound) (set! complete #f))
                                 ((null? pending) #t)
                                 (else
+                                 (if (or (equal? PARALLEL-DRAIN-MODE "local") (and PARALLEL-DRAIN (pair? pool) (car pool)))
+                                     (parallel-pass! pending
+                                                     (lambda (key)
+                                                       (set! checked (dict-set checked key #t))
+                                                       (set! n-checked (+ n-checked 1))))
                                  (for-each
                                    (lambda (entry)
                                      (when complete
                                        (set! checked (dict-set checked (car entry) #t))
-                                       (unless (seek (cdr entry) home record!)
-                                         (set! traps (cons (timed-key (cdr entry)) traps)))
+                                       (set! n-checked (+ n-checked 1))
+                                       (let ((back (seek (cdr entry) home record!)))
+                                         (cond
+                                           ((not back)
+                                            (trap! (cdr entry) (not search-incomplete)))
+                                           (else
+                                            (unless (equal? (cell-of back) home)
+                                              (set! memo-stops (+ memo-stops 1))
+                                              (when ROUTE-CHECK
+                                                (set! plain-bound #f)
+                                                (unless (plain-return (cdr entry) home)
+                                                  (error (if plain-bound
+                                                             "route check: a proven-return stop could not be re-verified (bound)"
+                                                             "route check: a proven-return stop is not a real return")
+                                                         (timed-key (cdr entry))))))
+                                            (set! return-proven (dict-set return-proven (memo-key (cdr entry)) #t))
+                                            (set! return-proven-exact
+                                                  (dict-set return-proven-exact (timed-key (cdr entry)) #t)))))
+                                       ;; HARKFELL_ROUTE_REPORT: what the drain holds, after every
+                                       ;; return search (memory diagnosis; observation only)
+                                       (when ROUTE-REPORT
+                                         (let ((finder (find (lambda (e) (eq? (car e) record!)) route-cache)))
+                                           (log (list (quote region-sizes) (quote checked) n-checked
+                                                      (quote landings) (length (dict-keys landings))
+                                                      (quote rotations) (length (dict-keys rotations))
+                                                      (quote covered) (length (dict-keys covered))
+                                                      (quote proven) (length (dict-keys return-proven))
+                                                      (quote finder) (and finder ((cdr finder) (quote sizes) #f))
+                                                      (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))))))
+                                       (when (= 0 (modulo n-checked 50))
+                                         (log (list (quote region-drain) (quote checked) n-checked
+                                                    (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
+                                                    (quote memo-stops) memo-stops (quote traps) (length traps)
+                                                    (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))))
+                                         (when CELL-RETURNS
+                                           (log (list (quote region-cells) (quote groups) (length (dict-keys cell-done))
+                                                      (quote skipped) cell-skips))))
                                        (when search-incomplete
                                          (set! complete #f)
                                          (log (list 'RED 'regional-return-bound 'carry carry
                                                     'bound bound)))))
-                                   pending)
+                                   pending))
                                  (drain)))))))
                   ;; Artificial negative profiles must fail at the legal
                   ;; entrance, rather than being spawned past its seal.
@@ -235,6 +986,46 @@
                       (log (list 'RED 'entry-bypass 'carry carry 'down down
                                  'reachable-rooms reached)))))
               (when search-incomplete (set! complete #f))
+              (prof-report (list 'profile-complete carry down))
+              (when CELL-RETURNS
+                (log (list 'region-cells 'carry carry 'down down 'groups (length (dict-keys cell-done))
+                           'skipped cell-skips 'searched n-checked 'complete complete)))
+              ;; HARKFELL_ROUTE_DIGEST=1: the full reached-state sets, as
+              ;; order-free hashes of their exact encodings, for comparing builds.
+              (when ROUTE-DIGEST
+                (log (list 'region-sets 'carry carry 'down down
+                           'landings (length (dict-keys landings))
+                           (route-set-digest (dict-keys landings))
+                           'covered (length (dict-keys covered))
+                           (route-set-digest (dict-keys covered))
+                           'traps (length traps) (route-set-digest traps)
+                           'proven (length (dict-keys return-proven)) (route-set-digest (dict-keys return-proven)))))
+              ;; HARKFELL_ROUTE_REPORT: what the retained landings are, for
+              ;; the landing bound: distinct cells, (cell, carry) pairs, poses
+              ;; with tau removed, and the cells holding the most. Observation.
+              (when ROUTE-REPORT
+                (let* ((rests (map cdr (dict-entries landings)))
+                       (tally (lambda (xs)
+                                (let count ((xs xs) (d #{}))
+                                  (if (null? xs) d
+                                      (count (cdr xs) (dict-set d (car xs) (+ 1 (dict-ref d (car xs) 0))))))))
+                       (by-cell (list-sort (lambda (a b) (> (cdr a) (cdr b)))
+                                           (dict-entries (tally (map cell-of rests)))))
+                       (cell-carry (dict-keys (tally (map (lambda (n) (cons (cell-of n) (timed-node-data n)))
+                                                          rests))))
+                       (poses (dict-keys (tally (map (lambda (n)
+                                                       (timed-key (timed-node n body: (body (timed-node-body n) tau: 0))))
+                                                     rests)))))
+                  (log (list 'region-landings 'carry carry 'down down
+                             'landings (length rests)
+                             'distinct-cells (length by-cell)
+                             'distinct-cell-carry (length cell-carry)
+                             'distinct-poses-without-tau (length poses)
+                             'at-phase-0 (length (filter (lambda (n) (= 0 (body-tau (timed-node-body n)))) rests))
+                             'sheltered-rotations (length (dict-keys rotations))
+                             'top-cells (let first ((xs by-cell) (n 12) (acc '()))
+                                          (if (or (null? xs) (= n 0)) (reverse acc)
+                                              (first (cdr xs) (- n 1) (cons (car xs) acc))))))))
               (set! failures (+ failures entry-fails (length unreached) (length traps)
                                 (if complete 0 1)))
               (log (list 'region 'carry carry 'down down 'entry-phases AIR-PERIOD

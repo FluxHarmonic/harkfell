@@ -49,6 +49,7 @@
           (harkfell render)
           (harkfell haze)
           (harkfell atlas)
+          (harkfell cues)
           (harkfell pipes look)
           (harkfell cloudstair look)
           (harkfell underhum look)
@@ -114,7 +115,30 @@
                       '()))
       (set! *strips-stale* (map car *strip-texs*))
       (set! *layers-key* #f)
+      (set! *ways* #f)
       (drop-overview!))
+
+    ;; D48: each room's openings that lead back toward its region's way in
+    ;; ((harkfell cues) room-ways-out), worked out once per content and kept
+    ;; by (region x y), so a copy of a room (the overview's lit sheet) finds
+    ;; its own.
+    (define *ways* #f)
+    (define (ways-out rm)
+      (if (not *content*)
+          '()
+          (begin
+            (unless *ways*
+              (set! *ways*
+                (apply append
+                  (map (lambda (in)
+                         (let ((ds (region-distances *content* (car in))))
+                           (map (lambda (p)
+                                  (cons (list (room-region (car p)) (room-x (car p)) (room-y (car p)))
+                                        (room-ways-out *content* (car p) ds)))
+                                ds)))
+                       REGION-WAYS-IN))))
+            (let ((e (assoc (list (room-region rm) (room-x rm) (room-y rm)) *ways*)))
+              (if e (cdr e) '())))))
 
     ;; The strips for a region: its own texture, made on first use, its
     ;; colours brought up to date once after the content changes.
@@ -1667,7 +1691,7 @@
               (draw-crusts!)
               (draw-snow! rm t)
               (for-each (lambda (c) (draw-critter c ox oy t slot)) (filter eyes? cs))
-              (draw-pipes-cues! rm t)
+              (draw-pipes-cues! rm t (ways-out rm))
               ;; front decoration, in front of the creature, swaying
               (set-blend-mode (quote normal))
               (sway-composite! *front-rt* t (wind-at t))
@@ -1677,6 +1701,13 @@
                         (world-pickups w))
               (let ((moths (filter (lambda (c) (memq (critter-kind c) '(moth firefly))) cs)))
                 (for-each (lambda (c) (draw-critter c ox oy t slot)) moths)
+                ;; D48: the Pipes' moths show the colour they answer to
+                ;; while you do not carry it yet
+                (when (eq? (room-region rm) 'pipes)
+                  (for-each (lambda (c)
+                              (when (and (critter-drawn c) (not (memv (critter-drawn c) (world-carry w))))
+                                (draw-moth-hint c ox oy t slot)))
+                            (filter (kind? 'moth) moths)))
                 ;; light last: B, added
                 (with-additive-blend
                   (for-each (lambda (st)
@@ -1712,7 +1743,7 @@
                               (room-things-of rm 'down)))
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
-                  (draw-pipes-lights! rm t)
+                  (draw-pipes-lights! rm t (ways-out rm))
                   (when (wrongwater? rm)
                     (draw-wrongwater-light! rm t)
                     (draw-seventh-pool-light! rm (seventh-level rm (world-carry w) *moment-name* *moment-heard*)))
@@ -1888,12 +1919,12 @@
         (draw-cloudstair-seeds! rm 0 0 -1000.0 -1000.0))
       (draw-pipes-panels! rm)
       (draw-underhum-scenery! rm 0 #f)
-      (draw-pipes-cues! rm 0)
+      (draw-pipes-cues! rm 0 (ways-out rm))
       (draw-upward-drips! rm 0)
       (for-each (lambda (cell) (draw-drip-build! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
                 (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))
       (with-additive-blend
-        (draw-pipes-lights! rm 0)
+        (draw-pipes-lights! rm 0 (ways-out rm))
         (when (wrongwater? rm) (draw-wrongwater-light! rm 0))
         (for-each (lambda (cell) (draw-drip-build-light! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
                   (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm))))

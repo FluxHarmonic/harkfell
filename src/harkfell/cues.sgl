@@ -4,36 +4,32 @@
           (engine worldmap)
           (harkfell content)
           (harkfell legend))
-  (export room-exits room-static-cells room-upward-drops room-standing-stones)
+  (export room-exits room-exit-spans room-open? room-static-cells room-upward-drops room-standing-stones
+          REGION-WAYS-IN region-distances room-ways-out)
   (begin
-    ;; (SIDE C R) at the middle of each contiguous real edge opening.
-    ;; Reserved slots have sealed edges, so they never advertise an exit.
-    ;; Neither does a one-way way in: a run holding a (quiet-exit at: (C R))
-    ;; cell (Against the Drip's lip from Wrongwater, out of reach from the
-    ;; room, which the map wants read as a dark slot).
-    (define (room-exits rm)
+    ;; The authored spans include the one-way lip from Wrongwater. Keep
+    ;; quiet-exit spans dark while preserving the Pipes' way-out lights.
+    (define (room-exit-spans rm)
       (let ((quiet (map thing-at (room-things-of rm 'quiet-exit))))
-        (filter (lambda (e)
-                  (not (find (lambda (q)
-                               (if (memq (car e) '(west east))
-                                   (and (= (car q) (cadr e)) (run-holds? rm (car e) (cdr q) (caddr e)))
-                                   (and (= (cdr q) (caddr e)) (run-holds? rm (car e) (car q) (cadr e)))))
-                             quiet)))
-                (all-exits rm))))
+        (filter
+          (lambda (span)
+            (let* ((side (car span))
+                   (vertical (memq side '(west east)))
+                   (edge (case side
+                           ((west north) 0)
+                           ((east) (- ROOM-COLS 1))
+                           (else (- ROOM-ROWS 1)))))
+              (not (find
+                     (lambda (q)
+                       (let ((across (if vertical (car q) (cdr q)))
+                             (along (if vertical (cdr q) (car q))))
+                         (and (= across edge)
+                              (<= (cadr span) along (caddr span)))))
+                     quiet))))
+          (all-exit-spans rm))))
 
-    ;; Whether position I and the run's middle M lie in one open run along
-    ;; SIDE's edge (no closed cell between them).
-    (define (run-holds? rm side i m)
-      (let ((open? (lambda (k)
-                     (let ((p (if (memq side '(west east))
-                                  (cons (if (eq? side 'west) 0 (- ROOM-COLS 1)) k)
-                                  (cons k (if (eq? side 'north) 0 (- ROOM-ROWS 1))))))
-                       (kind-open? (char-kind (room-char rm (car p) (cdr p))))))))
-        (let loop ((k (min i m)))
-          (or (> k (max i m))
-              (and (open? k) (loop (+ k 1)))))))
-
-    (define (all-exits rm)
+    ;; (SIDE A B) for each contiguous real edge opening.
+    (define (all-exit-spans rm)
       (apply append
         (map
           (lambda (side)
@@ -42,19 +38,96 @@
                    (cell (lambda (i)
                            (if vertical
                                (cons (if (eq? side 'west) 0 (- ROOM-COLS 1)) i)
-                               (cons i (if (eq? side 'north) 0 (- ROOM-ROWS 1))))))
-                   (mark (lambda (a b)
-                           (let ((p (cell (quotient (+ a b) 2))))
-                             (list side (car p) (cdr p))))))
+                               (cons i (if (eq? side 'north) 0 (- ROOM-ROWS 1)))))))
               (let loop ((i 0) (start #f) (out '()))
                 (if (= i n)
-                    (reverse (if start (cons (mark start (- i 1)) out) out))
+                    (reverse (if start (cons (list side start (- i 1)) out) out))
                     (let* ((p (cell i))
                            (open (kind-open? (char-kind (room-char rm (car p) (cdr p))))))
                       (cond (open (loop (+ i 1) (or start i) out))
-                            (start (loop (+ i 1) #f (cons (mark start (- i 1)) out)))
+                            (start (loop (+ i 1) #f (cons (list side start (- i 1)) out)))
                             (else (loop (+ i 1) #f out))))))))
           '(west east north south))))
+
+    ;; Whether cell (c, r) of RM can be passed through (air, water, a false
+    ;; wall): what an opening is made of.
+    (define (room-open? rm c r)
+      (kind-open? (char-kind (room-char rm c r))))
+
+    ;; (SIDE C R) at the middle of each contiguous real edge opening.
+    (define (span-mid span)
+      (let* ((side (car span))
+             (i (quotient (+ (cadr span) (caddr span)) 2)))
+        (case side
+          ((west) (list side 0 i))
+          ((east) (list side (- ROOM-COLS 1) i))
+          ((north) (list side i 0))
+          (else (list side i (- ROOM-ROWS 1))))))
+
+    (define (room-exits rm)
+      (map span-mid (room-exit-spans rm)))
+
+    ;; D48: the way a region was entered, (REGION X Y SIDE): the room and
+    ;; the edge that lead back out the way the player came in. A player who
+    ;; goes down into the Pipes without H3 must be able to find it again,
+    ;; so the openings that lead toward it carry a light (the Pipes look).
+    ;; The Pipes are entered from the Old Cut, above Wind Throat (A). D's
+    ;; west border is not a way in: it opens only with H4.
+    (define REGION-WAYS-IN '((pipes 2 4 north)))
+
+    (define (side-step side)
+      (case side
+        ((west) (cons -1 0)) ((east) (cons 1 0)) ((north) (cons 0 -1)) (else (cons 0 1))))
+
+    ;; The room across SIDE of RM, or #f.
+    (define (exit-neighbour ct rm side)
+      (let ((d (side-step side)))
+        (content-room ct (+ (room-x rm) (car d)) (+ (room-y rm) (cdr d)))))
+
+    ;; ((ROOM . D) ...): every room of REGION reachable from its way-in room
+    ;; through open room edges, with D its number of rooms from that room
+    ;; (0 for the way-in room). Rooms of other regions do not count. '()
+    ;; for a region with no way in. This is the room graph only; that each
+    ;; edge can be crossed both ways is the reach check's to prove.
+    (define (region-distances ct region)
+      (let ((in (assq region REGION-WAYS-IN)))
+        (if (not in)
+            '()
+            (let ((start (content-room ct (cadr in) (caddr in))))
+              (if (not (and start (eq? (room-region start) region)))
+                  '()
+                  (let loop ((frontier (list start)) (d 0) (seen (list (cons start 0))))
+                    (if (null? frontier)
+                        (reverse seen)
+                        (let next ((fs frontier) (new '()) (seen seen))
+                          (if (null? fs)
+                              (loop (reverse new) (+ d 1) seen)
+                              (let each ((ss (room-exit-spans (car fs))) (new new) (seen seen))
+                                (if (null? ss)
+                                    (next (cdr fs) new seen)
+                                    (let ((n (exit-neighbour ct (car fs) (car (car ss)))))
+                                      (if (and n (eq? (room-region n) region) (not (assq n seen)))
+                                          (each (cdr ss) (cons n new) (cons (cons n (+ d 1)) seen))
+                                          (each (cdr ss) new seen))))))))))))))
+
+    ;; RM's exit spans (SIDE A B) that lead toward its region's way in: into
+    ;; a room of the region nearer to it, or, in the way-in room, out the
+    ;; way in. DISTANCES: region-distances for RM's region. '() for a room
+    ;; outside every way-in region.
+    (define (room-ways-out ct rm distances)
+      (let ((d (assq rm distances))
+            (in (assq (room-region rm) REGION-WAYS-IN)))
+        (if (not (and d in))
+            '()
+            (filter
+              (lambda (span)
+                (let ((side (car span)))
+                  (or (and (= (room-x rm) (cadr in)) (= (room-y rm) (caddr in))
+                           (eq? side (cadddr in)))
+                      (let* ((n (exit-neighbour ct rm side))
+                             (nd (and n (assq n distances))))
+                        (and nd (< (cdr nd) (cdr d)))))))
+              (room-exit-spans rm)))))
 
     (define (room-static-cells rm)
       (let ((out '()))

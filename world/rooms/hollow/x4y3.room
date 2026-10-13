@@ -37,8 +37,8 @@
            (tune: hollow-fifth when: first-visit carrying: 3)
            (tune: hollow-octave when: first-visit carrying: 4)
            (tune: hollow-third when: first-visit carrying: 5))
-  unreached: ((20 6))
   decor: auto)
 ;; Existing amber, green and blue identities stay fixed. Blue reveals only
 ;; the interior rough stair to rose; the eastern and southern seams stay shut.
-;; The small pocket beyond H5 is reserved and explicitly unreachable in 0.3.
+;; H3, H4 and H5 open the enclosed stair and its small internal pocket.
+;; The pocket returns through the same stair; the Underhum seams stay shut.

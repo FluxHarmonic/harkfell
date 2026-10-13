@@ -25,6 +25,45 @@
                       (lambda (node) (timed-shelter? TM F advance node))
                       (timed-waiter TM F advance) bound record! incomplete!))
 
+(test-group "timed routes: additional input families"
+  (test "an authored input family can supply a missing physical suggestion"
+    (let* ((graph (reach-graph tm: TM cells: (standable-cells TM)
+                              edges: (make-vector 32 '())))
+           (route (timed-route-finder step (lambda (carry) TM) F
+                    (lambda (node) graph)
+                    (lambda (node) (timed-shelter? TM F step node))
+                    (timed-waiter TM F step) 20
+                    (lambda (node) #t) (lambda () #t) #f
+                    (lambda (node) (list (lambda (departure) SCRIPT)))))
+           (arrival (route START TARGET)))
+      (assert-true arrival)
+      (assert-equal (timed-key END) (timed-key arrival))))
+  (test "an added family cannot turn failed physics into an arrival"
+    (let* ((closed (lambda (node in) #f))
+           (graph (reach-graph tm: TM cells: (standable-cells TM)
+                              edges: (make-vector 32 '())))
+           (route (timed-route-finder closed (lambda (carry) TM) F
+                    (lambda (node) graph) (lambda (node) #f)
+                    (lambda (node phase) #f) 20
+                    (lambda (node) #t) (lambda () #t) #f
+                    (lambda (node) (list (lambda (departure) SCRIPT))))))
+      (assert-false (route START TARGET))))
+  (test "additional inputs preserve a mid-flight acquisition's full state"
+    (let* ((take (lambda (node in)
+                   (timed-node (step node in) data: '(2 4 5))))
+           (graph (reach-graph tm: TM cells: (standable-cells TM)
+                              edges: (make-vector 32 '())))
+           (route (timed-route-finder take (lambda (carry) TM) F
+                    (lambda (node) graph)
+                    (lambda (node) (timed-shelter? TM F take node))
+                    (timed-waiter TM F take) 20
+                    (lambda (node) #t) (lambda () #t) #f
+                    (lambda (node) (list (lambda (departure) SCRIPT)))))
+           (arrival (route START TARGET)))
+      (assert-true arrival)
+      (assert-equal (timed-key (timed-node END data: '(2 4 5)))
+                    (timed-key arrival)))))
+
 (test-group "timed routes: suggestions require actual replay"
   (test "arrival is the actual full body and phase, rather than a cell seed"
     (let* ((route (finder (guide TARGET) step 20 (lambda (node) #t) (lambda () #t)))
@@ -454,3 +493,105 @@
                                (equal? (timed-key node) (timed-key arrival)))
                              trace))))
               loop-trace)))))))
+
+(test-group "timed routes: a rank orders the search, never its moves"
+  ;; The moves guide has one edge, (1,2) to (7,2), whose script really lands
+  ;; at TARGET, so the search exhausts. The rank is gated by carry, like a
+  ;; door: without stone 5 it says "no path" (#f); with it, one hop. Every
+  ;; step acquires stone 5, so the start ranks as shut and every later
+  ;; state as open. With or without the rank, the exhausted search must
+  ;; record exactly the same states: the rank may only reorder.
+  (test "an exhausted search records the same states with and without a carry-gated rank"
+    (let* ((take (lambda (node in) (timed-node (step node in) data: '(2 4 5))))
+           (moves (guide '(7 . 2)))
+           (ranked 0)
+           (rank (lambda (node target)
+                   (set! ranked (+ ranked 1))
+                   (and (memv 5 (timed-node-data node)) 1)))
+           (explore
+             (lambda (rank)
+               (let* ((recorded '())
+                      (route (apply timed-route-finder take (lambda (carry) TM) F
+                               (lambda (node) moves)
+                               (lambda (node) (timed-shelter? TM F take node))
+                               (timed-waiter TM F take) 50
+                               (lambda (node) (set! recorded (cons (timed-key node) recorded)))
+                               (lambda () #t)
+                               (if rank
+                                   (list #f (lambda (node) '()) #f #f rank)
+                                   (list #f (lambda (node) '()))))))
+                 (cons (route START '(7 . 2)) recorded))))
+           (plain (explore #f))
+           (ordered (explore rank))
+           (same-members? (lambda (xs ys) (every (lambda (x) (member x ys)) xs))))
+      (assert-false (car plain))
+      (assert-false (car ordered))
+      (assert-true (> ranked 0))
+      (assert-true (> (length (cdr plain)) 2))
+      (assert-equal (length (cdr plain)) (length (cdr ordered)))
+      (assert-true (same-members? (cdr plain) (cdr ordered)))
+      (assert-true (same-members? (cdr ordered) (cdr plain))))))
+
+(test-group "timed routes: guides chosen by state make the order irrelevant on exhaustion"
+  ;; As the world check's guides are now seeded from the content alone, the
+  ;; moves guide here is a function of the node's carry: without stone 5 the
+  ;; start's guide; with it, a guide whose edge from TARGET walks back left.
+  ;; Every step acquires stone 5. Two orders (no rank, and a rank that puts
+  ;; carry-5 states first) must record exactly the same states, and more
+  ;; than the start's guide alone records (so the carry's guide was used).
+  (test "an exhausted search records the same states in either order"
+    (let* ((take (lambda (node in) (timed-node (step node in) data: '(2 4 5))))
+           (moves (guide '(7 . 2)))
+           (back (append (make-list 30 (intent h: -1)) (make-list 30 NO-INTENT)))
+           (open-moves
+             (let ((edges (make-vector 32 '())))
+               (vector-set! edges (cell-index TM (car TARGET) (cdr TARGET))
+                            (list (cons (cell-index TM 7 2) (witness from: TARGET script: back))))
+               (reach-graph tm: TM cells: (standable-cells TM) starts: (list TARGET) edges: edges)))
+           (by-carry (lambda (node) (if (memv 5 (timed-node-data node)) open-moves moves)))
+           (explore
+             (lambda (guides rank)
+               (let* ((recorded '())
+                      (route (apply timed-route-finder take (lambda (carry) TM) F guides
+                               (lambda (node) (timed-shelter? TM F take node))
+                               (timed-waiter TM F take) 50
+                               (lambda (node) (set! recorded (cons (timed-key node) recorded)))
+                               (lambda () #t)
+                               (if rank
+                                   (list #f (lambda (node) '()) #f #f rank)
+                                   (list #f (lambda (node) '()))))))
+                 (cons (route START '(7 . 2)) recorded))))
+           (first-order (explore by-carry #f))
+           (consulted 0)
+           (other-order (explore by-carry (lambda (node target)
+                                            (set! consulted (+ consulted 1))
+                                            (if (memv 5 (timed-node-data node)) 0 9))))
+           (start-guide-only (explore (lambda (node) moves) #f))
+           (same-members? (lambda (xs ys) (every (lambda (x) (member x ys)) xs))))
+      (assert-false (car first-order))
+      (assert-false (car other-order))
+      (assert-true (> consulted 0))
+      (assert-equal (length (cdr first-order)) (length (cdr other-order)))
+      (assert-true (same-members? (cdr first-order) (cdr other-order)))
+      (assert-true (same-members? (cdr other-order) (cdr first-order)))
+      (assert-true (> (length (cdr first-order)) (length (cdr start-guide-only)))))))
+
+(test-group "timed routes: a caller's proven states end a search"
+  ;; (7,2) is unreachable here (the suggestion lands at TARGET), so the plain
+  ;; search fails. Told that the actual arrival at TARGET is proven to reach
+  ;; (7,2), the search ends there and returns that arrival.
+  (test "also-goal? returns the proven arrival; without it the search fails"
+    (let* ((proven? (lambda (node target)
+                      (and (equal? target '(7 . 2))
+                           (equal? (rest-cell TM F (timed-node-body node)) TARGET))))
+           (finder (lambda (also)
+                     (apply timed-route-finder step (lambda (carry) TM) F
+                            (lambda (node) (guide '(7 . 2)))
+                            (lambda (node) (timed-shelter? TM F step node))
+                            (timed-waiter TM F step) 20 (lambda (node) #t) (lambda () #t)
+                            (list #f (lambda (node) '()) #f #f #f also))))
+           (plain ((finder #f) START '(7 . 2)))
+           (told ((finder proven?) START '(7 . 2))))
+      (assert-false plain)
+      (assert-true told)
+      (assert-equal (timed-key END) (timed-key told)))))

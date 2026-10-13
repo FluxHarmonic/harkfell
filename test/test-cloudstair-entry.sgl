@@ -32,6 +32,21 @@
            (end (car (reverse (timed-run (probe-step tm) start SCRIPT)))))
       (assert-false (probe-entry-arrives? end))
       (assert-equal 'ground (body-mode (timed-node-body end)))))
+  (test "H2 and H3 plus down stop safely at blue without H4"
+    (let* ((tm (probe-entry-map CT '(2 3)))
+           (start (timed-node (probe-entry-start tm #t) data: '(2 3)))
+           (end (car (reverse (timed-run (probe-step tm) start SCRIPT)))))
+      (assert-false (probe-entry-arrives? end))
+      (assert-equal 'ground (body-mode (timed-node-body end)))))
+  (test "opening only blue exposes the H2 and H3 plus down entrance bypass"
+    ;; Updraft Edge's local (6,3) is (31,14) in the entrance isolate.
+    ;; Keep the same carried harmonics and script; change only the door.
+    (let* ((closed (probe-entry-map CT '(2 3)))
+           (opened (tilemap-set closed 31 14 'air))
+           (start (timed-node (probe-entry-start opened #t) data: '(2 3)))
+           (end (car (reverse (timed-run (probe-step opened) start SCRIPT)))))
+      (assert-true (probe-entry-arrives? end))
+      (assert-equal '(2 3) (timed-node-data end))))
   (test "H4 without down cannot ride the same launch"
     (let ((end (car (reverse (timed-run STEP (probe-entry-start TM #f) SCRIPT)))))
       (assert-false (probe-entry-arrives? end))

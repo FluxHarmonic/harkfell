@@ -119,7 +119,8 @@ New room things:
 The bowl keeps its amber (16,8), green (21,8) and blue (23,8) identities.
 Blue reveals the enclosed rough stair to rose (21,6); the stair's roof
 prevents reaching it from above while green is shut. The pocket beyond
-rose stays sealed in 0.3. The new `hollow-octave` moment follows the first
+rose opens with H3/H4/H5 in 0.4 and returns through the same stair; the
+Underhum seams stay shut. The `hollow-octave` moment follows the first
 two homecomings. The aurora triggers once per save at home with H2/H3/H4,
 in either H3/H4 order. Older version-1 saves without the new `aurora` field
 restore with that flag false.

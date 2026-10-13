@@ -13,6 +13,8 @@
 // this version and a date, with exactly its five fields. Then:
 //   a version with a post   points at that post and carries its summary,
 //                           which is not empty
+//   0.4.1                   retains the 0.4.0 post and its summary (David's
+//                           2026-10-14 ship decision)
 //   a version with no post  (a quiet patch, as 0.3.1: David, 2026-10-11, "We
 //                           don't need a news page for this release") carries
 //                           an empty summary and points at the news index,
@@ -22,6 +24,13 @@
 // and the summary is drawable.
 
 export const SITE = "https://harkfell.com";
+
+// David's 0.4.1 ship decision keeps the 0.4 announcement. Other quiet
+// patches keep their empty summary and news-index link.
+export function releaseNewsPost(posts, version) {
+  const announcedVersion = version === "0.4.1" ? "0.4.0" : version;
+  return posts.find((post) => post.version === announcedVersion);
+}
 
 // DRAWABLE is the characters the start screen can draw at run time. Printable
 // ASCII until the runtime glyph atlas lands in sigil-graphics (the leader,
@@ -37,7 +46,8 @@ export function versionJsonProblems(vj, { stamp, pkg, posts }) {
   if (vj.build !== stamp) detail.push(`build "${vj.build}" is not the staged game's stamp ${stamp}`);
   if (vj.version !== pkg) detail.push(`version "${vj.version}" is not package.sgl's ${pkg}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(vj.date || "")) detail.push(`date "${vj.date}" is not YYYY-MM-DD`);
-  const post = posts.find((p) => p.version === vj.version);
+  const post = releaseNewsPost(posts, vj.version);
+  if (vj.version === "0.4.1" && !post) detail.push("0.4.1 requires the retained 0.4.0 announcement");
   if (!post) {
     // a release with no post: nothing new to say, and the index to point at
     if (vj.summary !== "") detail.push(`no news post for version ${vj.version} (posts: ${posts.map((p) => p.version).join(", ") || "none"}), yet the summary is "${vj.summary}"; a release with no post carries an empty summary`);
@@ -54,7 +64,7 @@ export function versionJsonProblems(vj, { stamp, pkg, posts }) {
 
 // The pass line's account of the file.
 export function versionJsonSummary(vj, posts) {
-  return posts.some((p) => p.version === vj.version)
+  return releaseNewsPost(posts, vj.version)
     ? `version.json ${vj.version} ${vj.date} build ${vj.build} -> ${vj.news}; summary ${vj.summary.length} chars, printable ASCII`
     : `version.json ${vj.version} ${vj.date} build ${vj.build} -> ${vj.news}; no post for this version: an empty summary, nothing new announced`;
 }

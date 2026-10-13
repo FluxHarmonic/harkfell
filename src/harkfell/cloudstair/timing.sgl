@@ -5,7 +5,7 @@
           (engine reach) (engine reach timed)
           (harkfell content) (harkfell check)
           (harkfell feel) (harkfell cloudstair reach)
-          (harkfell cloudstair probes))
+          (harkfell cloudstair probes) (harkfell cloudstair inputs))
 
   (export cloudstair-authored-timing)
 
@@ -41,10 +41,7 @@
       (define GAP-RUN 45)
       (define (gap-script h)
         (lambda (node)
-          (append (make-list GAP-RUN (intent h: h))
-                  (list (intent h: h jump: #t press: #t))
-                  (make-list 46 (intent h: h jump: #t))
-                  (make-list (- 73 GAP-RUN) NO-INTENT))))
+          (cloudstair-gap-inputs h node)))
 
       ;; name, lower/start room, start cell, family, arrival, timing windows,
       ;; kind, gap's left column, direction. All coordinates are authored cells.
@@ -54,9 +51,9 @@
       ;; AIR-GUST - 120 (the 600-tick cycle's 0-239 kept the same rule).
       (define LEGS
         (list
-          (list 'F-L 8 0 10 7 probe-lift-script (rests-in 8 -1 14 24)
+          (list 'F-L 8 0 10 7 cloudstair-lift-inputs (rests-in 8 -1 14 24)
                 (list (list AIR-GUST (+ AIR-GUST 89))) 'lift 11 1)
-          (list 'M-S 9 -1 10 7 probe-lift-script (rests-in 9 -2 14 24)
+          (list 'M-S 9 -1 10 7 cloudstair-lift-inputs (rests-in 9 -2 14 24)
                 (list (list AIR-GUST (+ AIR-GUST 89))) 'lift 11 1)
           (list 'I-east 11 0 6 7 (gap-script 1) (rests-in 11 0 13 21)
                 (list (list AIR-GUST (+ AIR-GUST 89))) 'gap 10 1)

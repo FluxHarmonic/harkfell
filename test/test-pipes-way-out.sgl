@@ -1,0 +1,162 @@
+;;; D48: a player who goes down into the Pipes without H3 can find the way
+;;; back up. Every Pipes room has a lit way out (a ceiling shaft or a side
+;;; spill) on an opening that leads toward the way in, Wind Throat's north
+;;; edge under the Old Cut. The distances here are worked out by this file
+;;; from the room grids' edge cells (open-edge? below), not by the cues
+;;; module under test; that each edge can be crossed both ways is the reach
+;;; check's to prove (scripts/room-check).
+(import (sigil test)
+        (sigil list)
+        (engine worldmap)
+        (harkfell source)
+        (harkfell content)
+        (harkfell legend)
+        (harkfell cues)
+        (harkfell pipes look))
+
+(define CT (load-content (read-world-source "world")))
+(define PIPES (region-rooms CT 'pipes))
+
+;; The cells along one edge of a room, read from its grid.
+(define (edge-cells side)
+  (case side
+    ((west) (map (lambda (r) (cons 0 r)) (iota ROOM-ROWS)))
+    ((east) (map (lambda (r) (cons (- ROOM-COLS 1) r)) (iota ROOM-ROWS)))
+    ((north) (map (lambda (c) (cons c 0)) (iota ROOM-COLS)))
+    (else (map (lambda (c) (cons c (- ROOM-ROWS 1))) (iota ROOM-COLS)))))
+(define (open-cell? rm c r) (kind-open? (char-kind (room-char rm c r))))
+(define (open-edge? rm side)
+  (and (find (lambda (p) (open-cell? rm (car p) (cdr p))) (edge-cells side)) #t))
+
+(define (key rm) (cons (room-x rm) (room-y rm)))
+(define (across rm side)
+  (case side
+    ((west) (content-room CT (- (room-x rm) 1) (room-y rm)))
+    ((east) (content-room CT (+ (room-x rm) 1) (room-y rm)))
+    ((north) (content-room CT (room-x rm) (- (room-y rm) 1)))
+    (else (content-room CT (room-x rm) (+ (room-y rm) 1)))))
+
+;; ((x . y) . d): rooms from Wind Throat (2,4) by open edges inside the Pipes.
+(define DIST
+  (let loop ((frontier (list (content-room CT 2 4))) (d 0) (seen (list (cons (cons 2 4) 0))))
+    (if (null? frontier)
+        seen
+        (let ((new '()))
+          (for-each
+            (lambda (rm)
+              (for-each
+                (lambda (side)
+                  (let ((n (across rm side)))
+                    (when (and n (eq? (room-region n) 'pipes)
+                               (not (assoc (key n) seen))
+                               (not (assoc (key n) (map (lambda (r) (cons (key r) #t)) new))))
+                      (set! new (cons n new)))))
+                (filter (lambda (s) (open-edge? rm s)) (list (quote west) (quote east) (quote north) (quote south)))))
+            frontier)
+          (loop new (+ d 1)
+                (append seen (map (lambda (n) (cons (key n) (+ d 1))) new)))))))
+
+(define (dist rm) (let ((e (assoc (key rm) DIST))) (and e (cdr e))))
+
+(define (leads-out? rm span)
+  (or (and (= (room-x rm) 2) (= (room-y rm) 4) (eq? (car span) 'north))
+      (let ((n (across rm (car span))))
+        (and n (eq? (room-region n) 'pipes) (< (dist n) (dist rm))))))
+
+(define (label rm) (string-append (number->string (room-x rm)) "," (number->string (room-y rm))))
+
+(test-group "Pipes: the way back up without H3 (D48)"
+  (test "the room graph matches the approved map's distances from Wind Throat"
+    (assert-equal 24 (length PIPES))
+    (assert-equal 24 (length DIST))
+    ;; A 0; B C E 1; the far corner X is eight rooms down
+    (assert-equal 0 (dist (content-room CT 2 4)))
+    (assert-equal 1 (dist (content-room CT 1 4)))
+    (assert-equal 1 (dist (content-room CT 2 5)))
+    (assert-equal 7 (dist (content-room CT 1 8)))
+    (assert-equal 8 (dist (content-room CT 6 8))))
+  (test "the openings cues reports are exactly the grid's open edge runs"
+    (for-each
+      (lambda (rm)
+        (for-each
+          (lambda (side)
+            (let* ((cells (edge-cells side))
+                   (n (length cells))
+                   (open? (lambda (i) (and (< -1 i n)
+                                           (let ((p (list-ref cells i))) (open-cell? rm (car p) (cdr p))))))
+                   (spans (filter (lambda (s) (eq? (car s) side)) (room-exit-spans rm))))
+              ;; each span: open throughout, closed (or the room's end) either side
+              (for-each (lambda (s)
+                          (assert-true (every open? (map (lambda (i) (+ i (cadr s))) (iota (+ 1 (- (caddr s) (cadr s)))))))
+                          (assert-false (open? (- (cadr s) 1)))
+                          (assert-false (open? (+ (caddr s) 1))))
+                        spans)
+              ;; and together they cover every open edge cell
+              (assert-equal (length (filter open? (iota n)))
+                            (apply + (map (lambda (s) (+ 1 (- (caddr s) (cadr s)))) spans)))))
+          '(west east north south)))
+      PIPES))
+  (test "every Pipes room has a lit way out on an opening toward the way in"
+    (let ((ds (region-distances CT 'pipes)))
+      (for-each
+        (lambda (rm)
+          (let ((ways (room-ways-out CT rm ds)))
+            (unless (pair? ways)
+              (assert-equal (list 'no-way-out (label rm)) '()))
+            (for-each
+              (lambda (span)
+                (unless (leads-out? rm span)
+                  (assert-equal (list 'way-out-leads-away (label rm) span) '())))
+              ways)))
+        PIPES)))
+  (test "a lit way out is a real opening, and every opening toward the way in is lit"
+    (let ((ds (region-distances CT 'pipes)))
+      (for-each
+        (lambda (rm)
+          (let ((ways (room-ways-out CT rm ds))
+                (toward (filter (lambda (s) (leads-out? rm s)) (room-exit-spans rm))))
+            (assert-equal (length toward) (length ways))
+            (for-each (lambda (s) (assert-true (member s (room-exit-spans rm)))) ways)))
+        PIPES)))
+  (test "a ceiling shaft falls into its room, at least a cell before it lands"
+    (let ((ds (region-distances CT 'pipes)) (shafts 0))
+      (for-each
+        (lambda (rm)
+          (for-each
+            (lambda (span)
+              (when (eq? (car span) 'north)
+                (set! shafts (+ shafts 1))
+                (for-each (lambda (col)
+                            (unless (>= (caddr col) 16)
+                              (assert-equal (list 'shaft-blocked (label rm) col) '())))
+                          (way-light-columns rm span))))
+            (room-ways-out CT rm ds)))
+        PIPES)
+      ;; A (the Old Cut) and the thirteen rooms whose way up is a shaft
+      (assert-equal 14 shafts)))
+  (test "a side spill never shines inside the rock, and reaches at least its edge cell"
+    (let ((ds (region-distances CT 'pipes)) (spills 0) (clipped 0))
+      (for-each
+        (lambda (rm)
+          (for-each
+            (lambda (span)
+              (when (memq (car span) '(west east))
+                (set! spills (+ spills 1))
+                (for-each
+                  (lambda (row)
+                    (let ((cells (quotient (cdr row) 16)))
+                      (assert-true (>= cells 1))
+                      (when (< cells 4) (set! clipped (+ clipped 1)))
+                      (for-each (lambda (n)
+                                  (unless (open-cell? rm (if (eq? (car span) 'west) n (- ROOM-COLS 1 n)) (car row))
+                                    (assert-equal (list 'spill-in-rock (label rm) span row) '())))
+                                (iota cells))))
+                  (spill-rows rm span))))
+            (room-ways-out CT rm ds)))
+        PIPES)
+      ;; Broken Choir's west way out is a two-cell nook: some rows are cut short
+      (assert-true (> spills 0))
+      (assert-true (> clipped 0))))
+  (test "regions with no way in get no way-out lights"
+    (assert-equal '() (region-distances CT 'glasswood))
+    (assert-equal '() (room-ways-out CT (content-room CT 0 5) (region-distances CT 'pipes)))))

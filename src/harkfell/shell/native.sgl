@@ -245,6 +245,9 @@
               ;; the gates exit with their verdict (main's return value is not
               ;; the process status: measured, a FAIL exited 0 before this)
               ((member "--room-check" args) (exit (room-check-main args)))
+              ;; a regional reach pool worker (harkfell cli): stdin to stdout
+              ((member "--reach-worker" args) (exit (reach-worker-main args)))
+              ((member "--reach-bench" args) (exit (reach-bench-main args)))
               ((member "--reach-fixtures" args) (exit (reach-fixtures-main args)))
               ((member "--envelope" args) (print-envelope!) 0)
               (else

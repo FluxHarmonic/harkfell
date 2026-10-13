@@ -68,3 +68,34 @@ test("a controlled page announces the waiting update once, and reloads only when
   p.serviceWorker.dispatchEvent(new Event("controllerchange"));
   assert.equal(p.reloads(), 1);
 });
+
+// 0.3.3: installed as an app and full screen (the manifest's fullscreen, or the
+// iOS home screen) the page shows no fullscreen button; a desktop
+// standalone window and a browser tab keep it. This runs the page's own
+// installedApp, cut from the template, against each display mode.
+const pageSource = fs.readFileSync(process.env.HARKFELL_PAGE_SOURCE || "index.template.html", "utf8");
+
+function installedApp() {
+  const m = pageSource.match(/\n( *)function installedApp\(w, nav\) \{\n[\s\S]*?\n\1\}\n/);
+  assert(m, "index.template.html defines installedApp");
+  return vm.runInNewContext(`(${m[0].trim()})`, {});
+}
+
+function display(mode, standalone) {
+  const window = { matchMedia: (query) => ({ matches: query === `(display-mode: ${mode})` }) };
+  return [window, standalone === undefined ? {} : { standalone }];
+}
+
+test("the installed app has no fullscreen button; a browser tab keeps it", () => {
+  const f = installedApp();
+  assert.equal(f(...display("fullscreen")), true, "manifest display: fullscreen");
+  assert.equal(f(...display("standalone")), false, "desktop standalone window: not full screen");
+  assert.equal(f(...display("browser", true)), true, "iOS home screen");
+  assert.equal(f(...display("browser")), false, "browser tab");
+  assert.equal(f(...display("browser", false)), false, "iOS Safari tab");
+  assert.equal(f({}, {}), false, "no matchMedia");
+  // the button is shown only where fsOK holds, and fsOK needs a tab
+  assert.match(pageSource, /var fsInstalled = installedApp\(window, navigator\);/);
+  assert.match(pageSource, /var fsOK = !fsInstalled && /);
+  assert.match(pageSource, /if \(fsOK\) \{\n *fsEl\.hidden = false;/);
+});

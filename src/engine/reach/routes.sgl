@@ -1,10 +1,12 @@
 ;;; Constructive routes on complete actual states. Spatial graphs suggest
 ;;; scripts only; accepted motion and waits have directed physical proofs.
 (define-library (engine reach routes)
-  (import (sigil list)
-          (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed))
+  (import (sigil list) (only (sigil process) getenv)
+          (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed)
+          (engine reach prof) (engine reach wire) (engine reach pool))
 
-  (export timed-route-finder)
+  (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST ROUTE-CHECK ROUTE-MEMO
+          ROUTE-REPORT route-rest-memo pose-key route-certificate-cache guide-distances)
 
   (begin
     (define (still? node)
@@ -14,6 +16,275 @@
                   (= (body-vx b) 0) (= (body-vy b) 0)))))
 
     (define (last-node trace) (and (pair? trace) (car (reverse trace))))
+
+    ;; Exact reuse inside timed-route-finder; HARKFELL_ROUTE_MEMO=0 turns it
+    ;; off (every wait and replay simulated as before, for differentials).
+    (define ROUTE-MEMO
+      (not (equal? (getenv "HARKFELL_ROUTE_MEMO") "0")))
+    ;; HARKFELL_ROUTE_CHECK=1: every reused wait and replay (memo or worker)
+    ;; is also simulated here and must match field for field, or the run
+    ;; stops with an error. Slow; for differential legs.
+    ;; Entries the finder's replay and wait memos hold before starting again
+    ;; empty: a bound on memory (a smaller heap also makes collections cheaper).
+    (define ROUTE-MEMO-CAP 200000)
+
+    (define ROUTE-CHECK
+      (equal? (getenv "HARKFELL_ROUTE_CHECK") "1"))
+
+    ;; Replay script from node, then settle with no input for up to 180
+    ;; ticks. A real wait inside the script (outside a shelter) ends it.
+    ;; The whole trace, origin first; a hazard ends it with #f.
+    (define (route-replay advance shelter? node script)
+      (let run ((node node) (script script) (rev '()))
+        (cond
+          ((not node) (reverse (cons #f rev)))
+          ((null? script)
+           (let settle ((node node) (n 0) (rev (cons node rev)))
+             (cond
+               ((not node) (reverse rev))
+               ((or (still? node) (= n 180)) (reverse rev))
+               (else
+                (prof-inc! 'tick-settle)
+                (let ((next (advance node NO-INTENT)))
+                  (settle next (+ n 1) (cons next rev)))))))
+          (else
+           (prof-inc! 'tick-script)
+           (let ((next (advance node (car script))))
+             (if (and (timed-wait? node next) (not (shelter? node)))
+                 (reverse (cons node rev))
+                 (run next (cdr script) (cons node rev))))))))
+
+    ;; observe reads only a trace's still nodes, in order, and its last
+    ;; element (a node or #f). Keep exactly those.
+    (define (route-compress trace)
+      (let loop ((t trace) (acc '()))
+        (cond ((null? t) (reverse acc))
+              ((null? (cdr t)) (reverse (cons (car t) acc)))
+              ((still? (car t)) (loop (cdr t) (cons (car t) acc)))
+              (else (loop (cdr t) acc)))))
+
+    ;; HARKFELL_ROUTE_DIGEST=1: each search prints one line with a hash of
+    ;; every node it expanded and every node it handed to record!, in order
+    ;; (their exact wire encoding), so two builds can be compared state for
+    ;; state. Observation only.
+    (define ROUTE-DIGEST
+      (equal? (getenv "HARKFELL_ROUTE_DIGEST") "1"))
+    ;; HARKFELL_ROUTE_REPORT=1: a search that ends without its target prints
+    ;; why it stopped, the reached states nearest the target per cell, the
+    ;; frontier's makeup, and how far along the guide's own path the actual
+    ;; states got (route-report lines). Observation only: it reads what the
+    ;; search already computed and never changes what it pushes or expands.
+    ;; HARKFELL_ROUTE_REPORT=probe adds the probe (route-report-probe): the
+    ;; first unreached guide-path edge replayed at every departure phase.
+    (define ROUTE-REPORT
+      (and (member (getenv "HARKFELL_ROUTE_REPORT") (list "1" "probe")) #t))
+    ;; HARKFELL_ROUTE_ORDER=baseline: the guided queue in its original order
+    ;; (depth + guide hops, ties on distance), for comparing orders. Order
+    ;; only, like the greedy default; the moves are the same.
+    (define ROUTE-ORDER-BASELINE
+      (equal? (getenv "HARKFELL_ROUTE_ORDER") "baseline"))
+    (define ROUTE-PROBE
+      (equal? (getenv "HARKFELL_ROUTE_REPORT") "probe"))
+    (define (digest-step h tag node)
+      (let loop ((cs (string->list (wire-join (cons tag (wire-node node)))))
+                 (h h))
+        (if (null? cs)
+            h
+            (loop (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291)))))
+
+    ;; advance, remembering its NO-INTENT steps from still states: the shelter
+    ;; certificate, the waiter's cycle proof, invariant-rest? and every wait
+    ;; step through the same few rest states, each proof from its own start.
+    ;; A step is a function of the state's timed-key (body-step resets events),
+    ;; so a remembered step is the step. At most cap states are kept; past
+    ;; that the memory starts again empty. HARKFELL_ROUTE_MEMO=0: advance.
+    (define (route-rest-memo advance cap)
+      (if (not ROUTE-MEMO)
+          advance
+          (let ((memo #{}) (n 0))
+            (lambda (node in)
+              (if (and (eq? in NO-INTENT) node (still? node))
+                  (let* ((k (timed-key node)) (prior (dict-ref memo k #f)))
+                    (if prior
+                        (begin
+                          (prof-inc! 'rest-memo-hit)
+                          (when ROUTE-CHECK
+                            (unless (equal? (node-sig (car prior)) (node-sig (advance node in)))
+                              (error "route check: a remembered rest step differs" k)))
+                          (car prior))
+                        (let ((next (advance node in)))
+                          (prof-inc! 'rest-memo-miss)
+                          (when (>= n cap) (set! memo #{}) (set! n 0))
+                          ;; boxed, so a hazard (#f) is remembered too
+                          (set! memo (dict-set memo k (list next)))
+                          (set! n (+ n 1))
+                          next)))
+                  (advance node in))))))
+
+    ;; For a caller with a pool: its shelter? and wait answering first from
+    ;; certificates the workers computed (filed by the finder's learn!).
+    ;; Both are functions of their key (shelter? of the pose, wait of the
+    ;; full node and phase), so an answer filed is the answer computed.
+    ;; HARKFELL_ROUTE_CHECK=1 recomputes every filed answer it gives.
+    ;; Returns #(shelter? wait learn!); without a pool, the originals and #f.
+    (define (route-certificate-cache shelter0? wait0 pool? cap)
+      (if (not pool?)
+          (vector shelter0? wait0 #f)
+          (let ((learned #{}) (n 0))
+            (define (sig v)
+              (if (pair? v)
+                  (cons (node-sig (car v)) (cdr v))
+                  v))
+            (define (checked v recompute)
+              (when ROUTE-CHECK
+                (unless (equal? (sig v) (sig (recompute)))
+                  (error "route check: a learned certificate differs")))
+              v)
+            (vector
+              (lambda (node)
+                (let ((k (cons 'shelter (pose-key node))))
+                  (if (dict-contains? learned k)
+                      (checked (dict-ref learned k) (lambda () (shelter0? node)))
+                      (shelter0? node))))
+              (lambda (node tau)
+                (let ((k (cons tau (timed-key node))))
+                  (if (dict-contains? learned k)
+                      (checked (dict-ref learned k) (lambda () (wait0 node tau)))
+                      (wait0 node tau))))
+              (lambda (kind node . rest)
+                (when (>= n cap) (set! learned #{}) (set! n 0))
+                (let ((k (if (eq? kind 'shelter)
+                             (cons 'shelter (pose-key node))
+                             (cons (car rest) (timed-key node)))))
+                  (unless (dict-contains? learned k)
+                    (set! learned (dict-set learned k (if (eq? kind 'shelter) (car rest) (cadr rest))))
+                    (set! n (+ n 1)))))))))
+
+    ;; One hash of a set of values (nodes, keys, cells): their exact wire
+    ;; encodings, sorted, so the order they were found in does not count.
+    (define (route-set-digest values)
+      (let loop ((ss (list-sort string<? (map (lambda (v) (wire-join (wire-value v))) values)))
+                 (h 0))
+        (if (null? ss)
+            h
+            (loop (cdr ss)
+                  (let chars ((cs (string->list (car ss))) (h (modulo (+ (* h 131) 7) 4294967291)))
+                    (if (null? cs)
+                        h
+                        (chars (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291))))))))
+
+    ;; What a trace or proof is, for comparing two computations of it.
+    ;; Compared by exact encoding (wire): every field, events, and the sign
+    ;; of zero, which equal? and dict keys do not distinguish.
+    (define (node-sig n)
+      (and n (wire-join (wire-node n))))
+    (define (trace-sig trace) (map node-sig trace))
+    (define (proof-sig proof) (and proof (cons (node-sig (car proof)) (cdr proof))))
+
+    ;; Airborne recovery: drop, drift each way tapped or held, then up and
+    ;; down, each settling. The same lists for every expansion.
+    (define RECOVER-SCRIPTS
+      (cons (make-list 360 NO-INTENT)
+        (append
+          (apply append
+            (map (lambda (h)
+                   (map (lambda (held)
+                          (append
+                            (if held (list (intent h: h jump: #t press: #t)) '())
+                            (make-list 120 (intent h: h jump: held))
+                            (make-list 180 NO-INTENT)))
+                        '(#f #t))) '(-1 1)))
+          (map (lambda (v)
+                 (append (make-list 120 (intent v: v))
+                         (make-list 180 NO-INTENT))) '(-1 1)))))
+
+    ;; The pose with tau removed: a key for certificates that hold at every
+    ;; phase of one actual rest, never a simulated arrival.
+    (define (pose-key node)
+      (timed-key (timed-node node body: (body (timed-node-body node) tau: 0))))
+
+    ;; A still shelter whose every field but tau stays put, tick for tick,
+    ;; through two whole cycles of real NO-INTENT steps (invariant-rest?).
+    (define (route-invariant-proof advance shelter? node)
+      (let ((key (pose-key node)))
+        (and (shelter? node)
+             (let loop ((node node) (left (* 2 AIR-PERIOD)))
+               (if (= left 0)
+                   #t
+                   (begin
+                     (prof-inc! 'tick-inv)
+                     (let ((next (advance node NO-INTENT)))
+                       (and (timed-wait? node next)
+                            (equal? key (pose-key next))
+                            (loop next (- left 1))))))))))
+
+    ;; --- Worker side --------------------------------------------------------
+    ;; A worker holds the same advance, shelter? and wait as the search (built
+    ;; from the same content), answers one request line with one line:
+    ;;   "W <node> <phase>"   -> "W <stage-node> <ticks>" | "W F"   (a wait)
+    ;;   "P <node> <script>"  -> "P <n> <node>..."  (a compressed replay)
+    ;;   "C <node>"           -> "C <shelter?> <invariant?> <wait to 0>"
+    ;;                           (a still node's certificates: what observe
+    ;;                           and record! ask of it)
+    (define (route-task-handler advance shelter? wait . fingerprint)
+      (let ((invariants #{}))   ; pose -> invariant-rest proof, this worker
+      (define (proof-tokens proof)
+        (if proof
+            (append (wire-node (car proof)) (list (number->string (cdr proof))))
+            (list "F")))
+      (lambda (line)
+        (let* ((toks (wire-tokens line)) (kind (car toks))
+               (r (if (string=? kind "I") (cons #f (quote ())) (wire-read-node (cdr toks))))
+               (node (car r)) (rest (cdr r)))
+          (cond
+            ;; "I" -> "I <fingerprint>": what this worker built, for the parent to
+            ;; compare with its own before trusting any answer
+            ((string=? kind "I")
+             (string-append "I " (if (pair? fingerprint) (car fingerprint) "none")))
+            ((string=? kind "W")
+             (wire-join (cons "W" (proof-tokens (wait node (string->number (car rest)))))))
+            ((string=? kind "P")
+             (let ((trace (route-compress
+                            (route-replay advance shelter? node (wire-read-script (car rest))))))
+               (wire-join (append (list "P" (number->string (length trace)))
+                                  (apply append (map wire-node trace))))))
+            ((string=? kind "C")
+             (let* ((key (pose-key node))
+                    (inv (if (dict-contains? invariants key)
+                             (dict-ref invariants key)
+                             (let ((v (route-invariant-proof advance shelter? node)))
+                               (set! invariants (dict-set invariants key v))
+                               v))))
+               (wire-join (append (list "C" (if (shelter? node) "T" "F") (if inv "T" "F"))
+                                  (proof-tokens (wait node 0))))))
+            (else (error "route worker: bad request" kind)))))))
+
+    (define (read-proof-tokens toks)
+      (if (string=? (car toks) "F")
+          #f
+          (let ((r (wire-read-node toks)))
+            (cons (car r) (string->number (cadr r))))))
+
+    (define (read-proof line) (read-proof-tokens (cdr (wire-tokens line))))
+
+    ;; A "C" response: (shelter? invariant? proof).
+    (define (read-cert line)
+      (let ((toks (cdr (wire-tokens line))))
+        (list (string=? (car toks) "T") (string=? (cadr toks) "T")
+              (read-proof-tokens (cddr toks)))))
+
+    ;; A "P" response: the compressed trace.
+    (define (read-trace line)
+      (let loop ((toks (cddr (wire-tokens line)))
+                 (n (string->number (cadr (wire-tokens line)))) (acc '()))
+        (if (= n 0)
+            (reverse acc)
+            (let ((r (wire-read-node toks)))
+              (loop (cdr r) (- n 1) (cons (car r) acc))))))
+
+    ;; Guide hops from every cell to target over graph's edges (#f: no path),
+    ;; as a vector by cell index.
+    (define (guide-distances graph target) (distances graph target))
 
     (define (distances graph target)
       (let* ((tm (graph-tm graph)) (n (* (tilemap-cols tm) (tilemap-rows tm)))
@@ -45,12 +316,46 @@
     ;; wait: actual node, target phase -> (actual node . real elapsed ticks).
     ;; record! receives genuine safe catches and nonhazard terminal states.
     ;; incomplete! is called at a hard bound; callers must never report PASS.
+    ;; reports optionally supplies a progress callback (or #f), then a
+    ;; node -> input-family list callback. A family generates inputs from
+    ;; the actual departure node after any proved wait. These receive the
+    ;; same physical replay as the spatial suggestions.
+    ;; After them: a worker pool, learn!, and rank. rank (optional) maps an
+    ;; actual node and the target to guide hops left (#f: no path), used ONLY
+    ;; to score the guided queue. The moves are always guides' witness
+    ;; scripts, so a rank changes the order of expansion and never the
+    ;; successor relation: a search that exhausts explores the same states
+    ;; with or without it (unreached and trap verdicts from exhaustion are
+    ;; unchanged), and an arrival is still an actual replay.
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete! . reports)
-      (let ((distance-cache '()) (invariant-rests #{}))
+      (let ((distance-cache '()) (invariant-rests #{}) (inv-size 0)
+            (replays #{}) (waits #{}) (rest-stages #{}) (requested #{}) (cert-pending #{}) (guide-keys #{}) (memo-size 0) (graph-ids (quote ())) (digest 0)
+            (pool (and ROUTE-MEMO (pair? reports) (pair? (cdr reports))
+                       (pair? (cddr reports)) (caddr reports)))
+            ;; learn! (optional, after pool): (learn! 'shelter node bool) and
+            ;; (learn! 'wait node phase proof) hand the caller certificates a
+            ;; worker computed, for the caller's own shelter? and wait.
+            (learn! (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
+                         (pair? (cdr (cdr (cdr reports)))) (car (cdr (cdr (cdr reports))))))
+            (rank (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
+                       (pair? (cdddr reports)) (pair? (cdr (cdddr reports)))
+                       (car (cdr (cdddr reports)))))
+            ;; also-goal? (optional, after rank): (also-goal? node target) -> #t
+            ;; ends the search at node as if it were at target. The caller must
+            ;; know node reaches target by an actual route (the region drain's
+            ;; states proven to return home): the arrival returned is node.
+            (also-goal? (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
+                             (pair? (cdddr reports)) (pair? (cdr (cdddr reports)))
+                             (pair? (cddr (cdddr reports)))
+                             (car (cddr (cdddr reports))))))
         (define (cell-of node)
           (and (still? node)
                (rest-cell (tiles-for (timed-node-data node)) f (timed-node-body node))))
+        ;; At the target cell, or a state the caller has proven reaches it.
+        (define (at-goal? node target)
+          (and node (or (equal? (cell-of node) target)
+                        (and also-goal? (also-goal? node target) #t))))
         (define (distance-for graph target)
           (let ((prior (find (lambda (e) (and (eq? (car e) graph)
                                              (equal? (cadr e) target))) distance-cache)))
@@ -59,22 +364,257 @@
                   (set! distance-cache (cons (list graph target dist) distance-cache))
                   dist))))
         (define (replay node script)
-          (let run ((node node) (script script) (rev '()))
-            (cond
-              ((not node) (reverse (cons #f rev)))
-              ((null? script)
-               (let settle ((node node) (n 0) (rev (cons node rev)))
-                 (cond
-                   ((not node) (reverse rev))
-                   ((or (still? node) (= n 180)) (reverse rev))
-                   (else
-                    (let ((next (advance node NO-INTENT)))
-                      (settle next (+ n 1) (cons next rev)))))))
-              (else
-               (let ((next (advance node (car script))))
-                 (if (and (timed-wait? node next) (not (shelter? node)))
-                     (reverse (cons node rev))
-                     (run next (cdr script) (cons node rev))))))))
+          (route-replay advance shelter? node script))
+        ;; Profiled wrappers (observation only, (engine reach prof)).
+        (define (timed-wait node phase)
+          (when (prof-on?)
+            (prof-inc! 'wait-call)
+            (prof-seen! 'wait (list (timed-key node) phase)))
+          (prof-time 'time-wait (lambda () (wait node phase))))
+        (define (timed-replay node script key)
+          (when (prof-on?)
+            (prof-inc! 'replay-call)
+            (when key (prof-seen! 'replay (cons (timed-key node) key))))
+          (prof-time 'time-replay (lambda () (replay node script))))
+        ;; --- Exact reuse of deterministic work (HARKFELL_ROUTE_MEMO=0: off) ---
+        ;; A wait's outcome is a function of the complete actual node: its
+        ;; certificate caches only skip proofs whose result is fixed by the
+        ;; node's own NO-INTENT ticks. So an expansion asks each phase once,
+        ;; not once per edge.
+        ;; A rest whose invariance is proved (invariant-rest?, here or filed from
+        ;; a worker's identical test of the same pose:
+        ;; still, a shelter, every field but tau unchanged through a full
+        ;; two-cycle NO-INTENT replay) waits to a phase by genuine ticks that
+        ;; reproduce, state for state, that proof's own steps: the waiter
+        ;; returns the body with tau = phase after delta ticks (a whole
+        ;; cycle when delta is 0). The first such stage found for (phase,
+        ;; pose) was simulated; later waits from the same pose reuse it.
+        (define (rest-stage node phase)
+          (let ((key (rotation-key node)))
+            (and (<= 0 phase) (< phase AIR-PERIOD)
+                 (<= 0 (body-tau (timed-node-body node))) (< (body-tau (timed-node-body node)) AIR-PERIOD)
+                 (eq? #t (dict-ref invariant-rests key #f))
+                 (let ((stage (dict-ref rest-stages (cons phase key) #f)))
+                   (and stage
+                        (let ((delta (modulo (- phase (body-tau (timed-node-body node)))
+                                             AIR-PERIOD)))
+                          (cons stage (if (= delta 0) AIR-PERIOD delta))))))))
+        (define (learn-stage! node phase proof)
+          (when (and proof (eq? #t (dict-ref invariant-rests (rotation-key node) #f))
+                     (equal? (rotation-key (car proof)) (rotation-key node)))
+            (set! inv-size (+ inv-size 1))
+            (set! rest-stages (dict-set rest-stages (cons phase (rotation-key node))
+                                        (car proof)))))
+        (define (staged-wait node phase)
+          (if (not ROUTE-MEMO)
+              (timed-wait node phase)
+              (let* ((k (cons phase (timed-key node)))
+                     (known (dict-contains? waits k))
+                     (proof (if known (dict-ref waits k) (rest-stage node phase))))
+                (prof-inc! (cond (known 'wait-hit) (proof 'wait-rest) (else 'wait-miss)))
+                (if proof
+                    (begin
+                      (when ROUTE-CHECK
+                        (unless (equal? (proof-sig proof) (proof-sig (timed-wait node phase)))
+                          (error "route check: a reused wait differs" phase (timed-key node))))
+                      proof)
+                    (let ((proof (timed-wait node phase)))
+                      (set! waits (dict-set waits k proof))
+                      (set! memo-size (+ memo-size 1))
+                      (learn-stage! node phase proof)
+                      proof)))))
+        ;; A small number per guide graph (eq?), for replay memo keys.
+        (define (graph-id graph)
+          (let ((prior (assq graph graph-ids)))
+            (if prior
+                (cdr prior)
+                (let ((id (length graph-ids)))
+                  (set! graph-ids (cons (cons graph id) graph-ids))
+                  id))))
+        ;; A replay is a function of the departure's complete state (every
+        ;; field advance reads is in timed-key; events are reset each tick)
+        ;; and the script. key names the script within this finder's
+        ;; immutable guides; #f means do not memoize.
+        (define (memo-replay node script key)
+          (if (not (and ROUTE-MEMO key))
+              (timed-replay node script key)
+              (let* ((k (cons key (timed-key node)))
+                     (prior (dict-ref replays k #f)))
+                (prof-inc! (if prior 'memo-hit 'memo-miss))
+                (if prior
+                    (begin
+                      (when ROUTE-CHECK
+                        (unless (equal? (trace-sig prior)
+                                        (trace-sig (route-compress (timed-replay node script key))))
+                          (error "route check: a reused replay differs" key (timed-key node))))
+                      prior)
+                    (let ((trace (route-compress (timed-replay node script key))))
+                      (set! replays (dict-set replays k trace))
+                      (set! memo-size (+ memo-size 1))
+                      trace)))))
+        ;; With a worker pool: before the sequential loop expands node, ask
+        ;; the workers for every wait and replay that loop could request and
+        ;; this finder has not computed, and file their answers in the memos
+        ;; above. The loop then runs unchanged, in its own order.
+        (define (numbered-edges graph cell)
+          (let number ((es (graph-edges-from graph cell)) (i 0) (acc '()))
+            (if (null? es)
+                (reverse acc)
+                (number (cdr es) (+ i 1)
+                        (cons (cons (caar es) (cons (cdar es) i)) acc)))))
+        ;; File a worker's certificates for one still node: each is a function
+        ;; of the node (invariant-rest? of its pose), so filing one is the
+        ;; same as computing it here.
+        (define (learn-cert! node cert)
+          (let ((shelter (car cert)) (inv (cadr cert)) (proof (caddr cert))
+                (key (rotation-key node)))
+            (when ROUTE-CHECK
+              (unless (eq? inv (route-invariant-proof advance shelter? node))
+                (error "route check: a worker's invariant-rest certificate differs" key)))
+            (unless (dict-contains? invariant-rests key)
+              (set! invariant-rests (dict-set invariant-rests key inv))
+              (set! inv-size (+ inv-size 1)))
+            (let ((wk (cons 0 (timed-key node))))
+              (unless (dict-contains? waits wk)
+                (set! waits (dict-set waits wk proof))
+                (set! memo-size (+ memo-size 1))
+                (learn-stage! node 0 proof)))
+            (when learn!
+              (learn! 'shelter node shelter)
+              (learn! 'wait node 0 proof))))
+        ;; A still node's certificates are known here when its pose's
+        ;; invariant-rest? is, and its wait to phase 0 is (filed, or a proved
+        ;; rest's known stage).
+        (define (cert-known? node)
+          (and (dict-contains? invariant-rests (rotation-key node))
+               (or (dict-contains? waits (cons 0 (timed-key node)))
+                   (rest-stage node 0))))
+        ;; The worker that proves a pose: the same one for every node standing
+        ;; at that place, so its remembered rest steps serve them all.
+        (define (pose-worker node)
+          (let ((b (timed-node-body node)))
+            (modulo (+ (exact (floor (body-x b))) (* 31 (exact (floor (body-y b)))))
+                    (pool-size pool))))
+        (define (request-cert! node urgent?)
+          (let ((k (cons 'cert (timed-key node))))
+            (unless (or (cert-known? node) (dict-contains? requested k))
+              (set! requested (dict-set requested k #t))
+              (set! cert-pending (dict-set cert-pending (timed-key node) #t))
+              (prof-inc! 'pool-cert)
+              ((if urgent? pool-submit-urgent! pool-submit!) pool
+               (wire-join (cons "C" (wire-node node)))
+               (lambda (line)
+                 (set! cert-pending (dict-remove cert-pending (timed-key node)))
+                 (prof-time (quote time-decode) (lambda () (learn-cert! node (read-cert line)))))
+               (pose-worker node)))))
+        ;; Ask the pool for every wait, replay and certificate expanding node
+        ;; could need that is neither known nor already asked for. urgent:
+        ;; ahead of the queue (the node about to be expanded), else behind it
+        ;; (a guess at a later expansion; its answers are kept by exact key).
+        (define (request-node! node urgent?)
+          (let ((cell (cell-of node))
+                (submit! (if urgent? pool-submit-urgent! pool-submit!)))
+            (define (want! stage key script)
+              (let ((k (cons key (timed-key stage))))
+                (unless (or (dict-contains? replays k) (dict-contains? requested k))
+                  (set! requested (dict-set requested k #t))
+                  (prof-inc! 'pool-replay)
+                  (submit! pool
+                    (wire-join (append (list "P") (wire-node stage) (list (wire-script script))))
+                    (lambda (line)
+                      (let ((trace (prof-time (quote time-decode) (lambda () (read-trace line)))))
+                        (set! replays (dict-set replays k trace))
+                        (set! memo-size (+ memo-size 1))
+                        (for-each (lambda (n) (request-cert! n urgent?))
+                                  (filter still? trace))))))))
+            (when (still? node) (request-cert! node urgent?))
+            (if (not cell)
+                (let loop ((scripts RECOVER-SCRIPTS))
+                  (when (pair? scripts)
+                    (want! node (list 'recover (length scripts)) (car scripts))
+                    (loop (cdr scripts))))
+                (when (guide-known? node)
+                (let* ((graph (guides node)) (gid (graph-id graph))
+                       (edges (numbered-edges graph cell)))
+                  (define (want-edges! stage)
+                    (for-each (lambda (e)
+                                (want! stage (list gid cell (cdr (cdr e)))
+                                       (witness-script (car (cdr e)))))
+                              edges))
+                  (want-edges! node)
+                  (for-each
+                    (lambda (phase)
+                      (let* ((k (cons phase (timed-key node)))
+                             (known (or (dict-contains? waits k) (rest-stage node phase))))
+                        (cond
+                          (known
+                           (let ((proof (if (pair? known) known (dict-ref waits k))))
+                             (when proof (want-edges! (car proof)))))
+                          ((not (dict-contains? requested k))
+                           (set! requested (dict-set requested k #t))
+                           (prof-inc! 'pool-wait)
+                           (submit! pool
+                             (wire-join (append (list "W") (wire-node node)
+                                                (list (number->string phase))))
+                             (lambda (line)
+                               (let ((proof (read-proof line)))
+                                 (set! waits (dict-set waits k proof))
+                                 (set! memo-size (+ memo-size 1))
+                                 (learn-stage! node phase proof)
+                                 (when proof (want-edges! (car proof)))))
+                             (pose-worker node))))))
+                    (list AIR-GUST 0)))))))
+        ;; Is everything node's expansion will ask for in: its waits, its
+        ;; replays, and the certificates asked for its replays' still nodes?
+        (define (node-ready? node)
+          (let ((cell (cell-of node)))
+            (define (have? stage key)
+              (let ((trace (dict-ref replays (cons key (timed-key stage)) #f)))
+                (and trace
+                     (every (lambda (n)
+                              (not (and (still? n) (dict-contains? cert-pending (timed-key n)))))
+                            trace))))
+            (and (not (dict-contains? cert-pending (timed-key node)))
+                 (if (not cell)
+                     (let loop ((scripts RECOVER-SCRIPTS))
+                       (or (null? scripts)
+                           (and (have? node (list 'recover (length scripts)))
+                                (loop (cdr scripts)))))
+                     (or (not (guide-known? node))
+                     (let* ((graph (guides node)) (gid (graph-id graph))
+                            (edges (numbered-edges graph cell)))
+                       (define (edges-ready? stage)
+                         (every (lambda (e) (have? stage (list gid cell (cdr (cdr e))))) edges))
+                       (and (edges-ready? node)
+                            (every (lambda (phase)
+                                     (let* ((k (cons phase (timed-key node)))
+                                            (known (or (dict-contains? waits k) (rest-stage node phase))))
+                                       (and known
+                                            (let ((proof (if (pair? known) known (dict-ref waits k))))
+                                              (or (not proof) (edges-ready? (car proof)))))))
+                                   (list AIR-GUST 0)))))))))
+        ;; Before the sequential loop expands node: ask for its work first,
+        ;; then for the guesses' (later expansions), and wait only until
+        ;; node's own answers are in. The guesses keep the workers busy while
+        ;; this process observes, records and pushes.
+        ;; guides is a function of (carry, down) by contract, but computing a
+        ;; new one is work with output (logs, and in the world check the memo a
+        ;; later guide reuses). The sequential path asks for guides through
+        ;; guide-of, which notes the (carry . down) it served; prefetches and
+        ;; guesses only use guides already served, so they never compute one
+        ;; earlier than the search itself would.
+        (define (guide-key node)
+          (cons (timed-node-data node) (body-down (timed-node-body node))))
+        (define (guide-of node)
+          (let ((g (guides node)))
+            (set! guide-keys (dict-set guide-keys (guide-key node) #t))
+            g))
+        (define (guide-known? node) (dict-contains? guide-keys (guide-key node)))
+        (define (prefetch! node guesses)
+          (prof-time (quote time-request) (lambda () (request-node! node #t)))
+          (prof-time (quote time-request) (lambda () (for-each (lambda (g) (request-node! g #f)) guesses)))
+          (prof-time 'time-pool
+            (lambda () (pool-drain-until! pool (lambda () (prof-time (quote time-ready) (lambda () (node-ready? node))))))))
         ;; Keys with tau removed describe poses for waiting certificates,
         ;; never simulated arrivals.
         ;; Hidden fields and product state must remain identical on every
@@ -87,32 +627,35 @@
                  (if (dict-contains? invariant-rests key)
                      (dict-ref invariant-rests key)
                      (let ((proved
-                             (and (shelter? node)
-                                  (let loop ((node node) (left (* 2 AIR-PERIOD)))
-                                    (if (= left 0)
-                                        #t
-                                        (let ((next (advance node NO-INTENT)))
-                                          (and (timed-wait? node next)
-                                               (equal? key (rotation-key next))
-                                               (loop next (- left 1)))))))))
+                             (prof-time 'time-inv
+                               (lambda ()
+                                 (prof-inc! 'inv-miss)
+                                 (route-invariant-proof advance shelter? node)))))
                        (set! invariant-rests (dict-set invariant-rests key proved))
+                       (set! inv-size (+ inv-size 1))
                        proved)))))
         (define (remaining node target)
           (let ((cell (cell-of node)))
             (if cell
-                (let* ((graph (guides node)) (tm (graph-tm graph))
-                       (dist (distance-for graph target)))
-                  (or (vector-ref dist (cell-index tm (car cell) (cdr cell))) 100000))
+                (if rank
+                    (or (rank node target) 100000)
+                    (let* ((graph (guide-of node)) (tm (graph-tm graph))
+                            (dist (distance-for graph target)))
+                      (or (vector-ref dist (cell-index tm (car cell) (cdr cell))) 100000)))
                 100000)))
         (define (observe trace target)
-          (for-each (lambda (node) (when (still? node) (record! node))) trace)
+          (prof-time 'time-observe (lambda () (observe* trace target))))
+        (define (note-record! node)
+          (when ROUTE-DIGEST (prof-time (quote time-digest) (lambda () (set! digest (digest-step digest "R" node))))))
+        (define (observe* trace target)
+          (for-each (lambda (node) (when (still? node) (note-record! node) (record! node))) trace)
           (let* ((end (last-node trace))
-                 (goal (if (and end (equal? (cell-of end) target))
+                 (goal (if (at-goal? end target)
                            end
                            (find (lambda (node)
-                                   (and node (equal? (cell-of node) target)))
+                                   (at-goal? node target))
                                  trace))))
-            (when (and end (not (still? end))) (record! end))
+            (when (and end (not (still? end))) (note-record! end) (record! end))
             ;; A suggestion can overshoot a real standing goal or fail after
             ;; reaching it. That safe prefix is a physical arrival in its own
             ;; right; requiring the whole suggested suffix would hide it.
@@ -143,31 +686,217 @@
         ;; Neither priority supplies a simulated arrival or an accepted edge.
         ;; Optional reports receive actual node, target, count, pending, depth.
         (define (report node target count pending depth)
-          (when (and (pair? reports)
+          (when (and (pair? reports) (car reports)
                      (or (= count 1) (= (modulo count 250) 0)))
             ((car reports) node target count pending depth)))
+        ;; (route (quote sizes) #f): the finder's own tables' sizes, for memory
+        ;; diagnosis. Observation only.
+        (define (sizes)
+          (list (cons (quote replays) (length (dict-keys replays)))
+                (cons (quote waits) (length (dict-keys waits)))
+                (cons (quote requested) (length (dict-keys requested)))
+                (cons (quote cert-pending) (length (dict-keys cert-pending)))
+                (cons (quote invariant-rests) (length (dict-keys invariant-rests)))
+                (cons (quote rest-stages) (length (dict-keys rest-stages)))
+                (cons (quote distance-cache) (length distance-cache))
+                (cons (quote graph-ids) (length graph-ids))))
         (lambda (start target)
+          (if (eq? start (quote sizes))
+              (sizes)
           (let ((queued #{}) (seen #{}) (count 0) (halted #f)
-                (physical (vector (make-vector 64 #f) 0 2))
-                (guided (vector (make-vector 64 #f) 0 5))
-                (turn 'physical) (serial 0))
-            (define (stop!)
+                (physical (vector (make-vector 64 #f) 0 2 3))
+                (guided (if ROUTE-ORDER-BASELINE
+                            (vector (make-vector 64 #f) 0 5 3)
+                            (vector (make-vector 64 #f) 0 6 1)))
+                (turn 'physical) (serial 0)
+                (stop-why #f) (cell-stats #{}) (cell-taus #{}))
+            (define (stop! why)
               (unless halted
                 (set! halted #t)
+                (set! stop-why why)
                 (incomplete!)))
+            ;; HARKFELL_ROUTE_REPORT: per cell (#f for a moving state), a
+            ;; vector #(pushed expanded distinct-taus min-depth best-remaining
+            ;; best-node best-depth) over every state pushed.
+            (define (stats-of cell)
+              (or (dict-ref cell-stats cell #f)
+                  (let ((v (vector 0 0 0 #f #f #f #f)))
+                    (set! cell-stats (dict-set cell-stats cell v))
+                    v)))
+            (define (report-push! node depth left)
+              (let* ((cell (cell-of node)) (v (stats-of cell))
+                     (tk (cons cell (body-tau (timed-node-body node)))))
+                (vector-set! v 0 (+ (vector-ref v 0) 1))
+                (unless (dict-contains? cell-taus tk)
+                  (set! cell-taus (dict-set cell-taus tk #t))
+                  (vector-set! v 2 (+ (vector-ref v 2) 1)))
+                (when (or (not (vector-ref v 3)) (< depth (vector-ref v 3)))
+                  (vector-set! v 3 depth))
+                (when (or (not (vector-ref v 4)) (< left (vector-ref v 4)))
+                  (vector-set! v 4 left)
+                  (vector-set! v 5 node)
+                  (vector-set! v 6 depth))))
+            (define (report-expand! node)
+              (let ((v (stats-of (cell-of node))))
+                (vector-set! v 1 (+ (vector-ref v 1) 1))))
+            (define (state-summary node depth)
+              (let ((b (timed-node-body node)))
+                (list 'cell (cell-of node) 'tau (body-tau b) 'depth depth
+                      'carry (timed-node-data node) 'down (body-down b)
+                      'mode (body-mode b) 'v (cons (body-vx b) (body-vy b)))))
+            (define (manhattan cell)
+              (if cell
+                  (+ (abs (- (car cell) (car target))) (abs (- (cdr cell) (cdr target))))
+                  100000))
+            (define (top n xs)
+              (let take ((xs xs) (n n) (acc '()))
+                (if (or (null? xs) (= n 0)) (reverse acc) (take (cdr xs) (- n 1) (cons (car xs) acc)))))
+            (define (tally xs)
+              ;; ((value . count) ...), most frequent first
+              (let ((d (let count ((xs xs) (d #{}))
+                         (if (null? xs) d
+                             (count (cdr xs) (dict-set d (car xs) (+ 1 (dict-ref d (car xs) 0))))))))
+                (list-sort (lambda (a b) (> (cdr a) (cdr b))) (dict-entries d))))
+            (define (route-report!)
+              (let* ((live
+                       ;; the physical heap's entries the search would still expand
+                       (let ((heap (vector-ref physical 0)))
+                         (let scan ((i 0) (acc '()))
+                           (if (>= i (vector-ref physical 1)) acc
+                               (let* ((e (vector-ref heap i)) (k (timed-key (vector-ref e 0))))
+                                 (scan (+ i 1)
+                                       (if (and (= (dict-ref queued k) (vector-ref e 1))
+                                                (not (and (dict-contains? seen k)
+                                                          (<= (dict-ref seen k) (vector-ref e 1)))))
+                                           (cons e acc) acc)))))))
+                     (cells (filter car (dict-entries cell-stats)))
+                     (near (list-sort
+                             (lambda (a b)
+                               (let ((ra (vector-ref (cdr a) 4)) (rb (vector-ref (cdr b) 4)))
+                                 (or (< ra rb)
+                                     (and (= ra rb) (< (manhattan (car a)) (manhattan (car b)))))))
+                             cells))
+                     ;; only a guide the search already built: building one here
+                     ;; (seeded from start) would change later searches' guides
+                     (graph (and (guide-known? start) (guide-of start)))
+                     (tm (and graph (graph-tm graph)))
+                     (dist (and graph (distance-for graph target)))
+                     (dist-at (lambda (cell) (and dist (vector-ref dist (cell-index tm (car cell) (cdr cell)))))))
+                (write (list 'route-report 'target target 'expanded count 'stop stop-why
+                             'heaps (list (vector-ref physical 1) (vector-ref guided 1))
+                             'live (length live) 'cells-reached (length cells)
+                             'start (state-summary start 0)
+                             'guide-hops-from-start (and (cell-of start) (dist-at (cell-of start)))))
+                (newline)
+                ;; the guide's own path: from the start cell, one hop nearer each step
+                (let ((path
+                        (if (and (cell-of start) (dist-at (cell-of start)))
+                            (let walk ((cell (cell-of start)) (acc '()))
+                              (let* ((d (dist-at cell)) (v (dict-ref cell-stats cell #f))
+                                     (here (list cell d (if v (vector-ref v 0) 0) (if v (vector-ref v 1) 0)
+                                                 (if v (vector-ref v 2) 0)))
+                                     (next (find (lambda (e) (let ((dn (dist-at (car e)))) (and dn (= dn (- d 1)))))
+                                                 (graph-edges-from graph cell))))
+                                (if (or (= d 0) (not next))
+                                    (reverse (cons here acc))
+                                    (walk (car next) (cons here acc)))))
+                            '())))
+                  (write (list 'route-report-guide-path '(cell hops-left pushed expanded taus) path))
+                  (newline)
+                (for-each
+                  (lambda (e)
+                    (let ((v (cdr e)))
+                      (write (list 'route-report-near 'cell (car e) 'guide-hops (vector-ref v 4)
+                                   'manhattan (manhattan (car e))
+                                   'pushed (vector-ref v 0) 'expanded (vector-ref v 1)
+                                   'taus (vector-ref v 2) 'min-depth (vector-ref v 3)
+                                   'best (state-summary (vector-ref v 5) (vector-ref v 6))))
+                      (newline)))
+                  near)
+                (let ((by-cell (tally (map (lambda (e) (cell-of (vector-ref e 0))) live))))
+                  (write (list 'route-report-frontier 'live (length live)
+                               'distinct-cells (length by-cell)
+                               'distinct-cell-taus
+                               (length (tally (map (lambda (e) (cons (cell-of (vector-ref e 0))
+                                                                     (body-tau (timed-node-body (vector-ref e 0)))))
+                                                   live)))
+                               'by-cell by-cell
+                               'by-guide-hops (list-sort (lambda (a b) (< (car a) (car b)))
+                                                         (tally (map (lambda (e) (- (vector-ref e 5) (vector-ref e 1))) live)))
+                               'by-depth (list-sort (lambda (a b) (< (car a) (car b)))
+                                                    (tally (map (lambda (e) (vector-ref e 1)) live)))
+                               'by-carry (tally (map (lambda (e) (timed-node-data (vector-ref e 0))) live))))
+                  (newline)
+                  ;; Last, so nothing above depends on it: the furthest cell on
+                  ;; the guide path an actual state reached, and the path's next
+                  ;; cell. Replay every guide edge between them from the best
+                  ;; state there, departing at each phase of the cycle (the
+                  ;; search departs only at its actual phase, AIR-GUST and 0).
+                  ;; Raw replays and waits: no memo is filled and nothing is
+                  ;; recorded, so later searches are unchanged. A diagnostic
+                  ;; error is reported, never raised.
+                  (when ROUTE-PROBE (guard (e (#t (write (list 'route-report-probe 'error
+                                             (if (error-object? e) (error-object-message e) e)))
+                                (newline)))
+                    (let furthest ((p path) (last #f))
+                      (cond
+                        ((pair? p) (furthest (cdr p) (if (> (caddr (car p)) 0) p last)))
+                        ((and last (pair? (cdr last)))
+                         (let* ((from (car (car last))) (to (car (cadr last)))
+                                (node (vector-ref (dict-ref cell-stats from) 5))
+                                (edges (filter (lambda (e) (equal? (car e) to)) (numbered-edges graph from)))
+                                (waitable 0) (reaching '()) (landed #{}))
+                           (let phase ((ph 0))
+                             (when (< ph AIR-PERIOD)
+                               (let* ((proof (if (= ph (body-tau (timed-node-body node)))
+                                                 (cons node 0)
+                                                 (wait node ph)))
+                                      (stage (and proof (car proof))))
+                                 (when stage
+                                   (set! waitable (+ waitable 1))
+                                   (for-each
+                                     (lambda (e)
+                                       (let ((ends (filter (lambda (c) c)
+                                                           (map (lambda (n) (and n (cell-of n)))
+                                                                (replay stage (witness-script (cadr e)))))))
+                                         (for-each (lambda (c) (set! landed (dict-set landed c (+ 1 (dict-ref landed c 0)))))
+                                                   ends)
+                                         (when (member to ends)
+                                           (set! reaching (cons (list ph (cddr e)) reaching)))))
+                                     edges)))
+                               (phase (+ ph 1))))
+                           (write (list 'route-report-probe 'from from 'to to
+                                        'state (state-summary node (vector-ref (dict-ref cell-stats from) 6))
+                                        'edges (length edges) 'phases-waitable waitable
+                                        'phases-reaching (length reaching) (top 40 (reverse reaching))
+                                        'still-cells-seen (top 20 (list-sort (lambda (a b) (> (cdr a) (cdr b)))
+                                                                             (dict-entries landed)))))
+                           (newline)))
+                        (else #f)))))))))
             (define (physical-distance node)
               (let ((cell (cell-of node)))
                 (if cell
                     (+ (abs (- (car cell) (car target)))
                        (abs (- (cdr cell) (cdr target))))
                     100000)))
+            ;; Each queue is #(heap size score tie): entries compare by score,
+            ;; then tie, then Manhattan distance, then age. The physical queue
+            ;; scores depth + distance and breaks ties on distance. The guided
+            ;; queue is greedy along the guide: it scores guide hops left and
+            ;; breaks ties on depth, so the state furthest along the guide goes
+            ;; first however many hops it took. (Scoring depth + hops let every
+            ;; phase variant on a shortest path outrank a state one hop longer
+            ;; but further along.) Order only: a search that exhausts explores
+            ;; the same states.
             (define (before? queue a b)
-              (let ((score (vector-ref queue 2)))
+              (let ((score (vector-ref queue 2)) (tie (vector-ref queue 3)))
                 (or (< (vector-ref a score) (vector-ref b score))
                     (and (= (vector-ref a score) (vector-ref b score))
-                         (or (< (vector-ref a 3) (vector-ref b 3))
-                             (and (= (vector-ref a 3) (vector-ref b 3))
-                                  (< (vector-ref a 4) (vector-ref b 4))))))))
+                         (or (< (vector-ref a tie) (vector-ref b tie))
+                             (and (= (vector-ref a tie) (vector-ref b tie))
+                                  (or (< (vector-ref a 3) (vector-ref b 3))
+                                      (and (= (vector-ref a 3) (vector-ref b 3))
+                                           (< (vector-ref a 4) (vector-ref b 4))))))))))
             (define (push-entry! queue entry)
               (let ((heap (vector-ref queue 0)) (size (vector-ref queue 1)))
                 (when (= size (vector-length heap))
@@ -199,15 +928,18 @@
                     ((or (> depth 2048)
                          (>= (vector-ref physical 1) (* 8 (max 1 bound)))
                          (>= (vector-ref guided 1) (* 8 (max 1 bound))))
-                     (stop!))
+                     (stop! (if (> depth 2048) 'depth-2048 'frontier)))
                     (else
                      (set! queued (dict-set queued key depth))
                      (let* ((distance (physical-distance node))
+                            (left (remaining node target))
                             (entry (vector node depth (+ depth distance) distance serial
-                                           (+ depth (remaining node target)))))
+                                           (+ depth left) left)))
                        (set! serial (+ serial 1))
                        (push-entry! physical entry)
-                       (push-entry! guided entry)))))))
+                       (push-entry! guided entry)
+                       (when ROUTE-REPORT
+                         (report-push! node depth (- (vector-ref entry 5) depth)))))))))
             (define (pop! queue)
               (let* ((heap (vector-ref queue 0))
                      (size (- (vector-ref queue 1) 1))
@@ -237,34 +969,72 @@
                 (and (not halted) (pair? nodes)
                      (let ((next (car nodes)))
                        (cond
-                         ((equal? (cell-of next) target) next)
+                         ((at-goal? next target) next)
                          (else
                           (when (eligible? next) (push! next depth))
                           (loop (cdr nodes))))))))
+            (define (progress? node end)
+              (and (cell-of end)
+                   (not (or (equal? (timed-key node) (timed-key end))
+                            (and (equal? (rotation-key node) (rotation-key end))
+                                 (invariant-rest? node))))))
+            (define (authored node depth)
+              (and (pair? reports) (pair? (cdr reports))
+                   (let ((families ((cadr reports) node)))
+                     (and (pair? families)
+                          (let depart ((phases (list 'actual AIR-GUST 0)))
+                            (and (not halted) (pair? phases)
+                                 (or
+                                   (let* ((proof (and (not (eq? (car phases) 'actual))
+                                                      (staged-wait node (car phases))))
+                                          (stage (if (eq? (car phases) 'actual) node
+                                                     (and proof (car proof)))))
+                                     (and stage
+                                          (let try ((families families))
+                                            (and (not halted) (pair? families)
+                                                 (or
+                                                   (resume
+                                                     (observe (timed-replay stage ((car families) stage) #f) target)
+                                                     (+ depth 1)
+                                                     (lambda (end) (progress? node end)))
+                                                   (try (cdr families)))))))
+                                   (depart (cdr phases)))))))))
             (define (expand node depth)
+              ;; Bound the memos' memory: past ROUTE-MEMO-CAP entries they start
+              ;; again empty (anything dropped is simply computed again).
+              (when (> memo-size ROUTE-MEMO-CAP)
+                (set! replays #{}) (set! waits #{}) (set! requested #{}) (set! memo-size 0))
+              ;; the pose-keyed invariant-rest proofs too (each is recomputed exactly)
+              (when (> inv-size ROUTE-MEMO-CAP)
+                (set! invariant-rests #{}) (set! rest-stages #{}) (set! inv-size 0))
+              (when pool
+                ;; guesses: the heads of the queue the next pop prefers, then
+                ;; of the other (turn has already flipped for the next pop)
+                (prefetch! node
+                  (let ((head (lambda (q)
+                                (and (> (vector-ref q 1) 0)
+                                     (vector-ref (vector-ref (vector-ref q 0) 0) 0)))))
+                    (filter (lambda (x) x)
+                            (if (eq? turn 'physical)
+                                (list (head physical) (head guided))
+                                (list (head guided) (head physical)))))))
+              (or (authored node depth) (expand-spatial node depth)))
+            (define (expand-spatial node depth)
               (let ((cell (cell-of node)))
                 (if (not cell)
-                    (let recover
-                      ((scripts
-                        (cons (make-list 360 NO-INTENT)
-                          (append
-                            (apply append
-                              (map (lambda (h)
-                                     (map (lambda (held)
-                                            (append
-                                              (if held (list (intent h: h jump: #t press: #t)) '())
-                                              (make-list 120 (intent h: h jump: held))
-                                              (make-list 180 NO-INTENT)))
-                                          '(#f #t))) '(-1 1)))
-                            (map (lambda (v)
-                                   (append (make-list 120 (intent v: v))
-                                           (make-list 180 NO-INTENT))) '(-1 1))))))
+                    (let recover ((scripts RECOVER-SCRIPTS))
                       (and (not halted) (pair? scripts)
-                           (or (resume (observe (replay node (car scripts)) target)
+                           (or (resume (observe (memo-replay node (car scripts)
+                                                             (list 'recover (length scripts)))
+                                                target)
                                        (+ depth 1) still?)
                                (recover (cdr scripts)))))
-                    (let* ((graph (guides node)) (tm (graph-tm graph))
+                    (let* ((graph (guide-of node)) (tm (graph-tm graph))
+                           (gid (graph-id graph))
                            (dist (distance-for graph target))
+                           ;; Each edge is (to-cell witness . i): i, its place in
+                           ;; the guide's own list, names its script for the
+                           ;; replay memo. The sort reads only to-cell.
                            (edges
                              (list-sort
                                (lambda (a b)
@@ -272,7 +1042,9 @@
                                         100000)
                                     (or (vector-ref dist (cell-index tm (caar b) (cdar b)))
                                         100000)))
-                               (graph-edges-from graph cell))))
+                               (numbered-edges graph cell))))
+                      (prof-inc! 'exp-cell)
+                      (prof-add! 'edges (length edges))
                       (let try ((edges edges))
                         (and (not halted) (pair? edges)
                              (or
@@ -280,12 +1052,14 @@
                                  (and (not halted) (pair? phases)
                                       (or
                                         (let* ((proof (and (not (eq? (car phases) 'actual))
-                                                           (wait node (car phases))))
+                                                           (staged-wait node (car phases))))
                                                (stage (if (eq? (car phases) 'actual) node
                                                           (and proof (car proof)))))
                                           (and stage
                                                (resume
-                                                 (observe (replay stage (witness-script (cdar edges))) target)
+                                                 (observe (memo-replay stage (witness-script (car (cdr (car edges))))
+                                                                       (list gid cell (cdr (cdr (car edges)))))
+                                                          target)
                                                  (+ depth 1)
                                                  (lambda (end)
                                                    ;; Repositioning and hidden body changes
@@ -293,14 +1067,15 @@
                                                    ;; cell. Frozen labels never rule them out.
                                                    ;; Clock-only changes continue unless a real
                                                    ;; invariant waiting cycle covers that phase.
-                                                   (and (cell-of end)
-                                                        (not (or (equal? (timed-key node) (timed-key end))
-                                                                 (and (equal? (rotation-key node)
-                                                                              (rotation-key end))
-                                                                      (invariant-rest? node)))))))))
+                                                   (progress? node end)))))
                                         (depart (cdr phases)))))
                                (try (cdr edges)))))))))
-            (if (equal? (cell-of start) target)
+            (set! digest 0)
+            ;; distances for this search's target only (a vector per graph and
+            ;; target would add up over a region's hundreds of targets)
+            (set! distance-cache (filter (lambda (e) (equal? (cadr e) target)) distance-cache))
+            (let ((found
+            (if (at-goal? start target)
                 start
                 (begin
                   (push! start 0)
@@ -318,13 +1093,30 @@
                              ((< (dict-ref queued key) depth) (search))
                              ((and (dict-contains? seen key)
                                    (<= (dict-ref seen key) depth)) (search))
-                             ((>= count bound) (stop!) #f)
+                             ((>= count bound) (stop! 'expansions) #f)
                              (else
                               (set! seen (dict-set seen key depth))
                               (set! count (+ count 1))
+                              (when ROUTE-REPORT (report-expand! node))
+                              (when ROUTE-DIGEST (prof-time (quote time-digest) (lambda () (set! digest (digest-step digest "E" node)))))
+                              (when (and ROUTE-DIGEST (= (modulo count 250) 0))
+                                (write (list (quote route-digest-at) (quote target) target
+                                             (quote expanded) count (quote hash) digest))
+                                (newline))
                               ;; Stale duplicate entries cost no expansion. Switch
                               ;; priorities only after a genuine state expansion.
                               (set! turn (if (eq? turn 'physical) 'guided 'physical))
                               (report node target count
                                       (+ (vector-ref physical 1) (vector-ref guided 1)) depth)
-                              (or (expand node depth) (search)))))))))))))))
+                              (prof-inc! 'expansions)
+                              (when (and (prof-on?) (= (modulo count 25) 0))
+                                (prof-report (list 'target target 'count count)))
+                              (or (prof-time 'time-expand (lambda () (expand node depth)))
+                                  (search)))))))))))
+              (when (and ROUTE-REPORT (not found)) (route-report!))
+              (when ROUTE-DIGEST
+                (write (list (quote route-digest) (quote target) target (quote expanded) count
+                             (quote found) (and found (wire-join (wire-node found)))
+                             (quote hash) digest))
+                (newline))
+              found))))))))
