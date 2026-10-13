@@ -135,6 +135,7 @@
     ;; (shell-begin!); a door (?room=, --room, the atlas, the test room) has
     ;; neither: it is for looking, and it must not overwrite a player's save.
     (define *frame* #f)              ; #f, or the frame until it plays
+    (define *front-prepared-world* #f) ; the hidden world's cached draw resources
     (define *frame-listeners* '())   ; each is called with every phase entered
     (define *key-edge* #f)           ; a key went down since the last frame
     (define *gesture* #f)            ; a key or a touch since the last frame (the web's gesture)
@@ -439,6 +440,7 @@
     ;; Returns what the restore forgave (strings), or #f for a new game.
     (define (shell-begin! web? d)
       (set! *frame* (frame-new web?))
+      (set! *front-prepared-world* #f)
       (set! *over-key* #f)
       (set! *over-touch* #f)
       (set! *wall* 0.0)
@@ -941,6 +943,14 @@
     (define (present-front! win-w win-h)
       (begin-frame)
       (set-blend-mode 'normal)
+      ;; Bake the restored or new room behind the silent start screen.
+      ;; Doing this at the first dawn drained the opening's audio ring.
+      ;; A start-over creates a different world and prepares that one too.
+      (when (and *world*
+                 (memq (frame-phase *frame*) '(start-in start start-out))
+                 (not (eq? *world* *front-prepared-world*)))
+        (prepare-play! *world*)
+        (set! *front-prepared-world* *world*))
       (case (frame-phase *frame*)
         ((start-in start start-out)
          (draw-start! win-w win-h (frame-words-alpha *frame*) *wall*

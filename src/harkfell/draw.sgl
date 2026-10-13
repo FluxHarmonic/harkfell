@@ -59,7 +59,7 @@
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
-          set-draw-content! draw-play present-play!
+          set-draw-content! draw-play prepare-play! present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
           slot player-frame set-look-sound! set-look-finale! region-colours set-look-waking! waking-frame
           floating-reeds room-hue FIREFLY-RINGS firefly-light-budget
@@ -539,18 +539,23 @@
 
     ;; The room's backdrop: its region's sky, or earth when it lies under
     ;; another room; stepped into the haze while a moment's music sounds.
+    (define (room-backdrop-key rm)
+      (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
+            ((wrongwater? rm) (wrongwater-backdrop-key rm))
+            ((cloudstair? rm) (cloudstair-backdrop-key rm))
+            ((underhum? rm) (underhum-backdrop-key rm))
+            ((and (not (under? rm)) (glasswood-sheet? rm))
+             ;; Glasswood's sky by the room's sun, in quarters.
+             (vector-ref (vector 'glasswood-sun-0 'glasswood-sun-1
+                                 'glasswood-sun-2 'glasswood-sun-3
+                                 'glasswood-sun-4)
+                         (exact (round (* 4 (room-sun rm))))))
+            ((not (under? rm)) (room-region rm))
+            ((eq? (room-region rm) 'glasswood) 'glasswood-under)
+            (else 'under)))
+
     (define (draw-backdrop! rm)
-      (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
-                                 ((wrongwater? rm) (wrongwater-backdrop-key rm))
-                                 ((cloudstair? rm) (cloudstair-backdrop-key rm))
-                                 ((underhum? rm) (underhum-backdrop-key rm))
-                                 ((and (not (under? rm)) (glasswood-sheet? rm))
-                                  ;; Glasswood's sky by the room's sun, in quarters
-                                  (vector-ref (vector (quote glasswood-sun-0) (quote glasswood-sun-1) (quote glasswood-sun-2) (quote glasswood-sun-3) (quote glasswood-sun-4))
-                                              (exact (round (* 4 (room-sun rm))))))
-                                 ((not (under? rm)) (room-region rm))
-                                 ((eq? (room-region rm) (quote glasswood)) (quote glasswood-under))
-                                 (else (quote under)))))
+      (let ((tex (backdrop (room-backdrop-key rm)))
             (bands (haze-bands *focus*)))
         (with-blend-mode (quote none)
           (set-color 1.0 1.0 1.0 1.0)
@@ -1763,17 +1768,25 @@
     ;; pass, the ears), resolve it; black: optionally a further fade to black
     ;; (the frame's dawn), by the same dither as the world's dim. Outside any
     ;; pass.
-    (define (present-play! w after . black)
+    ;; Prepare only cached resources: no world ticks, focus stepping or
+    ;; visible draw. The start screen can do this before the opening sounds.
+    (define (prepare-play! w)
       (ensure-render!)
       (atlas-ensure!)
+      (let* ((p (world-room w))
+             (rm (and p (placed-data p))))
+        (when rm
+          (prepare-layers! rm (world-tiles w))
+          (backdrop (room-backdrop-key rm)))
+        (use-region! (if rm (room-region rm) 'none))))
+
+    (define (present-play! w after . black)
+      (prepare-play! w)
       (step-focus!)
       (let* ((p (world-room w))
-             (rm (and p (placed-data p)))
-             (region (if rm (room-region rm) 'none)))
-        (when rm (prepare-layers! rm (world-tiles w)))
+             (rm (and p (placed-data p))))
         ;; a passing cloud's shadow on Cloudstair's stone, none anywhere else
         (apply set-cloud-shade! (if (and rm (cloudstair? rm)) (cloudstair-shade rm (world-ticks w)) (list 0.0 0.0 0.0)))
-        (use-region! region)
         (with-render-target (room-index-rt)
           (set-blend-mode 'normal)
           (draw-play w)
