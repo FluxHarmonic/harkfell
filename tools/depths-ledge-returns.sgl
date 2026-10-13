@@ -1,0 +1,56 @@
+;;; Runner-only return diagnosis for the four unreached Underhum K ledges.
+;;; Seeds are explicit local rest poses, not acquired full-world states.
+;;; Every selected edge replays independently; no continuous route is claimed.
+(import (engine reach)
+        (engine reach paths)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell depths reach)
+        (harkfell feel))
+
+(define (line datum)
+  (write datum)
+  (newline))
+
+(define ct
+  (depths-region-content (load-content (read-world-source "world")) 'underhum))
+(define tm (tiles-carrying ct '(2 3 4 5)))
+(define home (start-cell ct))
+(define room (content-room ct 7 6))
+(define ledges
+  (map (lambda (cell)
+         (local->global ct room (car cell) (cdr cell)))
+       '((9 . 7) (10 . 7) (3 . 9) (4 . 9))))
+
+(for-each
+  (lambda (cell)
+    (unless (standable? tm (car cell) (cdr cell))
+      (error "Underhum ledge return seed is not standable" cell)))
+  ledges)
+
+(line (list 'diagnostic 'isolated-ledge-returns 'carry '(2 3 4 5)
+            'down #f 'seeds ledges 'home home
+            'admission-from-world-not-established))
+(define graph
+  (reach-search-down tm HARKFELL-FEEL ledges witness-lands? #f))
+(define failures 0)
+
+(for-each
+  (lambda (cell)
+    (let ((route (graph-witness-path graph cell home)))
+      (line (list 'ledge-return 'from cell 'to home
+                  'return (and route #t)
+                  'edges (and route (length route))))
+      (if route
+          (for-each
+            (lambda (edge)
+              (unless (witness-lands? tm HARKFELL-FEEL (cdr edge) (car edge))
+                (error "Underhum ledge return edge failed replay" cell (car edge))))
+            route)
+          (set! failures (+ failures 1)))))
+  ledges)
+
+(line (list 'ledge-returns 'failures failures 'stats (graph-stats graph)))
+(unless (= failures 0)
+  (error "Underhum ledge returns not established" failures))
