@@ -188,7 +188,7 @@
         (lambda (line)
           (cond
             ;; the parallel return drain's whole searches and proven keys
-            ((and (> (string-length line) 1) (memv (string-ref line 0) (list #\D #\Q)))
+            ((and (> (string-length line) 1) (memv (string-ref line 0) (list #\D #\Q #\R)))
              (unless drain (set! drain (cloudstair-drain-server ct)))
              (drain line))
             ;; per-(carry, down) guides: cloudstair-guide-builder's requests
@@ -378,7 +378,8 @@
              (shelter? (cloudstair-shelter-checker ct advance))
              (wait (cloudstair-waiter ct advance))
              (proposals (cloudstair-route-proposals ct))
-             (proven #{}) (proven-exact #{}) (recorded (quote ())) (incomplete #f) (finders #f))
+             (proven #{}) (proven-exact #{}) (recorded (quote ())) (incomplete #f) (finders #f)
+             (plain-incomplete #f))
         (define (cell-of node)
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
@@ -413,12 +414,17 @@
                              (lambda () (set! incomplete #t))
                              #f proposals #f #f rank proven-return?))
                    (plain (timed-route-finder advance tiles-for HARKFELL-FEEL (lambda (node) candidate)
-                            shelter? wait bound (lambda (node) #t) (lambda () #t)
+                            shelter? wait bound (lambda (node) #t) (lambda () (set! plain-incomplete #t))
                             #f proposals #f #f rank)))
               (set! finders (cons finder plain)))))
         (lambda (line)
           (let ((toks (wire-tokens line)))
             (cond
+              ;; a new profile: its proven set starts empty, as the parent's does
+              ((string=? (car toks) "R")
+               (set! proven #{})
+               (set! proven-exact #{})
+               "R")
               ((string=? (car toks) "Q")
                (let loop ((n (string->number (cadr toks))) (ts (cddr toks)))
                  (when (> n 0)
@@ -433,11 +439,18 @@
                  (setup! bound)
                  (set! recorded '())
                  (set! incomplete #f)
-                 (let* ((back ((car finders) start home))
+                 ;; the finder's own diagnostics (digests, reports, profiles) go
+                 ;; to a discarded port: this process's stdout carries only answers
+                 (let* ((back (parameterize ((current-output-port (open-output-string)))
+                                ((car finders) start home)))
                         (at-home (and back (equal? (cell-of back) home)))
                         ;; ROUTE_CHECK: a memo stop must be a real return by itself
                         (checked (cond ((or (not ROUTE-CHECK) (not back) at-home) "N")
-                                       (((cdr finders) start home) "T")
+                                       ((begin (set! plain-incomplete #f)
+                                               (parameterize ((current-output-port (open-output-string)))
+                                                 ((cdr finders) start home)))
+                                        "T")
+                                       (plain-incomplete "B")
                                        (else "F")))
                         (records
                           (let loop ((ns (reverse recorded)) (seen #{}) (acc '()))
@@ -625,6 +638,16 @@
           (unless local-drain (set! local-drain (cloudstair-drain-server ct)))
           local-drain)
         (define drain-rounds 0)
+        ;; a new profile's drain starts from an empty proven set on every worker
+        ;; (and the in-process server), as this process's own does
+        (define (drain-reset!)
+          (when (and PARALLEL-DRAIN (not (equal? PARALLEL-DRAIN-MODE "local")) (pair? pool) (car pool))
+            (let each ((w 0))
+              (when (< w (pool-size (car pool)))
+                (pool-submit! (car pool) "R 0" (lambda (answer) #t) w)
+                (each (+ w 1))))
+            (pool-drain! (car pool)))
+          (when local-drain (local-drain "R 0")))
         (define (proven-key node)
           ;; the proven key node itself or its aligned rest holds, or #f
           (and (still? node)
@@ -773,6 +796,9 @@
                                           (b (wire-read-node (cdr a))))
                                      (apply-record! (car a) sh (car b))
                                      (records (- k 1) (cdr b)))))
+                               (when (string=? checked "B")
+                                 (error "route check: a proven-return stop could not be re-verified (bound)"
+                                        (timed-key (cdr entry))))
                                (when (string=? checked "F")
                                  (error "route check: a proven-return stop is not a real return"
                                         (timed-key (cdr entry))))
@@ -799,6 +825,7 @@
                                  (merge (cdr es) (+ i 1) fresh)))))))))))
               (set! search-incomplete #f)
               (set! return-proven #{}) (set! return-proven-exact #{}) (set! memo-stops 0) (set! n-checked 0)
+              (drain-reset!)
               (for-each
                 (lambda (entry)
                   (let ((rest (align entry 0)))
