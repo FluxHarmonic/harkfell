@@ -53,9 +53,14 @@
                     (map (lambda (carry) (list (cons carry #f) (cons carry #t)))
                          '((2 3 4) (2 3 4 5) (2 3 4 7) (2 3 4 5 7)))))))
 
-    ;; Revision 1's cistern is reached by the glide, and its one-way shaft
-    ;; returns through I's upper ledge. With no down these must stay outside
-    ;; the forward graph; they are not exemptions from checking traps.
+    ;; Revision 1's cistern is reached by the modeled glide, and its one-way
+    ;; shaft returns through I's upper ledge. The four west K ledges join
+    ;; that same modeled descent: explicit seeds return home with down, but
+    ;; form a closed K/L component without it. This is a bounded-search
+    ;; classification, not a claim that expert coyote inputs cannot enter.
+    ;; With no down these must stay outside the forward graph; reaching one
+    ;; is still a failure. With down all remain reachable/returnable, and
+    ;; ordinary cells and water traps keep their existing checks.
     (define (down-only-cells ct rooms tm)
       (apply append
         (map (lambda (p)
@@ -67,6 +72,9 @@
                      (filter
                        (lambda (cell)
                          (or (and (= y 7) (memv x '(7 8)))
+                             (and (= x 7) (= y 6)
+                                  (member (global->local ct rm cell)
+                                          '((9 . 7) (10 . 7) (3 . 9) (4 . 9))))
                              (and (= x 8) (= y 5)
                                   (<= (cdr (global->local ct rm cell)) 2))))
                        (room-standable-cells ct rm tm)))))
