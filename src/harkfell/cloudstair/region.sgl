@@ -42,6 +42,19 @@
     ;; The return memo's key for a proven state: its exact timed key.
     (define (return-memo-key node) (timed-key node))
 
+    ;; "local": the same rounds, searched by a drain server in this process
+    ;; instead of the workers (for checking the pool against it).
+    (define PARALLEL-DRAIN-MODE (or (getenv "HARKFELL_REGION_PARALLEL_DRAIN") ""))
+    ;; Landings per drain round (each round searches against the proven set
+    ;; frozen at its start, so results never depend on the number of workers).
+    (define DRAIN-ROUND
+      (or (let ((v (getenv "HARKFELL_REGION_DRAIN_ROUND"))) (and v (string->number v))) 6))
+    ;; Diagnostics (never a gate): only the first K targets; stop the drain
+    ;; after N rounds.
+    (define TARGETS-LIMIT
+      (let ((v (getenv "HARKFELL_REGION_TARGETS"))) (and v (string->number v))))
+    (define DRAIN-ROUNDS-LIMIT
+      (let ((v (getenv "HARKFELL_REGION_DRAIN_ROUNDS"))) (and v (string->number v))))
     (define PARALLEL-DRAIN
       (not (equal? (getenv "HARKFELL_REGION_PARALLEL_DRAIN") "0")))
 
@@ -544,12 +557,17 @@
              (wait (vector-ref certs 1))
              (learn! (vector-ref certs 2))
              (proposals (cloudstair-route-proposals ct))
-             (targets (apply append
-                        (map (lambda (p)
-                               (room-standable-cells ct (placed-data p) tm))
-                             (filter (lambda (p)
-                                       (eq? (room-region (placed-data p)) 'cloudstair))
-                                     (content-rooms ct)))))
+             (targets (let ((all
+                             (apply append
+                                (map (lambda (p)
+                                       (room-standable-cells ct (placed-data p) tm))
+                                     (filter (lambda (p)
+                                               (eq? (room-region (placed-data p)) 'cloudstair))
+                                             (content-rooms ct))))))
+                        (if TARGETS-LIMIT
+                            (let first ((xs all) (n TARGETS-LIMIT) (acc (quote ())))
+                              (if (or (null? xs) (= n 0)) (reverse acc) (first (cdr xs) (- n 1) (cons (car xs) acc))))
+                            all)))
              (route-cache '()) (entry-rooms (cloudstair-entrance-probe source)) (failures 0)
              (search-incomplete #f)
              (landing-bound (or LANDING-BOUND-OVERRIDE bound))
@@ -601,6 +619,12 @@
         ;; its proven return. A landing returns iff it reaches some proven
         ;; state, so trap verdicts from exhaustion are unchanged.
         (define (memo-key node) (return-memo-key node))
+        ;; the drain's in-process server for HARKFELL_REGION_PARALLEL_DRAIN=local
+        (define local-drain #f)
+        (define (local-drain-server)
+          (unless local-drain (set! local-drain (cloudstair-drain-server ct)))
+          local-drain)
+        (define drain-rounds 0)
         (define (proven-key node)
           ;; the proven key node itself or its aligned rest holds, or #f
           (and (still? node)
@@ -688,22 +712,34 @@
               ;; merging after the round equals recording during it, and no
               ;; result depends on timing. Returns when the pass is done.
               (define (parallel-pass! pending checked-add!)
-                (let* ((p (car pool)) (r (* 2 (pool-size p))))
+                ;; the round's searches run on the pool's workers, or ("local") on a
+                ;; drain server in this process: the same code, for checking
+                (let* ((p (and (not (equal? PARALLEL-DRAIN-MODE "local")) (car pool)))
+                       (local (and (not p) (local-drain-server)))
+                       (r DRAIN-ROUND))
                   (let round ((ps pending))
+                    (when (and complete DRAIN-ROUNDS-LIMIT (>= drain-rounds DRAIN-ROUNDS-LIMIT))
+                      ;; diagnostic: the drain stops here, so the run is incomplete
+                      (log (list (quote drain-rounds-limit) DRAIN-ROUNDS-LIMIT (quote not-a-gate-verdict)))
+                      (set! complete #f))
                     (when (and complete (pair? ps) (< landing-count landing-bound))
+                      (set! drain-rounds (+ drain-rounds 1))
                       (let* ((batch (let take ((xs ps) (n r) (acc '()))
                                       (if (or (null? xs) (= n 0)) (reverse acc)
                                           (take (cdr xs) (- n 1) (cons (car xs) acc)))))
                              (answers (make-vector (length batch) #f)))
                         (let submit ((es batch) (i 0))
                           (when (pair? es)
-                            (let ((slot i))
-                              (pool-submit! p (wire-join (append (list "D" (number->string bound))
-                                                                 (wire-node (cdr (car es)))))
-                                            (lambda (line) (vector-set! answers slot line))))
+                            (let ((slot i)
+                                  (line (wire-join (append (list "D" (number->string bound))
+                                                           (wire-node (cdr (car es)))))))
+                              (if p
+                                  (pool-submit! p line (lambda (answer) (vector-set! answers slot answer)))
+                                  (vector-set! answers slot (local line))))
                             (submit (cdr es) (+ i 1))))
-                        (pool-drain-until! p (lambda () (let all ((i 0)) (or (= i (vector-length answers))
-                                                                            (and (vector-ref answers i) (all (+ i 1)))))))
+                        (when p
+                          (pool-drain-until! p (lambda () (let all ((i 0)) (or (= i (vector-length answers))
+                                                                              (and (vector-ref answers i) (all (+ i 1))))))))
                         (let merge ((es batch) (i 0) (fresh '()))
                           (cond
                             ((or (null? es) (not complete))
@@ -711,11 +747,14 @@
                              (when (pair? fresh)
                                (let ((line (wire-join (append (list "Q" (number->string (length fresh)))
                                                               (apply append (map wire-value (reverse fresh)))))))
-                                 (let each ((w 0))
-                                   (when (< w (pool-size p))
-                                     (pool-submit! p line (lambda (answer) #t) w)
-                                     (each (+ w 1))))
-                                 (pool-drain! p)))
+                                 (if p
+                                     (begin
+                                       (let each ((w 0))
+                                         (when (< w (pool-size p))
+                                           (pool-submit! p line (lambda (answer) #t) w)
+                                           (each (+ w 1))))
+                                       (pool-drain! p))
+                                     (local line))))
                              (round (let skip ((xs ps) (n (length batch))) (if (= n 0) xs (skip (cdr xs) (- n 1))))))
                             (else
                              (let* ((entry (car es))
@@ -801,7 +840,7 @@
                                 ((>= landing-count landing-bound) (set! complete #f))
                                 ((null? pending) #t)
                                 (else
-                                 (if (and PARALLEL-DRAIN (pair? pool) (car pool))
+                                 (if (or (equal? PARALLEL-DRAIN-MODE "local") (and PARALLEL-DRAIN (pair? pool) (car pool)))
                                      (parallel-pass! pending
                                                      (lambda (key)
                                                        (set! checked (dict-set checked key #t))
@@ -871,7 +910,8 @@
                            (route-set-digest (dict-keys landings))
                            'covered (length (dict-keys covered))
                            (route-set-digest (dict-keys covered))
-                           'traps (length traps) (route-set-digest traps))))
+                           'traps (length traps) (route-set-digest traps)
+                           'proven (length (dict-keys return-proven)) (route-set-digest (dict-keys return-proven)))))
               ;; HARKFELL_ROUTE_REPORT: what the retained landings are, for
               ;; the landing bound: distinct cells, (cell, carry) pairs, poses
               ;; with tau removed, and the cells holding the most. Observation.

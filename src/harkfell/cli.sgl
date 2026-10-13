@@ -275,7 +275,10 @@
                            (measure (or (and (knob "HARKFELL_REGION_LANDING_BOUND")
                                              (string->number (knob "HARKFELL_REGION_LANDING_BOUND")))
                                         (equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0")
-                                        (equal? (knob "HARKFELL_ROUTE_ORDER") "baseline"))))
+                                        (equal? (knob "HARKFELL_ROUTE_ORDER") "baseline")
+                                        (knob "HARKFELL_REGION_TARGETS") (knob "HARKFELL_REGION_DRAIN_ROUNDS")
+                                        (knob "HARKFELL_REGION_DRAIN_ROUND")
+                                        (equal? (knob "HARKFELL_REGION_PARALLEL_DRAIN") "local"))))
                       (say (if (= failures 0) "PASS" "FAIL")
                            " Cloudstair regional replay: " (number->string failures)
                            " failures (final full-world progression NOT established)"
