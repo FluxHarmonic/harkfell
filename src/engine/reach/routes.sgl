@@ -78,6 +78,11 @@
     ;; first unreached guide-path edge replayed at every departure phase.
     (define ROUTE-REPORT
       (and (member (getenv "HARKFELL_ROUTE_REPORT") (list "1" "probe")) #t))
+    ;; HARKFELL_ROUTE_ORDER=baseline: the guided queue in its original order
+    ;; (depth + guide hops, ties on distance), for comparing orders. Order
+    ;; only, like the greedy default; the moves are the same.
+    (define ROUTE-ORDER-BASELINE
+      (equal? (getenv "HARKFELL_ROUTE_ORDER") "baseline"))
     (define ROUTE-PROBE
       (equal? (getenv "HARKFELL_ROUTE_REPORT") "probe"))
     (define (digest-step h tag node)
@@ -672,7 +677,9 @@
         (lambda (start target)
           (let ((queued #{}) (seen #{}) (count 0) (halted #f)
                 (physical (vector (make-vector 64 #f) 0 2 3))
-                (guided (vector (make-vector 64 #f) 0 6 1))
+                (guided (if ROUTE-ORDER-BASELINE
+                            (vector (make-vector 64 #f) 0 5 3)
+                            (vector (make-vector 64 #f) 0 6 1)))
                 (turn 'physical) (serial 0)
                 (stop-why #f) (cell-stats #{}) (cell-taus #{}))
             (define (stop! why)
@@ -741,10 +748,12 @@
                                  (or (< ra rb)
                                      (and (= ra rb) (< (manhattan (car a)) (manhattan (car b)))))))
                              cells))
-                     (graph (guide-of start))
-                     (tm (graph-tm graph))
-                     (dist (distance-for graph target))
-                     (dist-at (lambda (cell) (vector-ref dist (cell-index tm (car cell) (cdr cell))))))
+                     ;; only a guide the search already built: building one here
+                     ;; (seeded from start) would change later searches' guides
+                     (graph (and (guide-known? start) (guide-of start)))
+                     (tm (and graph (graph-tm graph)))
+                     (dist (and graph (distance-for graph target)))
+                     (dist-at (lambda (cell) (and dist (vector-ref dist (cell-index tm (car cell) (cdr cell)))))))
                 (write (list 'route-report 'target target 'expanded count 'stop stop-why
                              'heaps (list (vector-ref physical 1) (vector-ref guided 1))
                              'live (length live) 'cells-reached (length cells)

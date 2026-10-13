@@ -14,6 +14,10 @@
 # Without --prefix the two streams must be identical (finished legs).
 # With --prefix (legs stopped by a time limit) the shorter stream must be a
 # prefix of the longer, and at least one digest must be shared.
+# Guide lines ((world|rank)-candidates ... complete / digest) are compared with
+# their work counters (steps, repairs, reused, reused-walks) removed: REUSE
+# changes those by design. A log holding an error ("Error (" or "route check:")
+# is never SAME. With --prefix, a leg without a PASS/FAIL line is reported.
 # Exit 0 SAME, 1 DIFFER (first difference printed), 2 SETUP-FAILED.
 set -eu
 A=${1:-}; B=${2:-}; MODE=${3:-}
@@ -23,9 +27,17 @@ trap 'rm -rf "$TMP"' EXIT
 
 stream() {
   # drop the stamp, keep result lines only
-  sed 's/^[0-9]* //' "$1" | grep -a -E '^\((regional-search|world-search|route-digest|route-digest-at|coverage|world-coverage|region |region-sets|RED|candidate-geometry complete|world-candidates [^ ]* [^ ]* [^ ]* complete|world-acquisition|world-return|world-replay|world-bowl)|^(PASS|FAIL) ' || true
+  sed 's/^[0-9]* //' "$1" \
+    | grep -a -E '^\((regional-search|world-search|route-digest|route-digest-at|coverage|world-coverage|region |region-sets|RED|candidate-geometry complete|world-acquisition|world-return|world-replay|world-bowl)|^\((world|rank)-candidates .* (complete|digest)|^(PASS|FAIL) ' \
+    | sed -E 's/ \((steps|repairs|reused|reused-walks) \. [0-9]+\)//g' || true
 }
 stream "$A" > "$TMP/a"; stream "$B" > "$TMP/b"
+for f in "$A" "$B"; do
+  if grep -a -q -E 'Error \(|route check:' "$f"; then
+    echo "ERROR: $f holds an error line:"; grep -a -m 3 -E 'Error \(|route check:' "$f" | cut -c1-300
+    exit 1
+  fi
+done
 na=$(wc -l < "$TMP/a"); nb=$(wc -l < "$TMP/b")
 [ "$na" -gt 0 ] && [ "$nb" -gt 0 ] || { echo "SETUP-FAILED: a stream is empty (a=$na b=$nb lines): nothing to compare"; exit 2; }
 
@@ -48,6 +60,9 @@ if [ "$MODE" = "--prefix" ]; then
   if cmp -s "$TMP/a.p" "$TMP/b.p"; then
     [ "$shared" -gt 0 ] || { echo "SETUP-FAILED: the shared prefix ($n lines) holds no digest"; exit 2; }
     echo "SAME: the first $n result lines are identical ($shared digests among them)"
+    for s in a b; do
+      grep -q -E '^(PASS|FAIL) ' "$TMP/$s" || echo "note: $s has no PASS/FAIL line (stopped before a verdict)"
+    done
     exit 0
   fi
 else

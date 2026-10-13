@@ -582,12 +582,17 @@
         ;; The air fields by value. A field is a struct, and equal? on structs
         ;; is identity, so the list itself never matches another tilemap's:
         ;; guides built by steadying lifts get fresh fields each time, and
-        ;; REUSE then matched no anchor at all.
+        ;; REUSE then matched no anchor at all. A gated field also carries
+        ;; whether its gate cell is open here: body-step reads that cell
+        ;; wherever the body is in the footprint, outside any rectangle REUSE
+        ;; tracks, so a change of gate must invalidate every anchor.
         (define air-sig
           (map (lambda (fl)
-                 (list (air-field-x fl) (air-field-y fl) (air-field-w fl) (air-field-h fl)
-                       (air-field-lift fl) (air-field-east fl) (air-field-west fl)
-                       (air-field-pulsed fl) (air-field-gate fl)))
+                 (let ((gate (air-field-gate fl)))
+                   (list (air-field-x fl) (air-field-y fl) (air-field-w fl) (air-field-h fl)
+                         (air-field-lift fl) (air-field-east fl) (air-field-west fl)
+                         (air-field-pulsed fl) gate
+                         (and gate (not (kind-solid? (tile-at tm (car gate) (cdr gate))))))))
                (tilemap-air tm)))
         ;; What makes two representatives the same state.
         (define (rep-sig b)

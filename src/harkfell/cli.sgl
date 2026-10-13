@@ -266,10 +266,15 @@
                             (lambda (record) (write record) (newline))
                             pool)))
                     (when pool (pool-close! pool))
-                    (say (if (= failures 0) "PASS" "FAIL")
-                         " Cloudstair regional replay: " (number->string failures)
-                         " failures (final full-world progression NOT established)")
-                    (if (= failures 0) 0 1)))
+                    ;; HARKFELL_REGION_LANDING_BOUND is a measurement: say so on
+                    ;; the verdict line and exit 2, never 0 or 1
+                    (let ((measure (let ((v (getenv "HARKFELL_REGION_LANDING_BOUND")))
+                                     (and v (string->number v)))))
+                      (say (if (= failures 0) "PASS" "FAIL")
+                           " Cloudstair regional replay: " (number->string failures)
+                           " failures (final full-world progression NOT established)"
+                           (if measure " [landing-bound override: NOT a gate verdict]" ""))
+                      (cond (measure 2) ((= failures 0) 0) (else 1)))))
                 ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct))))
                   (let* ((n (reach-worker-count args))
                          (pool (and (> n 0)

@@ -94,7 +94,12 @@
                  (r (wire-read-value (cddr toks)))
                  (spec (car r))
                  (prior (assoc spec handlers))
-                 (handler (if prior (cdr prior) (geometry-task-handler (build spec)))))
+                 (handler (cond (prior (cdr prior))
+                                ;; a walk needs the graph its search loaded: a
+                                ;; fresh search here would walk nothing, silently
+                                ((string=? (cadr toks) "G")
+                                 (error "geometry worker: a walk for a search it does not hold" spec))
+                                (else (geometry-task-handler (build spec))))))
             (unless prior
               (set! handlers (cons (cons spec handler)
                                    (if (pair? handlers) (list (car handlers)) '()))))
