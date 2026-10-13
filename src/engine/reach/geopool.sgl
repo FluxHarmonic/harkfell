@@ -17,7 +17,7 @@
   (import (sigil list) (sigil string)
           (engine body) (engine reach) (engine reach wire) (engine reach pool))
 
-  (export make-geometry-remote geometry-task-handler)
+  (export make-geometry-remote geometry-task-handler geometry-spec-handler)
 
   (begin
     (define (script-value script) (string->symbol (wire-script script)))
@@ -82,13 +82,36 @@
                                                            (string->number (cadr toks))))))))
             (else (error "geometry worker: bad request" kind))))))
 
-    (define (make-geometry-remote pool)
-      (let ((results #{}) (walks #{}))
+    ;; A worker's answers to "S <op> <spec> ..." requests: (build spec) gives
+    ;; the vector (engine reach) returns for 'serve from the search spec
+    ;; names, and op is answered exactly as geometry-task-handler answers the
+    ;; unprefixed request. Guides are built one at a time, so only the last
+    ;; two specs' searches (each with its loaded graph) are kept.
+    (define (geometry-spec-handler build)
+      (let ((handlers '()))
+        (lambda (line)
+          (let* ((toks (wire-tokens line))
+                 (r (wire-read-value (cddr toks)))
+                 (spec (car r))
+                 (prior (assoc spec handlers))
+                 (handler (if prior (cdr prior) (geometry-task-handler (build spec)))))
+            (unless prior
+              (set! handlers (cons (cons spec handler)
+                                   (if (pair? handlers) (list (car handlers)) '()))))
+            (handler (wire-join (cons (cadr toks) (cdr r))))))))
+
+    ;; (make-geometry-remote pool [spec]): with spec, a wire-able value naming
+    ;; the search (for example (carry down starts)), every request is prefixed
+    ;; "S <op> <spec>" for workers that build that search on demand
+    ;; (geometry-spec-handler); the answers are the same.
+    (define (make-geometry-remote pool . spec)
+      (let ((results #{}) (walks #{})
+            (op (lambda (o) (if (pair? spec) (cons "S" (cons o (wire-value (car spec)))) (list o)))))
         (vector
           ;; request! k rep urgent?
           (lambda (k rep urgent?)
             ((if urgent? pool-submit-urgent! pool-submit!) pool
-             (wire-join (append (list "X" (number->string k)) (wire-value (wire-body-value rep))))
+             (wire-join (append (op "X") (list (number->string k)) (wire-value (wire-body-value rep))))
              (lambda (line)
                (let ((v (car (wire-read-value (cdr (wire-tokens line))))))
                  (set! results (dict-set results k
@@ -103,14 +126,14 @@
               r))
           ;; load! reps hops: the drained graph, to every worker, before walks
           (lambda (reps hops)
-            (let ((line (wire-join (cons "L" (wire-value (graph-value reps hops))))))
+            (let ((line (wire-join (append (op "L") (wire-value (graph-value reps hops))))))
               (let loop ((i 0))
                 (when (< i (pool-size pool))
                   (pool-submit! pool line (lambda (answer) #t) i)
                   (loop (+ i 1))))))
           ;; request-walk! k
           (lambda (k)
-            (pool-submit! pool (string-append "G " (number->string k))
+            (pool-submit! pool (wire-join (append (op "G") (list (number->string k))))
               (lambda (line)
                 (set! walks (dict-set walks k (value-walk (car (wire-read-value (cdr (wire-tokens line))))))))))
           ;; await-walk k

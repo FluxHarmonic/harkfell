@@ -10,7 +10,7 @@
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
   (export cloudstair-region-content cloudstair-region-check cloudstair-region-worker
-          cloudstair-region-waypoints cloudstair-carry-guides
+          cloudstair-region-waypoints cloudstair-carry-guides cloudstair-guide-server
           cloudstair-fingerprint
           cloudstair-reached-rooms cloudstair-entrance-probe)
 
@@ -157,17 +157,22 @@
                                          (cloudstair-shelter-checker ct advance)
                                          (cloudstair-waiter ct advance)
                                          (cloudstair-fingerprint ct)))
-             (geometry #f))
+             (geometry #f) (guides #f))
         (lambda (line)
-          (if (and (> (string-length line) 1) (memv (string-ref line 0) (list #\X #\L #\G)))
+          (cond
+            ;; per-(carry, down) guides: cloudstair-guide-builder's requests
+            ((and (> (string-length line) 1) (char=? (string-ref line 0) #\S))
+             (unless guides (set! guides (cloudstair-guide-server ct)))
+             (guides line))
+            ((and (> (string-length line) 1) (memv (string-ref line 0) (list #\X #\L #\G)))
               (begin
                 (unless geometry
                   (set! geometry
                     (geometry-task-handler
                       (reach-search-down (region-candidate-tm ct) HARKFELL-FEEL
                                          (list (start-cell ct)) witness-lands? #t #f 'serve))))
-                (geometry line))
-              (routes line)))))
+                (geometry line)))
+            (else (routes line))))))
 
     ;; Spatial guides per (carry, down), built as cloudstair-world-check
     ;; has always built its guides: carry's tiles with every lifting field
@@ -176,18 +181,31 @@
     ;; the first request, REUSING the memo of the latest guide with the same
     ;; down. (build carry down cell-thunk) returns the guide, building it
     ;; once per (carry, down); tag names its log lines.
-    (define (cloudstair-guide-builder tiles-for home log tag)
+    ;; A guide's tilemap: carry's tiles with every lifting field steady.
+    (define (cloudstair-guide-tm tiles-for carry)
+      (let ((tm (tiles-for carry)))
+        (tilemap tm air:
+          (filter-map
+            (lambda (field)
+              (and (> (air-field-lift field) 0)
+                   (air-field field pulsed: #f)))
+            (tilemap-air tm)))))
+
+    ;; A worker's side of the builder's pool: it answers "S" geometry
+    ;; requests by building the named (carry down starts) search itself.
+    (define (cloudstair-guide-server ct)
+      (let ((tiles-for (cloudstair-tile-provider ct)))
+        (geometry-spec-handler
+          (lambda (spec)
+            (reach-search-down* (cloudstair-guide-tm tiles-for (car spec)) HARKFELL-FEEL
+                                (caddr spec) witness-lands? (cadr spec) #f (quote ()) #f (quote serve))))))
+
+    (define (cloudstair-guide-builder tiles-for home log tag . pool)
       (let ((guides '()))
         (lambda (carry down cell-thunk)
           (let* ((key (cons carry down)) (prior (assoc key guides)))
             (if prior (cdr prior)
-                (let* ((tm (tiles-for carry))
-                       (tm (tilemap tm air:
-                             (filter-map
-                               (lambda (field)
-                                 (and (> (air-field-lift field) 0)
-                                      (air-field field pulsed: #f)))
-                               (tilemap-air tm))))
+                (let* ((tm (cloudstair-guide-tm tiles-for carry))
                        (base (find (lambda (entry) (eq? (cdar entry) down)) guides))
                        (cell (cell-thunk))
                        (starts (if (and cell (not (equal? cell home)))
@@ -200,7 +218,11 @@
                             (lambda (anchors steps kind cell)
                               (when (= (modulo anchors 100) 0)
                                 (log (list tag 'carry carry 'down down
-                                           'anchors anchors 'steps steps)))))))
+                                           'anchors anchors 'steps steps))))
+                            ;; with a pool, its workers expand the anchors and walk
+                            ;; the candidates REUSE cannot supply
+                            (and ROUTE-MEMO (pair? pool) (car pool)
+                                 (make-geometry-remote (car pool) (list carry down starts))))))
                     (set! guides (cons (cons key graph) guides))
                     (log (list tag 'carry carry 'down down
                                'complete 'stats (graph-stats graph)))
@@ -208,8 +230,8 @@
 
     ;; (lambda (node) guide): the guide for the node's own (carry, down),
     ;; first built from the node's cell. The world check's guides.
-    (define (cloudstair-carry-guides tiles-for cell-of home log tag)
-      (let ((build (cloudstair-guide-builder tiles-for home log tag)))
+    (define (cloudstair-carry-guides tiles-for cell-of home log tag . pool)
+      (let ((build (apply cloudstair-guide-builder tiles-for home log tag pool)))
         (lambda (node)
           (build (timed-node-data node) (body-down (timed-node-body node))
                  (lambda () (cell-of node))))))
@@ -284,7 +306,8 @@
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
         ;; Guide hops scored per (carry, down); moves from the region's guide.
-        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for home log (quote rank-candidates))
+        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for home log (quote rank-candidates)
+                                                                     (and (pair? pool) (car pool)))
                                             (content-pickup-cells ct) cell-of))
         (define (summary node)
           (let ((b (timed-node-body node)))
@@ -375,7 +398,8 @@
         ;; and a target behind it scores by way of the pickup that opens it.
         ;; Moves still come from candidate (the guide below), so this orders
         ;; the search and never changes what it can reach on exhaustion.
-        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for home log (quote rank-candidates))
+        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for home log (quote rank-candidates)
+                                                                     (and (pair? pool) (car pool)))
                                             (content-pickup-cells ct) cell-of))
         ;; Normalize TIME only by real no-input ticks from a certified rest.
         ;; The arrival's position, momentum, ability and carry are never set.

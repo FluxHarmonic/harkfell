@@ -1013,13 +1013,21 @@
         (define remote (and (pair? log) (pair? (cdr log)) (vector? (cadr log)) (cadr log)))
         (define serving (and (pair? log) (pair? (cdr log)) (eq? (cadr log) (quote serve))))
         (define requested-anchors (make-vector nk #f))
+        ;; expand! would take anchor k from the prior memo (REUSE): the same
+        ;; representative and nothing it touched changed. Fixed once k is
+        ;; queued, so a worker is asked only for anchors REUSE cannot supply.
+        (define (reusable? k)
+          (let ((p (and prior-exp (vector-ref prior-exp k))))
+            (and p (equal? (car p) (rep-sig (vector-ref reps k)))
+                 (not (rect-changed? (cadr p))))))
         (define (request-queued!)
           ;; every queued anchor will be expanded; ask for those not asked
           ;; yet, the next to be popped last so it is first in line
           (for-each (lambda (k)
                       (unless (vector-ref requested-anchors k)
                         (vector-set! requested-anchors k #t)
-                        ((vector-ref remote 0) k (vector-ref reps k) #t)))
+                        (unless (reusable? k)
+                          ((vector-ref remote 0) k (vector-ref reps k) #t))))
                     (reverse queue)))
         (define (expand-remote! k)
           (if REACH-CHECK
@@ -1054,7 +1062,7 @@
         (let drain ()
           (unless (null? queue)
             (let ((k (car queue)))
-              (if (and remote (not prior-exp))
+              (if (and remote (not (reusable? k)))
                   (begin
                     (request-queued!)
                     (set! queue (cdr queue))
@@ -1192,8 +1200,16 @@
                            (caddr r))
                       (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6)
                       (- steps s0) (- repaired r0)))))
-          (define walk-remote? (and remote (> (vector-length remote) 2) (not prior-cand)))
+          (define walk-remote? (and remote (> (vector-length remote) 2)))
+          ;; Each stand anchor's REUSE walk (or 'none), found once before any
+          ;; walk: a worker is asked only for walks REUSE cannot supply.
+          (define old-walks (make-vector nk #f))
           (define (prepare-remote-walks!)
+            (let loop ((k 0))
+              (when (< k nk)
+                (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
+                  (vector-set! old-walks k (or (walk-reused k) (quote none))))
+                (loop (+ k 1))))
             (when walk-remote?
               ((vector-ref remote 2)
                (let loop ((k 0) (acc '()))
@@ -1204,7 +1220,8 @@
                      (loop (+ k 1) (if (pair? (vector-ref hops k)) (cons (cons k (vector-ref hops k)) acc) acc)))))
               (let loop ((k 0))
                 (when (< k nk)
-                  (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
+                  (when (and (vector-ref reps k) (= (key-kind k) K-STAND)
+                             (eq? (vector-ref old-walks k) (quote none)))
                     ((vector-ref remote 3) k))
                   (loop (+ k 1))))))
           (define (remote-walk k)
@@ -1235,7 +1252,7 @@
           (let each ((k 0))
             (when (< k nkeys)
               (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
-                (let* ((old (walk-reused k))
+                (let* ((old (let ((o (vector-ref old-walks k))) (and (not (eq? o (quote none))) o)))
                        (r (or old (if walk-remote? (remote-walk k) (walk-from k))))
                        (i (let ((c (key-cell k))) (cell-index tm (car c) (cdr c)))))
                   (when old (set! reused-cands (+ reused-cands 1)))

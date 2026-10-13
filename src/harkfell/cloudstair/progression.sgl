@@ -7,7 +7,8 @@
           (engine reach) (engine reach timed) (engine reach routes)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes)
-          (only (harkfell cloudstair region) cloudstair-fingerprint cloudstair-carry-guides)
+          (only (harkfell cloudstair region) cloudstair-fingerprint cloudstair-carry-guides
+                cloudstair-guide-server)
           (only (engine reach pool) pool-verify!))
 
   (export cloudstair-world-check cloudstair-world-worker)
@@ -26,13 +27,21 @@
 
     ;; A worker for cloudstair-world-check's pool: the same content, advance,
     ;; shelter certificates and waiter, answering (engine reach routes)'
-    ;; wait, replay and certificate requests.
+    ;; wait, replay and certificate requests, and the guide builder's "S"
+    ;; geometry requests.
     (define (cloudstair-world-worker ct)
-      (let ((advance (route-rest-memo (cloudstair-stepper ct) WORLD-WORKER-REST-CAP)))
-        (route-task-handler advance
-                            (cloudstair-shelter-checker ct advance)
-                            (cloudstair-waiter ct advance)
-                            (cloudstair-fingerprint ct))))
+      (let* ((advance (route-rest-memo (cloudstair-stepper ct) WORLD-WORKER-REST-CAP))
+             (routes (route-task-handler advance
+                                         (cloudstair-shelter-checker ct advance)
+                                         (cloudstair-waiter ct advance)
+                                         (cloudstair-fingerprint ct)))
+             (guides #f))
+        (lambda (line)
+          (if (and (> (string-length line) 1) (char=? (string-ref line 0) #\S))
+              (begin
+                (unless guides (set! guides (cloudstair-guide-server ct)))
+                (guides line))
+              (routes line)))))
 
     ;; pool (optional): an (engine reach pool) of cloudstair-world-worker
     ;; processes. It changes how long the searches take, not what they find.
@@ -66,7 +75,10 @@
               (set! landing-count (+ landing-count 1))
               (when (>= landing-count bound) (set! complete #f)))))
         ;; One guide per (carry, down), shared with the region check.
-        (define guide-for (cloudstair-carry-guides tiles-for cell-of home log (quote world-candidates)))
+        ;; With a pool, its workers expand the guides' anchors and walk their
+        ;; candidates, whatever REUSE cannot supply.
+        (define guide-for (cloudstair-carry-guides tiles-for cell-of home log (quote world-candidates)
+                                                   (and (pair? pool) (car pool))))
         (define route
           (timed-route-finder advance tiles-for HARKFELL-FEEL guide-for shelter? wait
                               bound record! (lambda () (set! complete #f))
