@@ -10,7 +10,7 @@
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
   (export cloudstair-region-content cloudstair-region-check cloudstair-region-worker
-          cloudstair-region-waypoints
+          cloudstair-region-waypoints cloudstair-carry-guides
           cloudstair-fingerprint
           cloudstair-reached-rooms cloudstair-entrance-probe)
 
@@ -160,6 +160,91 @@
                 (geometry line))
               (routes line)))))
 
+    ;; Spatial guides per (carry, down), built as cloudstair-world-check
+    ;; has always built its guides: carry's tiles with every lifting field
+    ;; steady (suggestions only; an accepted edge replays the actual pulsed
+    ;; field), searched from home and, when it differs, the cell given at
+    ;; the first request, REUSING the memo of the latest guide with the same
+    ;; down. (build carry down cell-thunk) returns the guide, building it
+    ;; once per (carry, down); tag names its log lines.
+    (define (cloudstair-guide-builder tiles-for home log tag)
+      (let ((guides '()))
+        (lambda (carry down cell-thunk)
+          (let* ((key (cons carry down)) (prior (assoc key guides)))
+            (if prior (cdr prior)
+                (let* ((tm (tiles-for carry))
+                       (tm (tilemap tm air:
+                             (filter-map
+                               (lambda (field)
+                                 (and (> (air-field-lift field) 0)
+                                      (air-field field pulsed: #f)))
+                               (tilemap-air tm))))
+                       (base (find (lambda (entry) (eq? (cdar entry) down)) guides))
+                       (cell (cell-thunk))
+                       (starts (if (and cell (not (equal? cell home)))
+                                   (list home cell) (list home))))
+                  (log (list tag 'carry carry 'down down 'starting))
+                  (let ((graph
+                          (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down
+                            (and base (graph-memo (cdr base)))
+                            (if base (tilemap-changes (graph-tm (cdr base)) tm) '())
+                            (lambda (anchors steps kind cell)
+                              (when (= (modulo anchors 100) 0)
+                                (log (list tag 'carry carry 'down down
+                                           'anchors anchors 'steps steps)))))))
+                    (set! guides (cons (cons key graph) guides))
+                    (log (list tag 'carry carry 'down down
+                               'complete 'stats (graph-stats graph)))
+                    graph)))))))
+
+    ;; (lambda (node) guide): the guide for the node's own (carry, down),
+    ;; first built from the node's cell. The world check's guides.
+    (define (cloudstair-carry-guides tiles-for cell-of home log tag)
+      (let ((build (cloudstair-guide-builder tiles-for home log tag)))
+        (lambda (node)
+          (build (timed-node-data node) (body-down (timed-node-body node))
+                 (lambda () (cell-of node))))))
+
+    ;; The region check's guided-queue score, (rank node target): guide hops
+    ;; from the node's cell to target in the guide for the node's own
+    ;; (carry, down). When that guide has no path (a door this carry cannot
+    ;; open), the least over the pickups of a stone the carry lacks of: hops
+    ;; to the pickup in this guide, plus hops from the pickup to the target
+    ;; in the guide for carry plus that stone. #f when neither has a path.
+    ;; It only orders the search (see timed-route-finder's rank).
+    (define (cloudstair-carry-rank build pickups cell-of)
+      (let ((dists #{}))
+        (define (hops graph key from target)
+          ;; key names graph (its carry and down) for the distance cache
+          (let* ((k (cons key target))
+                 (d (or (dict-ref dists k #f)
+                        (let ((d (guide-distances graph target)))
+                          (set! dists (dict-set dists k d))
+                          d)))
+                 (tm (graph-tm graph)))
+            (vector-ref d (cell-index tm (car from) (cdr from)))))
+        (lambda (node target)
+          (let* ((cell (cell-of node))
+                 (carry (timed-node-data node))
+                 (down (body-down (timed-node-body node))))
+            (and cell
+                 (let ((g (build carry down (lambda () cell))))
+                   (or (hops g (cons carry down) cell target)
+                       (let loop ((ps pickups) (best #f))
+                         (if (null? ps)
+                             best
+                             (let* ((stone (car (car ps))) (pc (cdr (car ps)))
+                                    (total
+                                      (and (not (memv stone carry))
+                                           (let ((to-pickup (hops g (cons carry down) cell pc)))
+                                             (and to-pickup
+                                                  (let* ((more (carry-union carry (list stone)))
+                                                         (g2 (build more down (lambda () pc)))
+                                                         (on (hops g2 (cons more down) pc target)))
+                                                    (and on (+ to-pickup on))))))))
+                               (loop (cdr ps)
+                                     (if (and total (or (not best) (< total best))) total best))))))))))))
+
     ;; A diagnostic, never a verdict: from the profile's actual root, search
     ;; to each waypoint cell in turn, each search starting at the previous
     ;; search's actual arrival (body, phase and carry). The finder, guide,
@@ -189,6 +274,9 @@
         (define (cell-of node)
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
+        ;; Guide hops scored per (carry, down); moves from the region's guide.
+        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for home log (quote rank-candidates))
+                                            (content-pickup-cells ct) cell-of))
         (define (summary node)
           (let ((b (timed-node-body node)))
             (list 'cell (cell-of node) 'tau (body-tau b) 'carry (timed-node-data node)
@@ -204,7 +292,7 @@
                                      'pending pending 'depth depth 'at (cell-of node)
                                      'tau (body-tau (timed-node-body node)))))
                         (cloudstair-route-proposals ct) (and (pair? pool) (car pool))
-                        (vector-ref certs 2))))
+                        (vector-ref certs 2) rank)))
           (if (not root)
               (begin (log '(waypoints no-root)) 1)
               (let next-leg ((at root) (cells waypoints) (i 0))
@@ -269,6 +357,13 @@
         (define (cell-of node)
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
+        ;; The guided queue scores guide hops left in a guide for the node's
+        ;; own (carry, down), so a door the carry cannot open scores as shut,
+        ;; and a target behind it scores by way of the pickup that opens it.
+        ;; Moves still come from candidate (the guide below), so this orders
+        ;; the search and never changes what it can reach on exhaustion.
+        (define rank (cloudstair-carry-rank (cloudstair-guide-builder tiles-for home log (quote rank-candidates))
+                                            (content-pickup-cells ct) cell-of))
         ;; Normalize TIME only by real no-input ticks from a certified rest.
         ;; The arrival's position, momentum, ability and carry are never set.
         (define (align node tau)
@@ -287,7 +382,7 @@
                                        'expanded expanded 'pending pending 'depth depth
                                        'at (cell-of node) 'carry (timed-node-data node)
                                        'tau (body-tau (timed-node-body node)))))
-                          proposals (and (pair? pool) (car pool)) learn!))))
+                          proposals (and (pair? pool) (car pool)) learn! rank))))
               (unless prior (set! route-cache (cons (cons record! route) route-cache)))
               (route start target))))
         (for-each
@@ -385,6 +480,32 @@
                            'covered (length (dict-keys covered))
                            (route-set-digest (dict-keys covered))
                            'traps (length traps) (route-set-digest traps))))
+              ;; HARKFELL_ROUTE_REPORT: what the retained landings are, for
+              ;; the landing bound: distinct cells, (cell, carry) pairs, poses
+              ;; with tau removed, and the cells holding the most. Observation.
+              (when ROUTE-REPORT
+                (let* ((rests (map cdr (dict-entries landings)))
+                       (tally (lambda (xs)
+                                (let count ((xs xs) (d #{}))
+                                  (if (null? xs) d
+                                      (count (cdr xs) (dict-set d (car xs) (+ 1 (dict-ref d (car xs) 0))))))))
+                       (by-cell (list-sort (lambda (a b) (> (cdr a) (cdr b)))
+                                           (dict-entries (tally (map cell-of rests)))))
+                       (cell-carry (dict-keys (tally (map (lambda (n) (cons (cell-of n) (timed-node-data n)))
+                                                          rests))))
+                       (poses (dict-keys (tally (map (lambda (n)
+                                                       (timed-key (timed-node n body: (body (timed-node-body n) tau: 0))))
+                                                     rests)))))
+                  (log (list 'region-landings 'carry carry 'down down
+                             'landings (length rests)
+                             'distinct-cells (length by-cell)
+                             'distinct-cell-carry (length cell-carry)
+                             'distinct-poses-without-tau (length poses)
+                             'at-phase-0 (length (filter (lambda (n) (= 0 (body-tau (timed-node-body n)))) rests))
+                             'sheltered-rotations (length (dict-keys rotations))
+                             'top-cells (let first ((xs by-cell) (n 12) (acc '()))
+                                          (if (or (null? xs) (= n 0)) (reverse acc)
+                                              (first (cdr xs) (- n 1) (cons (car xs) acc))))))))
               (set! failures (+ failures entry-fails (length unreached) (length traps)
                                 (if complete 0 1)))
               (log (list 'region 'carry carry 'down down 'entry-phases AIR-PERIOD

@@ -493,3 +493,41 @@
                                (equal? (timed-key node) (timed-key arrival)))
                              trace))))
               loop-trace)))))))
+
+(test-group "timed routes: a rank orders the search, never its moves"
+  ;; The moves guide has one edge, (1,2) to (7,2), whose script really lands
+  ;; at TARGET, so the search exhausts. The rank is gated by carry, like a
+  ;; door: without stone 5 it says "no path" (#f); with it, one hop. Every
+  ;; step acquires stone 5, so the start ranks as shut and every later
+  ;; state as open. With or without the rank, the exhausted search must
+  ;; record exactly the same states: the rank may only reorder.
+  (test "an exhausted search records the same states with and without a carry-gated rank"
+    (let* ((take (lambda (node in) (timed-node (step node in) data: '(2 4 5))))
+           (moves (guide '(7 . 2)))
+           (ranked 0)
+           (rank (lambda (node target)
+                   (set! ranked (+ ranked 1))
+                   (and (memv 5 (timed-node-data node)) 1)))
+           (explore
+             (lambda (rank)
+               (let* ((recorded '())
+                      (route (apply timed-route-finder take (lambda (carry) TM) F
+                               (lambda (node) moves)
+                               (lambda (node) (timed-shelter? TM F take node))
+                               (timed-waiter TM F take) 50
+                               (lambda (node) (set! recorded (cons (timed-key node) recorded)))
+                               (lambda () #t)
+                               (if rank
+                                   (list #f (lambda (node) '()) #f #f rank)
+                                   (list #f (lambda (node) '()))))))
+                 (cons (route START '(7 . 2)) recorded))))
+           (plain (explore #f))
+           (ordered (explore rank))
+           (same-members? (lambda (xs ys) (every (lambda (x) (member x ys)) xs))))
+      (assert-false (car plain))
+      (assert-false (car ordered))
+      (assert-true (> ranked 0))
+      (assert-true (> (length (cdr plain)) 2))
+      (assert-equal (length (cdr plain)) (length (cdr ordered)))
+      (assert-true (same-members? (cdr plain) (cdr ordered)))
+      (assert-true (same-members? (cdr ordered) (cdr plain))))))

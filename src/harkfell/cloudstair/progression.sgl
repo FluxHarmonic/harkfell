@@ -7,7 +7,7 @@
           (engine reach) (engine reach timed) (engine reach routes)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes)
-          (only (harkfell cloudstair region) cloudstair-fingerprint)
+          (only (harkfell cloudstair region) cloudstair-fingerprint cloudstair-carry-guides)
           (only (engine reach pool) pool-verify!))
 
   (export cloudstair-world-check cloudstair-world-worker)
@@ -50,7 +50,7 @@
              (initial-body (and home (real-stand-body (tiles-for '()) HARKFELL-FEEL
                                                      (car home) (cdr home))))
              (initial (and initial-body (timed-node body: initial-body)))
-             (guides '()) (landings #{}) (covered #{}) (history '())
+             (landings #{}) (covered #{}) (history '())
              (complete #t) (failures 0) (traps '()) (unreached '())
              (landing-count 0) (bowl-proof #f))
         (define (cell-of node)
@@ -65,37 +65,8 @@
               (set! landings (dict-set landings key rest))
               (set! landing-count (+ landing-count 1))
               (when (>= landing-count bound) (set! complete #f)))))
-        (define (guide-for node)
-          (let* ((carry (timed-node-data node))
-                 (down (body-down (timed-node-body node)))
-                 (key (cons carry down)) (prior (assoc key guides)))
-            (if prior (cdr prior)
-                (let* ((tm (tiles-for carry))
-                       ;; Geometry suggestions may pretend lift is steady;
-                       ;; every accepted edge replays the actual pulsed field.
-                       (tm (tilemap tm air:
-                             (filter-map
-                               (lambda (field)
-                                 (and (> (air-field-lift field) 0)
-                                      (air-field field pulsed: #f)))
-                               (tilemap-air tm))))
-                       (base (find (lambda (entry) (eq? (cdar entry) down)) guides))
-                       (cell (cell-of node))
-                       (starts (if (and cell (not (equal? cell home)))
-                                   (list home cell) (list home))))
-                  (log (list 'world-candidates 'carry carry 'down down 'starting))
-                  (let ((graph
-                          (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down
-                            (and base (graph-memo (cdr base)))
-                            (if base (tilemap-changes (graph-tm (cdr base)) tm) '())
-                            (lambda (anchors steps kind cell)
-                              (when (= (modulo anchors 100) 0)
-                                (log (list 'world-candidates 'carry carry 'down down
-                                           'anchors anchors 'steps steps)))))))
-                    (set! guides (cons (cons key graph) guides))
-                    (log (list 'world-candidates 'carry carry 'down down
-                               'complete 'stats (graph-stats graph)))
-                    graph)))))
+        ;; One guide per (carry, down), shared with the region check.
+        (define guide-for (cloudstair-carry-guides tiles-for cell-of home log (quote world-candidates)))
         (define route
           (timed-route-finder advance tiles-for HARKFELL-FEEL guide-for shelter? wait
                               bound record! (lambda () (set! complete #f))

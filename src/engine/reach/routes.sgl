@@ -6,7 +6,7 @@
           (engine reach prof) (engine reach wire) (engine reach pool))
 
   (export timed-route-finder route-task-handler route-set-digest ROUTE-DIGEST ROUTE-CHECK ROUTE-MEMO
-          route-rest-memo pose-key route-certificate-cache)
+          ROUTE-REPORT route-rest-memo pose-key route-certificate-cache guide-distances)
 
   (begin
     (define (still? node)
@@ -277,6 +277,10 @@
             (let ((r (wire-read-node toks)))
               (loop (cdr r) (- n 1) (cons (car r) acc))))))
 
+    ;; Guide hops from every cell to target over graph's edges (#f: no path),
+    ;; as a vector by cell index.
+    (define (guide-distances graph target) (distances graph target))
+
     (define (distances graph target)
       (let* ((tm (graph-tm graph)) (n (* (tilemap-cols tm) (tilemap-rows tm)))
              (incoming (make-vector n '())) (dist (make-vector n #f)))
@@ -311,6 +315,13 @@
     ;; node -> input-family list callback. A family generates inputs from
     ;; the actual departure node after any proved wait. These receive the
     ;; same physical replay as the spatial suggestions.
+    ;; After them: a worker pool, learn!, and rank. rank (optional) maps an
+    ;; actual node and the target to guide hops left (#f: no path), used ONLY
+    ;; to score the guided queue. The moves are always guides' witness
+    ;; scripts, so a rank changes the order of expansion and never the
+    ;; successor relation: a search that exhausts explores the same states
+    ;; with or without it (unreached and trap verdicts from exhaustion are
+    ;; unchanged), and an arrival is still an actual replay.
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete! . reports)
       (let ((distance-cache '()) (invariant-rests #{})
@@ -321,7 +332,10 @@
             ;; (learn! 'wait node phase proof) hand the caller certificates a
             ;; worker computed, for the caller's own shelter? and wait.
             (learn! (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
-                         (pair? (cdr (cdr (cdr reports)))) (car (cdr (cdr (cdr reports)))))))
+                         (pair? (cdr (cdr (cdr reports)))) (car (cdr (cdr (cdr reports))))))
+            (rank (and (pair? reports) (pair? (cdr reports)) (pair? (cddr reports))
+                       (pair? (cdddr reports)) (pair? (cdr (cdddr reports)))
+                       (car (cdr (cdddr reports))))))
         (define (cell-of node)
           (and (still? node)
                (rest-cell (tiles-for (timed-node-data node)) f (timed-node-body node))))
@@ -603,9 +617,11 @@
         (define (remaining node target)
           (let ((cell (cell-of node)))
             (if cell
-                (let* ((graph (guide-of node)) (tm (graph-tm graph))
-                       (dist (distance-for graph target)))
-                  (or (vector-ref dist (cell-index tm (car cell) (cdr cell))) 100000))
+                (if rank
+                    (or (rank node target) 100000)
+                    (let* ((graph (guide-of node)) (tm (graph-tm graph))
+                            (dist (distance-for graph target)))
+                      (or (vector-ref dist (cell-index tm (car cell) (cdr cell))) 100000)))
                 100000)))
         (define (observe trace target)
           (prof-time 'time-observe (lambda () (observe* trace target))))
