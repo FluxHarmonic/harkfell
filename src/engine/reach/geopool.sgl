@@ -85,8 +85,8 @@
     ;; A worker's answers to "S <op> <spec> ..." requests: (build spec) gives
     ;; the vector (engine reach) returns for 'serve from the search spec
     ;; names, and op is answered exactly as geometry-task-handler answers the
-    ;; unprefixed request. Guides are built one at a time, so only the last
-    ;; two specs' searches (each with its loaded graph) are kept.
+    ;; unprefixed request. Guides are built one at a time, so only the latest
+    ;; spec's search (with its loaded graph) is kept.
     (define (geometry-spec-handler build)
       (let ((handlers '()))
         (lambda (line)
@@ -101,8 +101,7 @@
                                  (error "geometry worker: a walk for a search it does not hold" spec))
                                 (else (geometry-task-handler (build spec))))))
             (unless prior
-              (set! handlers (cons (cons spec handler)
-                                   (if (pair? handlers) (list (car handlers)) '()))))
+              (set! handlers (list (cons spec handler))))
             (handler (wire-join (cons (cadr toks) (cdr r))))))))
 
     ;; (make-geometry-remote pool [spec]): with spec, a wire-able value naming

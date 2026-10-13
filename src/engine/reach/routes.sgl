@@ -329,7 +329,7 @@
     ;; unchanged), and an arrival is still an actual replay.
     (define (timed-route-finder advance tiles-for f guides shelter? wait
                                 bound record! incomplete! . reports)
-      (let ((distance-cache '()) (invariant-rests #{})
+      (let ((distance-cache '()) (invariant-rests #{}) (inv-size 0)
             (replays #{}) (waits #{}) (rest-stages #{}) (requested #{}) (cert-pending #{}) (guide-keys #{}) (memo-size 0) (graph-ids (quote ())) (digest 0)
             (pool (and ROUTE-MEMO (pair? reports) (pair? (cdr reports))
                        (pair? (cddr reports)) (caddr reports)))
@@ -630,6 +630,7 @@
                                  (prof-inc! 'inv-miss)
                                  (route-invariant-proof advance shelter? node)))))
                        (set! invariant-rests (dict-set invariant-rests key proved))
+                       (set! inv-size (+ inv-size 1))
                        proved)))))
         (define (remaining node target)
           (let ((cell (cell-of node)))
@@ -988,6 +989,9 @@
               ;; again empty (anything dropped is simply computed again).
               (when (> memo-size ROUTE-MEMO-CAP)
                 (set! replays #{}) (set! waits #{}) (set! requested #{}) (set! memo-size 0))
+              ;; the pose-keyed invariant-rest proofs too (each is recomputed exactly)
+              (when (> inv-size ROUTE-MEMO-CAP)
+                (set! invariant-rests #{}) (set! rest-stages #{}) (set! inv-size 0))
               (when pool
                 ;; guesses: the heads of the queue the next pop prefers, then
                 ;; of the other (turn has already flipped for the next pop)
@@ -1052,6 +1056,9 @@
                                         (depart (cdr phases)))))
                                (try (cdr edges)))))))))
             (set! digest 0)
+            ;; distances for this search's target only (a vector per graph and
+            ;; target would add up over a region's hundreds of targets)
+            (set! distance-cache (filter (lambda (e) (equal? (cadr e) target)) distance-cache))
             (let ((found
             (if (at-goal? start target)
                 start

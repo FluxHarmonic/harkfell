@@ -2,7 +2,7 @@
 ;;; only. Every accepted route starts at an actual body, retains acquisitions
 ;;; and phase, and has an independently replayed physical route back out.
 (define-library (harkfell cloudstair region)
-  (import (sigil list) (only (sigil process) getenv)
+  (import (sigil list) (only (sigil process) getenv) (only (sigil gc) gc-stats)
           (engine body) (engine air) (engine tilemap) (engine worldmap)
           (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
           (engine reach geopool) (only (engine reach pool) pool-verify!)
@@ -255,6 +255,12 @@
                             ;; the candidates REUSE cannot supply
                             (and ROUTE-MEMO (pair? pool) (car pool)
                                  (make-geometry-remote (car pool) (list carry down starts))))))
+                    ;; The base's REUSE memo has served: only the latest guide per
+                    ;; down is ever a base, so keep the base's graph and drop its
+                    ;; memo (memory; a later need simply rebuilds).
+                    (when base
+                      (set! guides (map (lambda (e) (if (eq? e base) (cons (car e) (reach-graph (cdr e) memo: #f)) e))
+                                        guides)))
                     (set! guides (cons (cons key graph) guides))
                     (log (list tag 'carry carry 'down down
                                'complete 'stats (graph-stats graph)))
@@ -291,7 +297,7 @@
     ;; in the guide for carry plus that stone. #f when neither has a path.
     ;; It only orders the search (see timed-route-finder's rank).
     (define (cloudstair-carry-rank build pickups cell-of)
-      (let ((dists #{}))
+      (let ((dists #{}) (last-target #f))
         (define (hops graph key from target)
           ;; key names graph (its carry and down) for the distance cache
           (let* ((k (cons key target))
@@ -302,6 +308,11 @@
                  (tm (graph-tm graph)))
             (vector-ref d (cell-index tm (car from) (cdr from)))))
         (lambda (node target)
+          ;; distances for one target at a time: the region seeks its targets
+          ;; in turn, and a vector per (guide, target) would add up
+          (unless (equal? target last-target)
+            (set! dists #{})
+            (set! last-target target))
           (let* ((cell (cell-of node))
                  (carry (timed-node-data node))
                  (down (body-down (timed-node-body node))))
@@ -545,6 +556,10 @@
                         (when (= (modulo target-count 20) 0)
                           (log (list 'coverage 'carry carry 'targets target-count
                                      'landings landing-count 'unreached (length unreached))))
+                        ;; HARKFELL_ROUTE_REPORT: the process's resident memory here
+                        (when ROUTE-REPORT
+                          (log (list (quote region-memory) (quote targets) target-count
+                                     (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0))))))
                         (if (or (>= landing-count landing-bound) (not complete))
                             (set! complete #f)
                             (begin
@@ -592,7 +607,8 @@
                                        (when (= 0 (modulo n-checked 50))
                                          (log (list (quote region-drain) (quote checked) n-checked
                                                     (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
-                                                    (quote memo-stops) memo-stops (quote traps) (length traps))))
+                                                    (quote memo-stops) memo-stops (quote traps) (length traps)
+                                                    (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0))))))
                                        (when search-incomplete
                                          (set! complete #f)
                                          (log (list 'RED 'regional-return-bound 'carry carry
