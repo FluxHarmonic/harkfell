@@ -655,8 +655,8 @@
             ((car reports) node target count pending depth)))
         (lambda (start target)
           (let ((queued #{}) (seen #{}) (count 0) (halted #f)
-                (physical (vector (make-vector 64 #f) 0 2))
-                (guided (vector (make-vector 64 #f) 0 5))
+                (physical (vector (make-vector 64 #f) 0 2 3))
+                (guided (vector (make-vector 64 #f) 0 5 6))
                 (turn 'physical) (serial 0)
                 (stop-why #f) (cell-stats #{}) (cell-taus #{}))
             (define (stop! why)
@@ -826,13 +826,21 @@
                     (+ (abs (- (car cell) (car target)))
                        (abs (- (cdr cell) (cdr target))))
                     100000)))
+            ;; Each queue is #(heap size score tie): entries compare by score,
+            ;; then tie, then Manhattan distance, then age. The physical queue
+            ;; (score depth + distance) breaks ties on distance; the guided queue
+            ;; (score depth + guide hops) on guide hops left, so among equal
+            ;; estimates it expands the state furthest along the guide first.
+            ;; Order only: a search that exhausts explores the same states.
             (define (before? queue a b)
-              (let ((score (vector-ref queue 2)))
+              (let ((score (vector-ref queue 2)) (tie (vector-ref queue 3)))
                 (or (< (vector-ref a score) (vector-ref b score))
                     (and (= (vector-ref a score) (vector-ref b score))
-                         (or (< (vector-ref a 3) (vector-ref b 3))
-                             (and (= (vector-ref a 3) (vector-ref b 3))
-                                  (< (vector-ref a 4) (vector-ref b 4))))))))
+                         (or (< (vector-ref a tie) (vector-ref b tie))
+                             (and (= (vector-ref a tie) (vector-ref b tie))
+                                  (or (< (vector-ref a 3) (vector-ref b 3))
+                                      (and (= (vector-ref a 3) (vector-ref b 3))
+                                           (< (vector-ref a 4) (vector-ref b 4))))))))))
             (define (push-entry! queue entry)
               (let ((heap (vector-ref queue 0)) (size (vector-ref queue 1)))
                 (when (= size (vector-length heap))
@@ -868,8 +876,9 @@
                     (else
                      (set! queued (dict-set queued key depth))
                      (let* ((distance (physical-distance node))
+                            (left (remaining node target))
                             (entry (vector node depth (+ depth distance) distance serial
-                                           (+ depth (remaining node target)))))
+                                           (+ depth left) left)))
                        (set! serial (+ serial 1))
                        (push-entry! physical entry)
                        (push-entry! guided entry)
