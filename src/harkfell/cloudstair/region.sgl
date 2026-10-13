@@ -728,7 +728,7 @@
                         (set! landings (dict-set landings key rest))
                         (set! landing-count (+ landing-count 1)))))))
               ;; The parallel drain's pass over pending landings: rounds of
-              ;; 2 per worker, each a whole return search on a worker against
+              ;; DRAIN-ROUND landings, each a whole return search on a worker against
               ;; the proven set frozen at the round's start; answers merge in
               ;; landing order, then the round's proven keys go to every
               ;; worker. A search never reads the landings it records, so
@@ -821,7 +821,7 @@
                                               (quote landings) landing-count (quote proven) (length (dict-keys return-proven))
                                               (quote memo-stops) memo-stops (quote traps) (length traps)
                                               (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0)))
-                                              (quote parallel) (pool-size p))))
+                                              (quote parallel) (if p (pool-size p) (quote local)))))
                                  (merge (cdr es) (+ i 1) fresh)))))))))))
               (set! search-incomplete #f)
               (set! return-proven #{}) (set! return-proven-exact #{}) (set! memo-stops 0) (set! n-checked 0)
