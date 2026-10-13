@@ -6,7 +6,7 @@
 #   scripts/gate-remote depths-focused dev build and focused systems tests
 #   scripts/gate-remote depths-full integrated suite, release, reach, sound/look and web gates
 #   scripts/gate-remote depths-followup suite/sound, affected look and unfinished web/A3 gates
-#   scripts/gate-remote depths-diagnostics startup, look palette/pools and Underhum reach;
+#   scripts/gate-remote depths-diagnostics startup, look palette/pools, A4 SOUND and Underhum reach;
 #                                  GATE_POOL_RED names the authored overlay control
 #   scripts/gate-remote depths-water-paths dev build, path tests and wet/dry route diagnostics
 #   scripts/gate-remote depths-water-check also focused systems tests and strict water fixtures
@@ -125,6 +125,8 @@ case "$JOB" in
       step look-pools env GATE_POOL_RED="$HOME/work/reedfen-overlay-map.png" guix shell imagemagick -- scripts/gate-look --pools
     fi
     if step build-release scripts/dev sigil build --config release; then
+      step build-sketchbook scripts/dev sh -c 'cd sketchbook && sigil deps install && sigil build --config release'
+      step gate-a4-sound guix shell ffmpeg -- scripts/gate-a4-sound
       step underhum-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
     fi ;;
   depths-followup)
