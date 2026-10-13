@@ -455,6 +455,22 @@
         (define (cell-of node)
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
+        ;; The drain proves landings nearest home first (guide hops to home in
+        ;; the candidate guide; ties keep the landings' own order), so a later
+        ;; return finds proven states near it to stop at. Order only: the same
+        ;; landings are checked; which proven states exist when is what changes.
+        (define home-hops (guide-distances candidate home))
+        (define (home-first entries)
+          (let ((hops (lambda (e)
+                        (let ((c (cell-of (cdr e))))
+                          (or (and c (vector-ref home-hops (cell-index (graph-tm candidate) (car c) (cdr c))))
+                              100000)))))
+            (map caddr
+                 (list-sort (lambda (a b) (or (< (car a) (car b))
+                                              (and (= (car a) (car b)) (< (cadr a) (cadr b)))))
+                            (let number ((es entries) (i 0) (acc (quote ())))
+                              (if (null? es) (reverse acc)
+                                  (number (cdr es) (+ i 1) (cons (list (hops (car es)) i (car es)) acc))))))))
         ;; The guided queue scores guide hops left in a guide for the node's
         ;; own (carry, down), so a door the carry cannot open scores as shut,
         ;; and a target behind it scores by way of the pickup that opens it.
@@ -576,9 +592,10 @@
                     ;; New landings from return trials also create obligations.
                     (let ((checked #{}))
                       (let drain ()
-                        (let ((pending (filter (lambda (entry)
-                                                 (not (dict-contains? checked (car entry))))
-                                               (dict-entries landings))))
+                        (let ((pending (home-first
+                                        (filter (lambda (entry)
+                                                  (not (dict-contains? checked (car entry))))
+                                                (dict-entries landings)))))
                           (cond ((not complete) #f)
                                 ((>= landing-count landing-bound) (set! complete #f))
                                 ((null? pending) #t)
