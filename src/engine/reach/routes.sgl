@@ -2,7 +2,8 @@
 ;;; scripts only; accepted motion and waits have directed physical proofs.
 (define-library (engine reach routes)
   (import (sigil list)
-          (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed))
+          (engine body) (engine air) (engine tilemap) (engine reach) (engine reach timed)
+          (engine reach prof))
 
   (export timed-route-finder)
 
@@ -72,13 +73,26 @@
                    ((not node) (reverse rev))
                    ((or (still? node) (= n 180)) (reverse rev))
                    (else
+                    (prof-inc! 'tick-settle)
                     (let ((next (advance node NO-INTENT)))
                       (settle next (+ n 1) (cons next rev)))))))
               (else
+               (prof-inc! 'tick-script)
                (let ((next (advance node (car script))))
                  (if (and (timed-wait? node next) (not (shelter? node)))
                      (reverse (cons node rev))
                      (run next (cdr script) (cons node rev))))))))
+        ;; Profiled wrappers (observation only, (engine reach prof)).
+        (define (timed-wait node phase)
+          (when (prof-on?)
+            (prof-inc! 'wait-call)
+            (prof-seen! 'wait (list (timed-key node) phase)))
+          (prof-time 'time-wait (lambda () (wait node phase))))
+        (define (timed-replay node script key)
+          (when (prof-on?)
+            (prof-inc! 'replay-call)
+            (when key (prof-seen! 'replay (cons (timed-key node) key))))
+          (prof-time 'time-replay (lambda () (replay node script))))
         ;; Keys with tau removed describe poses for waiting certificates,
         ;; never simulated arrivals.
         ;; Hidden fields and product state must remain identical on every
@@ -91,14 +105,19 @@
                  (if (dict-contains? invariant-rests key)
                      (dict-ref invariant-rests key)
                      (let ((proved
-                             (and (shelter? node)
-                                  (let loop ((node node) (left (* 2 AIR-PERIOD)))
-                                    (if (= left 0)
-                                        #t
-                                        (let ((next (advance node NO-INTENT)))
-                                          (and (timed-wait? node next)
-                                               (equal? key (rotation-key next))
-                                               (loop next (- left 1)))))))))
+                             (prof-time 'time-inv
+                               (lambda ()
+                                 (prof-inc! 'inv-miss)
+                                 (and (shelter? node)
+                                      (let loop ((node node) (left (* 2 AIR-PERIOD)))
+                                        (if (= left 0)
+                                            #t
+                                            (begin
+                                              (prof-inc! 'tick-inv)
+                                              (let ((next (advance node NO-INTENT)))
+                                                (and (timed-wait? node next)
+                                                     (equal? key (rotation-key next))
+                                                     (loop next (- left 1))))))))))))
                        (set! invariant-rests (dict-set invariant-rests key proved))
                        proved)))))
         (define (remaining node target)
@@ -109,6 +128,8 @@
                   (or (vector-ref dist (cell-index tm (car cell) (cdr cell))) 100000))
                 100000)))
         (define (observe trace target)
+          (prof-time 'time-observe (lambda () (observe* trace target))))
+        (define (observe* trace target)
           (for-each (lambda (node) (when (still? node) (record! node))) trace)
           (let* ((end (last-node trace))
                  (goal (if (and end (equal? (cell-of end) target))
@@ -258,7 +279,7 @@
                             (and (not halted) (pair? phases)
                                  (or
                                    (let* ((proof (and (not (eq? (car phases) 'actual))
-                                                      (wait node (car phases))))
+                                                      (timed-wait node (car phases))))
                                           (stage (if (eq? (car phases) 'actual) node
                                                      (and proof (car proof)))))
                                      (and stage
@@ -266,7 +287,7 @@
                                             (and (not halted) (pair? families)
                                                  (or
                                                    (resume
-                                                     (observe (replay stage ((car families) stage)) target)
+                                                     (observe (timed-replay stage ((car families) stage) #f) target)
                                                      (+ depth 1)
                                                      (lambda (end) (progress? node end)))
                                                    (try (cdr families)))))))
@@ -292,7 +313,9 @@
                                    (append (make-list 120 (intent v: v))
                                            (make-list 180 NO-INTENT))) '(-1 1))))))
                       (and (not halted) (pair? scripts)
-                           (or (resume (observe (replay node (car scripts)) target)
+                           (or (resume (observe (timed-replay node (car scripts)
+                                                              (list 'recover (length scripts)))
+                                                target)
                                        (+ depth 1) still?)
                                (recover (cdr scripts)))))
                     (let* ((graph (guides node)) (tm (graph-tm graph))
@@ -305,6 +328,8 @@
                                     (or (vector-ref dist (cell-index tm (caar b) (cdar b)))
                                         100000)))
                                (graph-edges-from graph cell))))
+                      (prof-inc! 'exp-cell)
+                      (prof-add! 'edges (length edges))
                       (let try ((edges edges))
                         (and (not halted) (pair? edges)
                              (or
@@ -312,12 +337,15 @@
                                  (and (not halted) (pair? phases)
                                       (or
                                         (let* ((proof (and (not (eq? (car phases) 'actual))
-                                                           (wait node (car phases))))
+                                                           (timed-wait node (car phases))))
                                                (stage (if (eq? (car phases) 'actual) node
                                                           (and proof (car proof)))))
                                           (and stage
                                                (resume
-                                                 (observe (replay stage (witness-script (cdar edges))) target)
+                                                 (observe (timed-replay stage (witness-script (cdar edges))
+                                                                        (list cell (caar edges)
+                                                                              (length (witness-script (cdar edges)))))
+                                                          target)
                                                  (+ depth 1)
                                                  (lambda (end)
                                                    ;; Repositioning and hidden body changes
@@ -355,4 +383,8 @@
                               (set! turn (if (eq? turn 'physical) 'guided 'physical))
                               (report node target count
                                       (+ (vector-ref physical 1) (vector-ref guided 1)) depth)
-                              (or (expand node depth) (search)))))))))))))))
+                              (prof-inc! 'expansions)
+                              (when (and (prof-on?) (= (modulo count 25) 0))
+                                (prof-report (list 'target target 'count count)))
+                              (or (prof-time 'time-expand (lambda () (expand node depth)))
+                                  (search)))))))))))))))

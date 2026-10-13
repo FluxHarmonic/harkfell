@@ -4,7 +4,7 @@
 (define-library (harkfell cloudstair region)
   (import (sigil list)
           (engine body) (engine air) (engine tilemap) (engine worldmap)
-          (engine reach) (engine reach timed) (engine reach routes)
+          (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
@@ -120,8 +120,8 @@
                      (log (list 'candidate-geometry 'anchors anchors 'steps steps))))))
              (advance (cloudstair-stepper ct))
              (tiles-for (cloudstair-tile-provider ct))
-             (wait (cloudstair-waiter ct advance))
-             (shelter? (cloudstair-shelter-checker ct advance))
+             (wait (cloudstair-waiter ct (prof-advance 'tick-waiter advance)))
+             (shelter? (cloudstair-shelter-checker ct (prof-advance 'tick-shelter advance)))
              (proposals (cloudstair-route-proposals ct))
              (targets (apply append
                         (map (lambda (p)
@@ -132,6 +132,7 @@
              (route-cache '()) (entry-rooms (cloudstair-entrance-probe source)) (failures 0)
              (search-incomplete #f))
         (log (list 'candidate-geometry 'complete 'stats (graph-stats candidate)))
+        (prof-report 'candidate-geometry-complete)
         (define (cell-of node)
           (and (still? node) (rest-cell (tiles-for (timed-node-data node))
                                      HARKFELL-FEEL (timed-node-body node))))
@@ -141,6 +142,7 @@
           (let ((proof (wait node tau)))
             (and proof (car proof))))
         (define (seek start target record!)
+          (prof-inc! 'seek)
           (let ((prior (find (lambda (entry) (eq? (car entry) record!)) route-cache)))
             (let ((route
                     (if prior (cdr prior)
@@ -165,6 +167,9 @@
                    (covered #{})
                    (target-count 0))
               (define (record! node)
+                (prof-inc! 'record-call)
+                (prof-time 'time-record (lambda () (record*! node))))
+              (define (record*! node)
                 (let ((cell (cell-of node)))
                   (when cell (set! covered (dict-set covered cell #t))))
                 (let ((rotation (and (shelter? node)
@@ -237,6 +242,7 @@
                       (log (list 'RED 'entry-bypass 'carry carry 'down down
                                  'reachable-rooms reached)))))
               (when search-incomplete (set! complete #f))
+              (prof-report (list 'profile-complete carry down))
               (set! failures (+ failures entry-fails (length unreached) (length traps)
                                 (if complete 0 1)))
               (log (list 'region 'carry carry 'down down 'entry-phases AIR-PERIOD
