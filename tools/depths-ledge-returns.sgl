@@ -1,7 +1,10 @@
 ;;; Runner-only return diagnosis for the four unreached Underhum K ledges.
 ;;; Seeds are explicit local rest poses, not acquired full-world states.
 ;;; Every selected edge replays independently; no continuous route is claimed.
-(import (engine reach)
+;;; HARKFELL_LEDGE_DOWN=1 selects a down-enabled diagnostic control.
+(import (sigil list)
+        (only (sigil process) getenv)
+        (engine reach)
         (engine reach paths)
         (harkfell content)
         (harkfell source)
@@ -17,6 +20,7 @@
   (depths-region-content (load-content (read-world-source "world")) 'underhum))
 (define tm (tiles-carrying ct '(2 3 4 5)))
 (define home (start-cell ct))
+(define down (equal? (getenv "HARKFELL_LEDGE_DOWN") "1"))
 (define room (content-room ct 7 6))
 (define ledges
   (map (lambda (cell)
@@ -30,11 +34,30 @@
   ledges)
 
 (line (list 'diagnostic 'isolated-ledge-returns 'carry '(2 3 4 5)
-            'down #f 'seeds ledges 'home home
+            'down down 'seeds ledges 'home home
             'admission-from-world-not-established))
 (define graph
-  (reach-search-down tm HARKFELL-FEEL ledges witness-lands? #f))
+  (reach-search-down tm HARKFELL-FEEL ledges witness-lands? down))
 (define failures 0)
+
+;; Report accepted exits from this explicitly seeded graph. The default
+;; no-down graph has only fifteen candidates; a down-enabled control can
+;; be larger, so bound the diagnostic output without changing the search.
+(define seen (reach-forward graph ledges))
+(define reached
+  (filter (lambda (cell)
+            (vector-ref seen (cell-index tm (car cell) (cdr cell))))
+          (graph-cells graph)))
+(line (list 'ledge-reached 'count (length reached) 'printed-max 64))
+(let loop ((cells reached) (left 64))
+  (when (and (pair? cells) (> left 0))
+    (let ((cell (car cells)))
+      (line (list 'ledge-exits 'from cell
+                  'to (map (lambda (edge)
+                             (list (car edge) 'hops (witness-hops (cdr edge))
+                                   'ticks (length (witness-script (cdr edge)))))
+                           (graph-edges-from graph cell)))))
+    (loop (cdr cells) (- left 1))))
 
 (for-each
   (lambda (cell)
