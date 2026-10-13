@@ -5,6 +5,7 @@
   (import (sigil list)
           (engine body) (engine air) (engine tilemap) (engine worldmap)
           (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
+          (engine reach geopool)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
@@ -117,15 +118,37 @@
                   (set! cache (dict-set cache key reached))
                   reached))))))
 
+    ;; The spatial guide's tilemap: every stone open, pulsed lifts steady
+    ;; (candidates only; every accepted route is replayed on actual fields).
+    (define (region-candidate-tm ct)
+      (let ((tm (tiles-carrying ct '(2 3 4 5))))
+        (tilemap tm air:
+          (filter-map (lambda (field)
+                        (and (> (air-field-lift field) 0)
+                             (air-field field pulsed: #f)))
+                      (tilemap-air tm)))))
+
     ;; A worker for cloudstair-region-check's pool: the same content, advance,
     ;; shelter certificates and waiter as the check builds, answering
-    ;; (engine reach routes)' wait and replay requests.
+    ;; (engine reach routes)' wait and replay requests; and the same spatial
+    ;; guide search, answering (engine reach geopool)'s anchor expansions.
     (define (cloudstair-region-worker source)
       (let* ((ct (cloudstair-region-content source))
-             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP)))
-        (route-task-handler advance
-                            (cloudstair-shelter-checker ct advance)
-                            (cloudstair-waiter ct advance))))
+             (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
+             (routes (route-task-handler advance
+                                         (cloudstair-shelter-checker ct advance)
+                                         (cloudstair-waiter ct advance)))
+             (geometry #f))
+        (lambda (line)
+          (if (and (> (string-length line) 1) (char=? (string-ref line 0) #\X))
+              (begin
+                (unless geometry
+                  (set! geometry
+                    (geometry-task-handler
+                      (reach-search-down (region-candidate-tm ct) HARKFELL-FEEL
+                                         (list (start-cell ct)) witness-lands? #t #f 'serve))))
+                (geometry line))
+              (routes line)))))
 
     ;; pool (optional): an (engine reach pool) of cloudstair-region-worker
     ;; processes. It changes how long the searches take, not what they find.
@@ -134,18 +157,15 @@
       (let* ((ct (cloudstair-region-content source))
              (home (start-cell ct))
              (tm (tiles-carrying ct '(2 3 4 5)))
-             (candidate-tm
-               (tilemap tm air:
-                 (filter-map (lambda (field)
-                               (and (> (air-field-lift field) 0)
-                                    (air-field field pulsed: #f)))
-                             (tilemap-air tm))))
+             (candidate-tm (region-candidate-tm ct))
              (candidate
                (reach-search-down candidate-tm HARKFELL-FEEL
                  (list home) witness-lands? #t
                  (lambda (anchors steps kind cell)
                    (when (= (modulo anchors 100) 0)
-                     (log (list 'candidate-geometry 'anchors anchors 'steps steps))))))
+                     (log (list 'candidate-geometry 'anchors anchors 'steps steps))))
+                 ;; with a pool, anchors are expanded on its workers
+                 (and (pair? pool) (car pool) (make-geometry-remote (car pool)))))
              (advance (route-rest-memo (cloudstair-stepper ct) REST-MEMO-CAP))
              (tiles-for (cloudstair-tile-provider ct))
              (wait0 (cloudstair-waiter ct (prof-advance (quote tick-waiter) advance)))

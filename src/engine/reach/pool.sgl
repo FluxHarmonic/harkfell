@@ -12,6 +12,8 @@
 ;;;                                     runs in this process when it arrives
 ;;;                                     and may submit more
 ;;;   (pool-submit-urgent! pool line k) the same, ahead of everything queued
+;;;   (either, with a last argument i: only worker i takes it; pinning
+;;;   related requests keeps one worker's caches warm for them)
 ;;;   (pool-drain! pool)                run until nothing is queued or in flight
 ;;;   (pool-drain-until! pool done?)    run until (done?) or nothing is left
 ;;;   (pool-close! pool)                close the workers' stdin, wait for them
@@ -53,11 +55,11 @@
 
     (define (pool-size pool) (vector-length (pool-workers pool)))
 
-    (define (pool-submit! pool line k)
-      (set-pool-queue! pool (append (pool-queue pool) (list (cons line k)))))
+    (define (pool-submit! pool line k . pin)
+      (set-pool-queue! pool (append (pool-queue pool) (list (list line k (and (pair? pin) (car pin)))))))
 
-    (define (pool-submit-urgent! pool line k)
-      (set-pool-queue! pool (cons (cons line k) (pool-queue pool))))
+    (define (pool-submit-urgent! pool line k . pin)
+      (set-pool-queue! pool (cons (list line k (and (pair? pin) (car pin))) (pool-queue pool))))
 
     (define (write-all! p text)
       (let loop ((bv (string->utf8 text)))
@@ -67,26 +69,32 @@
                  (await-writable-fd (process-stdin-fd p))
                  (loop (bytevector-copy bv n)))))))
 
-    ;; Start queued requests, filling the least loaded worker first.
+    ;; Start queued requests: each idle slot takes the first queued job that
+    ;; is unpinned or pinned to its worker; unpinned jobs go to the least
+    ;; loaded worker.
     (define (assign! pool)
       (let ((ws (pool-workers pool)))
-        (let loop ()
-          (when (pair? (pool-queue pool))
-            (let pick ((i 0) (best #f))
-              (if (< i (vector-length ws))
-                  (let ((w (vector-ref ws i)))
-                    (pick (+ i 1)
-                          (if (and (< (length (vector-ref w 3)) POOL-DEPTH)
-                                   (or (not best)
-                                       (< (length (vector-ref w 3)) (length (vector-ref best 3)))))
-                              w best)))
-                  (when best
-                    (let ((job (car (pool-queue pool))))
-                      (set-pool-queue! pool (cdr (pool-queue pool)))
-                      (vector-set! best 3 (append (vector-ref best 3) (list (cdr job))))
-                      (set-pool-requests! pool (+ 1 (pool-requests pool)))
-                      (write-all! (vector-ref best 0) (string-append (car job) "\n"))
-                      (loop)))))))))
+        (define (load i) (length (vector-ref (vector-ref ws i) 3)))
+        (define (start! i job)
+          (let ((w (vector-ref ws i)))
+            (vector-set! w 3 (append (vector-ref w 3) (list (cadr job))))
+            (set-pool-requests! pool (+ 1 (pool-requests pool)))
+            (write-all! (vector-ref w 0) (string-append (car job) "\n"))))
+        (let loop ((jobs (pool-queue pool)) (kept '()))
+          (if (null? jobs)
+              (set-pool-queue! pool (reverse kept))
+              (let* ((job (car jobs)) (pin (caddr job))
+                     (i (if pin
+                            (and (< (load pin) POOL-DEPTH) pin)
+                            (let pick ((i 0) (best #f))
+                              (cond ((= i (vector-length ws)) best)
+                                    ((and (< (load i) POOL-DEPTH)
+                                          (or (not best) (< (load i) (load best))))
+                                     (pick (+ i 1) i))
+                                    (else (pick (+ i 1) best)))))))
+                (if i
+                    (begin (start! i job) (loop (cdr jobs) kept))
+                    (loop (cdr jobs) (cons job kept))))))))
 
     (define (busy pool)
       (filter (lambda (w) (pair? (vector-ref w 3))) (vector->list (pool-workers pool))))

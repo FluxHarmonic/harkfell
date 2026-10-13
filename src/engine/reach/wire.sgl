@@ -16,7 +16,7 @@
   (import (sigil list) (sigil string)
           (engine body) (engine reach) (engine reach timed))
 
-  (export wire-value wire-read-value wire-node wire-read-node
+  (export wire-value wire-read-value wire-node wire-read-node wire-body-value read-body-value
           wire-script wire-read-script wire-tokens wire-join)
 
   (begin
@@ -109,6 +109,23 @@
               (body-jumping b) (body-cut b) (body-events b) (body-brittle b)
               (body-down b) (body-tau b) (body-gliding b)
               (timed-node-data n))))
+
+    ;; A body alone: its fields as a list value, and back.
+    (define (wire-body-value b)
+      (list (body-x b) (body-y b) (body-vx b) (body-vy b)
+            (body-mode b) (body-side b) (body-facing b)
+            (body-coyote b) (body-buffer b) (body-lock b)
+            (body-jumping b) (body-cut b) (body-events b) (body-brittle b)
+            (body-down b) (body-tau b) (body-gliding b)))
+
+    (define (read-body-value f)
+      (define (at i) (list-ref f i))
+      (body x: (at 0) y: (at 1) vx: (at 2) vy: (at 3)
+            mode: (at 4) side: (at 5) facing: (at 6)
+            coyote: (at 7) buffer: (at 8) lock: (at 9)
+            jumping: (at 10) cut: (at 11) events: (at 12)
+            brittle: (at 13) down: (at 14) tau: (at 15)
+            gliding: (at 16)))
 
     (define (wire-node n)
       (if n (wire-value (node-fields n)) (list "F")))

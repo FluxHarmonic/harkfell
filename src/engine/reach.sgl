@@ -978,6 +978,46 @@
 
         (define (list-drop l n) (if (or (= n 0) (null? l)) l (list-drop (cdr l) (- n 1))))
 
+        ;; Optional (the second element of log): 'serve, to return an anchor
+        ;; expander for a worker instead of searching; or a REMOTE, a vector
+        ;; #(request! await): (request! k rep urgent?) asks a worker to expand
+        ;; anchor k from rep, (await k) gives (notes rect steps) when it is
+        ;; in. An expansion reads only its representative (never reps, hops
+        ;; or the queue), so a worker's notes are the notes; they are applied
+        ;; here, in the drain's own order, exactly as REUSE applies a memo's.
+        (define remote (and (pair? log) (pair? (cdr log)) (vector? (cadr log)) (cadr log)))
+        (define requested-anchors (make-vector nk #f))
+        (define (request-queued!)
+          ;; every queued anchor will be expanded; ask for those not asked
+          ;; yet, the next to be popped last so it is first in line
+          (for-each (lambda (k)
+                      (unless (vector-ref requested-anchors k)
+                        (vector-set! requested-anchors k #t)
+                        ((vector-ref remote 0) k (vector-ref reps k) #t)))
+                    (reverse queue)))
+        (define (expand-remote! k)
+          (set! expanded (+ expanded 1))
+          (when (pair? log)
+            (when (car log) ((car log) expanded steps (key-kind k) (key-cell k))))
+          (let* ((rep (vector-ref reps k))
+                 (r ((vector-ref remote 1) k))
+                 (notes (car r)))
+            (set! steps (+ steps (caddr r)))
+            (vector-set! exp-memo k (list (rep-sig rep) (cadr r) notes))
+            (for-each (lambda (n) (apply note! k n)) (reverse notes))))
+
+
+        (if (and (pair? log) (pair? (cdr log)) (eq? (cadr log) 'serve))
+            ;; a worker: expand anchor k from rep, as expand! would
+            (lambda (k rep)
+              (let ((s0 steps))
+                (rect-start! rep)
+                (set! *notes* '())
+                (expand-kind k (key-kind k) rep)
+                (let ((notes *notes*))
+                  (set! *notes* #f)
+                  (list notes (rect-take!) (- steps s0)))))
+        (begin
         ;; the anchors, from the starts
         (for-each (lambda (c)
                     (let ((k (key K-STAND (car c) (cdr c))))
@@ -988,8 +1028,14 @@
         (let drain ()
           (unless (null? queue)
             (let ((k (car queue)))
-              (set! queue (cdr queue))
-              (expand! k)
+              (if (and remote (not prior-exp))
+                  (begin
+                    (request-queued!)
+                    (set! queue (cdr queue))
+                    (expand-remote! k))
+                  (begin
+                    (set! queue (cdr queue))
+                    (expand! k)))
               (drain))))
 
         ;; standing-to-standing candidates: from each stand anchor, a
@@ -1123,4 +1169,4 @@
                                     (cons 'repairs repaired)
                                     (cons 'reused reused)
                                     (cons 'reused-walks reused-cands))
-                       memo: (cons exp-memo cand-memo)))))))
+                       memo: (cons exp-memo cand-memo)))))))))

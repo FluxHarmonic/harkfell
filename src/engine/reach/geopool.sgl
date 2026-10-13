@@ -1,0 +1,54 @@
+;;; Spatial anchor expansions on worker processes, for (engine reach)'s
+;;; drain. An expansion reads only its representative, so a worker that
+;;; built the same search (same tilemap, feel, starts, down) returns exactly
+;;; the notes, rectangle and step count the drain would have produced; the
+;;; drain applies them in its own order ((engine reach) REMOTE).
+;;;
+;;;   (make-geometry-remote pool)    the #(request! await) (engine reach) takes
+;;;   (geometry-task-handler expand) a worker's answer to "X <k> <rep>", given
+;;;                                  the expander (engine reach) returns for 'serve
+(define-library (engine reach geopool)
+  (import (sigil list) (sigil string)
+          (engine body) (engine reach) (engine reach wire) (engine reach pool))
+
+  (export make-geometry-remote geometry-task-handler)
+
+  (begin
+    ;; A note (kind cell side b rev) as a value: the body's fields, and the
+    ;; reversed script as a symbol holding its run-length token.
+    (define (note-value n)
+      (list (list-ref n 0) (list-ref n 1) (list-ref n 2)
+            (wire-body-value (list-ref n 3))
+            (string->symbol (wire-script (list-ref n 4)))))
+
+    (define (value-note v)
+      (list (list-ref v 0) (list-ref v 1) (list-ref v 2)
+            (read-body-value (list-ref v 3))
+            (wire-read-script (symbol->string (list-ref v 4)))))
+
+    (define (geometry-task-handler expand)
+      (lambda (line)
+        (let* ((toks (wire-tokens line))
+               (k (string->number (cadr toks)))
+               (rep (read-body-value (car (wire-read-value (cddr toks)))))
+               (r (expand k rep)))
+          (wire-join (append (list "X")
+                             (wire-value (list (map note-value (car r)) (cadr r) (caddr r))))))))
+
+    (define (make-geometry-remote pool)
+      (let ((results #{}))
+        (vector
+          (lambda (k rep urgent?)
+            ((if urgent? pool-submit-urgent! pool-submit!) pool
+             (wire-join (append (list "X" (number->string k)) (wire-value (wire-body-value rep))))
+             (lambda (line)
+               (let ((v (car (wire-read-value (cdr (wire-tokens line))))))
+                 (set! results (dict-set results k
+                                         (list (map value-note (car v)) (cadr v) (caddr v))))))))
+          (lambda (k)
+            (pool-drain-until! pool (lambda () (dict-contains? results k)))
+            (unless (dict-contains? results k)
+              (error "geometry pool: no answer for anchor" k))
+            (let ((r (dict-ref results k)))
+              (set! results (dict-remove results k))
+              r)))))))

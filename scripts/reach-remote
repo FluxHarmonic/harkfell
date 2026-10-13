@@ -18,6 +18,8 @@
 # Then all legs start together, each in its own commit's checkout (so it
 # reads that tree's world/), with `timeout` and its wall time recorded.
 # Logs land in build/reach-remote-<stamp>.logs/<NAME>.log, with a summary.
+# A commit built on a runner leaves its binary in build/reach-bin/<full sha>/;
+# later jobs deliver that binary instead of building the commit again.
 #
 # Exit: 0 every build and leg ran (a leg's own FAIL is in its log);
 # 1 a build failed; 125 refused or SETUP-FAILED; 126/127 from azoth-remote.
@@ -56,6 +58,15 @@ for pair in $resolved; do
 done
 cp "$LEGS" "$STAGE/legs.sh"
 printf '%s\n' $resolved > "$STAGE/commits.txt"
+# Runner-built binaries from earlier jobs, by full sha: delivered, not rebuilt.
+PUTS=()
+for pair in $resolved; do
+  short=${pair%%=*}; full=${pair#*=}
+  if [ -x "build/reach-bin/$full/harkfell" ]; then
+    PUTS+=(--put "build/reach-bin/$full/harkfell:bins/$short")
+    say "commit $short: delivering cached binary build/reach-bin/$full/harkfell"
+  fi
+done
 
 cat > "$STAGE/remote.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -76,12 +87,17 @@ while IFS== read -r short full; do
   dir="$HOME/work/c-$short"
   git -C repo worktree add --quiet --detach "$dir" "$full" || { echo "SETUP-FAILED: checkout $short"; exit 125; }
   ts=$(t)
+  if [ -x "bins/$short" ]; then
+    mkdir -p "$dir/build/release/bin" && cp "bins/$short" "$dir/build/release/bin/harkfell"
+    echo "=== BUILD $short cached binary delivered (sha256 $(sha256sum "bins/$short" | cut -c1-16))"
+    continue
+  fi
   ( cd "$dir" && sigil deps install > "$HOME/work/out/deps-$short.log" 2>&1 \
       && scripts/dev sigil build --config release > "$HOME/work/out/build-$short.log" 2>&1 )
   r=$?
   echo "=== BUILD $short rc=$r $(( $(t) - ts ))s oom_kill=$(awk '/oom_kill /{print $2}' /proc/vmstat)"
   sed 's/\x1b\[[0-9;]*m//g' "out/build-$short.log" | tail -3
-  [ $r -eq 0 ] || RC=1
+  if [ $r -eq 0 ]; then mkdir -p out/bins && cp "$dir/build/release/bin/harkfell" "out/bins/$short"; else RC=1; fi
 done < commits.txt
 [ $RC -eq 0 ] || { echo "remote: a build failed; no legs run"; exit 1; }
 sha_of() { awk -F= -v s="$1" '$1 == s { print $2 }' commits.txt; }
@@ -126,13 +142,22 @@ set +e
   --put "$STAGE/src.bundle:src.bundle" --put "$STAGE/remote.sh:remote.sh" --put "$STAGE/legs.sh:legs.sh" \
   --put "$STAGE/commits.txt:commits.txt" \
   --put "scripts/remote-sigil-toolchain:remote-sigil-toolchain" --put "$STAGE/sigil-delivered:sigil-delivered" \
-  --get "out:$STAGE/fetched" -- bash remote.sh "$SIGIL_V"
+  "${PUTS[@]}" --get "out:$STAGE/fetched" -- bash remote.sh "$SIGIL_V"
 rc=$?
 set -e
 say "remote rc=$rc in $(( $(date +%s) - T0 ))s"
 if [ -d "$STAGE/fetched" ]; then
   LOGS="build/reach-remote-$STAMP.logs"
   mkdir -p "$LOGS"
+  for pair in $resolved; do
+    short=${pair%%=*}; full=${pair#*=}
+    if [ -f "$STAGE/fetched/bins/$short" ] && [ ! -e "build/reach-bin/$full/harkfell" ]; then
+      mkdir -p "build/reach-bin/$full" && mv "$STAGE/fetched/bins/$short" "build/reach-bin/$full/harkfell"
+      chmod +x "build/reach-bin/$full/harkfell"
+      say "cached the runner-built binary of $short in build/reach-bin/$full/"
+    fi
+  done
+  rm -rf "$STAGE/fetched/bins"
   cp -r "$STAGE/fetched/." "$LOGS/"
   cp "$LEGS" "$LOGS/legs.sh"
   say "logs in $LOGS"
