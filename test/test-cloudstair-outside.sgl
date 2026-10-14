@@ -67,3 +67,45 @@
                  (cons '(harmonic at: (12 8) overtone: 5)
                        (room-things (placed-data BOWL)))))))
       (assert-error (cloudstair-outside-rooms (source-with-bowl p) '(2 4))))))
+
+(define LEDGE (source-placement 7 2))
+
+(define (source-with-ledge p)
+  (content SOURCE rooms:
+    (map (lambda (old) (if (eq? old LEDGE) p old)) (content-rooms SOURCE))))
+
+(test-group "outside Cloudstair: x7y2's lift ledge (7,1), reached by timed exp-31"
+  (test "the timed exclusions add exactly x7y2's (7,1) and leave every other room as it was"
+    (let* ((rooms (cloudstair-outside-rooms SOURCE '(2 3 4)))
+           (out (outside-timed-exclusions rooms))
+           (added '()))
+      (assert-equal (length rooms) (length out))
+      (for-each
+        (lambda (before after)
+          (let ((old (placed-data before)) (rm (placed-data after)))
+            (assert-eq (placed-tiles before) (placed-tiles after))
+            (for-each (lambda (cell)
+                        (unless (member cell (room-unreached old))
+                          (set! added (cons (list (room-region rm) (room-x rm) (room-y rm) cell) added))))
+                      (room-unreached rm))
+            (for-each (lambda (cell) (assert-true (member cell (room-unreached rm))))
+                      (room-unreached old))
+            ;; (the no-H5 view passes x7y2 through as the source's own placement)
+            (unless (eq? before LEDGE)
+              (assert-eq before after))))
+        rooms out)
+      (assert-equal '((hollow 7 2 (7 . 1))) added)
+      (assert-equal '() (room-unreached (placed-data LEDGE)))))
+  (test "an authored x7y2 declaration is kept, and (7,1) is listed once"
+    (let* ((p (placed LEDGE data: (room (placed-data LEDGE) unreached: '((7 . 1) (20 . 3)))))
+           (out (outside-timed-exclusions (cloudstair-outside-rooms (source-with-ledge p) '())))
+           (ledge (find (lambda (p) (and (= (placed-x p) 7) (= (placed-y p) 2))) out)))
+      (assert-equal '((7 . 1) (20 . 3)) (room-unreached (placed-data ledge)))))
+  (test "without the steady lift at (8,0) the room receives no exception"
+    (let* ((rm (placed-data LEDGE))
+           (p (placed LEDGE data:
+                (room rm things:
+                  (filter (lambda (t) (not (eq? (car t) 'air-field))) (room-things rm)))))
+           (out (outside-timed-exclusions (cloudstair-outside-rooms (source-with-ledge p) '())))
+           (ledge (find (lambda (p) (and (= (placed-x p) 7) (= (placed-y p) 2))) out)))
+      (assert-equal '() (room-unreached (placed-data ledge))))))
