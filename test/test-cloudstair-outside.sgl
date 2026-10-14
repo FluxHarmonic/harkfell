@@ -6,7 +6,12 @@
         (harkfell cli))
 
 (define SOURCE (load-content (read-world-source "world")))
-(define BOWL (room-placed (content-room SOURCE 4 3)))
+
+(define (source-placement x y)
+  (find (lambda (p) (and (= (placed-x p) x) (= (placed-y p) y)))
+        (content-rooms SOURCE)))
+
+(define BOWL (source-placement 4 3))
 
 (define (source-with-bowl p)
   (content SOURCE rooms:
@@ -20,7 +25,7 @@
       (for-each
         (lambda (p)
           (let* ((rm (placed-data p))
-                 (original (room-placed (content-room SOURCE (room-x rm) (room-y rm))))
+                 (original (source-placement (room-x rm) (room-y rm)))
                  (old (placed-data original)))
             (assert-eq (placed-tiles original) (placed-tiles p))
             (for-each (lambda (cell)
@@ -39,7 +44,7 @@
     (for-each
       (lambda (p)
         (let ((rm (placed-data p)))
-          (assert-eq (room-placed (content-room SOURCE (room-x rm) (room-y rm))) p)))
+          (assert-eq (source-placement (room-x rm) (room-y rm)) p)))
       (cloudstair-outside-rooms SOURCE '(2 3 4 5))))
   (test "a different authored bowl declaration is retained alongside the timed pocket"
     (let* ((p (placed BOWL data: (room (placed-data BOWL) unreached: '((18 . 8)))))
