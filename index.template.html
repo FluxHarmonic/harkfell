@@ -341,7 +341,23 @@
     var fsEl = document.getElementById("fs");
     var fsRequest = gameEl.requestFullscreen || gameEl.webkitRequestFullscreen;
     var fsExit = document.exitFullscreen || document.webkitExitFullscreen;
-    var fsOK = !!(fsRequest && fsExit && (document.fullscreenEnabled || document.webkitFullscreenEnabled));
+    // 0.3.3 (David: "there's no need for the fullscreen button in PWA mode,
+    // it should always be treated as fullscreen"): where the installed game
+    // IS full screen, display-mode fullscreen (the manifest's display, which
+    // Android honours) or the iOS home screen (navigator.standalone, full
+    // screen there), the button stays hidden and F is an ordinary key. A
+    // desktop browser opens the installed app as a standalone window, which
+    // is not full screen, so it keeps both, as a browser tab does (the
+    // leader's ruling, option B). test/test-pwa.mjs runs this function as
+    // written here.
+    function installedApp(w, nav) {
+      var mm = w.matchMedia;
+      return !!((mm && mm.call(w, "(display-mode: fullscreen)").matches) ||
+                (nav && nav.standalone === true));
+    }
+    var fsInstalled = installedApp(window, navigator);
+    if (fsInstalled) console.log("harkfell: page installed, no fullscreen button");
+    var fsOK = !fsInstalled && !!(fsRequest && fsExit && (document.fullscreenEnabled || document.webkitFullscreenEnabled));
     var fsTimer = null;
     function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
     function fsKey(e) {

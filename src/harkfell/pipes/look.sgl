@@ -13,7 +13,7 @@
 
   (export PIPES-DARK pipes-backdrop-bytes pipes-backdrop-key draw-pipes-solids!
           stone-bytes draw-pipes-panels! draw-pipes-cues!
-          draw-pipes-lights! draw-upward-drips! draw-aurora!)
+          draw-pipes-lights! way-light-columns spill-rows draw-upward-drips! draw-aurora!)
 
   (begin
     (define (pixel x) (exact (floor x)))
@@ -494,49 +494,157 @@
                 (else #f)))))
         (room-things-of rm 'mural)))
 
-    ;; Cream edge marks never advertise a closed wall. Their shape points
-    ;; into the real opening; neither they nor static require moth arrival.
-    (define (each-exit rm draw!)
-      (for-each
-        (lambda (exit)
-          (let ((side (car exit))
-                (x (+ 8 (* 16 (cadr exit))))
-                (y (+ 8 (* 16 (caddr exit)))))
-            (draw! side
-                   (case side ((west) 2) ((east) (- VIEW-W 3)) (else x))
-                   (case side ((north) 2) ((south) (- VIEW-H 3)) (else y)))))
-        (room-exits rm)))
+    ;; --- tells in the dark (D48) --------------------------------------------
+    ;; David, playing into the Pipes with H2 and no H3: "a few little details
+    ;; lit up in the dark rooms but I can't tell what they are." Each tell is
+    ;; now a shape with one meaning, readable at phone size, and none is a
+    ;; sign: no arrows, no text.
+    ;;   an opening   two short cream lips frame the gap, at the rock on
+    ;;                either side of it (a doorway: lintel and sill, or two
+    ;;                jambs), lit; never on a closed wall
+    ;;   the way out  the openings that lead back toward the way in (cues,
+    ;;                room-ways-out) also let in a little light: a dusty
+    ;;                shaft falling from a ceiling opening to the floor, or a
+    ;;                faint spill through a side opening, with motes
+    ;;                drifting in it
+    ;;   static       a jagged spark jumping across the cell between its
+    ;;                lips, over the faint footprint of the whole cell
+    ;; None of them needs the moths.
 
-    (define (draw-pipes-cues! rm t)
+    ;; The lips of one opening, (x y w h) rects in room pixels, at the closed
+    ;; cells either side of the span, each LEN long into the room.
+    (define LIP-LEN 10)
+    (define (span-lips span)
+      (let* ((side (car span)) (a (cadr span)) (b (caddr span))
+             (lo (* 16 a)) (hi (* 16 (+ b 1))))
+        (case side
+          ((west east)
+           (let ((x (if (eq? side 'west) 0 (- VIEW-W LIP-LEN))))
+             (append (if (> a 0) (list (list x (- lo 1) LIP-LEN 1)) '())
+                     (if (< b (- ROOM-ROWS 1)) (list (list x hi LIP-LEN 1)) '()))))
+          (else
+           (let ((y (if (eq? side 'north) 0 (- VIEW-H LIP-LEN))))
+             (append (if (> a 0) (list (list (- lo 1) y 1 LIP-LEN)) '())
+                     (if (< b (- ROOM-COLS 1)) (list (list hi y 1 LIP-LEN)) '())))))))
+
+    ;; The shading beside a lip, one pixel further from the opening.
+    (define (lip-shade span rect)
+      (let ((x (car rect)) (y (cadr rect)) (w (caddr rect)) (h (cadddr rect))
+            (side (car span)))
+        (if (memq side '(west east))
+            (list x (if (< y (* 16 (cadr span))) (- y 1) (+ y 1)) w 1)
+            (list (if (< x (* 16 (cadr span))) (- x 1) (+ x 1)) y 1 h))))
+
+    ;; A ceiling opening's shaft: ((x0 x1 bottom) ...) per cell column of
+    ;; the span, bottom the pixel row where the first closed cell under the
+    ;; opening stops the light.
+    (define (way-light-columns rm span)
+      (map (lambda (c)
+             (let down ((r 0))
+               (if (and (< r ROOM-ROWS) (room-open? rm c r))
+                   (down (+ r 1))
+                   (list (* 16 c) (+ (* 16 c) 16) (* 16 r)))))
+           (map (lambda (i) (+ i (cadr span))) (iota (+ 1 (- (caddr span) (cadr span)))))))
+
+    ;; A side opening's spill: ((ROW . LEN) ...) per cell row of the span,
+    ;; LEN the pixels in from the edge the light and motes may go: SPILL, or
+    ;; less where a closed cell stops it (it never shines inside the rock).
+    ;; At least one cell: the edge cell of an opening is open.
+    (define SPILL 64)
+    (define (spill-rows rm span)
+      (let ((west? (eq? (car span) 'west)))
+        (map (lambda (i)
+               (let ((r (+ i (cadr span))))
+                 (let in ((n 0))
+                   (if (and (< n (quotient SPILL 16))
+                            (room-open? rm (if west? n (- ROOM-COLS 1 n)) r))
+                       (in (+ n 1))
+                       (cons r (* 16 (max 1 n)))))))
+             (iota (+ 1 (- (caddr span) (cadr span)))))))
+
+    ;; Motes drifting in a way-out light: ((x . y) ...) at tick t, the same
+    ;; for the slot pass and the light pass. Down a shaft they sink slowly;
+    ;; through a side opening they drift in from the edge.
+    (define (way-motes rm span t)
+      (let ((side (car span)) (a (cadr span)) (b (caddr span)))
+        (case side
+          ((north)
+           (apply append
+             (map (lambda (col)
+                    (let ((x0 (car col)) (depth (caddr col)))
+                      (if (< depth 24)
+                          '()
+                          (map (lambda (k)
+                                 (let* ((h (hash3 x0 k 41))
+                                        (fall (+ 6 (modulo h 7)))
+                                        (y (modulo (+ (quotient t fall) (* k 47) h) depth))
+                                        (x (+ x0 3 (modulo (quotient h 7) 10)
+                                              (pixel (* 2.0 (sin (+ (* t 0.013) k (* 0.05 y))))))))
+                                   (cons x y)))
+                               '(0 1)))))
+                  (way-light-columns rm span))))
+          ((west east)
+           (let ((rows (spill-rows rm span)))
+             (map (lambda (k)
+                    (let* ((h (hash3 a k 43))
+                           (drift (+ 8 (modulo h 7)))
+                           (y (+ (* 16 a) 2 (modulo (quotient h 5) (max 1 (- (* 16 (+ 1 (- b a))) 4)))
+                                 (pixel (* 1.5 (sin (+ (* t 0.017) k))))))
+                           (row (assv (max a (min b (quotient y 16))) rows))
+                           (d (modulo (+ (quotient t drift) (* k 29) h) (cdr row))))
+                      (cons (if (eq? side 'west) d (- VIEW-W 1 d)) y)))
+                  (iota (+ 2 (- b a))))))
+          (else '()))))
+
+    ;; The spark across a static cell at tick t: ((x . y) ...), one pixel
+    ;; each, from the left lip to the right one. It jumps to a new path
+    ;; every four ticks; the ends stay on the lips.
+    (define (static-spark x y t)
+      (let* ((phase (quotient t 4))
+             (ys (list 0
+                       (- (modulo (hash3 (+ x phase) y 1) 9) 4)
+                       (- (modulo (hash3 (+ x phase) y 2) 11) 5)
+                       (- (modulo (hash3 (+ x phase) y 3) 9) 4)
+                       0)))
+        (let seg ((i 0) (ys ys) (out '()))
+          (if (null? (cdr ys))
+              (cons (cons (+ x 15) (+ y 8)) out)
+              (let ((y0 (car ys)) (y1 (cadr ys)))
+                (seg (+ i 1) (cdr ys)
+                     (let px ((k 0) (out out))
+                       (if (= k 4)
+                           out
+                           (px (+ k 1)
+                               (cons (cons (+ x (* 4 i) k)
+                                           (+ y 8 y0 (quotient (* (- y1 y0) k) 4)))
+                                     out))))))))))
+
+    (define (pixels! points)
+      (for-each (lambda (p) (draw-filled-rect (car p) (cdr p) 1 1)) points))
+
+    ;; The slot pass. ways: the room's way-out spans (cues, room-ways-out).
+    (define (draw-pipes-cues! rm t . opt)
       (when (eq? (room-region rm) 'pipes)
-        (each-exit rm
-          (lambda (side x y)
-            (slot-rect! 'ground-4 x y 1 1)
-            (case side
-              ((west east)
-               (slot-rect! 'ground-3 x (- y 3) 1 2)
-               (slot-rect! 'ground-3 x (+ y 2) 1 2))
-              (else
-               (slot-rect! 'ground-3 (- x 3) y 2 1)
-               (slot-rect! 'ground-3 (+ x 2) y 2 1)))))
+        (let ((ways (if (pair? opt) (car opt) '())))
+          (for-each
+            (lambda (span)
+              (for-each (lambda (rect)
+                          (apply slot-rect! 'ground-3 (lip-shade span rect))
+                          (apply slot-rect! 'ground-4 rect))
+                        (span-lips span)))
+            (room-exit-spans rm))
+          (paint-slot! (slot-of 'sky-4))
+          (for-each (lambda (span) (pixels! (way-motes rm span t))) ways))
         (for-each
           (lambda (cell)
             (let ((x (* 16 (car cell)))
                   (y (* 16 (cdr cell))))
-              ;; The faint rectangular afterglow encloses the entire
-              ;; collision cell, throughout every animation phase.
+              ;; The faint afterglow encloses the entire collision cell,
+              ;; throughout every animation phase.
               (paint-slot! (slot-of 'ground-2))
               (draw-rect x y 16 16)
               (paint-slot! (slot-of 'ground-4))
-              (let hairs ((k 0))
-                (when (< k 4)
-                  (let* ((phase (modulo (+ (quotient t 3) (* k 11) (* x 3)) 19))
-                         (hx (+ x 2 (* k 3)))
-                         (hy (+ y 2 (modulo phase 4)))
-                         (len (+ 4 (modulo phase 7))))
-                    (draw-filled-rect hx hy 1 len)
-                    (draw-filled-rect (+ hx 1) (+ hy 2) 1 1))
-                  (hairs (+ k 1))))))
+              (pixels! (static-spark x y t))))
           (room-static-cells rm))))
 
     (define (disc! cx cy radius amount)
@@ -547,19 +655,87 @@
             (draw-filled-rect (- cx half) (+ cy dy) (+ 1 (* 2 half)) 1))
           (loop (+ dy 1)))))
 
-    (define (draw-pipes-lights! rm t)
+    ;; How much a way-out light lifts the dark (B), at its brightest. Light
+    ;; units: DARK-GAIN (5) steps each. A Pipes room before its moths come
+    ;; is three steps down (black); 0.2 lifts it one step to a dithered near
+    ;; black, so the shaft is a dusty column, not a lamp.
+    (define WAY-LIGHT 0.2)
+
+    ;; Soft edges: the light in three tiers, the whole width at 0.4 of it,
+    ;; then 2 and 5 pixels in from the open sides at 0.3 each, so the edge
+    ;; dithers out instead of stopping. (x y w h): the whole rect; lo? hi?:
+    ;; whether its low and high sides (left/right, or top/bottom with
+    ;; across? #t) are soft.
+    (define (soft-rect! x y w h a across? lo? hi?)
+      (for-each
+        (lambda (tier)
+          (let* ((in (car tier))
+                 (l (if lo? in 0)) (r (if hi? in 0)))
+            (paint-light! (* (cdr tier) a))
+            (if across?
+                (when (> (- h l r) 0) (draw-filled-rect x (+ y l) w (- h l r)))
+                (when (> (- w l r) 0) (draw-filled-rect (+ x l) y (- w l r) h)))))
+        '((0 . 0.4) (2 . 0.3) (5 . 0.3))))
+
+    (define (draw-way-light! rm span t)
+      (let ((breathe (+ 0.9 (* 0.1 (sin (* t 0.006))))))
+        (case (car span)
+          ((north)
+           (let ((left (* 16 (cadr span))) (right (* 16 (+ 1 (caddr span)))))
+             (for-each
+               (lambda (col)
+                 (let ((x0 (car col)) (x1 (cadr col)) (bottom (caddr col)))
+                   (let band ((y 0))
+                     (when (< y bottom)
+                       (soft-rect! x0 y (- x1 x0) (min 4 (- bottom y))
+                                   (* WAY-LIGHT breathe (max 0.3 (- 1.0 (/ y 176.0))))
+                                   #f (= x0 left) (= x1 right))
+                       (band (+ y 4))))
+                   ;; where it lands
+                   (when (< bottom VIEW-H)
+                     (paint-light! (* 0.6 WAY-LIGHT))
+                     (draw-filled-rect (+ x0 2) bottom (- x1 x0 4) 2))))
+               (way-light-columns rm span))))
+          ((west east)
+           ;; row by row, each stopped where its rock begins
+           (for-each
+             (lambda (row)
+               (let ((r (car row)) (len (cdr row)))
+                 (let band ((d 0))
+                   (when (< d len)
+                     (soft-rect! (if (eq? (car span) 'west) d (- VIEW-W d 4)) (* 16 r) 4 16
+                                 (* WAY-LIGHT breathe 0.8 (- 1.0 (/ d SPILL)))
+                                 #t (= r (cadr span)) (= r (caddr span)))
+                     (band (+ d 4))))))
+             (spill-rows rm span)))
+          (else #f))
+        (for-each (lambda (p) (disc! (car p) (cdr p) 1 0.4))
+                  (way-motes rm span t))))
+
+    (define (draw-pipes-lights! rm t . opt)
       (when (eq? (room-region rm) 'pipes)
-        (each-exit rm
-          (lambda (side x y)
-            (disc! x y 4 0.48)))
+        (let ((ways (if (pair? opt) (car opt) '())))
+          (for-each
+            (lambda (span)
+              (for-each (lambda (rect)
+                          (paint-light! 0.5)
+                          (apply draw-filled-rect rect)
+                          (paint-light! 0.25)
+                          (apply draw-filled-rect (lip-shade span rect)))
+                        (span-lips span)))
+            (room-exit-spans rm))
+          (for-each (lambda (span) (draw-way-light! rm span t)) ways))
         (for-each
           (lambda (cell)
             (let ((x (* 16 (car cell)))
                   (y (* 16 (cdr cell))))
               ;; Tiny neutral stone pool; it never illuminates a room.
               (disc! (+ x 8) (+ y 8) 13 0.14)
-              (paint-light! 0.44)
-              (draw-filled-rect x y 16 16)))
+              (paint-light! 0.32)
+              (draw-filled-rect x y 16 16)
+              ;; the spark itself, bright
+              (paint-light! 0.4)
+              (pixels! (static-spark x y t))))
           (room-static-cells rm))
         ;; A travelling strip only on the wet edge of a carved lip.
         (let rows ((r 1))

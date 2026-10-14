@@ -306,6 +306,33 @@ try {
     assert.deepEqual(errors, []);
     console.log(`PASS updates: waiting line; tap applies worker and reloads without stepping in; ${info.summary ? `New in ${info.version} uses version.json, persists once` : `${info.version} (no post) is marked seen and announces nothing new`}, and old cache is removed`);
   }
+  // 0.3.3: a browser tab shows the fullscreen button; the installed app
+  // where it IS full screen (display-mode fullscreen, as the manifest asks
+  // and Android honours) shows none; a desktop app window (display-mode
+  // standalone, not full screen) keeps it. Headless Chrome is never
+  // installed, so each boot answers the page's display-mode query as that
+  // installed app would.
+  await boot();
+  assert.equal(await evaluate("document.getElementById('fs').hidden"), false, "a browser tab shows the fullscreen button");
+  async function bootAs(mode) {
+    const script = await send("Page.addScriptToEvaluateOnNewDocument", { source: `{
+      const mm = window.matchMedia.bind(window);
+      window.matchMedia = (q) => q === "(display-mode: ${mode})"
+        ? { matches: true, media: q, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }
+        : mm(q);
+    }` });
+    try { await boot(); } finally { await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.identifier }); }
+  }
+  await bootAs("fullscreen");
+  assert.equal(await evaluate("matchMedia('(display-mode: fullscreen)').matches"), true, "the override took");
+  assert.equal(await evaluate("document.getElementById('fs').hidden"), true, "the full-screen installed app shows no fullscreen button");
+  assert(lines.includes("harkfell: page installed, no fullscreen button"), "the installed page says so");
+  await bootAs("standalone");
+  assert.equal(await evaluate("matchMedia('(display-mode: standalone)').matches"), true, "the override took");
+  assert.equal(await evaluate("document.getElementById('fs').hidden"), false, "a desktop app window keeps the fullscreen button");
+  assert(!lines.includes("harkfell: page installed, no fullscreen button"), "a desktop app window is not treated as full screen");
+  assert.deepEqual(errors, []);
+  console.log("PASS fullscreen: a browser tab and a desktop app window (standalone) show the button; full screen (display-mode fullscreen) it stays hidden");
 } catch (error) {
   console.error(error.stack);
   try {

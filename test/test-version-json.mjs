@@ -7,6 +7,10 @@
 // behaviour byte for byte.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { versionJsonProblems, versionJsonSummary } from "../scripts/version-json.mjs";
 
 const DRAWABLE = /^[\x20-\x7e]*$/;
@@ -40,6 +44,54 @@ const posted = (over = {}) => ({ version: "0.3.0", date: "2026-10-11", build: ST
 const quiet = (over = {}) => ({ version: "0.3.1", date: "2026-10-11", build: STAMP,
   summary: "", news: "https://harkfell.com/news/", ...over });
 const judge = (vj, pkg) => versionJsonProblems(vj, { stamp: STAMP, pkg, posts: POSTS });
+
+test("0.4.1 retains the approved 0.4 announcement with exact metadata checks", () => {
+  const posts = [{ version: "0.4.0", href: "/news/harkfell-0-4/", summary: "Cloudstair." }, ...POSTS];
+  const vj = { version: "0.4.1", date: "2026-10-14", build: STAMP,
+    summary: "Cloudstair.", news: "https://harkfell.com/news/harkfell-0-4/" };
+  const check = (value, list = posts) => versionJsonProblems(value, { stamp: STAMP, pkg: "0.4.1", posts: list });
+  assert.deepEqual(check(vj), []);
+  assert.match(versionJsonSummary(vj, posts), /summary 11 chars, printable ASCII$/);
+  for (const over of [{ news: "https://harkfell.com/news/" },
+    { news: "https://harkfell.com/news/harkfell-0-3/" }, { summary: "" },
+    { summary: "Different." }, { build: "old" }, { version: "0.4.0" }, { extra: true }]) {
+    assert.ok(check({ ...vj, ...over }).length > 0, JSON.stringify(over));
+  }
+  assert.ok(check({ ...vj, summary: "", news: "https://harkfell.com/news/" }, POSTS)
+    .includes("0.4.1 requires the retained 0.4.0 announcement"));
+});
+
+test("the builder retains the same 0.4 post for 0.4.1 and rejects a missing announcement", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "harkfell-news-patch-"));
+  try {
+    const source = path.join(root, "news");
+    fs.mkdirSync(source);
+    const post = "---\ntitle: Harkfell 0.4\ndate: 2026-10-14\nversion: 0.4.0\nsummary: Cloudstair.\n---\nThe wind.\n";
+    fs.writeFileSync(path.join(source, "harkfell-0-4.md"), post);
+    const run = (version, destination) => spawnSync(process.execPath,
+      ["scripts/build-news.mjs", source, destination, "--version", version,
+        "--stamp", STAMP, "--date", "2026-10-14"], { encoding: "utf8" });
+    const original = path.join(root, "original");
+    const patched = path.join(root, "patched");
+    assert.equal(run("0.4.0", original).status, 0);
+    assert.equal(run("0.4.1", patched).status, 0);
+    const metadata = JSON.parse(fs.readFileSync(path.join(patched, "version.json")));
+    assert.deepEqual(metadata, { version: "0.4.1", date: "2026-10-14", build: STAMP,
+      summary: "Cloudstair.", news: "https://harkfell.com/news/harkfell-0-4/" });
+    assert.equal(fs.readFileSync(path.join(original, "news/harkfell-0-4/index.html"), "utf8"),
+      fs.readFileSync(path.join(patched, "news/harkfell-0-4/index.html"), "utf8"));
+    assert.equal(fs.readFileSync(path.join(source, "harkfell-0-4.md"), "utf8"), post);
+    assert.deepEqual(fs.readdirSync(path.join(patched, "news")).sort(),
+      ["feed.json", "feed.xml", "harkfell-0-4", "index.html"]);
+    fs.renameSync(path.join(source, "harkfell-0-4.md"), path.join(source, "harkfell-0-3.md"));
+    fs.writeFileSync(path.join(source, "harkfell-0-3.md"), post.replace("version: 0.4.0", "version: 0.3.0"));
+    const missing = run("0.4.1", path.join(root, "missing"));
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /requires the retained 0\.4\.0 announcement/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("a posted version is judged exactly as before the move, green and red", () => {
   const cases = [

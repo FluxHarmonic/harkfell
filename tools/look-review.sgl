@@ -13,6 +13,7 @@
 ;;;                       MODE down carries the cattail down, glide also holds
 ;;;                       jump, ride stands 120 ticks then jumps west holding it;
 ;;;                       TAU0 is where the gust clock starts (default 0)
+;;;                       C "start" (any R) puts it where ?room= would
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
 ;;;                       the same room on a W x H window (fitted as the web
 ;;;                       fits it), with D47's region name over it at ALPHA
@@ -36,7 +37,10 @@
 
 (define (review-world ct parts)
   (let* ((rm (content-room ct (num (list-ref parts 2)) (num (list-ref parts 3))))
-         (g (local->global ct rm (num (list-ref parts 4)) (num (list-ref parts 5))))
+         ;; C "start": where the ?room= door puts the body (room-start-cell)
+         (g (if (string=? (list-ref parts 4) "start")
+                (room-start-cell ct rm)
+                (local->global ct rm (num (list-ref parts 4)) (num (list-ref parts 5)))))
          (wm (content-map ct))
          ;; MODE (optional 9th field): down, the body carries the cattail
          ;; down; glide, it carries it and holds jump every tick (a body put

@@ -22,6 +22,8 @@
 // the shape Crash's Press site writes them, and TREE/version.json:
 //     { "version", "date", "build", "summary", "news" }
 // with the summary and news URL of the post whose version equals --version.
+// 0.4.1 retains the 0.4.0 announcement by David's ship decision; the shared
+// releaseNewsPost policy keeps the builder and version gate in agreement.
 // When no post has that version, version.json says so ("summary": "",
 // "news": the index) and this prints a note: a release with no post (a quiet
 // patch, as 0.3.1), which the start screen offers to reload into and says
@@ -32,6 +34,7 @@
 // em dash anywhere, or two posts for one version.
 import fs from "node:fs";
 import path from "node:path";
+import { releaseNewsPost } from "./version-json.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -113,7 +116,8 @@ const dup = versions.find((v, i) => versions.indexOf(v) !== i);
 if (dup) die(`two posts for version ${dup}`);
 posts.sort((a, b) => (b.date + b.version).localeCompare(a.date + a.version));
 
-const mine = posts.find((p) => p.version === VERSION);
+const mine = releaseNewsPost(posts, VERSION);
+if (VERSION === "0.4.1" && !mine) die("0.4.1 requires the retained 0.4.0 announcement");
 if (!mine) console.error(`build-news: no post for version ${VERSION} (posts: ${versions.join(", ")}): a release with no post; version.json carries an empty summary and the news index, and the game announces nothing new`);
 const vj = { version: VERSION, date: TODAY, build: STAMP, summary: mine ? mine.summary : "", news: mine ? `${SITE}/news/${mine.slug}/` : `${SITE}/news/` };
 fs.mkdirSync(TREE, { recursive: true });
