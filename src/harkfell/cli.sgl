@@ -126,9 +126,10 @@
       (let ((v (or (arg-value args "--workers") (getenv "HARKFELL_REACH_WORKERS"))))
         (or (and v (string->number v)) 0)))
 
-    ;; harkfell --reach-worker cloudstair-region [--world DIR]: one pool
-    ;; worker, request lines on stdin, answers on stdout, nothing else
-    ;; printed there. Ends at end of input.
+    ;; harkfell --reach-worker cloudstair-region [--world DIR] [--cell-returns]:
+    ;; one pool worker, request lines on stdin, answers on stdout, nothing
+    ;; else printed there. Ends at end of input. --cell-returns: the parent
+    ;; runs cell mode, so the worker's return memo is off as the parent's is.
     ;; harkfell --reach-bench [--world DIR]: what one tick of the Cloudstair
     ;; regional stepper costs natively, and its parts. Diagnostic only.
     (define (reach-bench-main args)
@@ -190,6 +191,7 @@
       (let* ((dir (or (arg-value args "--world") "world"))
              (ct (load-content (read-world-source dir))))
         (cond ((member "cloudstair-region" args)
+               (when (member "--cell-returns" args) (set-cell-returns! #t))
                (pool-serve (cloudstair-region-worker ct))
                0)
               ((member "cloudstair-world" args)
@@ -504,9 +506,12 @@
                                    (let ((c (string->number (arg-value args "--landing-cap"))))
                                      (set-landing-cap! c)
                                      c)))
+                         ;; the workers run the same mode (cell mode: their return
+                         ;; memo off too)
                          (pool (and (> n 0)
-                                    (make-pool (list (executable-path) "--reach-worker"
-                                                     "cloudstair-region" "--world" dir)
+                                    (make-pool (append (list (executable-path) "--reach-worker"
+                                                             "cloudstair-region" "--world" dir)
+                                                       (if cell-mode (list "--cell-returns") '()))
                                                n)))
                          ;; the 0.4 entries are (2 4) and (2 3 4) with down
                          (profiles (region-profiles args))
