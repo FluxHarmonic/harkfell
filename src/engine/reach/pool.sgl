@@ -16,6 +16,9 @@
 ;;;   related requests keeps one worker's caches warm for them)
 ;;;   (pool-drain! pool)                run until nothing is queued or in flight
 ;;;   (pool-drain-until! pool done?)    run until (done?) or nothing is left
+;;;   (pool-cancel-queued! pool)        drop the queued requests no worker has
+;;;                                     started (their k never runs); returns
+;;;                                     how many; requests in flight still finish
 ;;;   (pool-close! pool)                close the workers' stdin, wait for them
 ;;;   (pool-serve handler)              a worker's loop: line in, (handler line) out
 ;;;
@@ -27,7 +30,7 @@
   (import (sigil list) (sigil string) (sigil io) (sigil process) (sigil async))
 
   (export make-pool pool? pool-size pool-submit! pool-submit-urgent! pool-drain!
-          pool-drain-until! pool-close! pool-serve pool-requests pool-verify!)
+          pool-drain-until! pool-cancel-queued! pool-close! pool-serve pool-requests pool-verify!)
 
   (begin
     (define POOL-DEPTH 3)
@@ -144,6 +147,13 @@
 
     (define (pool-drain! pool)
       (pool-drain-until! pool (lambda () #f)))
+
+    ;; An early stop: requests queued but not yet written to any worker are
+    ;; dropped, so the caller then waits only for those in flight (pool-drain!).
+    (define (pool-cancel-queued! pool)
+      (let ((n (length (pool-queue pool))))
+        (set-pool-queue! pool (quote ()))
+        n))
 
     ;; Ask every worker line and require answer from each: a worker built
     ;; from something else than this process is refused before its first
