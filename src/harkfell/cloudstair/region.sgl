@@ -718,6 +718,15 @@
                       (unless (dict-contains? landings key)
                         (set! landings (dict-set landings key rest))
                         (set! landing-count (+ landing-count 1)))))))
+              ;; A landing whose return search did not reach home: counted, and
+              ;; named (cell, phase, carry) so a FAIL says where. exhausted is
+              ;; #f when the search stopped at its bound (then the run is also
+              ;; incomplete, with its own RED line), so not a proven trap.
+              (define (trap! node exhausted)
+                (set! traps (cons (timed-key node) traps))
+                (log (list 'RED 'region-trap 'carry carry 'down down 'cell (cell-of node)
+                           'tau (body-tau (timed-node-body node)) 'data (timed-node-data node)
+                           'exhausted exhausted)))
               ;; record*! with the two values a drain worker computed for node
               ;; (its shelter answer and its aligned rest): the same effect.
               (define (apply-record! node shelter rest-aligned)
@@ -809,7 +818,7 @@
                                         (timed-key (cdr entry))))
                                (let ((fresh
                                        (cond ((not found)
-                                              (set! traps (cons (timed-key (cdr entry)) traps))
+                                              (trap! (cdr entry) (not incomplete))
                                               fresh)
                                              (else
                                               (unless at-home (set! memo-stops (+ memo-stops 1)))
@@ -907,7 +916,7 @@
                                        (let ((back (seek (cdr entry) home record!)))
                                          (cond
                                            ((not back)
-                                            (set! traps (cons (timed-key (cdr entry)) traps)))
+                                            (trap! (cdr entry) (not search-incomplete)))
                                            (else
                                             (unless (equal? (cell-of back) home)
                                               (set! memo-stops (+ memo-stops 1))
