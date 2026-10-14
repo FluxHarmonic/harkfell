@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Prepared for David. Run --publish only after the green 0.4 checklist and
+# David's final ship instruction. With no mode argument this is a dry run.
+# This wrapper does not merge, push or tag, and never builds a different tree.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+gate_sha=${1:-}
+staged_tree=${2:-}
+mode=${3:---dry-run}
+if [[ ! "$gate_sha" =~ ^[0-9a-f]{40}$ ]] || [[ -z "$staged_tree" ]] || (( $# > 3 )); then
+  echo 'usage: bash scripts/publish-0-4 GATE_SHA STAGED_TREE [--dry-run|--publish]' >&2
+  exit 2
+fi
+case "$mode" in --dry-run|--publish) ;; *) echo 'Unknown publish mode' >&2; exit 2 ;; esac
+test "$(git rev-parse HEAD)" = "$gate_sha" || { echo 'REFUSED: HEAD differs from the gate SHA' >&2; exit 1; }
+test -z "$(git status --porcelain --untracked-files=no)" || { echo 'REFUSED: tracked changes after the gate' >&2; exit 1; }
+version=$(sed -n 's/^  version: "\([0-9][0-9.]*\)".*/\1/p' package.sgl | head -n 1)
+test "$version" = 0.4.0 || { echo 'REFUSED: package is not Harkfell 0.4.0' >&2; exit 1; }
+test -f "${staged_tree%/}.verified" || { echo 'REFUSED: staged-tree verification receipt is missing' >&2; exit 1; }
+
+if [[ "$mode" = --publish ]]; then
+  exec nice -n 19 ionice -c3 scripts/publish-web "$staged_tree" 'Harkfell 0.4: Cloudstair'
+fi
+exec nice -n 19 ionice -c3 scripts/publish-web "$staged_tree" --dry-run
