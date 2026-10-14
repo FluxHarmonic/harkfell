@@ -89,14 +89,17 @@
     ;; with down; --quick, (2 4) with down; else the diagnostic set (which
     ;; holds the negatives). --negatives adds, to --carry or --quick, the
     ;; entrance negatives: every diagnostic profile without down or without
-    ;; H4, each of which must not enter Cloudstair at all.
+    ;; H4, each of which must not enter Cloudstair at all; each profile
+    ;; once (none is already in the base, which room-check-main requires to
+    ;; carry H4).
     (define (region-profiles args)
       (let* ((c (carry-arg args))
              (base (cond ((pair? c) (list (cons c #t)))
                          ((member "--quick" args) (list (cons '(2 4) #t)))
                          (else (cloudstair-diagnostic-profiles)))))
         (if (and (member "--negatives" args) (or (pair? c) (member "--quick" args)))
-            (append base (filter (lambda (p) (not (and (cdr p) (memv 4 (car p)))))
+            (append base (filter (lambda (p) (and (not (and (cdr p) (memv 4 (car p))))
+                                                  (not (member p base))))
                                  (cloudstair-diagnostic-profiles)))
             base)))
 
@@ -449,6 +452,15 @@
                           (and (carry-arg args) (member "--quick" args))))
                   (say "SETUP-FAILED room-check: --carry takes the harmonics carried, 2 to 5, "
                        "comma-separated, each once (e.g. --carry 2,3,4), and not with --quick")
+                  2)
+                ;; --carry names an entry profile: it carries H4 (run with down).
+                ;; Without H4 the check would only run that carry as an entrance
+                ;; negative (Cloudstair stays shut) and could PASS checking no cell.
+                ((and (member "--cloudstair-region" args)
+                      (pair? (carry-arg args)) (not (memv 4 (carry-arg args))))
+                  (say "SETUP-FAILED room-check: --carry " (arg-value args "--carry")
+                       " has no H4, so it is not an entry profile (an entry carries H4, with down); "
+                       "the entrance negatives are --negatives")
                   2)
                 ;; --landing-cap N: a whole number of landings, or nothing runs.
                 ((and (member "--cloudstair-region" args) (member "--landing-cap" args)
