@@ -404,6 +404,13 @@
                   (say "SETUP-FAILED room-check: --carry takes the harmonics carried, 2 to 5, "
                        "comma-separated, each once (e.g. --carry 2,3,4), and not with --quick")
                   2)
+                ;; --landing-cap N: a whole number of landings, or nothing runs.
+                ((and (member "--cloudstair-region" args) (member "--landing-cap" args)
+                      (not (let ((n (string->number (or (arg-value args "--landing-cap") ""))))
+                             (and n (integer? n) (exact? n) (> n 0)))))
+                  (say "SETUP-FAILED room-check: --landing-cap takes a whole number of landings "
+                       "(e.g. --landing-cap 30000)")
+                  2)
                 ;; Diagnostic: chain searches through waypoint cells (carry (2 4), down).
                 ((and (member "--cloudstair-region" args) (member "--waypoints" args))
                   (let* ((n (reach-worker-count args))
@@ -430,6 +437,15 @@
                     rc))
                 ((member "--cloudstair-region" args)
                   (let* ((n (reach-worker-count args))
+                         ;; gate flags (not diagnostic knobs): --cell-returns sets the
+                         ;; same switch as HARKFELL_REGION_CELL_RETURNS=1; --landing-cap N
+                         ;; caps retained landings apart from the search bound
+                         (cell-mode (and (member "--cell-returns" args)
+                                         (begin (set-cell-returns! #t) #t)))
+                         (cap (and (member "--landing-cap" args)
+                                   (let ((c (string->number (arg-value args "--landing-cap"))))
+                                     (set-landing-cap! c)
+                                     c)))
                          (pool (and (> n 0)
                                     (make-pool (list (executable-path) "--reach-worker"
                                                      "cloudstair-region" "--world" dir)
@@ -462,11 +478,12 @@
                            " Cloudstair regional replay: " (number->string failures)
                            " failures (final full-world progression NOT established)"
                            (profiles-label profiles)
-                           ;; the claim a PASS makes: per cell group with
-                           ;; HARKFELL_REGION_CELL_RETURNS, else per retained landing
+                           (if cap (string-append " [landing cap " (number->string cap) "]") "")
+                           ;; the claim a PASS makes: per cell group with --cell-returns
+                           ;; (or its knob), else per retained landing
                            ;; (a FAIL makes no claim, so none is printed)
                            (cond ((> failures 0) "")
-                                 ((equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1")
+                                 ((or cell-mode (equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1"))
                                   " [cell returns: one retained landing per reached (cell, carry, down) proven to return]")
                                  ((equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0") "")
                                  (else " [return memo: every retained landing proven to return]"))

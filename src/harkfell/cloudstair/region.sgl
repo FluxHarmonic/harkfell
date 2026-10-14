@@ -13,7 +13,8 @@
   (export cloudstair-region-content cloudstair-region-check cloudstair-region-worker
           cloudstair-region-waypoints cloudstair-carry-guides cloudstair-guide-server cloudstair-guide-seeds
           cloudstair-fingerprint
-          cloudstair-reached-rooms cloudstair-entrance-probe)
+          cloudstair-reached-rooms cloudstair-entrance-probe
+          set-cell-returns! set-landing-cap!)
 
   (begin
     (define (cloudstair-region-content ct)
@@ -57,15 +58,25 @@
       (let ((v (getenv "HARKFELL_REGION_DRAIN_ROUNDS"))) (and v (string->number v))))
     (define PARALLEL-DRAIN
       (not (equal? (getenv "HARKFELL_REGION_PARALLEL_DRAIN") "0")))
-    ;; HARKFELL_REGION_CELL_RETURNS=1 (diagnostic, a weaker claim): one return
+    ;; Cell returns (the 0.4 gate's drain, a claim per cell): one return
     ;; search per (cell, carry, down) group of retained landings, from the
     ;; group's first pending landing in drain order. The group's other
-    ;; landings are marked checked and counted, never proven.
+    ;; landings are marked checked and counted, never proven. Set by the
+    ;; gate flag --cell-returns (set-cell-returns!), or by the diagnostic
+    ;; knob HARKFELL_REGION_CELL_RETURNS=1: the same switch either way.
     (define CELL-RETURNS (equal? (getenv "HARKFELL_REGION_CELL_RETURNS") "1"))
+    (define (set-cell-returns! on) (set! CELL-RETURNS on))
 
     (define LANDING-BOUND-OVERRIDE
       (let ((v (getenv "HARKFELL_REGION_LANDING_BOUND")))
         (and v (string->number v))))
+    ;; The gate's landing cap (--landing-cap N, set-landing-cap!): retained
+    ;; landings at or over it stop the check, incomplete, so FAIL. Separate
+    ;; from the search bound (--region-bound), which bounds each search's
+    ;; expansions; without a cap the search bound is also the landing cap.
+    ;; The diagnostic knob HARKFELL_REGION_LANDING_BOUND overrides both.
+    (define LANDING-CAP #f)
+    (define (set-landing-cap! n) (set! LANDING-CAP n))
 
     (define REST-MEMO-CAP 120000)
     ;; A worker proves each pose pinned to it once, so it needs fewer.
@@ -588,13 +599,17 @@
                             all)))
              (route-cache '()) (entry-rooms (cloudstair-entrance-probe source)) (failures 0)
              (search-incomplete #f)
-             (landing-bound (or LANDING-BOUND-OVERRIDE bound))
+             (landing-bound (or LANDING-BOUND-OVERRIDE LANDING-CAP bound))
              ;; States proven to return home this profile, by exact timed key
              ;; (the key memo-key gives; also by timed-key, for the exact-key check).
              (return-proven #{}) (return-proven-exact #{}) (memo-stops 0) (n-checked 0) (plain-bound #f))
         (when LANDING-BOUND-OVERRIDE
           (log (list (quote landing-bound-override) landing-bound (quote gate-bound) bound
                      (quote not-a-gate-verdict))))
+        (when (and LANDING-CAP (not LANDING-BOUND-OVERRIDE))
+          (log (list (quote landing-cap) LANDING-CAP (quote search-bound) bound)))
+        (when CELL-RETURNS
+          (log (list (quote cell-returns) #t)))
         (log (list 'candidate-geometry 'complete 'stats (graph-stats candidate)))
         (prof-report 'candidate-geometry-complete)
         (define (cell-of node)
