@@ -645,7 +645,7 @@
                           (apply slot-rect! 'ground-3 (lip-shade span rect))
                           (apply slot-rect! 'ground-4 rect))
                         (span-lips span)))
-            (room-exit-spans rm))
+            (room-cue-spans rm))
           (paint-slot! (slot-of 'sky-4))
           (for-each (lambda (span) (pixels! (way-motes rm span t))) ways))
         (for-each
@@ -736,7 +736,7 @@
                           (paint-light! 0.25)
                           (apply draw-filled-rect (lip-shade span rect)))
                         (span-lips span)))
-            (room-exit-spans rm))
+            (room-cue-spans rm))
           (for-each (lambda (span) (draw-way-light! rm span t)) ways))
         (for-each
           (lambda (cell)

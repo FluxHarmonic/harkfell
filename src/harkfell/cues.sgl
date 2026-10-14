@@ -4,12 +4,13 @@
           (engine worldmap)
           (harkfell content)
           (harkfell legend))
-  (export room-exits room-exit-spans room-open? room-static-cells room-upward-drops room-standing-stones
+  (export room-exits room-exit-spans room-cue-spans room-open?
+          room-static-cells room-upward-drops room-standing-stones
           REGION-WAYS-IN region-distances room-ways-out)
   (begin
     ;; The authored spans include the one-way lip from Wrongwater. Keep
     ;; quiet-exit spans dark while preserving the Pipes' way-out lights.
-    (define (room-exit-spans rm)
+    (define (room-cue-spans rm)
       (let ((quiet (map thing-at (room-things-of rm 'quiet-exit))))
         (filter
           (lambda (span)
@@ -26,10 +27,12 @@
                          (and (= across edge)
                               (<= (cadr span) along (caddr span)))))
                      quiet))))
-          (all-exit-spans rm))))
+          (room-exit-spans rm))))
 
-    ;; (SIDE A B) for each contiguous real edge opening.
-    (define (all-exit-spans rm)
+    ;; (SIDE A B) for each contiguous real edge opening: A..B are rows on
+    ;; west/east and columns on north/south. This is physical geometry,
+    ;; including quiet entrances; room-cue-spans selects the visible tells.
+    (define (room-exit-spans rm)
       (apply append
         (map
           (lambda (side)
@@ -65,7 +68,7 @@
           (else (list side i (- ROOM-ROWS 1))))))
 
     (define (room-exits rm)
-      (map span-mid (room-exit-spans rm)))
+      (map span-mid (room-cue-spans rm)))
 
     ;; D48: the way a region was entered, (REGION X Y SIDE): the room and
     ;; the edge that lead back out the way the player came in. A player who
