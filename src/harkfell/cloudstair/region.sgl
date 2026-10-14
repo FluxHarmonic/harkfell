@@ -756,6 +756,9 @@
                   (set! cap-logged #t)
                   (log (list 'RED 'landing-cap-reached 'carry carry 'down down
                              'landings landing-count 'cap landing-bound
+                             'from (cond (LANDING-BOUND-OVERRIDE 'landing-bound-override)
+                                         (LANDING-CAP 'landing-cap)
+                                         (else 'search-bound))
                              'targets target-count 'checked n-checked)))
                 (set! complete #f))
               ;; record*! with the two values a drain worker computed for node
@@ -800,14 +803,20 @@
                       (let* ((batch (let take ((xs ps) (n r) (acc '()))
                                       (if (or (null? xs) (= n 0)) (reverse acc)
                                           (take (cdr xs) (- n 1) (cons (car xs) acc)))))
-                             (answers (make-vector (length batch) #f)))
+                             (answers (make-vector (length batch) #f))
+                             ;; this batch's continuations: an early stop cancels
+                             ;; only these (other requests, e.g. a finder's guesses,
+                             ;; may also be queued)
+                             (batch-ks '()))
                         (let submit ((es batch) (i 0))
                           (when (pair? es)
                             (let ((slot i)
                                   (line (wire-join (append (list "D" (number->string bound))
                                                            (wire-node (cdr (car es)))))))
                               (if p
-                                  (pool-submit! p line (lambda (answer) (vector-set! answers slot answer)))
+                                  (let ((k (lambda (answer) (vector-set! answers slot answer))))
+                                    (set! batch-ks (cons k batch-ks))
+                                    (pool-submit! p line k))
                                   (vector-set! answers slot (local line))))
                             (submit (cdr es) (+ i 1))))
                         (let merge ((es batch) (i 0) (fresh '()))
@@ -820,11 +829,22 @@
                              ;; not close the pool with requests in flight); their
                              ;; answers are not merged.
                              (when (and p (not complete))
-                               (let ((cancelled (pool-cancel-queued! p)))
+                               (let ((cancelled (pool-cancel-queued! p (lambda (line k) (memq k batch-ks)))))
                                  (pool-drain! p)
-                                 (log (list (quote drain-stopped) (quote merged) i
-                                            (quote cancelled) cancelled
-                                            (quote unmerged) (- (length batch) i cancelled)))))
+                                 ;; every slot from i on is now an answer that arrived
+                                 ;; and is not merged, or a cancelled search (#f)
+                                 (let slots ((j i) (arrived 0) (never 0))
+                                   (if (< j (vector-length answers))
+                                       (if (vector-ref answers j)
+                                           (slots (+ j 1) (+ arrived 1) never)
+                                           (slots (+ j 1) arrived (+ never 1)))
+                                       (begin
+                                         (unless (= never cancelled)
+                                           (error "drain stop: a batch search neither answered nor cancelled"
+                                                  never cancelled))
+                                         (log (list (quote drain-stopped) (quote merged) i
+                                                    (quote arrived-unmerged) arrived
+                                                    (quote cancelled) cancelled)))))))
                              ;; the round's proven keys, to every worker before the next
                              ;; round (none in cell mode: its memo is off)
                              (when (and (pair? fresh) (not CELL-RETURNS))

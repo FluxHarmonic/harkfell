@@ -16,9 +16,10 @@
 ;;;   related requests keeps one worker's caches warm for them)
 ;;;   (pool-drain! pool)                run until nothing is queued or in flight
 ;;;   (pool-drain-until! pool done?)    run until (done?) or nothing is left
-;;;   (pool-cancel-queued! pool)        drop the queued requests no worker has
-;;;                                     started (their k never runs); returns
-;;;                                     how many; requests in flight still finish
+;;;   (pool-cancel-queued! pool drop?)  drop each queued request no worker has
+;;;                                     started for which (drop? line k) holds
+;;;                                     (its k never runs); returns how many;
+;;;                                     requests in flight still finish
 ;;;   (pool-close! pool)                close the workers' stdin, wait for them
 ;;;   (pool-serve handler)              a worker's loop: line in, (handler line) out
 ;;;
@@ -148,12 +149,18 @@
     (define (pool-drain! pool)
       (pool-drain-until! pool (lambda () #f)))
 
-    ;; An early stop: requests queued but not yet written to any worker are
-    ;; dropped, so the caller then waits only for those in flight (pool-drain!).
-    (define (pool-cancel-queued! pool)
-      (let ((n (length (pool-queue pool))))
-        (set-pool-queue! pool (quote ()))
-        n))
+    ;; An early stop: the caller's own requests queued but not yet written to
+    ;; any worker are dropped (drop? picks them, by line and continuation:
+    ;; other callers' requests, such as a route finder's guesses, stay
+    ;; queued), so the caller then waits only for its requests in flight.
+    (define (pool-cancel-queued! pool drop?)
+      (let loop ((jobs (pool-queue pool)) (kept '()) (n 0))
+        (cond ((null? jobs)
+               (set-pool-queue! pool (reverse kept))
+               n)
+              ((drop? (car (car jobs)) (cadr (car jobs)))
+               (loop (cdr jobs) kept (+ n 1)))
+              (else (loop (cdr jobs) (cons (car jobs) kept) n)))))
 
     ;; Ask every worker line and require answer from each: a worker built
     ;; from something else than this process is refused before its first
