@@ -364,23 +364,52 @@
                    outside-base)))))
 
     ;; Hollow x7y2 (7,1), the ledge beside the steady lift under the sealed
-    ;; Cloudstair border. The spatial search does not reach it; an actual
-    ;; timed search does: exp-31 on 3471ab9, `--cloudstair-region --waypoints
-    ;; 32,45` (region cell (32,45) is x7y2's (7,1)), from home (29,47)
-    ;; carrying (2 4) with down, arrived at tau 166, bound not hit. The world
-    ;; has changed since only in x4y3's tune. So that one cell, and no other,
-    ;; is declared unreached in the outside view, for every carry set. Every
-    ;; other x7y2 cell, and every trap, water trap and stale declaration
-    ;; there, counts as in any room. If the spatial search reaches (7,1), the
-    ;; declaration is stale and the check FAILs on it.
+    ;; Cloudstair border. The spatial search (which never models down) does
+    ;; not reach it; an actual timed search does: exp-31 on 3471ab9,
+    ;; `--cloudstair-region --waypoints 32,45` (region cell (32,45) is x7y2's
+    ;; (7,1)), from home (29,47) carrying (2 4) with down, arrived at tau 166,
+    ;; bound not hit. That run was diagnostic (it prints no verdict) and
+    ;; nothing re-runs it. Since 3471ab9 the world has changed only in x4y3
+    ;; (its (20,6) unreached declaration and comments) and BIBLE.md. So that
+    ;; one cell, and no other, is declared unreached in the outside view, for
+    ;; every carry set, and only while x7y2 is exactly as exp-31 ran it (the
+    ;; grid below, the blue ring-stone at (6,3) and the steady lift at (8,0),
+    ;; nothing else): any edit to the room revokes it, so (7,1) counts again
+    ;; until a new timed run is cited. Every other x7y2 cell, and every trap,
+    ;; water trap and stale declaration there, counts as in any room. If the
+    ;; spatial search reaches (7,1), the declaration is stale and the check
+    ;; FAILs on it.
+    (define X7Y2-AT-EXP-31
+      '("########^^^##############"
+        "      # ^^^             #"
+        "      ##^^^             #"
+        "      o ^^^             #"
+        "####### ^^^             #"
+        "####### ^^^             #"
+        "####### ^^^             #"
+        "#######=======          #"
+        "#########################"
+        "####### ^^^             #"
+        "####### ^^^             #"))
     (define (outside-lift-ledge-room? p)
-      (let ((rm (placed-data p)))
+      (let* ((rm (placed-data p))
+             (things (room-things rm)))
         (and (eq? (room-region rm) 'hollow)
              (= (room-x rm) 7) (= (room-y rm) 2)
+             (equal? (room-grid rm) X7Y2-AT-EXP-31)
+             (= (length things) 2)
              (find (lambda (t)
-                     (and (equal? (thing-at t) '(8 . 0))
+                     (and (eq? (car t) 'ring-stone)
+                          (equal? (thing-at t) '(6 . 3))
+                          (equal? (thing-kw t "overtone") 4)))
+                   things)
+             (find (lambda (t)
+                     (and (eq? (car t) 'air-field)
+                          (equal? (thing-at t) '(8 . 0))
+                          (equal? (thing-kw t "size") '(3 8))
                           (eq? (thing-kw t "kind") 'steady-lift)))
-                   (room-things-of rm 'air-field)))))
+                   things)
+             #t)))
 
     (define (outside-timed-exclusions rooms)
       (map (lambda (p)
@@ -426,7 +455,7 @@
                        " [excluded: hollow:4,3 (20,6), H5-only, timed bowl gate af83a32]"
                        "")
                    (if ledge-room
-                       " [excluded: hollow:7,2 (7,1), lift ledge, reached by timed waypoint search exp-31 (3471ab9)]"
+                       " [excluded: hollow:7,2 (7,1), lift ledge: reached carrying (2 4) with down by diagnostic timed search exp-31 (3471ab9), not re-gated, void if x7y2 changes]"
                        "")))))))
 
     (define (room-check-main args)
