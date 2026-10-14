@@ -66,6 +66,55 @@
       (let ((m (member flag args)))
         (and m (pair? (cdr m)) (cadr m))))
 
+    ;; --carry H,H,...: the harmonics carried, 2 to 5, comma-separated, each
+    ;; once. The sorted list; 'bad when malformed (a bad token is never
+    ;; dropped silently); #f when --carry is absent.
+    (define (carry-arg args)
+      (let ((v (arg-value args "--carry")))
+        (cond ((not (member "--carry" args)) #f)
+              ((not v) 'bad)
+              (else
+               (let ((ns (map string->number (string-split v ","))))
+                 (if (and (pair? ns)
+                          (list-all? (lambda (n) (and n (integer? n) (exact? n) (<= 2 n 5))) ns))
+                     (let ((s (list-sort < ns)))
+                       (if (let dup ((l s))
+                             (and (pair? l) (pair? (cdr l)) (or (= (car l) (cadr l)) (dup (cdr l)))))
+                           'bad
+                           s))
+                     'bad))))))
+
+    ;; The regional check's profiles ((carry . down) ...): --carry, that entry
+    ;; with down; --quick, (2 4) with down; else the diagnostic set (which
+    ;; holds the negatives). --negatives adds, to --carry or --quick, the
+    ;; entrance negatives: every diagnostic profile without down or without
+    ;; H4, each of which must not enter Cloudstair at all.
+    (define (region-profiles args)
+      (let* ((c (carry-arg args))
+             (base (cond ((pair? c) (list (cons c #t)))
+                         ((member "--quick" args) (list (cons '(2 4) #t)))
+                         (else (cloudstair-diagnostic-profiles)))))
+        (if (and (member "--negatives" args) (or (pair? c) (member "--quick" args)))
+            (append base (filter (lambda (p) (not (and (cdr p) (memv 4 (car p)))))
+                                 (cloudstair-diagnostic-profiles)))
+            base)))
+
+    ;; The profiles, for the verdict line.
+    (define (profiles-label profiles)
+      (let* ((entries (filter (lambda (p) (and (cdr p) (memv 4 (car p)))) profiles))
+             (negatives (- (length profiles) (length entries))))
+        (string-append
+          " [profiles: "
+          (string-join (map (lambda (p)
+                              (string-append "(" (string-join (map number->string (car p)) " ") ")"
+                                             (if (cdr p) "+down" "")))
+                            entries)
+                       ", ")
+          (if (> negatives 0)
+              (string-append "; " (number->string negatives) " entrance negatives")
+              "")
+          "]")))
+
     ;; Worker processes for the regional search: --workers N, else
     ;; HARKFELL_REACH_WORKERS, else none. Workers change the time, not
     ;; the result ((engine reach pool)).
@@ -227,6 +276,14 @@
                          " Cloudstair authored timing: " (number->string failures)
                          " failures (regional/world reach NOT established)")
                     (if (= failures 0) 0 1)))
+                ;; --carry must be well formed and alone (not with --quick): a
+                ;; dropped token would silently check another profile.
+                ((and (member "--cloudstair-region" args)
+                      (or (eq? (carry-arg args) 'bad)
+                          (and (carry-arg args) (member "--quick" args))))
+                  (say "SETUP-FAILED room-check: --carry takes the harmonics carried, 2 to 5, "
+                       "comma-separated, each once (e.g. --carry 2,3,4), and not with --quick")
+                  2)
                 ;; Diagnostic: chain searches through waypoint cells (carry (2 4), down).
                 ((and (member "--cloudstair-region" args) (member "--waypoints" args))
                   (let* ((n (reach-worker-count args))
@@ -257,16 +314,11 @@
                                     (make-pool (list (executable-path) "--reach-worker"
                                                      "cloudstair-region" "--world" dir)
                                                n)))
+                         ;; the 0.4 entries are (2 4) and (2 3 4) with down
+                         (profiles (region-profiles args))
                          (failures
                           (cloudstair-region-check ct
-                            ;; --carry 2,3,4: one entry profile, that carry with
-                            ;; down (the 0.4 entries are (2 4) and (2 3 4));
-                            ;; --quick: (2 4) with down; else the diagnostic set
-                            (let ((cv (arg-value args "--carry")))
-                              (cond (cv (list (cons (list-sort < (filter integer? (map string->number (string-split cv ","))))
-                                                    #t)))
-                                    ((member "--quick" args) (list (cons '(2 4) #t)))
-                                    (else (cloudstair-diagnostic-profiles))))
+                            profiles
                             (let ((b (arg-value args "--region-bound")))
                               (or (and b (string->number b)) 10000))
                             (lambda (record) (write record) (newline))
@@ -289,9 +341,12 @@
                       (say (if (= failures 0) "PASS" "FAIL")
                            " Cloudstair regional replay: " (number->string failures)
                            " failures (final full-world progression NOT established)"
-                           ;; the claim the drain supports: per cell group with
+                           (profiles-label profiles)
+                           ;; the claim a PASS makes: per cell group with
                            ;; HARKFELL_REGION_CELL_RETURNS, else per retained landing
-                           (cond ((equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1")
+                           ;; (a FAIL makes no claim, so none is printed)
+                           (cond ((> failures 0) "")
+                                 ((equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1")
                                   " [cell returns: one retained landing per reached (cell, carry, down) proven to return]")
                                  ((equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0") "")
                                  (else " [return memo: every retained landing proven to return]"))

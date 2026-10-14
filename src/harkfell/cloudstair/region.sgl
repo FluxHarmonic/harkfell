@@ -724,7 +724,8 @@
               ;; incomplete, with its own RED line), so not a proven trap.
               (define (trap! node exhausted)
                 (set! traps (cons (timed-key node) traps))
-                (log (list 'RED 'region-trap 'carry carry 'down down 'cell (cell-of node)
+                (log (list 'RED (if exhausted 'region-trap 'region-return-incomplete)
+                           'carry carry 'down down 'cell (cell-of node)
                            'tau (body-tau (timed-node-body node)) 'data (timed-node-data node)
                            'exhausted exhausted)))
               ;; record*! with the two values a drain worker computed for node
@@ -880,7 +881,10 @@
                       ;; rest checked (counted in cell-skips, never proven). A
                       ;; landing with no rest cell is always kept.
                       (define (cell-select! pending)
-                        (if (not CELL-RETURNS) pending
+                        ;; (only while the drain will run this pass: after an early
+                        ;; stop nothing is selected, so no group counts as done unsearched)
+                        (if (or (not CELL-RETURNS) (not complete) (>= landing-count landing-bound))
+                            pending
                             (let loop ((ps pending) (acc (quote ())))
                               (if (null? ps) (reverse acc)
                                   (let* ((n (cdr (car ps))) (c (cell-of n))
