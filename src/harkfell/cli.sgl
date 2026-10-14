@@ -249,8 +249,10 @@
 
     ;; The spatial room-check (gate 3 of section 8) on ct: every room's
     ;; reach and traps, per carry set a player can hold. scope labels the
-    ;; verdict line ("" for the whole world).
-    (define (spatial-room-check ct args keys t0 scope)
+    ;; verdict line ("" for the whole world). diagnostic, optional: room
+    ;; labels whose problems are printed as diagnostic and not counted (the
+    ;; verdict line names them); none for the whole world.
+    (define (spatial-room-check ct args keys t0 scope . diagnostic)
       (let* ((g (if (member "--verbose" args)
                     (content-reach ct (lambda (n steps kind cell)
                                         (say "  anchor " (number->string n) " kind " (number->string kind)
@@ -258,7 +260,16 @@
                                              " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
                     (content-reach ct)))
              (t1 (now-s))
-             (rps (reach-problems ct g))
+             (diag (if (pair? diagnostic) (car diagnostic) '()))
+             (diag-paths (map (lambda (rm) (room-path rm))
+                              (filter (lambda (rm) (member (room-label rm) diag))
+                                      (map placed-data (content-rooms ct)))))
+             (all-ps (reach-problems ct g))
+             (rps (filter (lambda (p) (not (member (problem-path p) diag-paths))) all-ps))
+             (dps (filter (lambda (p) (member (problem-path p) diag-paths)) all-ps))
+             (diag-label (if (null? diag) ""
+                             (string-append " [diagnostic only, not counted: " (string-join diag " ")
+                                            ", " (number->string (length dps)) " problems]")))
              (rooms (map placed-data (content-rooms ct)))
              (shown (if (null? keys)
                         rooms
@@ -272,6 +283,9 @@
                              (number->string (cadr e)) "," (number->string (cddr e)) ")"))
                       (apply append (map (lambda (e) (graph-rejected (cset-graph e))) g)))))
         (for-each (lambda (p) (say (problem->string p))) rps)
+        (for-each (lambda (p) (say "diagnostic (air field: the timed check owns this room): "
+                                   (problem->string p)))
+                  dps)
         (let ((pk (arg-value args "--path"))
               (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
           (when (and g pk pc)
@@ -296,10 +310,11 @@
         (newline)
         (if (null? rps)
             (begin
-              (say "PASS room-check" scope ": " (number->string (length rooms)) " rooms, parse seams map reach green")
+              (say "PASS room-check" scope ": " (number->string (length rooms)) " rooms, parse seams map reach green"
+                   diag-label)
               0)
             (begin
-              (say "FAIL room-check" scope ": " (number->string (length rps)) " reach problems")
+              (say "FAIL room-check" scope ": " (number->string (length rps)) " reach problems" diag-label)
               1))))
 
     ;; --outside-cloudstair: the spatial room-check on every room outside
@@ -338,8 +353,17 @@
               ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct*))))
                (say "FAIL room-check outside Cloudstair: a pulsed air field outside Cloudstair, which the spatial check cannot prove")
                1)
-              (else (spatial-room-check ct* args keys t0
-                      " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]")))))
+              (else
+               ;; Rooms holding an air field (steady: x7y2's lift): SYSTEMS rates a
+               ;; spatial verdict there diagnostic only, so the timed check owns them.
+               (let ((air-rooms (map (lambda (p) (room-label (placed-data p)))
+                                     (filter (lambda (p) (pair? (tilemap-air (placed-tiles p)))) outside))))
+                 (unless (null? air-rooms)
+                   (say "rooms with an air field, diagnostic only (the timed check owns them): "
+                        (string-join air-rooms " ")))
+                 (spatial-room-check ct* args keys t0
+                   " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
+                   air-rooms))))))
 
     (define (room-check-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
