@@ -1,0 +1,174 @@
+;;; An exact text codec for timed nodes, scripts and traces, so a search can
+;;; hand physics to worker processes and get back what it would have
+;;; computed itself, bit for bit.
+;;;
+;;; Values: a flonum is "d" and its eight IEEE-754 bytes in hex (number->
+;;; string would print 5.0 as "5", which reads back exact, and -0.0 as
+;;; "-0"); an exact integer "i" and decimal; #t/#f "T"/"F"; a symbol "s"
+;;; and its name; a list "(" items ")". One message is one line of
+;;; space-separated tokens.
+;;;
+;;; A script is its intents' slots (h v jump press, 36 of them) as
+;;; run-length pairs "<slot>x<count>" joined by "."; decoding gives the
+;;; interned intents of (engine reach), which body-step reads field by
+;;; field exactly as it reads any intent with the same fields.
+(define-library (engine reach wire)
+  (import (sigil list) (sigil string)
+          (engine body) (engine reach) (engine reach timed))
+
+  (export wire-value wire-read-value wire-node wire-read-node wire-body-value read-body-value
+          wire-script wire-read-script wire-tokens wire-join)
+
+  (begin
+    (define HEX "0123456789abcdef")
+
+    (define (hex-byte b)
+      (string (string-ref HEX (quotient b 16)) (string-ref HEX (modulo b 16))))
+
+    (define (hex-digit c)
+      (let loop ((i 0))
+        (cond ((= i 16) (error "wire: bad hex digit" c))
+              ((char=? (string-ref HEX i) c) i)
+              (else (loop (+ i 1))))))
+
+    (define (flonum->token x)
+      (let ((bv (make-bytevector 8 0)))
+        (bytevector-ieee-double-set! bv 0 x)
+        (let loop ((i 0) (acc '("d")))
+          (if (= i 8)
+              (apply string-append (reverse acc))
+              (loop (+ i 1) (cons (hex-byte (bytevector-u8-ref bv i)) acc))))))
+
+    (define (token->flonum s)
+      (let ((bv (make-bytevector 8 0)))
+        (let loop ((i 0))
+          (when (< i 8)
+            (bytevector-u8-set! bv i (+ (* 16 (hex-digit (string-ref s (+ 1 (* 2 i)))))
+                                         (hex-digit (string-ref s (+ 2 (* 2 i))))))
+            (loop (+ i 1))))
+        (bytevector-ieee-double-ref bv 0)))
+
+    ;; Tokens of one value, consed onto acc in reverse.
+    (define (value-tokens v acc)
+      (cond ((and (number? v) (exact-integer? v))
+             (cons (string-append "i" (number->string v)) acc))
+            ((and (number? v) (inexact? v) (real? v))
+             (cons (flonum->token v) acc))
+            ((eq? v #t) (cons "T" acc))
+            ((eq? v #f) (cons "F" acc))
+            ((symbol? v) (cons (string-append "s" (symbol->string v)) acc))
+            ((null? v) (cons ")" (cons "(" acc)))
+            ((pair? v)
+             (let loop ((v v) (acc (cons "(" acc)))
+               (cond ((null? v) (cons ")" acc))
+                     ((pair? v) (loop (cdr v) (value-tokens (car v) acc)))
+                     ;; a dotted tail: "." then the tail value, then ")"
+                     (else (cons ")" (value-tokens v (cons "." acc)))))))
+            (else (error "wire: cannot encode" v))))
+
+    (define (wire-join tokens)
+      (string-join tokens " "))
+
+    (define (wire-tokens line)
+      (filter (lambda (s) (not (string=? s ""))) (string-split line " ")))
+
+    (define (wire-value v)
+      (reverse (value-tokens v '())))
+
+    ;; Read one value from a token list: (value . rest).
+    (define (wire-read-value tokens)
+      (let ((t (car tokens)))
+        (cond ((string=? t "(")
+               (let loop ((rest (cdr tokens)) (acc '()))
+                 (cond
+                   ((string=? (car rest) ")")
+                    (cons (reverse acc) (cdr rest)))
+                   ((string=? (car rest) ".")
+                    (let ((r (wire-read-value (cdr rest))))
+                      (cons (append (reverse acc) (car r)) (cdr (cdr r)))))
+                   (else
+                    (let ((r (wire-read-value rest)))
+                      (loop (cdr r) (cons (car r) acc)))))))
+              ((string=? t "T") (cons #t (cdr tokens)))
+              ((string=? t "F") (cons #f (cdr tokens)))
+              (else
+               (let ((tag (string-ref t 0)) (body (substring t 1 (string-length t))))
+                 (cons (case tag
+                         ((#\i) (string->number body))
+                         ((#\d) (token->flonum t))
+                         ((#\s) (string->symbol body))
+                         (else (error "wire: bad token" t)))
+                       (cdr tokens)))))))
+
+    ;; A node is #f or its body's fields (events included) and its data.
+    (define (node-fields n)
+      (let ((b (timed-node-body n)))
+        (list (body-x b) (body-y b) (body-vx b) (body-vy b)
+              (body-mode b) (body-side b) (body-facing b)
+              (body-coyote b) (body-buffer b) (body-lock b)
+              (body-jumping b) (body-cut b) (body-events b) (body-brittle b)
+              (body-down b) (body-tau b) (body-gliding b)
+              (timed-node-data n))))
+
+    ;; A body alone: its fields as a list value, and back.
+    (define (wire-body-value b)
+      (list (body-x b) (body-y b) (body-vx b) (body-vy b)
+            (body-mode b) (body-side b) (body-facing b)
+            (body-coyote b) (body-buffer b) (body-lock b)
+            (body-jumping b) (body-cut b) (body-events b) (body-brittle b)
+            (body-down b) (body-tau b) (body-gliding b)))
+
+    (define (read-body-value f)
+      (define (at i) (list-ref f i))
+      (body x: (at 0) y: (at 1) vx: (at 2) vy: (at 3)
+            mode: (at 4) side: (at 5) facing: (at 6)
+            coyote: (at 7) buffer: (at 8) lock: (at 9)
+            jumping: (at 10) cut: (at 11) events: (at 12)
+            brittle: (at 13) down: (at 14) tau: (at 15)
+            gliding: (at 16)))
+
+    (define (wire-node n)
+      (if n (wire-value (node-fields n)) (list "F")))
+
+    (define (wire-read-node tokens)
+      (if (string=? (car tokens) "F")
+          (cons #f (cdr tokens))
+          (let* ((r (wire-read-value tokens)) (f (car r)))
+            (define (at i) (list-ref f i))
+            (cons (timed-node
+                    body: (body x: (at 0) y: (at 1) vx: (at 2) vy: (at 3)
+                                mode: (at 4) side: (at 5) facing: (at 6)
+                                coyote: (at 7) buffer: (at 8) lock: (at 9)
+                                jumping: (at 10) cut: (at 11) events: (at 12)
+                                brittle: (at 13) down: (at 14) tau: (at 15)
+                                gliding: (at 16))
+                    data: (at 17))
+                  (cdr r)))))
+
+    (define (intent-code in)
+      (+ (* (+ (intent-h in) 1) 12) (* (+ (intent-v in) 1) 4)
+         (if (intent-jump in) 2 0) (if (intent-press in) 1 0)))
+
+    (define (code-intent k)
+      (make-intent* (- (quotient k 12) 1) (- (modulo (quotient k 4) 3) 1)
+                    (odd? (quotient k 2)) (odd? k)))
+
+    ;; One token: runs "<code>x<count>" joined by "." ("-" for no intents).
+    (define (wire-script script)
+      (if (null? script)
+          "-"
+          (let loop ((s (cdr script)) (code (intent-code (car script))) (n 1) (acc '()))
+            (define (run) (string-append (number->string code) "x" (number->string n)))
+            (cond ((null? s) (string-join (reverse (cons (run) acc)) "."))
+                  ((= (intent-code (car s)) code) (loop (cdr s) code (+ n 1) acc))
+                  (else (loop (cdr s) (intent-code (car s)) 1 (cons (run) acc)))))))
+
+    (define (wire-read-script token)
+      (if (string=? token "-")
+          '()
+          (apply append
+                 (map (lambda (run)
+                        (let ((parts (string-split run "x")))
+                          (make-list (string->number (cadr parts))
+                                     (code-intent (string->number (car parts))))))
+                      (string-split token ".")))))))

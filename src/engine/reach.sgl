@@ -90,14 +90,15 @@
           (engine tilemap)
           (engine collide)
           (engine air)
-          (engine body))
+          (engine body)
+          (only (sigil process) getenv))
 
   (export make-intent* NOTHING
           standable? standable-cells stand-body real-stand-body rest-cell body-cell
           witness witness? witness-from witness-script witness-hops witness-origin
           reach-search-down reach-search-down*
           reach-graph reach-graph? reach-search reach-search* graph-memo tilemap-changes graph-stand-scripts
-          graph-same-edges?
+          graph-same-edges? graph-digest
           graph-tm graph-cells graph-edges graph-starts graph-stats
           graph-edges-from graph-rejected graph-waters cell-index index-cell
           replay-witness witness-lands? witness-bodies witness-trace graph-walk-rect settle-cell
@@ -208,6 +209,30 @@
       (script default: '())
       (hops default: 1)
       (origin default: #f))
+
+    ;; HARKFELL_ROUTE_CHECK=1: every anchor expansion and walk a worker
+    ;; answered is also computed here, the original way, and compared (an
+    ;; error on any difference); the local result is the one used.
+    (define REACH-CHECK (equal? (getenv "HARKFELL_ROUTE_CHECK") "1"))
+    (define (check-body-sig b)
+      (list (map number->string (list (body-x b) (body-y b) (body-vx b) (body-vy b)))
+            (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b)
+            (body-facing b) (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b)
+            (body-cut b) (body-events b) (body-brittle b) (body-down b) (body-tau b)
+            (body-gliding b)))
+    (define (check-script-sig s)
+      (map (lambda (i) (list (intent-h i) (intent-v i) (intent-jump i) (intent-press i))) s))
+    (define (check-notes-sig notes)
+      (map (lambda (n) (list (list-ref n 0) (list-ref n 1) (list-ref n 2)
+                             (check-body-sig (list-ref n 3)) (check-script-sig (list-ref n 4))))
+           notes))
+    (define (check-walk-sig r)
+      (list (car r) (cadr r)
+            (map (lambda (e) (let ((w (cadr e)))
+                               (list (car e) (witness-from w) (check-script-sig (witness-script w))
+                                     (witness-hops w) (caddr e))))
+                 (caddr r))
+            (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6)))
 
     (define SETTLE-MAX 180)
 
@@ -371,6 +396,28 @@
                 ((equal? (norm (vector-ref ea i)) (norm (vector-ref eb i))) (loop (+ i 1)))
                 (else i)))))
 
+    ;; A hash of a graph's edges, witness for witness as graph-same-edges?
+    ;; compares them (target, hops, script): two runs' guides compare by it.
+    (define (graph-digest g)
+      (let ((eg (reach-graph-edges g)))
+        (define (edge-key e)
+          (string-append (number->string (car e)) ":" (number->string (witness-hops (cdr e))) ":"
+                         (apply string-append (map (lambda (in) (string-append (number->string (intent-code* in)) ","))
+                                                   (witness-script (cdr e))))))
+        (let cells ((i 0) (h 0))
+          (if (>= i (vector-length eg))
+              h
+              (cells (+ i 1)
+                     (let keys ((ks (list-sort string<? (map edge-key (vector-ref eg i)))) (h h))
+                       (if (null? ks)
+                           h
+                           (keys (cdr ks)
+                                 (let chars ((cs (string->list (string-append (number->string i) ">" (car ks))))
+                                             (h (modulo (+ (* h 131) 7) 4294967291)))
+                                   (if (null? cs)
+                                       h
+                                       (chars (cdr cs) (modulo (+ (* h 131) (char->integer (car cs))) 4294967291))))))))))))
+
     (define (intent-code* in)
       (intent-slot (intent-h in) (intent-v in) (intent-jump in) (intent-press in)))
 
@@ -532,11 +579,26 @@
                    (or (and (<= c0 (car (car cs)) c1) (<= r0 (cdr (car cs)) r1))
                        (loop (cdr cs)))))))
 
+        ;; The air fields by value. A field is a struct, and equal? on structs
+        ;; is identity, so the list itself never matches another tilemap's:
+        ;; guides built by steadying lifts get fresh fields each time, and
+        ;; REUSE then matched no anchor at all. A gated field also carries
+        ;; whether its gate cell is open here: body-step reads that cell
+        ;; wherever the body is in the footprint, outside any rectangle REUSE
+        ;; tracks, so a change of gate must invalidate every anchor.
+        (define air-sig
+          (map (lambda (fl)
+                 (let ((gate (air-field-gate fl)))
+                   (list (air-field-x fl) (air-field-y fl) (air-field-w fl) (air-field-h fl)
+                         (air-field-lift fl) (air-field-east fl) (air-field-west fl)
+                         (air-field-pulsed fl) gate
+                         (and gate (not (kind-solid? (tile-at tm (car gate) (cdr gate))))))))
+               (tilemap-air tm)))
         ;; What makes two representatives the same state.
         (define (rep-sig b)
           (list (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b) (body-facing b)
                 (body-coyote b) (body-buffer b) (body-lock b) (body-jumping b) (body-cut b) (body-brittle b)
-                (body-down b) (body-tau b) (body-gliding b) f (tilemap-air tm)))
+                (body-down b) (body-tau b) (body-gliding b) f air-sig))
 
         (define (standing c r)
           (body (stand-body tm f c r) down: down))
@@ -978,6 +1040,54 @@
 
         (define (list-drop l n) (if (or (= n 0) (null? l)) l (list-drop (cdr l) (- n 1))))
 
+        ;; Optional (the second element of log): 'serve, to return an anchor
+        ;; expander for a worker instead of searching; or a REMOTE, a vector
+        ;; #(request! await): (request! k rep urgent?) asks a worker to expand
+        ;; anchor k from rep, (await k) gives (notes rect steps) when it is
+        ;; in. An expansion reads only its representative (never reps, hops
+        ;; or the queue), so a worker's notes are the notes; they are applied
+        ;; here, in the drain's own order, exactly as REUSE applies a memo's.
+        (define remote (and (pair? log) (pair? (cdr log)) (vector? (cadr log)) (cadr log)))
+        (define serving (and (pair? log) (pair? (cdr log)) (eq? (cadr log) (quote serve))))
+        (define requested-anchors (make-vector nk #f))
+        ;; expand! would take anchor k from the prior memo (REUSE): the same
+        ;; representative and nothing it touched changed. Fixed once k is
+        ;; queued, so a worker is asked only for anchors REUSE cannot supply.
+        (define (reusable? k)
+          (let ((p (and prior-exp (vector-ref prior-exp k))))
+            (and p (equal? (car p) (rep-sig (vector-ref reps k)))
+                 (not (rect-changed? (cadr p))))))
+        (define (request-queued!)
+          ;; every queued anchor will be expanded; ask for those not asked
+          ;; yet, the next to be popped last so it is first in line
+          (for-each (lambda (k)
+                      (unless (vector-ref requested-anchors k)
+                        (vector-set! requested-anchors k #t)
+                        (unless (reusable? k)
+                          ((vector-ref remote 0) k (vector-ref reps k) #t))))
+                    (reverse queue)))
+        (define (expand-remote! k)
+          (if REACH-CHECK
+              ;; the original expansion, then the worker's compared with it
+              (let* ((r ((vector-ref remote 1) k)) (s0 steps))
+                (expand! k)
+                (let ((mine (vector-ref exp-memo k)))
+                  (unless (and (equal? (check-notes-sig (caddr mine)) (check-notes-sig (car r)))
+                               (equal? (cadr mine) (cadr r))
+                               (= (- steps s0) (caddr r)))
+                    (error "route check: a worker's anchor expansion differs" k))))
+              (begin
+          (set! expanded (+ expanded 1))
+          (when (pair? log)
+            (when (car log) ((car log) expanded steps (key-kind k) (key-cell k))))
+          (let* ((rep (vector-ref reps k))
+                 (r ((vector-ref remote 1) k))
+                 (notes (car r)))
+            (set! steps (+ steps (caddr r)))
+            (vector-set! exp-memo k (list (rep-sig rep) (cadr r) notes))
+            (for-each (lambda (n) (apply note! k n)) (reverse notes))))))
+
+
         ;; the anchors, from the starts
         (for-each (lambda (c)
                     (let ((k (key K-STAND (car c) (cdr c))))
@@ -985,12 +1095,19 @@
                         (vector-set! reps k (standing (car c) (cdr c)))
                         (set! queue (cons k queue)))))
                   starts)
+        (unless serving
         (let drain ()
           (unless (null? queue)
             (let ((k (car queue)))
-              (set! queue (cdr queue))
-              (expand! k)
-              (drain))))
+              (if (and remote (not (reusable? k)))
+                  (begin
+                    (request-queued!)
+                    (set! queue (cdr queue))
+                    (expand-remote! k))
+                  (begin
+                    (set! queue (cdr queue))
+                    (expand! k)))
+              (drain)))))
 
         ;; standing-to-standing candidates: from each stand anchor, a
         ;; breadth-first walk over non-stand anchors (at most PATH-HOPS
@@ -1088,11 +1205,92 @@
                               (every (cdr es)))))
                    p)))
 
+
+          ;; --- REMOTE walks (and a worker's side of them) ---------------------
+          ;; A walk reads the drained anchor graph (reps, hops) and nothing a
+          ;; walk changes, so a worker loaded with this graph walks exactly as
+          ;; walk-from would here; its step and repair counts are added in.
+          (define (expand-one k rep)
+            (let ((s0 steps))
+              (rect-start! rep)
+              (set! *notes* '())
+              (expand-kind k (key-kind k) rep)
+              (let ((notes *notes*))
+                (set! *notes* #f)
+                (list notes (rect-take!) (- steps s0)))))
+          (define (load-graph! rep-list hop-list)
+            (let clear ((i 0))
+              (when (< i nk)
+                (vector-set! reps i #f)
+                (vector-set! hops i '())
+                (clear (+ i 1))))
+            (for-each (lambda (e) (vector-set! reps (car e) (cdr e))) rep-list)
+            (for-each (lambda (e) (vector-set! hops (car e) (cdr e))) hop-list))
+          (define (walk-one k)
+            (let ((s0 steps) (r0 repaired))
+              (let ((r (walk-from k)))
+                (list (car r) (cadr r)
+                      (map (lambda (e)
+                             (let ((w (cadr e)))
+                               (list (car e) (witness-from w) (witness-script w)
+                                     (witness-hops w) (caddr e))))
+                           (caddr r))
+                      (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6)
+                      (- steps s0) (- repaired r0)))))
+          (define walk-remote? (and remote (> (vector-length remote) 2)))
+          ;; Each stand anchor's REUSE walk (or 'none), found once before any
+          ;; walk: a worker is asked only for walks REUSE cannot supply.
+          (define old-walks (make-vector nk #f))
+          (define (prepare-remote-walks!)
+            (let loop ((k 0))
+              (when (< k nk)
+                (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
+                  (vector-set! old-walks k (or (walk-reused k) (quote none))))
+                (loop (+ k 1))))
+            (when walk-remote?
+              ((vector-ref remote 2)
+               (let loop ((k 0) (acc '()))
+                 (if (= k nk) (reverse acc)
+                     (loop (+ k 1) (if (vector-ref reps k) (cons (cons k (vector-ref reps k)) acc) acc))))
+               (let loop ((k 0) (acc '()))
+                 (if (= k nk) (reverse acc)
+                     (loop (+ k 1) (if (pair? (vector-ref hops k)) (cons (cons k (vector-ref hops k)) acc) acc)))))
+              (let loop ((k 0))
+                (when (< k nk)
+                  (when (and (vector-ref reps k) (= (key-kind k) K-STAND)
+                             (eq? (vector-ref old-walks k) (quote none)))
+                    ((vector-ref remote 3) k))
+                  (loop (+ k 1))))))
+          (define (remote-walk k)
+            (if REACH-CHECK
+                (let* ((r ((vector-ref remote 4) k)) (s0 steps) (r0 repaired) (mine (walk-from k)))
+                  (unless (and (equal? (check-walk-sig mine) (check-walk-sig (remote-walk-result k r)))
+                               (= (- steps s0) (list-ref r 7)) (= (- repaired r0) (list-ref r 8)))
+                    (error "route check: a worker's candidate walk differs" k))
+                  mine)
+                (let ((r ((vector-ref remote 4) k)))
+                  (set! steps (+ steps (list-ref r 7)))
+                  (set! repaired (+ repaired (list-ref r 8)))
+                  (remote-walk-result k r))))
+          (define (remote-walk-result k r)
+              (list (car r) (cadr r)
+                    (map (lambda (e)
+                           (list (car e)
+                                 (witness from: (list-ref e 1) origin: (vector-ref reps k)
+                                          script: (list-ref e 2) hops: (list-ref e 3))
+                                 (list-ref e 4)))
+                         (caddr r))
+                    (cadddr r) (list-ref r 4) (list-ref r 5) (list-ref r 6)))
+
+          (if serving
+              (vector expand-one load-graph! walk-one)
+          (begin
+          (prepare-remote-walks!)
           (let each ((k 0))
             (when (< k nkeys)
               (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
-                (let* ((old (walk-reused k))
-                       (r (or old (walk-from k)))
+                (let* ((old (let ((o (vector-ref old-walks k))) (and (not (eq? o (quote none))) o)))
+                       (r (or old (if walk-remote? (remote-walk k) (walk-from k))))
                        (i (let ((c (key-cell k))) (cell-index tm (car c) (cdr c)))))
                   (when old (set! reused-cands (+ reused-cands 1)))
                   (vector-set! cand-memo k r)
@@ -1123,4 +1321,4 @@
                                     (cons 'repairs repaired)
                                     (cons 'reused reused)
                                     (cons 'reused-walks reused-cands))
-                       memo: (cons exp-memo cand-memo)))))))
+                       memo: (cons exp-memo cand-memo)))))))))

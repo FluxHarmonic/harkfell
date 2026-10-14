@@ -1,0 +1,58 @@
+;;; Opt-in counters for the timed reach search (HARKFELL_REACH_PROF=1).
+;;; Observation only: no search reads a counter, so order, inputs, bounds
+;;; and results are the same with it on or off. Off, every hook is a test
+;;; of one boolean.
+(define-library (engine reach prof)
+  (import (sigil list) (sigil process) (sigil time) (sigil gc))
+
+  (export prof-on? prof-add! prof-inc! prof-time prof-seen! prof-report prof-advance)
+
+  (begin
+    (define enabled
+      (let ((v (getenv "HARKFELL_REACH_PROF")))
+        (and v (not (equal? v "")) (not (equal? v "0")))))
+
+    (define counters #{})
+    (define seen #{})
+    (define t-start (current-jiffy))
+
+    (define (prof-on?) enabled)
+
+    (define (prof-add! label n)
+      (when enabled
+        (set! counters (dict-set counters label (+ n (dict-ref counters label 0))))))
+
+    (define (prof-inc! label) (prof-add! label 1))
+
+    ;; Run thunk; when enabled, add its elapsed jiffies to label.
+    (define (prof-time label thunk)
+      (if enabled
+          (let* ((t0 (current-jiffy)) (r (thunk)))
+            (prof-add! label (- (current-jiffy) t0))
+            r)
+          (thunk)))
+
+    ;; Count label-dup when key was seen before under label, else label-new.
+    (define (prof-seen! label key)
+      (when enabled
+        (let ((k (cons label key)))
+          (if (dict-contains? seen k)
+              (prof-inc! (cons label 'dup))
+              (begin
+                (set! seen (dict-set seen k #t))
+                (prof-inc! (cons label 'new)))))))
+
+    ;; advance itself when off; when on, the same advance counting its ticks.
+    (define (prof-advance label advance)
+      (if enabled
+          (lambda (node in) (prof-inc! label) (advance node in))
+          advance))
+
+    (define (prof-report tag)
+      (when enabled
+        (write (list 'prof tag 'jiffies (- (current-jiffy) t-start)
+                     'jps (jiffies-per-second)
+                     (dict-entries counters)
+                     (filter (lambda (e) (memq (car e) (quote (minor-collections major-collections minor-time-ns major-time-ns bytes-allocated rss-bytes promoted-bytes remset-peak))))
+                             (gc-stats))))
+        (newline)))))

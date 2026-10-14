@@ -6,9 +6,12 @@
           (engine body) (engine air) (engine tilemap)
           (engine reach) (engine reach timed) (engine reach routes)
           (harkfell content) (harkfell check) (harkfell feel)
-          (harkfell cloudstair reach))
+          (harkfell cloudstair reach) (harkfell cloudstair routes)
+          (only (harkfell cloudstair region) cloudstair-fingerprint cloudstair-carry-guides cloudstair-guide-seeds
+                cloudstair-guide-server)
+          (only (engine reach pool) pool-verify!))
 
-  (export cloudstair-world-check)
+  (export cloudstair-world-check cloudstair-world-worker)
 
   (begin
     (define (still? node)
@@ -17,16 +20,46 @@
              (and (eq? (body-mode b) 'ground)
                   (= (body-vx b) 0) (= (body-vy b) 0)))))
 
-    (define (cloudstair-world-check ct bound log)
+    ;; Rest states each process remembers (route-rest-memo); a bound on
+    ;; memory, not on the search.
+    (define WORLD-REST-CAP 120000)
+    (define WORLD-WORKER-REST-CAP 60000)
+
+    ;; A worker for cloudstair-world-check's pool: the same content, advance,
+    ;; shelter certificates and waiter, answering (engine reach routes)'
+    ;; wait, replay and certificate requests, and the guide builder's "S"
+    ;; geometry requests.
+    (define (cloudstair-world-worker ct)
+      (let* ((advance (route-rest-memo (cloudstair-stepper ct) WORLD-WORKER-REST-CAP))
+             (routes (route-task-handler advance
+                                         (cloudstair-shelter-checker ct advance)
+                                         (cloudstair-waiter ct advance)
+                                         (cloudstair-fingerprint ct)))
+             (guides #f))
+        (lambda (line)
+          (if (and (> (string-length line) 1) (char=? (string-ref line 0) #\S))
+              (begin
+                (unless guides (set! guides (cloudstair-guide-server ct)))
+                (guides line))
+              (routes line)))))
+
+    ;; pool (optional): an (engine reach pool) of cloudstair-world-worker
+    ;; processes. It changes how long the searches take, not what they find.
+    (define (cloudstair-world-check ct bound log . pool)
       (let* ((tiles-for (cloudstair-tile-provider ct))
-             (advance (cloudstair-stepper ct))
-             (shelter? (cloudstair-shelter-checker ct advance))
-             (wait (cloudstair-waiter ct advance))
+             (verified (and (pair? pool) (car pool)
+                            (pool-verify! (car pool) "I" (string-append "I " (cloudstair-fingerprint ct)))))
+             (advance (route-rest-memo (cloudstair-stepper ct) WORLD-REST-CAP))
+             (certs (route-certificate-cache (cloudstair-shelter-checker ct advance)
+                                             (cloudstair-waiter ct advance)
+                                             (and (pair? pool) (car pool) #t) WORLD-REST-CAP))
+             (shelter? (vector-ref certs 0))
+             (wait (vector-ref certs 1))
              (home (start-cell ct))
              (initial-body (and home (real-stand-body (tiles-for '()) HARKFELL-FEEL
                                                      (car home) (cdr home))))
              (initial (and initial-body (timed-node body: initial-body)))
-             (guides '()) (landings #{}) (covered #{}) (history '())
+             (landings #{}) (covered #{}) (history '())
              (complete #t) (failures 0) (traps '()) (unreached '())
              (landing-count 0) (bowl-proof #f))
         (define (cell-of node)
@@ -41,37 +74,11 @@
               (set! landings (dict-set landings key rest))
               (set! landing-count (+ landing-count 1))
               (when (>= landing-count bound) (set! complete #f)))))
-        (define (guide-for node)
-          (let* ((carry (timed-node-data node))
-                 (down (body-down (timed-node-body node)))
-                 (key (cons carry down)) (prior (assoc key guides)))
-            (if prior (cdr prior)
-                (let* ((tm (tiles-for carry))
-                       ;; Geometry suggestions may pretend lift is steady;
-                       ;; every accepted edge replays the actual pulsed field.
-                       (tm (tilemap tm air:
-                             (filter-map
-                               (lambda (field)
-                                 (and (> (air-field-lift field) 0)
-                                      (air-field field pulsed: #f)))
-                               (tilemap-air tm))))
-                       (base (find (lambda (entry) (eq? (cdar entry) down)) guides))
-                       (cell (cell-of node))
-                       (starts (if (and cell (not (equal? cell home)))
-                                   (list home cell) (list home))))
-                  (log (list 'world-candidates 'carry carry 'down down 'starting))
-                  (let ((graph
-                          (reach-search-down* tm HARKFELL-FEEL starts witness-lands? down
-                            (and base (graph-memo (cdr base)))
-                            (if base (tilemap-changes (graph-tm (cdr base)) tm) '())
-                            (lambda (anchors steps kind cell)
-                              (when (= (modulo anchors 100) 0)
-                                (log (list 'world-candidates 'carry carry 'down down
-                                           'anchors anchors 'steps steps)))))))
-                    (set! guides (cons (cons key graph) guides))
-                    (log (list 'world-candidates 'carry carry 'down down
-                               'complete 'stats (graph-stats graph)))
-                    graph)))))
+        ;; One guide per (carry, down), shared with the region check.
+        ;; With a pool, its workers expand the guides' anchors and walk their
+        ;; candidates, whatever REUSE cannot supply.
+        (define guide-for (cloudstair-carry-guides tiles-for (cloudstair-guide-seeds ct) log (quote world-candidates)
+                                                   (and (pair? pool) (car pool))))
         (define route
           (timed-route-finder advance tiles-for HARKFELL-FEEL guide-for shelter? wait
                               bound record! (lambda () (set! complete #f))
@@ -80,7 +87,8 @@
                          'expanded expanded 'pending pending 'depth depth
                          'at (cell-of node) 'carry (timed-node-data node)
                          'down (body-down (timed-node-body node))
-                         'tau (body-tau (timed-node-body node)))))))
+                         'tau (body-tau (timed-node-body node)))))
+            (cloudstair-route-proposals ct) (and (pair? pool) (car pool)) (vector-ref certs 2)))
         (define (from-history target)
           (let try ((starts history))
             (and complete (pair? starts)

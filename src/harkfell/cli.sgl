@@ -50,9 +50,13 @@
           (harkfell cloudstair region)
           (harkfell cloudstair timing)
           (harkfell cloudstair progression)
-          (harkfell source))
+          (harkfell source)
+          (engine reach pool)
+          (engine reach timed)
+          (only (sigil process) getenv executable-path)
+          (sigil gc))
 
-  (export room-check-main arg-value)
+  (export room-check-main reach-worker-main reach-bench-main arg-value)
 
   (begin
     (define (say . parts) (display (apply string-append parts)) (newline))
@@ -61,6 +65,133 @@
     (define (arg-value args flag)
       (let ((m (member flag args)))
         (and m (pair? (cdr m)) (cadr m))))
+
+    ;; --carry H,H,...: the harmonics carried, 2 to 5, comma-separated, each
+    ;; once. The sorted list; 'bad when malformed (a bad token is never
+    ;; dropped silently); #f when --carry is absent.
+    (define (carry-arg args)
+      (let ((v (arg-value args "--carry")))
+        (cond ((not (member "--carry" args)) #f)
+              ((not v) 'bad)
+              (else
+               (let ((ns (map string->number (string-split v ","))))
+                 (if (and (pair? ns)
+                          (list-all? (lambda (n) (and n (integer? n) (exact? n) (<= 2 n 5))) ns))
+                     (let ((s (list-sort < ns)))
+                       (if (let dup ((l s))
+                             (and (pair? l) (pair? (cdr l)) (or (= (car l) (cadr l)) (dup (cdr l)))))
+                           'bad
+                           s))
+                     'bad))))))
+
+    ;; The regional check's profiles ((carry . down) ...): --carry, that entry
+    ;; with down; --quick, (2 4) with down; else the diagnostic set (which
+    ;; holds the negatives). --negatives adds, to --carry or --quick, the
+    ;; entrance negatives: every diagnostic profile without down or without
+    ;; H4, each of which must not enter Cloudstair at all.
+    (define (region-profiles args)
+      (let* ((c (carry-arg args))
+             (base (cond ((pair? c) (list (cons c #t)))
+                         ((member "--quick" args) (list (cons '(2 4) #t)))
+                         (else (cloudstair-diagnostic-profiles)))))
+        (if (and (member "--negatives" args) (or (pair? c) (member "--quick" args)))
+            (append base (filter (lambda (p) (not (and (cdr p) (memv 4 (car p)))))
+                                 (cloudstair-diagnostic-profiles)))
+            base)))
+
+    ;; The profiles, for the verdict line.
+    (define (profiles-label profiles)
+      (let* ((entries (filter (lambda (p) (and (cdr p) (memv 4 (car p)))) profiles))
+             (negatives (- (length profiles) (length entries))))
+        (string-append
+          " [profiles: "
+          (string-join (map (lambda (p)
+                              (string-append "(" (string-join (map number->string (car p)) " ") ")"
+                                             (if (cdr p) "+down" "")))
+                            entries)
+                       ", ")
+          (if (> negatives 0)
+              (string-append "; " (number->string negatives) " entrance negatives")
+              "")
+          "]")))
+
+    ;; Worker processes for the regional search: --workers N, else
+    ;; HARKFELL_REACH_WORKERS, else none. Workers change the time, not
+    ;; the result ((engine reach pool)).
+    (define (reach-worker-count args)
+      (let ((v (or (arg-value args "--workers") (getenv "HARKFELL_REACH_WORKERS"))))
+        (or (and v (string->number v)) 0)))
+
+    ;; harkfell --reach-worker cloudstair-region [--world DIR]: one pool
+    ;; worker, request lines on stdin, answers on stdout, nothing else
+    ;; printed there. Ends at end of input.
+    ;; harkfell --reach-bench [--world DIR]: what one tick of the Cloudstair
+    ;; regional stepper costs natively, and its parts. Diagnostic only.
+    (define (reach-bench-main args)
+      (let* ((dir (or (arg-value args "--world") "world"))
+             (ct (cloudstair-region-content (load-content (read-world-source dir))))
+             (advance (cloudstair-stepper ct))
+             (tiles-for (cloudstair-tile-provider ct))
+             (tm (tiles-for '(2 4)))
+             (wm (content-map ct))
+             (entries (cloudstair-entry-phases ct (start-cell ct) '(2 4) #t))
+             (root (car entries))
+             (b0 (timed-node-body root))
+             (gap (append (make-list 45 (intent h: 1)) (list (intent h: 1 jump: #t press: #t))
+                          (make-list 46 (intent h: 1 jump: #t)) (make-list 28 NO-INTENT))))
+        (define (clock) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
+        ;; --ballast MB: hold that much live data (small lists, like the search's
+        ;; keys) while benchmarking, to see what a large heap does to a tick.
+        (define ballast
+          (let ((mb (let ((v (arg-value args "--ballast"))) (or (and v (string->number v)) 0))))
+            (let loop ((n (quotient (* mb 1048576) 300)) (acc (quote ())))
+              (if (<= n 0) acc (loop (- n 1) (cons (timed-key root) acc))))))
+        (define (gc-ns) (+ (cdr (assq (quote minor-time-ns) (gc-stats))) (cdr (assq (quote major-time-ns) (gc-stats)))))
+        (define (bench name n thunk)
+          (let ((t0 (clock)) (g0 (gc-ns)))
+            (let loop ((i 0)) (when (< i n) (thunk) (loop (+ i 1))))
+            (let ((dt (- (clock) t0)))
+              (write (list (quote bench) name (quote n) n (quote seconds) dt (quote us-per) (/ (* 1e6 dt) n)
+                           (quote gc-seconds) (/ (- (gc-ns) g0) 1e9) (quote ballast-lists) (length ballast)))
+              (newline))))
+        (write (list 'bench-setup 'air-fields (length (tilemap-air tm))
+                     'rooms (length (content-rooms ct)) 'cols (tilemap-cols tm) 'rows (tilemap-rows tm)))
+        (newline)
+        (bench 'advance-gap-script (* 100 (length gap))
+               (let ((node root) (s gap))
+                 (lambda ()
+                   (when (or (null? s) (not node)) (set! node root) (set! s gap))
+                   (set! node (advance node (car s)))
+                   (set! s (cdr s)))))
+        (bench 'body-step-gap-script (* 100 (length gap))
+               (let ((b b0) (s gap))
+                 (lambda ()
+                   (when (null? s) (set! b b0) (set! s gap))
+                   (set! b (body-step b (car s) tm HARKFELL-FEEL))
+                   (set! s (cdr s)))))
+        (bench 'advance-still 20000 (lambda () (advance root NO-INTENT)))
+        (bench 'body-step-still 20000 (lambda () (body-step b0 NO-INTENT tm HARKFELL-FEEL)))
+        (let ((c (body-center b0 HARKFELL-FEEL)))
+          (bench 'air-sample 20000
+                 (lambda () (air-sample (tilemap-air tm) (car c) (cdr c) 310
+                                        (lambda (gx gy) (not (kind-solid? (tile-at tm gx gy)))))))
+          (bench 'room-at-px 20000 (lambda () (worldmap-room-at-px wm (car c) (cdr c)))))
+        (bench 'timed-key 20000 (lambda () (timed-key root)))
+        (bench 'rest-key 20000
+               (lambda () (timed-key (timed-node root body: (body b0 tau: 0)))))
+        (bench 'body-copy 20000 (lambda () (body b0 tau: 3)))
+        0))
+
+    (define (reach-worker-main args)
+      (let* ((dir (or (arg-value args "--world") "world"))
+             (ct (load-content (read-world-source dir))))
+        (cond ((member "cloudstair-region" args)
+               (pool-serve (cloudstair-region-worker ct))
+               0)
+              ((member "cloudstair-world" args)
+               (pool-serve (cloudstair-world-worker ct))
+               0)
+              (else (display "reach-worker: unknown kind" (current-error-port)) 2))))
 
     (define (now-s) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
 
@@ -116,6 +247,124 @@
                    (loop (append (cdr front) (map car next))
                          (append parents (map (lambda (e) (cons (car e) (cons c (cdr e)))) next)))))))))
 
+    ;; The spatial room-check (gate 3 of section 8) on ct: every room's
+    ;; reach and traps, per carry set a player can hold. scope labels the
+    ;; verdict line ("" for the whole world). diagnostic, optional: room
+    ;; labels whose problems are printed as diagnostic and not counted (the
+    ;; verdict line names them); none for the whole world.
+    (define (spatial-room-check ct args keys t0 scope . diagnostic)
+      (let* ((g (if (member "--verbose" args)
+                    (content-reach ct (lambda (n steps kind cell)
+                                        (say "  anchor " (number->string n) " kind " (number->string kind)
+                                             " cell " (number->string (car cell)) "," (number->string (cdr cell))
+                                             " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
+                    (content-reach ct)))
+             (t1 (now-s))
+             (diag (if (pair? diagnostic) (car diagnostic) '()))
+             (diag-paths (map (lambda (rm) (room-path rm))
+                              (filter (lambda (rm) (member (room-label rm) diag))
+                                      (map placed-data (content-rooms ct)))))
+             (all-ps (reach-problems ct g))
+             (rps (filter (lambda (p) (not (member (problem-path p) diag-paths))) all-ps))
+             (dps (filter (lambda (p) (member (problem-path p) diag-paths)) all-ps))
+             (diag-label (if (null? diag) ""
+                             (string-append " [diagnostic only, not counted: " (string-join diag " ")
+                                            ", " (number->string (length dps)) " problems]")))
+             (rooms (map placed-data (content-rooms ct)))
+             (shown (if (null? keys)
+                        rooms
+                        (filter (lambda (rm) (member (room-label rm) keys)) rooms))))
+        (when g
+          (say "reach: " (reach-summary g) ", " (number->string (exact (round (- t1 t0)))) " s")
+          (when (member "--verbose" args)
+            (for-each (lambda (e)
+                        (say "  rejected by the replay: ("
+                             (number->string (caar e)) "," (number->string (cdar e)) ") -> ("
+                             (number->string (cadr e)) "," (number->string (cddr e)) ")"))
+                      (apply append (map (lambda (e) (graph-rejected (cset-graph e))) g)))))
+        (for-each (lambda (p) (say (problem->string p))) rps)
+        (for-each (lambda (p) (say "diagnostic (air field: the timed check owns this room): "
+                                   (problem->string p)))
+                  dps)
+        (let ((pk (arg-value args "--path"))
+              (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
+          (when (and g pk pc)
+            (let* ((k (parse-room-key pk))
+                   (rm (and k (content-room ct (cadr k) (caddr k))))
+                   (xy (map string->number (string-split pc ","))))
+              (if (and rm (= (length xy) 2) (car xy) (cadr xy))
+                  (begin
+                    (say "path to " pk " (" pc "):")
+                    (let* ((hv (arg-value args "--have"))
+                           (carry (if hv (list-sort < (filter integer? (map string->number (string-split hv ",")))) '()))
+                           (e (find (lambda (x) (equal? (cset-carry x) carry)) g)))
+                      (if e
+                          (print-path ct (cset-graph e) (local->global ct rm (car xy) (cadr xy)))
+                          (say "--have: no carry set " (carry-label carry) " is one a player can hold"))))
+                  (say "--path: no room " pk " or no cell " pc)))))
+        (when (and g (not (member "--path" args)))
+          (for-each (lambda (rm)
+                      (newline)
+                      (for-each say (room-report ct g rm)))
+                    shown))
+        (newline)
+        (if (null? rps)
+            (begin
+              (say "PASS room-check" scope ": " (number->string (length rooms)) " rooms, parse seams map reach green"
+                   diag-label)
+              0)
+            (begin
+              (say "FAIL room-check" scope ": " (number->string (length rps)) " reach problems" diag-label)
+              1))))
+
+    ;; --outside-cloudstair: the spatial room-check on every room outside
+    ;; Cloudstair. Cloudstair's 22 rooms (where every pulsed air field is,
+    ;; which the spatial search cannot prove) are removed and their slots
+    ;; become solid rock, so its one border (Cloudstair (7,1) over Hollow
+    ;; (7,2)) is sealed. Nothing in the search changes.
+    ;; What this does NOT check, so the verdict line says it (review, HIGH):
+    ;; sealing shrinks what is reached, so it adds failures (unreached cells,
+    ;; lost ways back) but it can also HIDE them. Traps, water traps, stale
+    ;; unreached: declarations and pickup problems are judged only on states
+    ;; the search reaches, so any state reachable only through Cloudstair, or
+    ;; only carrying a harmonic picked up there (H5, in x12y-2), goes
+    ;; unjudged: e.g. Hollow x4y3's H5 stone (21,6) and its declared-unreached
+    ;; (20,6). And the spatial search never models down, which every player
+    ;; entering Cloudstair has. Cloudstair itself is the regional replay's.
+    (define (outside-cloudstair-check ct args keys t0)
+      (let* ((wm (content-map ct))
+             (outside (filter (lambda (p) (not (eq? (room-region (placed-data p)) 'cloudstair)))
+                              (content-rooms ct)))
+             (ct* (content ct rooms: outside
+                           wmap: (make-worldmap outside (worldmap-cols wm) (worldmap-rows wm)
+                                                (worldmap-size wm)))))
+        (say "outside Cloudstair: " (number->string (length outside)) " rooms; "
+             (number->string (- (length (content-rooms ct)) (length outside)))
+             " Cloudstair rooms removed, their slots solid")
+        (cond ((find (lambda (f) (member f args))
+                     '("--parse-only" "--cloudstair-timing" "--waypoints" "--cloudstair-region"))
+               (say "SETUP-FAILED room-check: --outside-cloudstair runs alone, not with "
+                    (find (lambda (f) (member f args))
+                          '("--parse-only" "--cloudstair-timing" "--waypoints" "--cloudstair-region")))
+               2)
+              ((not (start-cell ct*))
+               (say "FAIL room-check outside Cloudstair: the world's start is not outside Cloudstair")
+               1)
+              ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct*))))
+               (say "FAIL room-check outside Cloudstair: a pulsed air field outside Cloudstair, which the spatial check cannot prove")
+               1)
+              (else
+               ;; Rooms holding an air field (steady: x7y2's lift): SYSTEMS rates a
+               ;; spatial verdict there diagnostic only, so the timed check owns them.
+               (let ((air-rooms (map (lambda (p) (room-label (placed-data p)))
+                                     (filter (lambda (p) (pair? (tilemap-air (placed-tiles p)))) outside))))
+                 (unless (null? air-rooms)
+                   (say "rooms with an air field, diagnostic only (the timed check owns them): "
+                        (string-join air-rooms " ")))
+                 (spatial-room-check ct* args keys t0
+                   " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
+                   air-rooms))))))
+
     (define (room-check-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
              (keys (filter (lambda (a) (and (parse-room-key a) (not (equal? a dir)))) args)))
@@ -131,6 +380,8 @@
                 ((not (null? ps))
                   (say "FAIL room-check: " (number->string (length ps)) " problems before reach (reach not run)")
                   1)
+                ((member "--outside-cloudstair" args)
+                  (outside-cloudstair-check ct args keys t0))
                 ((member "--parse-only" args)
                   (say "PASS room-check --parse-only: " (number->string (length (content-rooms ct)))
                        " rooms, parse seams map green (reach NOT run)")
@@ -145,72 +396,112 @@
                          " Cloudstair authored timing: " (number->string failures)
                          " failures (regional/world reach NOT established)")
                     (if (= failures 0) 0 1)))
+                ;; --carry must be well formed and alone (not with --quick): a
+                ;; dropped token would silently check another profile.
+                ((and (member "--cloudstair-region" args)
+                      (or (eq? (carry-arg args) 'bad)
+                          (and (carry-arg args) (member "--quick" args))))
+                  (say "SETUP-FAILED room-check: --carry takes the harmonics carried, 2 to 5, "
+                       "comma-separated, each once (e.g. --carry 2,3,4), and not with --quick")
+                  2)
+                ;; --landing-cap N: a whole number of landings, or nothing runs.
+                ((and (member "--cloudstair-region" args) (member "--landing-cap" args)
+                      (not (let ((n (string->number (or (arg-value args "--landing-cap") ""))))
+                             (and n (integer? n) (exact? n) (> n 0)))))
+                  (say "SETUP-FAILED room-check: --landing-cap takes a whole number of landings "
+                       "(e.g. --landing-cap 30000)")
+                  2)
+                ;; Diagnostic: chain searches through waypoint cells (carry (2 4), down).
+                ((and (member "--cloudstair-region" args) (member "--waypoints" args))
+                  (let* ((n (reach-worker-count args))
+                         (cells (filter-map
+                                  (lambda (a)
+                                    (let ((parts (string-split a ",")))
+                                      (and (= (length parts) 2)
+                                           (string->number (car parts)) (string->number (cadr parts))
+                                           (cons (string->number (car parts)) (string->number (cadr parts))))))
+                                  (cdr (member "--waypoints" args))))
+                         (pool (and (> n 0)
+                                    (make-pool (list (executable-path) "--reach-worker"
+                                                     "cloudstair-region" "--world" dir)
+                                               n)))
+                         (rc (cloudstair-region-waypoints ct '(2 4) #t
+                               (let ((b (arg-value args "--region-bound")))
+                                 (or (and b (string->number b)) 10000))
+                               cells
+                               (lambda (record) (write record) (newline))
+                               pool)))
+                    (when pool (pool-close! pool))
+                    (say (if (= rc 0) "WAYPOINTS-REACHED" "WAYPOINTS-FAILED")
+                         " (diagnostic only; no verdict)")
+                    rc))
                 ((member "--cloudstair-region" args)
-                  (let ((failures
+                  (let* ((n (reach-worker-count args))
+                         ;; gate flags (not diagnostic knobs): --cell-returns sets the
+                         ;; same switch as HARKFELL_REGION_CELL_RETURNS=1; --landing-cap N
+                         ;; caps retained landings apart from the search bound
+                         (cell-mode (and (member "--cell-returns" args)
+                                         (begin (set-cell-returns! #t) #t)))
+                         (cap (and (member "--landing-cap" args)
+                                   (let ((c (string->number (arg-value args "--landing-cap"))))
+                                     (set-landing-cap! c)
+                                     c)))
+                         (pool (and (> n 0)
+                                    (make-pool (list (executable-path) "--reach-worker"
+                                                     "cloudstair-region" "--world" dir)
+                                               n)))
+                         ;; the 0.4 entries are (2 4) and (2 3 4) with down
+                         (profiles (region-profiles args))
+                         (failures
                           (cloudstair-region-check ct
-                            (if (member "--quick" args) (list (cons '(2 4) #t))
-                                (cloudstair-diagnostic-profiles))
-                            10000 (lambda (record) (write record) (newline)))))
-                    (say (if (= failures 0) "PASS" "FAIL")
-                         " Cloudstair regional replay: " (number->string failures)
-                         " failures (final full-world progression NOT established)")
-                    (if (= failures 0) 0 1)))
+                            profiles
+                            (let ((b (arg-value args "--region-bound")))
+                              (or (and b (string->number b)) 10000))
+                            (lambda (record) (write record) (newline))
+                            pool)))
+                    (when pool (pool-close! pool))
+                    ;; Measurement knobs (a raised landing bound, the return memo off,
+                    ;; the baseline order) can change which states are touched: say so
+                    ;; on the verdict line and exit 2, never 0 or 1. The gate's own
+                    ;; claim, with the return memo on: every retained landing is
+                    ;; proven to return (return trials stop at proven states).
+                    (let* ((knob (lambda (name) (let ((v (getenv name))) (and v (not (equal? v "")) v))))
+                           (measure (or (and (knob "HARKFELL_REGION_LANDING_BOUND")
+                                             (string->number (knob "HARKFELL_REGION_LANDING_BOUND")))
+                                        (equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0")
+                                        (equal? (knob "HARKFELL_ROUTE_ORDER") "baseline")
+                                        (knob "HARKFELL_REGION_TARGETS") (knob "HARKFELL_REGION_DRAIN_ROUNDS")
+                                        (knob "HARKFELL_REGION_DRAIN_ROUND")
+                                        (equal? (knob "HARKFELL_REGION_PARALLEL_DRAIN") "local")
+                                        (equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1"))))
+                      (say (if (= failures 0) "PASS" "FAIL")
+                           " Cloudstair regional replay: " (number->string failures)
+                           " failures (final full-world progression NOT established)"
+                           (profiles-label profiles)
+                           (if cap (string-append " [landing cap " (number->string cap) "]") "")
+                           ;; the claim a PASS makes: per cell group with --cell-returns
+                           ;; (or its knob), else per retained landing
+                           ;; (a FAIL makes no claim, so none is printed)
+                           (cond ((> failures 0) "")
+                                 ((or cell-mode (equal? (knob "HARKFELL_REGION_CELL_RETURNS") "1"))
+                                  " [cell returns: one retained landing per reached (cell, carry, down) proven to return]")
+                                 ((equal? (knob "HARKFELL_REGION_RETURN_MEMO") "0") "")
+                                 (else " [return memo: every retained landing proven to return]"))
+                           (if measure " [diagnostic knob set: NOT a gate verdict]" ""))
+                      (cond (measure 2) ((= failures 0) 0) (else 1)))))
                 ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct))))
-                  (let ((failures
+                  (let* ((n (reach-worker-count args))
+                         (pool (and (> n 0)
+                                    (make-pool (list (executable-path) "--reach-worker"
+                                                     "cloudstair-world" "--world" dir)
+                                               n)))
+                         (failures
                           (cloudstair-world-check ct 50000
-                            (lambda (record) (write record) (newline)))))
+                            (lambda (record) (write record) (newline))
+                            pool)))
+                    (when pool (pool-close! pool))
                     (say (if (= failures 0) "PASS" "FAIL")
                          " room-check: " (number->string failures)
                          " exact world replay failures (timing/profile/sabotage gates also required)")
                     (if (= failures 0) 0 1)))
-                (else
-                  (let* ((g (if (member "--verbose" args)
-                                (content-reach ct (lambda (n steps kind cell)
-                                                    (say "  anchor " (number->string n) " kind " (number->string kind)
-                                                         " cell " (number->string (car cell)) "," (number->string (cdr cell))
-                                                         " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
-                                (content-reach ct)))
-                         (t1 (now-s))
-                         (rps (reach-problems ct g))
-                         (rooms (map placed-data (content-rooms ct)))
-                         (shown (if (null? keys)
-                                    rooms
-                                    (filter (lambda (rm) (member (room-label rm) keys)) rooms))))
-                    (when g
-                      (say "reach: " (reach-summary g) ", " (number->string (exact (round (- t1 t0)))) " s")
-                      (when (member "--verbose" args)
-                        (for-each (lambda (e)
-                                    (say "  rejected by the replay: ("
-                                         (number->string (caar e)) "," (number->string (cdar e)) ") -> ("
-                                         (number->string (cadr e)) "," (number->string (cddr e)) ")"))
-                                  (apply append (map (lambda (e) (graph-rejected (cset-graph e))) g)))))
-                    (for-each (lambda (p) (say (problem->string p))) rps)
-                    (let ((pk (arg-value args "--path"))
-                          (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
-                      (when (and g pk pc)
-                        (let* ((k (parse-room-key pk))
-                               (rm (and k (content-room ct (cadr k) (caddr k))))
-                               (xy (map string->number (string-split pc ","))))
-                          (if (and rm (= (length xy) 2) (car xy) (cadr xy))
-                              (begin
-                                (say "path to " pk " (" pc "):")
-                                (let* ((hv (arg-value args "--have"))
-                                       (carry (if hv (list-sort < (filter integer? (map string->number (string-split hv ",")))) '()))
-                                       (e (find (lambda (x) (equal? (cset-carry x) carry)) g)))
-                                  (if e
-                                      (print-path ct (cset-graph e) (local->global ct rm (car xy) (cadr xy)))
-                                      (say "--have: no carry set " (carry-label carry) " is one a player can hold"))))
-                              (say "--path: no room " pk " or no cell " pc)))))
-                    (when (and g (not (member "--path" args)))
-                      (for-each (lambda (rm)
-                                  (newline)
-                                  (for-each say (room-report ct g rm)))
-                                shown))
-                    (newline)
-                    (if (null? rps)
-                        (begin
-                          (say "PASS room-check: " (number->string (length rooms)) " rooms, parse seams map reach green")
-                          0)
-                        (begin
-                          (say "FAIL room-check: " (number->string (length rps)) " reach problems")
-                          1)))))))))))
+                (else (spatial-room-check ct args keys t0 "")))))))))

@@ -1,0 +1,182 @@
+;;; A pool of worker processes speaking one line per request and one line
+;;; per response, for spreading pure physics across cores.
+;;;
+;;; The search stays in one process and stays sequential: workers only
+;;; compute values the search would otherwise compute itself (they are
+;;; functions of their request line), and the search consumes them in its
+;;; own order. So a pool can change how long a search takes, never what it
+;;; finds.
+;;;
+;;;   (make-pool argv n)                n children running argv (strings)
+;;;   (pool-submit! pool line k)        queue a request; (k response-line)
+;;;                                     runs in this process when it arrives
+;;;                                     and may submit more
+;;;   (pool-submit-urgent! pool line k) the same, ahead of everything queued
+;;;   (either, with a last argument i: only worker i takes it; pinning
+;;;   related requests keeps one worker's caches warm for them)
+;;;   (pool-drain! pool)                run until nothing is queued or in flight
+;;;   (pool-drain-until! pool done?)    run until (done?) or nothing is left
+;;;   (pool-close! pool)                close the workers' stdin, wait for them
+;;;   (pool-serve handler)              a worker's loop: line in, (handler line) out
+;;;
+;;; Each worker holds up to POOL-DEPTH requests at once (it answers them in
+;;; order), so it keeps working while this process does other things.
+;;; A worker that exits or answers garbage is an error in this process,
+;;; never a silent result.
+(define-library (engine reach pool)
+  (import (sigil list) (sigil string) (sigil io) (sigil process) (sigil async))
+
+  (export make-pool pool? pool-size pool-submit! pool-submit-urgent! pool-drain!
+          pool-drain-until! pool-close! pool-serve pool-requests pool-verify!)
+
+  (begin
+    (define POOL-DEPTH 3)
+
+    ;; A pool is a vector: workers (vector), queue (list), requests started.
+    (define (%make-pool workers queue requests) (vector (quote pool) workers queue requests))
+    (define (pool? x) (and (vector? x) (= (vector-length x) 4) (eq? (vector-ref x 0) (quote pool))))
+    (define (pool-workers p) (vector-ref p 1))
+    (define (pool-queue p) (vector-ref p 2))
+    (define (set-pool-queue! p q) (vector-set! p 2 q))
+    (define (pool-requests p) (vector-ref p 3))
+    (define (set-pool-requests! p n) (vector-set! p 3 n))
+
+    ;; Each worker is a vector: process, stdout fd, input buffer, the
+    ;; continuations of its requests in flight, oldest first.
+    (define (make-pool argv n)
+      (%make-pool
+        (list->vector
+          (map (lambda (i)
+                 (let ((p (apply process-spawn-pipe argv)))
+                   (unless p (error "pool: cannot start worker" argv))
+                   (vector p (process-stdout-fd p) "" '())))
+               (iota n)))
+        '() 0))
+
+    (define (pool-size pool) (vector-length (pool-workers pool)))
+
+    (define (pool-submit! pool line k . pin)
+      (set-pool-queue! pool (append (pool-queue pool) (list (list line k (and (pair? pin) (car pin)))))))
+
+    (define (pool-submit-urgent! pool line k . pin)
+      (set-pool-queue! pool (cons (list line k (and (pair? pin) (car pin))) (pool-queue pool))))
+
+    (define (write-all! p text)
+      (let loop ((bv (string->utf8 text)))
+        (let ((n (process-pipe-write p bv)))
+          (cond ((= n (bytevector-length bv)) #t)
+                (else
+                 (await-writable-fd (process-stdin-fd p))
+                 (loop (bytevector-copy bv n)))))))
+
+    ;; Start queued requests: each idle slot takes the first queued job that
+    ;; is unpinned or pinned to its worker; unpinned jobs go to the least
+    ;; loaded worker.
+    (define (assign! pool)
+      (let ((ws (pool-workers pool)))
+        (define (load i) (length (vector-ref (vector-ref ws i) 3)))
+        (define (start! i job)
+          (let ((w (vector-ref ws i)))
+            (vector-set! w 3 (append (vector-ref w 3) (list (cadr job))))
+            (set-pool-requests! pool (+ 1 (pool-requests pool)))
+            (write-all! (vector-ref w 0) (string-append (car job) "\n"))))
+        (let loop ((jobs (pool-queue pool)) (kept '()))
+          (if (null? jobs)
+              (set-pool-queue! pool (reverse kept))
+              (let* ((job (car jobs)) (pin (caddr job))
+                     (i (if pin
+                            (and (< (load pin) POOL-DEPTH) pin)
+                            (let pick ((i 0) (best #f))
+                              (cond ((= i (vector-length ws)) best)
+                                    ((and (< (load i) POOL-DEPTH)
+                                          (or (not best) (< (load i) (load best))))
+                                     (pick (+ i 1) i))
+                                    (else (pick (+ i 1) best)))))))
+                (if i
+                    (begin (start! i job) (loop (cdr jobs) kept))
+                    (loop (cdr jobs) (cons job kept))))))))
+
+    (define (busy pool)
+      (filter (lambda (w) (pair? (vector-ref w 3))) (vector->list (pool-workers pool))))
+
+    (define (newline-index s)
+      (let loop ((i 0))
+        (cond ((= i (string-length s)) #f)
+              ((char=? (string-ref s i) #\newline) i)
+              (else (loop (+ i 1))))))
+
+    ;; Read what a worker has written; deliver each complete response, in
+    ;; the order its requests were written.
+    (define (collect! w)
+      (let ((bv (process-pipe-read (vector-ref w 0) 65536)))
+        (when (eof-object? bv)
+          (error "pool: a reach worker exited with requests in flight"))
+        (when (> (bytevector-length bv) 0)
+          (vector-set! w 2 (string-append (vector-ref w 2) (utf8->string bv))))
+        (let loop ()
+          (let ((at (newline-index (vector-ref w 2))))
+            (when at
+              (let ((line (substring (vector-ref w 2) 0 at))
+                    (rest (substring (vector-ref w 2) (+ at 1) (string-length (vector-ref w 2)))))
+                (when (null? (vector-ref w 3))
+                  (error "pool: a worker answered a request it was not sent" line))
+                (let ((k (car (vector-ref w 3))))
+                  (vector-set! w 2 rest)
+                  (vector-set! w 3 (cdr (vector-ref w 3)))
+                  (k line)
+                  (loop))))))))
+
+    ;; One round: start what can start, wait for any answer, deliver it.
+    ;; #f when nothing is queued or in flight.
+    (define (pump! pool)
+      (assign! pool)
+      (let ((ws (busy pool)))
+        (and (pair? ws)
+             (begin
+               (await-readable-fds (map (lambda (w) (vector-ref w 1)) ws))
+               (for-each collect! ws)
+               #t))))
+
+    (define (pool-drain-until! pool done?)
+      (let loop ()
+        (unless (done?)
+          (when (pump! pool) (loop)))))
+
+    (define (pool-drain! pool)
+      (pool-drain-until! pool (lambda () #f)))
+
+    ;; Ask every worker line and require answer from each: a worker built
+    ;; from something else than this process is refused before its first
+    ;; real request.
+    (define (pool-verify! pool line answer)
+      (let ((got (make-vector (pool-size pool) #f)))
+        (let loop ((i 0))
+          (when (< i (pool-size pool))
+            (let ((i i)) (pool-submit! pool line (lambda (a) (vector-set! got i a)) i))
+            (loop (+ i 1))))
+        (pool-drain! pool)
+        (let loop ((i 0))
+          (when (< i (pool-size pool))
+            (unless (equal? (vector-ref got i) answer)
+              (error "pool: a worker was built from something else" i (vector-ref got i) answer))
+            (loop (+ i 1))))
+        #t))
+
+    ;; Answers still in flight are not wanted (the search is over; they were
+    ;; guesses), so the workers are killed rather than drained: a leftover
+    ;; guess can neither delay the verdict nor fail it.
+    (define (pool-close! pool)
+      (vector-for-each
+        (lambda (w)
+          (process-kill! (vector-ref w 0))
+          (process-wait (vector-ref w 0)))
+        (pool-workers pool)))
+
+    (define (pool-serve handler)
+      (let loop ()
+        (let ((line (read-line)))
+          (unless (eof-object? line)
+            (display (handler line))
+            (newline)
+            (flush-output-port (current-output-port))
+            (loop)))))))

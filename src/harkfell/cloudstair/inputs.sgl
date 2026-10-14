@@ -1,0 +1,19 @@
+;;; Authored input families shared by the timing gate and actual-state search.
+(define-library (harkfell cloudstair inputs)
+  (import (sigil list)
+          (engine body)
+          (harkfell cloudstair probes))
+
+  (export cloudstair-lift-inputs cloudstair-gap-inputs)
+
+  (begin
+    (define (cloudstair-lift-inputs node)
+      (probe-lift-script node))
+
+    ;; David's three-tile gaps have standing take-offs over run-ups 38-52.
+    ;; The approved family uses the middle of that measured window.
+    (define (cloudstair-gap-inputs h node)
+      (append (make-list 45 (intent h: h))
+              (list (intent h: h jump: #t press: #t))
+              (make-list 46 (intent h: h jump: #t))
+              (make-list 28 NO-INTENT)))))
