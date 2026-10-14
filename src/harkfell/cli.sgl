@@ -306,9 +306,16 @@
     ;; Cloudstair. Cloudstair's 22 rooms (where every pulsed air field is,
     ;; which the spatial search cannot prove) are removed and their slots
     ;; become solid rock, so its one border (Cloudstair (7,1) over Hollow
-    ;; (7,2)) is sealed. A route or a return through Cloudstair is then not
-    ;; counted, which can only add failures; Cloudstair itself is the regional
-    ;; replay's. Nothing in the search changes.
+    ;; (7,2)) is sealed. Nothing in the search changes.
+    ;; What this does NOT check, so the verdict line says it (review, HIGH):
+    ;; sealing shrinks what is reached, so it adds failures (unreached cells,
+    ;; lost ways back) but it can also HIDE them. Traps, water traps, stale
+    ;; unreached: declarations and pickup problems are judged only on states
+    ;; the search reaches, so any state reachable only through Cloudstair, or
+    ;; only carrying a harmonic picked up there (H5, in x12y-2), goes
+    ;; unjudged: e.g. Hollow x4y3's H5 stone (21,6) and its declared-unreached
+    ;; (20,6). And the spatial search never models down, which every player
+    ;; entering Cloudstair has. Cloudstair itself is the regional replay's.
     (define (outside-cloudstair-check ct args keys t0)
       (let* ((wm (content-map ct))
              (outside (filter (lambda (p) (not (eq? (room-region (placed-data p)) 'cloudstair)))
@@ -319,13 +326,20 @@
         (say "outside Cloudstair: " (number->string (length outside)) " rooms; "
              (number->string (- (length (content-rooms ct)) (length outside)))
              " Cloudstair rooms removed, their slots solid")
-        (cond ((not (start-cell ct*))
+        (cond ((find (lambda (f) (member f args))
+                     '("--parse-only" "--cloudstair-timing" "--waypoints" "--cloudstair-region"))
+               (say "SETUP-FAILED room-check: --outside-cloudstair runs alone, not with "
+                    (find (lambda (f) (member f args))
+                          '("--parse-only" "--cloudstair-timing" "--waypoints" "--cloudstair-region")))
+               2)
+              ((not (start-cell ct*))
                (say "FAIL room-check outside Cloudstair: the world's start is not outside Cloudstair")
                1)
               ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct*))))
                (say "FAIL room-check outside Cloudstair: a pulsed air field outside Cloudstair, which the spatial check cannot prove")
                1)
-              (else (spatial-room-check ct* args keys t0 " outside Cloudstair")))))
+              (else (spatial-room-check ct* args keys t0
+                      " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]")))))
 
     (define (room-check-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
