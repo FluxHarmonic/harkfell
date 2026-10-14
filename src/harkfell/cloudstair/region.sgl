@@ -404,7 +404,8 @@
         ;; checked at its exact key (a failure ends this worker, an error in
         ;; the check).
         (define (proven-return? node target)
-          (and RETURN-MEMO (equal? target home) (still? node)
+          ;; (never in cell mode: its searches are independent of each other)
+          (and RETURN-MEMO (not CELL-RETURNS) (equal? target home) (still? node)
                (let ((hit (if (dict-contains? proven (return-memo-key node))
                               node
                               (let ((rest (align node)))
@@ -676,7 +677,9 @@
                    (let ((rest (align node 0)))
                      (and rest (dict-contains? return-proven (memo-key rest)) rest)))))
         (define (proven-return? node target)
-          (and RETURN-MEMO (equal? target home)
+          ;; (never in cell mode: its searches are independent of each other,
+          ;; so its pass is one batch on the pool, see parallel-pass!)
+          (and RETURN-MEMO (not CELL-RETURNS) (equal? target home)
                (let ((hit (proven-key node)))
                  (and hit
                       (begin
@@ -764,12 +767,17 @@
               ;; worker. A search never reads the landings it records, so
               ;; merging after the round equals recording during it, and no
               ;; result depends on timing. Returns when the pass is done.
+              ;; Cell returns: the return memo is off (proven-return? is #f in
+              ;; cell mode, and no proven keys are sent), so every search is
+              ;; independent of every other: a pass is ONE batch, all of it on
+              ;; the pool at once, merged in selection order as each answer and
+              ;; all before it are in. No round waits for its slowest search.
               (define (parallel-pass! pending checked-add!)
                 ;; the round's searches run on the pool's workers, or ("local") on a
                 ;; drain server in this process: the same code, for checking
                 (let* ((p (and (not (equal? PARALLEL-DRAIN-MODE "local")) (car pool)))
                        (local (and (not p) (local-drain-server)))
-                       (r DRAIN-ROUND))
+                       (r (if CELL-RETURNS (max 1 (length pending)) DRAIN-ROUND)))
                   (let round ((ps pending))
                     (when (and complete DRAIN-ROUNDS-LIMIT (>= drain-rounds DRAIN-ROUNDS-LIMIT))
                       ;; diagnostic: the drain stops here, so the run is incomplete
@@ -790,14 +798,17 @@
                                   (pool-submit! p line (lambda (answer) (vector-set! answers slot answer)))
                                   (vector-set! answers slot (local line))))
                             (submit (cdr es) (+ i 1))))
-                        (when p
-                          (pool-drain-until! p (lambda () (let all ((i 0)) (or (= i (vector-length answers))
-                                                                              (and (vector-ref answers i) (all (+ i 1))))))))
                         (let merge ((es batch) (i 0) (fresh '()))
                           (cond
                             ((or (null? es) (not complete))
-                             ;; the round's proven keys, to every worker before the next round
-                             (when (pair? fresh)
+                             ;; every answer of the round in before leaving it (an early
+                             ;; stop must not close the pool with requests in flight)
+                             (when p
+                               (pool-drain-until! p (lambda () (let all ((i 0)) (or (= i (vector-length answers))
+                                                                                   (and (vector-ref answers i) (all (+ i 1))))))))
+                             ;; the round's proven keys, to every worker before the next
+                             ;; round (none in cell mode: its memo is off)
+                             (when (and (pair? fresh) (not CELL-RETURNS))
                                (let ((line (wire-join (append (list "Q" (number->string (length fresh)))
                                                               (apply append (map wire-value (reverse fresh)))))))
                                  (if p
@@ -810,6 +821,8 @@
                                      (local line))))
                              (round (let skip ((xs ps) (n (length batch))) (if (= n 0) xs (skip (cdr xs) (- n 1))))))
                             (else
+                             ;; merge in order: wait for this answer (those before it are in)
+                             (when p (pool-drain-until! p (lambda () (vector-ref answers i))))
                              (let* ((entry (car es))
                                     (toks (wire-tokens (vector-ref answers i)))
                                     (found (string=? (list-ref toks 1) "T"))
