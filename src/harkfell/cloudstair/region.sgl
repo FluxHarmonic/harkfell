@@ -164,8 +164,9 @@
                   reached))))))
 
     ;; A hash of what a check is built from (tiles with every stone shut and
-    ;; every stone open, air fields, start, pickups, rooms): a pool worker must
-    ;; report the same one as the check before any of its answers is used.
+    ;; every stone open, air fields, start, pickups, rooms) and of its mode
+    ;; (cell returns or not): a pool worker must report the same one as the
+    ;; check before any of its answers is used.
     (define (cloudstair-fingerprint ct)
       (let ((shut (tiles-carrying ct (quote ()))) (open (tiles-carrying ct (quote (2 3 4 5)))))
         (number->string
@@ -178,7 +179,8 @@
                                                (air-field-gate f)))
                              (tilemap-air shut))
                         (start-cell ct) (content-pickup-cells ct) (content-stone-cells ct)
-                        (length (content-rooms ct))))))))
+                        (length (content-rooms ct))
+                        (if CELL-RETURNS 1 0)))))))
 
     ;; The spatial guide's tilemap: every stone open, pulsed lifts steady
     ;; (candidates only; every accepted route is replayed on actual fields).
