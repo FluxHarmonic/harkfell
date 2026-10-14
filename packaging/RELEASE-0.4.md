@@ -30,7 +30,9 @@ Whole-world timed progression is not a 0.4 gate.
 
 Landing cap **N: pending the complete exp-35 final landing count L**.
 Set `N = 1000 * ceil(1.25 * L / 1000)` and record both L and N in the
-release notes/checklist before the ship. This is a resource cap. Reaching it
+final release notes/receipt in the task Session Log and the durable
+`build/restart-cloudstair-20261012/release-receipt.json` before the ship.
+These evidence updates do not change the settled source SHA. This is a resource cap. Reaching it
 FAILs; a timeout or per-search bound stop is inconclusive and cannot PASS.
 The existing 13,104 target-loop count is not the final drain count.
 
@@ -45,14 +47,16 @@ The existing 13,104 target-loop count is not the final drain count.
   that the cap does not affect the accepted complete result.
 - [ ] Glue plant, exp-34: nonzero exit and named
   `RED region-trap ... cell (63 . 41) ... exhausted #t`.
-- [ ] Outside check, exp-36: PASS for the approved scope and explicit air-room
-  diagnostic. Resolve the new H5-only pocket's cell-specific outside scope
-  in the task note before applying its old-world receipt to this snapshot.
+- [ ] Outside check and pit plant rerun by the perf worker on the settled
+  final SHA: PASS for the approved scope and explicit air-room diagnostic.
+  The temporary no-H5 view adds only Hollow (20,6), with its reason and timed
+  bowl receipt named on the verdict. No exclusion is added with H5. The old
+  exp-36 world receipt does not carry over to this changed world.
 - [ ] Pit plant: nonzero exit naming `reedfen:10,4` and trap floors
   `(19,9) (20,9) (21,9) (22,9)`.
-- [ ] Hollow timed positive: home (15,8) to pocket (20,6), then a return
+- [x] Hollow timed positive: home (15,8) to pocket (20,6), then a return
   starting from that exact arrival body/carry/down/phase.
-- [ ] Hollow negative: (2 4 5)+down blocked by green; opening only green
+- [x] Hollow negative: (2 4 5)+down blocked by green; opening only green
   produces a real-body bypass. No bound hit can count as the negative PASS.
 - [x] Authored x4y3 stale exclusion and 0.3 text removed; all seams unchanged.
 - [x] Focused entrance file: 7/7 on b76d419, including (2 3)+down and the
@@ -73,7 +77,7 @@ Expected package verdicts (fill in the measured N):
 
 ```text
 PASS Cloudstair regional replay: 0 failures (final full-world progression NOT established) [profiles: (2 4)+down] [landing cap <N>] [cell returns: one retained landing per reached (cell, carry, down) proven to return]
-PASS room-check outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]: 82 rooms, parse seams map reach green [diagnostic only, not counted: hollow:7,2, 1 problems]
+PASS room-check outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed] [excluded: hollow:4,3 (20,6), H5-only, timed bowl gate af83a32]: 82 rooms, parse seams map reach green [diagnostic only, not counted: hollow:7,2, 1 problems]
 ```
 
 All reach legs use:

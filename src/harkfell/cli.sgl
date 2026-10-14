@@ -56,7 +56,8 @@
           (only (sigil process) getenv executable-path)
           (sigil gc))
 
-  (export room-check-main reach-worker-main reach-bench-main arg-value)
+  (export room-check-main reach-worker-main reach-bench-main arg-value
+          cloudstair-outside-rooms)
 
   (begin
     (define (say . parts) (display (apply string-append parts)) (newline))
@@ -328,13 +329,54 @@
     ;; unreached: declarations and pickup problems are judged only on states
     ;; the search reaches, so any state reachable only through Cloudstair, or
     ;; only carrying a harmonic picked up there (H5, in x12y-2), goes
-    ;; unjudged: e.g. Hollow x4y3's H5 stone (21,6) and its declared-unreached
-    ;; (20,6). And the spatial search never models down, which every player
-    ;; entering Cloudstair has. Cloudstair itself is the regional replay's.
+    ;; unjudged: e.g. Hollow x4y3's H5 stone (21,6) and its pocket (20,6).
+    ;; That pocket has a separate timed gate, with a named exclusion only
+    ;; in this temporary no-H5 view. The spatial search never models down,
+    ;; which every player entering Cloudstair has. Cloudstair itself is the
+    ;; regional replay's.
+    (define (outside-pocket-room? p)
+      (let ((rm (placed-data p)))
+        (and (eq? (room-region rm) 'hollow)
+             (= (room-x rm) 4) (= (room-y rm) 3)
+             (find (lambda (t)
+                     (and (equal? (thing-at t) '(21 . 6))
+                          (equal? (thing-kw t "overtone") 5)))
+                   (room-things-of rm 'ring-stone)))))
+
+    ;; CARRY states the view's ability context, not an acquisition seed.
+    ;; An H5 view keeps every authored declaration and gets no new exclusion.
+    (define (cloudstair-outside-rooms ct carry)
+      (let ((outside-base
+              (filter (lambda (p)
+                        (not (eq? (room-region (placed-data p)) 'cloudstair)))
+                      (content-rooms ct))))
+        (if (memv 5 carry)
+            outside-base
+            (begin
+              ;; The spatial solver starts empty and acquires only these
+              ;; pickups. Refuse a future outside H5 instead of labelling its
+              ;; acquired states as a no-H5 view.
+              (when (find (lambda (p)
+                            (find (lambda (t) (equal? (thing-kw t "overtone") 5))
+                                  (room-things-of (placed-data p) 'harmonic)))
+                          outside-base)
+                (error "Outside Cloudstair no-H5 view contains an H5 pickup"))
+              (map (lambda (p)
+                      (if (outside-pocket-room? p)
+                          (let* ((rm (placed-data p))
+                                 (excluded (room-unreached rm)))
+                            (placed p data:
+                              (room rm unreached:
+                                (if (member '(20 . 6) excluded)
+                                    excluded
+                                    (cons '(20 . 6) excluded)))))
+                          p))
+                   outside-base)))))
+
     (define (outside-cloudstair-check ct args keys t0)
       (let* ((wm (content-map ct))
-             (outside (filter (lambda (p) (not (eq? (room-region (placed-data p)) 'cloudstair)))
-                              (content-rooms ct)))
+             (outside (cloudstair-outside-rooms ct '()))
+             (pocket-room (find outside-pocket-room? outside))
              (ct* (content ct rooms: outside
                            wmap: (make-worldmap outside (worldmap-cols wm) (worldmap-rows wm)
                                                 (worldmap-size wm)))))
@@ -362,7 +404,11 @@
                    (say "rooms with an air field, diagnostic only (the timed check owns them): "
                         (string-join air-rooms " ")))
                  (spatial-room-check ct* args keys t0
-                   " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
+                   (string-append
+                     " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
+                     (if pocket-room
+                         " [excluded: hollow:4,3 (20,6), H5-only, timed bowl gate af83a32]"
+                         ""))
                    air-rooms))))))
 
     (define (room-check-main args)

@@ -1,0 +1,64 @@
+(import (sigil test)
+        (sigil list)
+        (engine worldmap)
+        (harkfell content)
+        (harkfell source)
+        (harkfell cli))
+
+(define SOURCE (load-content (read-world-source "world")))
+(define BOWL (room-placed (content-room SOURCE 4 3)))
+
+(define (source-with-bowl p)
+  (content SOURCE rooms:
+    (map (lambda (old) (if (eq? old BOWL) p old)) (content-rooms SOURCE))))
+
+(test-group "outside Cloudstair: the H5 pocket belongs to its timed gate"
+  (test "the no-H5 view adds exactly one cell and preserves every other outside room"
+    (let* ((outside (cloudstair-outside-rooms SOURCE '(2 3 4)))
+           (added '()))
+      (assert-equal 82 (length outside))
+      (for-each
+        (lambda (p)
+          (let* ((rm (placed-data p))
+                 (original (room-placed (content-room SOURCE (room-x rm) (room-y rm))))
+                 (old (placed-data original)))
+            (assert-eq (placed-tiles original) (placed-tiles p))
+            (for-each (lambda (cell)
+                        (unless (member cell (room-unreached old))
+                          (set! added (cons (list (room-region rm) (room-x rm)
+                                                  (room-y rm) cell) added))))
+                      (room-unreached rm))
+            (for-each (lambda (cell) (assert-true (member cell (room-unreached rm))))
+                      (room-unreached old))
+            (unless (eq? original BOWL)
+              (assert-eq original p))))
+        outside)
+      (assert-equal '((hollow 4 3 (20 . 6))) added)
+      (assert-equal '() (room-unreached (placed-data BOWL)))))
+  (test "a view carrying H5 adds no exclusion, including in the bowl"
+    (for-each
+      (lambda (p)
+        (let ((rm (placed-data p)))
+          (assert-eq (room-placed (content-room SOURCE (room-x rm) (room-y rm))) p)))
+      (cloudstair-outside-rooms SOURCE '(2 3 4 5))))
+  (test "a different authored bowl declaration is retained alongside the timed pocket"
+    (let* ((p (placed BOWL data: (room (placed-data BOWL) unreached: '((18 . 8)))))
+           (outside (cloudstair-outside-rooms (source-with-bowl p) '(2 4)))
+           (bowl (find (lambda (p) (and (= (placed-x p) 4) (= (placed-y p) 3))) outside)))
+      (assert-equal '((20 . 6) (18 . 8)) (room-unreached (placed-data bowl)))
+      (assert-equal '((18 . 8)) (room-unreached (placed-data p)))))
+  (test "without the H5 door the room receives no exception"
+    (let* ((rm (placed-data BOWL))
+           (p (placed BOWL data:
+                (room rm things:
+                  (filter (lambda (t) (not (equal? (thing-kw t "overtone") 5)))
+                          (room-things rm)))))
+           (outside (cloudstair-outside-rooms (source-with-bowl p) '(2 4))))
+      (assert-true (memq p outside))
+      (assert-equal '() (room-unreached (placed-data p)))))
+  (test "a no-H5 view refuses an outside H5 pickup that would broaden its carry sets"
+    (let ((p (placed BOWL data:
+               (room (placed-data BOWL) things:
+                 (cons '(harmonic at: (12 8) overtone: 5)
+                       (room-things (placed-data BOWL)))))))
+      (assert-error (cloudstair-outside-rooms (source-with-bowl p) '(2 4))))))
