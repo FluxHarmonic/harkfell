@@ -1,0 +1,204 @@
+#!/bin/sh
+# The Pipes' sound gate (D53, the stone organ).
+#
+#   scripts/gate-pipes-sound                     the green arm
+#   scripts/gate-pipes-sound --sabotage [LEG..]  the green arm, then the named legs (all by
+#                                                default), each of which must go RED
+#
+# HARNESS: an audio-capable harkfell-test whose lib/engine and lib/harkfell are this
+# tree's src/; default
+# build/audio-harness/bin/harkfell-test, or PIPES_HARNESS. Checked before anything runs.
+#
+# THE GREEN ARM
+#   score    node tools/pipes-compose.mjs --check: every composed Pipes tune is the score's
+#   tests    test/test-pipes-sound.sgl (the D53 rules: no D4 before H4, no bed voice in a
+#            moment, the tune, the homecoming, pickup-h4's tuning), test/test-pipes-audio.sgl
+#            and test/test-pickup-cues.sgl (every pickup ready and on its frame after a fresh
+#            boot and under a moment: the timing-critical cue this work re-voiced). A test
+#            file passes only with exit 0, "1 of 1 loaded" and no failed test.
+#   speaker  the phone-speaker rule (design D10) on the eight Pipes tunes, with the sketchbook's
+#            own analysis run through the harness (tools/pipes-speaker.sgl; the harness lib/ must
+#            link sketchbook -> sketchbook/src/sketchbook): every channel keeps at least 0.25 of
+#            its energy above 300 Hz. gate-a4-sound checks the same with a release build of the
+#            sketchbook tool, which the runners' release job does not build (SETUP-FAILED there).
+#   levels   tools/pipes-levels.jobs rendered with tools/cloudstair-render.sgl and measured
+#            with ffmpeg: each Pipes moment alone between -22.5 and -18.5 LUFS (the game's
+#            other moments measure -19.7 to -22.2 through this renderer); the bed in B between
+#            -28 and -24; and H4's finding tone at least 10 dB above the Long Pipe's mix in
+#            its own band (the mix against its no-tone twin, 293.66 Hz, two Q30 band-passes);
+#            pickup-h4 alone with its loudest 400 ms between -11 and -8.5 LUFS (the 0.3 cue's
+#            was -9.4: A4's ladder sets cue gains in SPOTS by that figure).
+#
+# THE LEGS (planted in committed files, checked to have landed by hash and grep, run,
+# restored with git checkout, and the restore checked against the pre-plant hash; RED only
+# when the check exits non-zero AND prints the named failure, which a pass cannot print):
+#   d4-before-h4    wind-in-stone's tune C4 becomes D4        -> test-pipes-sound, the D4 rule
+#   bed-voice       the Long Pipe's long rank takes the bed's rank patch -> the bed-voice rule
+#   hanging-note    the Long Pipe's last release on channel 4 deleted -> the release-and-tail rule
+#   a-at-home       an A in the homecoming's tune             -> the homecoming rule
+#   sharp-f         pickup-h4's F#6 loses its cents           -> the pickup tuning rule
+#   pickup-missing  pickup-h4 dropped from SPOTS              -> test-pickup-cues, pickup plays
+#   dull-rank       the bed's stone rank back to index 0.6       -> speaker, FAIL pipes-bed ch3
+#   quiet-moment    the Long Pipe's gains at 0.3 (the old 10 dB gap) -> levels, its loudness
+#   score-drift     a hand edit in three-echoes               -> score, DIFFERS three-echoes
+#
+# Exit: 0 all as expected, 1 a check or a leg went the wrong way, 2 SETUP-FAILED.
+# Scratch goes under /tmp; nothing is written in the tree but the plants.
+set -u
+cd "$(dirname "$0")/.." || exit 2
+H=${PIPES_HARNESS:-build/audio-harness/bin/harkfell-test}
+TMP=$(mktemp -d /tmp/harkfell-gate-pipes-sound-XXXXXX)
+FAIL=0
+PLANTED=""
+setup_failed() { echo "SETUP-FAILED: $*"; restore_all; exit 2; }
+restore_all() { [ -n "$PLANTED" ] && git checkout -- $PLANTED && PLANTED=""; return 0; }
+trap 'restore_all' EXIT
+trap 'exit 130' INT TERM HUP
+
+# --- setup ---------------------------------------------------------------------------
+[ -x "$H" ] || setup_failed "no harness at $H"
+for l in engine harkfell; do
+  [ "$(readlink -f "$(dirname "$H")/../lib/$l")" = "$(pwd)/src/$l" ] || setup_failed "$H's lib/$l is not this tree's src/$l"
+done
+[ "$(readlink -f "$(dirname "$H")/../lib/sketchbook")" = "$(pwd)/sketchbook/src/sketchbook" ] || setup_failed "$H's lib/sketchbook is not this tree's sketchbook/src/sketchbook"
+command -v ffmpeg > /dev/null || setup_failed "no ffmpeg"
+command -v node > /dev/null || setup_failed "no node"
+echo "gate-pipes-sound: tree $(git rev-parse --short HEAD), harness $H ($(stat -c %y "$H" | cut -c1-16)), sigil lock $(sha256sum sigil.lock | cut -c1-12)"
+
+# --- the checks (each prints its failures; returns non-zero when red) ------------------
+check_score() { # $1 log
+  node tools/pipes-compose.mjs --check > "$1" 2>&1
+}
+check_test() { # $1 test name, $2 log
+  PULSE_SINK=worker-null scripts/dev "$H" --no-strict "test/$1.sgl" > "$2" 2>&1; rc=$?
+  sed -i 's/\x1b\[[0-9;]*m//g' "$2"
+  [ "$rc" -eq 0 ] || return 1
+  grep -q 'Files: *1 of 1 loaded' "$2" || return 1
+  grep -q 'Tests: .* passed' "$2" || return 1
+  ! grep -q 'Tests: .* failed' "$2"
+}
+SPEAKER_TUNES_ALL="pipes-bed wind-in-stone three-echoes the-pipes-breathe air-below seep-song hollow-octave pickup-h4"
+check_speaker() { # $1 tunes, $2 log
+  SPEAKER_TUNES="$1" PULSE_SINK=worker-null scripts/dev "$H" --no-strict tools/pipes-speaker.sgl > "$2" 2>&1
+  sed -i 's/\x1b\[[0-9;]*m//g' "$2"
+  grep -q '^SPEAKER-DONE fails 0$' "$2"
+}
+mmax() { ffmpeg -hide_banner -i "$1" -af ebur128 -f null - 2>&1 | grep -a -o 'M: *-\?[0-9.]*' | sed 's/M: *//' | sort -g | tail -1; }
+lufs() { ffmpeg -nostats -hide_banner -i "$1" -af ebur128 -f null - 2>&1 | awk '/^ +I:/ {v=$2} END {print v}'; }
+band() { ffmpeg -nostats -hide_banner -i "$1" -af "bandpass=f=293.66:width_type=q:width=30,bandpass=f=293.66:width_type=q:width=30,astats=measure_perchannel=none:measure_overall=RMS_level" -f null - 2>&1 | awk '/RMS level dB/ {v=$NF} END {print v}'; }
+check_levels() { # $1 jobs file, $2 out dir, $3 log
+  mkdir -p "${2:?}"; rm -f "${2:?}"/*.wav
+  JOBS="$1" OUT="$2" PULSE_SINK=worker-null scripts/dev "$H" --no-strict tools/cloudstair-render.sgl > "$2/render.log" 2>&1
+  : > "$3"
+  grep -a -q 'RENDER-DONE' "$2/render.log" || { echo "SETUP: render did not finish" >> "$3"; return 2; }
+  bad=$(grep -a '^RENDERED ' "$2/render.log" | awk '$4 <= 0.00001 || $4 >= 1.0 {print $2, $4}')
+  [ -z "$bad" ] || { echo "SETUP: bad peaks: $bad" >> "$3"; return 2; }
+  red=0
+  for j in $(grep -o '^(job "[^"]*"' "$1" | cut -d\" -f2); do
+    w="$2/$j.wav"; [ -s "$w" ] || { echo "SETUP: missing $j.wav" >> "$3"; return 2; }
+    case "$j" in
+      moment-*) v=$(lufs "$w"); ok=$(awk -v v="$v" 'BEGIN {print (v >= -22.5 && v <= -18.5) ? 1 : 0}')
+                echo "$j $v LUFS (want -22.5..-18.5)" >> "$3"; [ "$ok" = 1 ] || { echo "LOUDNESS-OUT $j $v" >> "$3"; red=1; } ;;
+      cue-*)    v=$(mmax "$w"); ok=$(awk -v v="$v" 'BEGIN {print (v >= -11 && v <= -8.5) ? 1 : 0}')
+                echo "$j loudest 400 ms $v LUFS (want -11..-8.5)" >> "$3"; [ "$ok" = 1 ] || { echo "LOUDNESS-OUT $j $v" >> "$3"; red=1; } ;;
+      bed-b)    v=$(lufs "$w"); ok=$(awk -v v="$v" 'BEGIN {print (v >= -28 && v <= -24) ? 1 : 0}')
+                echo "$j $v LUFS (want -28..-24)" >> "$3"; [ "$ok" = 1 ] || { echo "LOUDNESS-OUT $j $v" >> "$3"; red=1; } ;;
+    esac
+  done
+  if [ -s "$2/r-tone.wav" ]; then
+    d=$(awk -v a="$(band "$2/r-tone.wav")" -v b="$(band "$2/r-notone.wav")" 'BEGIN {printf "%.1f", a - b}')
+    echo "tone band in R: $d dB (want >= 10)" >> "$3"
+    awk -v d="$d" 'BEGIN {exit !(d >= 10)}' || { echo "TONE-MASKED $d" >> "$3"; red=1; }
+  fi
+  return $red
+}
+
+# --- the green arm -------------------------------------------------------------------
+echo "== green"
+if check_score "$TMP/score.log"; then echo "GREEN score: $(tail -1 "$TMP/score.log")"; else echo "NOT GREEN score:"; cat "$TMP/score.log"; FAIL=1; fi
+for t in test-pipes-sound test-pipes-audio test-pickup-cues; do
+  if check_test "$t" "$TMP/$t.log"; then echo "GREEN $t: $(grep -o 'Tests: .*' "$TMP/$t.log")"
+  else echo "NOT GREEN $t:"; grep -E '✗|LOAD ERROR|rror|Tests:|Files:' "$TMP/$t.log" | head -8; FAIL=1; fi
+done
+if check_speaker "$SPEAKER_TUNES_ALL" "$TMP/speaker.log"; then echo "GREEN speaker: $(grep -c '^pass ' "$TMP/speaker.log") channels pass, lowest $(grep '^pass ' "$TMP/speaker.log" | sort -k4 -g | head -1 | cut -c7-)"
+else grep -q '^SPEAKER-DONE' "$TMP/speaker.log" || setup_failed "speaker: the check did not finish ($(grep -m1 rror "$TMP/speaker.log"))"; echo "NOT GREEN speaker:"; grep '^FAIL' "$TMP/speaker.log"; FAIL=1; fi
+check_levels tools/pipes-levels.jobs "$TMP/levels" "$TMP/levels.log"; lrc=$?
+sed 's/^/  /' "$TMP/levels.log"
+case $lrc in 0) echo "GREEN levels" ;; 2) setup_failed "levels: $(grep SETUP "$TMP/levels.log")" ;; *) echo "NOT GREEN levels"; FAIL=1 ;; esac
+
+[ "${1:-}" = "--sabotage" ] || { [ $FAIL -eq 0 ] && echo "gate-pipes-sound: GREEN" || echo "gate-pipes-sound: FAILED"; exit $FAIL; }
+shift
+[ $FAIL -eq 0 ] || { echo "gate-pipes-sound: the green arm failed; no legs run"; exit 1; }
+
+# --- the legs ------------------------------------------------------------------------
+# plant FILE AWK-PROGRAM GREP-FOR-THE-PLANT [MAX-DIFF-LINES, default 4]
+plant() {
+  f=$1; git diff --quiet -- "$f" || setup_failed "$f has uncommitted changes; commit before planting"
+  PRE=$(sha256sum "$f" | cut -d' ' -f1)
+  awk "$2" "$f" > "$TMP/plant" || setup_failed "plant program failed on $f"
+  cp "$TMP/plant" "$f"; PLANTED="$f"
+  [ "$(sha256sum "$f" | cut -d' ' -f1)" != "$PRE" ] || setup_failed "plant did not change $f"
+  grep -q -- "$3" "$f" || setup_failed "plant not found in $f"
+  n=$(diff "$TMP/plant" "$(git show HEAD:"$f" > "$TMP/orig"; echo "$TMP/orig")" | grep -c '^[<>]')
+  [ "$n" -ge 1 ] && [ "$n" -le "${4:-4}" ] || setup_failed "plant in $f changed $n diff lines"
+}
+restore() {
+  git checkout -- "$PLANTED"
+  [ "$(sha256sum "$PLANTED" | cut -d' ' -f1)" = "$PRE" ] || { echo "RESTORE FAILED for $PLANTED"; exit 1; }
+  PLANTED=""
+}
+leg_test() { # name test anchor
+  if check_test "$2" "$TMP/leg-$1.log"; then echo "NOT RED $1: $2 passed"; FAIL=1
+  elif grep -qF "✗ $3" "$TMP/leg-$1.log"; then echo "RED $1 (as it must be): ✗ $3"
+  else echo "NOT RED $1 for its reason: $2 failed without ✗ $3"; grep -E '✗|rror' "$TMP/leg-$1.log" | head -4; FAIL=1; fi
+}
+LEGS=${*:-"d4-before-h4 bed-voice hanging-note a-at-home sharp-f pickup-missing dull-rank quiet-moment score-drift"}
+echo "== sabotage: $LEGS"
+for leg in $LEGS; do
+  case $leg in
+    d4-before-h4)
+      plant assets/tunes/wind-in-stone.cts '!done && sub(/\(1 "C-4" 1 34 "000"\)/, "(1 \"D-4\" 1 34 \"000\")") {done=1} {print}' '(1 "D-4" 1 34'
+      leg_test "$leg" test-pipes-sound "nothing heard in the Pipes before H4 sounds a D4, in any voice"; restore ;;
+    bed-voice)
+      patch=$(grep -o 'name: "a stone rank" patch: ([^)]*)' assets/tunes/pipes-bed.cts | sed 's/name: "a stone rank" //')
+      [ -n "$patch" ] || setup_failed "bed-voice: no bed rank patch found"
+      plant assets/tunes/the-pipes-breathe.cts "/name: \"the long rank\"/ {sub(/patch: \\([^)]*\\)/, \"$patch\")} {print}" "the long rank\" $patch"
+      leg_test "$leg" test-pipes-sound "no moment instrument is one of the bed's (an identical patch; the drops and the ranks are deliberately kin)"; restore ;;
+    hanging-note)
+      plant assets/tunes/the-pipes-breathe.cts '/^      \(row 40 \(4 "===" 0 0 "000"\) \(5 "==="/ {sub(/\(4 "===" 0 0 "000"\) /, "")} {print}' '(row 40 (5 "===" 0 0 "000") (6'
+      leg_test "$leg" test-pipes-sound "every moment releases its held voices, then plays a silent pattern for its tail (a hanging note keeps the sky hazed, D51)"; restore ;;
+    a-at-home)
+      plant assets/tunes/hollow-octave.cts '!done && sub(/\(1 "G-3" 1 34 "000"\)/, "(1 \"A-3\" 1 34 \"000\")") {done=1} {print}' '(1 "A-3" 1 34'
+      leg_test "$leg" test-pipes-sound "the homecoming makes the leap on D and lands on D4, with no A (no H3 reward) and no F# (no H5)"; restore ;;
+    sharp-f)
+      plant assets/tunes/pickup-h4.cts '{sub(/ cents: -13\.686/, "")} {print}' 'partial 20" patch: (drone-fm[^)]*release: 1.4)'
+      leg_test "$leg" test-pipes-sound "pickup-h4 speaks H4's partials 4 8 12 16 20 24, each at its just tuning on a voice that takes cents:"; restore ;;
+    pickup-missing)
+      plant src/harkfell/sound.sgl '/\(list .pickup-h4 "pickup-h4" / {next} {print}' "(list 'pickup-h3"
+      grep -q '"pickup-h4" 0' src/harkfell/sound.sgl && setup_failed "pickup-missing: pickup-h4 still in SPOTS"
+      leg_test "$leg" test-pickup-cues "each placed harmonic's pickup tune plays when it is taken"; restore ;;
+    dull-rank)
+      plant assets/tunes/pipes-bed.cts '/name: "a stone rank"/ {sub(/index: 1\.3 /, "index: 0.6 ")} {print}' 'stone rank" patch: (drone-fm level: 0.3 index: 0.6 '
+      if check_speaker pipes-bed "$TMP/leg-dull.log"; then echo "NOT RED $leg: the speaker check passed"; FAIL=1
+      elif grep -q '^FAIL  pipes-bed ch3 ' "$TMP/leg-dull.log"; then echo "RED $leg (as it must be): $(grep '^FAIL' "$TMP/leg-dull.log")"
+      else echo "NOT RED $leg for its reason:"; tail -5 "$TMP/leg-dull.log"; FAIL=1; fi
+      restore ;;
+    quiet-moment)
+      plant assets/tunes/the-pipes-breathe.cts '/\(instrument id:/ {match($0, /gain: [0-9.]+/); g=substr($0, RSTART+6, RLENGTH-6); sub(/gain: [0-9.]+/, "gain: " g*0.3)} {print}' 'gain: 0.225' 12
+      grep '"the-pipes-breathe"' tools/pipes-levels.jobs | grep '^(job "moment-' > "$TMP/leg-quiet.jobs"
+      [ -s "$TMP/leg-quiet.jobs" ] || setup_failed "quiet-moment: no job for the Long Pipe alone"
+      check_levels "$TMP/leg-quiet.jobs" "$TMP/leg-quiet" "$TMP/leg-quiet.log"; qrc=$?
+      if [ $qrc -eq 1 ] && grep -q '^LOUDNESS-OUT moment-the-pipes-breathe' "$TMP/leg-quiet.log"; then echo "RED $leg (as it must be): $(grep '^LOUDNESS-OUT' "$TMP/leg-quiet.log")"
+      else echo "NOT RED $leg (rc $qrc):"; cat "$TMP/leg-quiet.log"; FAIL=1; fi
+      restore ;;
+    score-drift)
+      plant assets/tunes/three-echoes.cts '!done && sub(/\(3 "A-5" 3 30 "000"\)/, "(3 \"A-5\" 3 31 \"000\")") {done=1} {print}' '(3 "A-5" 3 31'
+      if check_score "$TMP/leg-drift.log"; then echo "NOT RED $leg: the score check passed"; FAIL=1
+      elif grep -q '^DIFFERS three-echoes$' "$TMP/leg-drift.log"; then echo "RED $leg (as it must be): DIFFERS three-echoes"
+      else echo "NOT RED $leg for its reason:"; cat "$TMP/leg-drift.log"; FAIL=1; fi
+      restore ;;
+    *) setup_failed "no leg named $leg" ;;
+  esac
+done
+[ $FAIL -eq 0 ] && echo "gate-pipes-sound: GREEN, and every leg RED" || echo "gate-pipes-sound: FAILED"
+exit $FAIL

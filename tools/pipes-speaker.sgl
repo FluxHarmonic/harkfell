@@ -1,0 +1,53 @@
+;;; The phone-speaker check (design D10) on chosen tunes, with the sketchbook's own analysis
+;;; ((sketchbook analysis) energy-share-above: Welch power, 4096-point Hann FFTs, the share above
+;;; 300 Hz with a two-bin guard) and its way of soloing a channel (player-solo!, 30 s at
+;;; 44.1 kHz, mono (L+R)/2), so the figures are scripts/gate-a4-sound's without a release build
+;;; of the sketchbook tool. Run with an audio harness whose lib/ also links sketchbook ->
+;;; sketchbook/src/sketchbook:
+;;;   SPEAKER_TUNES="pipes-bed hollow-fifth" scripts/dev build/audio-harness/bin/harkfell-test --no-strict tools/pipes-speaker.sgl
+;;; Prints "pass"/"FAIL TUNE chN SHARE", and "SPEAKER-DONE fails N".
+(import (sigil test) (sigil process) (sigil list) (sigil string)
+        (motif tune) (motif tune player)
+        (sketchbook analysis)
+        (harkfell tunes))
+
+(define SR 44100)
+(define SECS 30)
+(define BLOCK 4096)
+(define FLOOR 0.25)
+(define (f32 bv i) (bytevector-ieee-single-ref bv (* i 4) 'little))
+(define (channel-samples t ch)
+  (let* ((p (open-tune-player t SR loop: #t))
+         (n (* SECS SR))
+         (v (make-vector n 0.0))
+         (buf (make-bytevector (* 8 BLOCK) 0)))
+    (player-solo! p ch)
+    (let loop ((i 0))
+      (if (or (>= i n) (not (player-pull! p buf 0 BLOCK)))
+          (begin (player-close! p) (if (< i n) (vector-copy v 0 i) v))
+          (begin
+            (let fill ((k 0))
+              (when (and (< k BLOCK) (< (+ i k) n))
+                (vector-set! v (+ i k) (* 0.5 (+ (f32 buf (* 2 k)) (f32 buf (+ 1 (* 2 k))))))
+                (fill (+ k 1))))
+            (loop (+ i BLOCK)))))))
+
+(define FAILS 0)
+(test-group "speaker"
+  (test "every channel of the named tunes"
+    (for-each
+      (lambda (name)
+        (let ((t (tune-parsed name)))
+          (unless t (error "no tune" name))
+          (let loop ((ch 1))
+            (when (<= ch (tune-channels t))
+              (let* ((v (channel-samples t ch)) (db (rms-db v)))
+                (if (<= db -70.0)
+                    (begin (display "  --  ") (display name) (display " ch") (display ch) (display " silent") (newline))
+                    (let ((s (energy-share-above v SR 300.0)))
+                      (when (< s FLOOR) (set! FAILS (+ FAILS 1)))
+                      (display (if (< s FLOOR) "FAIL  " "pass  ")) (display name) (display " ch") (display ch)
+                      (display " ") (display (/ (round (* 1000 s)) 1000.0)) (newline))))
+              (loop (+ ch 1))))))
+      (filter (lambda (s) (> (string-length s) 0)) (string-split (or (getenv "SPEAKER_TUNES") "") " ")))
+    (display "SPEAKER-DONE fails ") (display FAILS) (newline)))

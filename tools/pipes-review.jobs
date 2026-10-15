@@ -1,0 +1,22 @@
+;; tools/pipes-review.jobs: the Pipes' Stage 2 listening page (tools/pipes-review.sh).
+;; In-play gains: each room's bed: levels, the drone at DRONE-MOVING 0.35 unless the moment needs you still (N),
+;; the bed ducked to 0.5 under a moment, carrying H2 (and H4 at home and after the pickup); beds and the
+;; finding tone loop as the game opens them. was-*: the 0.3 tunes from integration/cloudstair, as zz-was-* copies.
+(job "now-moment-b" 42 (layer "pipes-bed" 0.5 (2) ((1 . 0.5) (2 . 0.1) (3 . 0.9) (4 . 0.105) (5 . 0.105) (6 . 0.105) (7 . 0.105) (8 . 0.105)) 0 #t) (layer "wind-in-stone" 1.0 () () 1.0))
+(job "now-moment-n" 42 (layer "pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.8) (3 . 0.4) (4 . 0.5) (5 . 0.5) (6 . 0.5) (7 . 0.5) (8 . 0.5)) 0 #t) (layer "three-echoes" 1.0 () () 1.0))
+(job "now-moment-r" 44 (layer "pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.2) (3 . 0.8) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245)) 0 #t) (layer "tone-h4" 0.5 () () 0 #t) (layer "the-pipes-breathe" 1.0 () () 1.0))
+(job "now-wander-air-below" 40 (layer "pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.3) (3 . 0.7) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245)) 0 #t) (layer "air-below" 1.0 () () 1.0))
+(job "now-wander-seep-song" 38 (layer "pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.7) (3 . 0.4) (4 . 0.14) (5 . 0.14) (6 . 0.14) (7 . 0.14) (8 . 0.14)) 0 #t) (layer "seep-song" 1.0 () () 1.0))
+(job "now-home-hollow-octave" 42 (layer "hollow-bed" 0.5 (2 4) ((1 . 0.3) (2 . 0.1) (3 . 1.0) (4 . 0.7) (5 . 0.7) (6 . 0.7) (7 . 0.7) (8 . 0.7)) 0 #t) (layer "hollow-octave" 1.0 () () 1.0))
+(job "now-pickup-h4" 10 (layer "pipes-bed" 1 (2 4) ((1 . 0) (2 . 0.2) (3 . 0.3) (4 . 0.28) (5 . 0.28) (6 . 0.28) (7 . 0.28) (8 . 0.28)) 0 #t) (layer "pickup-h4" 0.55 () () 2.0))
+(job "now-bed-b" 40 (layer "pipes-bed" 1 (2) ((1 . 0.5) (2 . 0.1) (3 . 0.9) (4 . 0.105) (5 . 0.105) (6 . 0.105) (7 . 0.105) (8 . 0.105)) 0 #t))
+(job "now-bed-n" 40 (layer "pipes-bed" 1 (2) ((1 . 0.1) (2 . 0.8) (3 . 0.4) (4 . 0.175) (5 . 0.175) (6 . 0.175) (7 . 0.175) (8 . 0.175)) 0 #t))
+(job "was-moment-b" 42 (layer "zz-was-pipes-bed" 0.5 (2) ((1 . 0.5) (2 . 0.1) (3 . 0.9) (4 . 0.105) (5 . 0.105) (6 . 0.105) (7 . 0.105) (8 . 0.105)) 0 #t) (layer "zz-was-wind-in-stone" 1.0 () () 1.0))
+(job "was-moment-n" 42 (layer "zz-was-pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.8) (3 . 0.4) (4 . 0.5) (5 . 0.5) (6 . 0.5) (7 . 0.5) (8 . 0.5)) 0 #t) (layer "zz-was-three-echoes" 1.0 () () 1.0))
+(job "was-moment-r" 44 (layer "zz-was-pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.2) (3 . 0.8) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245)) 0 #t) (layer "tone-h4" 0.5 () () 0 #t) (layer "zz-was-the-pipes-breathe" 1.0 () () 1.0))
+(job "was-wander-air-below" 40 (layer "zz-was-pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.3) (3 . 0.7) (4 . 0.245) (5 . 0.245) (6 . 0.245) (7 . 0.245) (8 . 0.245)) 0 #t) (layer "zz-was-air-below" 1.0 () () 1.0))
+(job "was-wander-seep-song" 38 (layer "zz-was-pipes-bed" 0.5 (2) ((1 . 0.1) (2 . 0.7) (3 . 0.4) (4 . 0.14) (5 . 0.14) (6 . 0.14) (7 . 0.14) (8 . 0.14)) 0 #t) (layer "zz-was-seep-song" 1.0 () () 1.0))
+(job "was-home-hollow-octave" 42 (layer "hollow-bed" 0.5 (2 4) ((1 . 0.3) (2 . 0.1) (3 . 1.0) (4 . 0.7) (5 . 0.7) (6 . 0.7) (7 . 0.7) (8 . 0.7)) 0 #t) (layer "zz-was-hollow-octave" 1.0 () () 1.0))
+(job "was-pickup-h4" 10 (layer "zz-was-pipes-bed" 1 (2 4) ((1 . 0) (2 . 0.2) (3 . 0.3) (4 . 0.28) (5 . 0.28) (6 . 0.28) (7 . 0.28) (8 . 0.28)) 0 #t) (layer "zz-was-pickup-h4" 0.55 () () 2.0))
+(job "was-bed-b" 40 (layer "zz-was-pipes-bed" 1 (2) ((1 . 0.5) (2 . 0.1) (3 . 0.9) (4 . 0.105) (5 . 0.105) (6 . 0.105) (7 . 0.105) (8 . 0.105)) 0 #t))
+(job "was-bed-n" 40 (layer "zz-was-pipes-bed" 1 (2) ((1 . 0.1) (2 . 0.8) (3 . 0.4) (4 . 0.175) (5 . 0.175) (6 . 0.175) (7 . 0.175) (8 . 0.175)) 0 #t))
