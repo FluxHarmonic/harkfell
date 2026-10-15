@@ -75,7 +75,7 @@ trap 'rm -rf "$STAGE"' EXIT
 stage_remote_sigil "$STAGE" "$SIGIL_V"
 git bundle create "$STAGE/src.bundle" HEAD 2>/dev/null
 CONTROL_PUT=()
-if [ "$JOB" = depths-diagnostics ]; then
+if [ "$JOB" = depths-diagnostics ] || [ "$JOB" = depths-041 ]; then
   [ -n "${GATE_POOL_RED:-}" ] && [ -f "$GATE_POOL_RED" ] || {
     say "SETUP-FAILED: GATE_POOL_RED must name the authored rejected-overlay control"
     exit 125
@@ -283,7 +283,7 @@ case "$JOB" in
       tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
         && printf '%s\n' "$FULL" > ../out/web.complete
     fi
-    step gate-look env GATE_TMP="$HOME/work/out/look-evidence" guix shell imagemagick -- scripts/gate-look
+    step gate-look env GATE_TMP="$HOME/work/out/look-evidence" GATE_POOL_RED="$HOME/work/reedfen-overlay-map.png" guix shell imagemagick -- scripts/gate-look
     if [ -x build/release/bin/harkfell ]; then
       step cloudstair-targets scripts/dev node scripts/gate-cloudstair-targets.mjs ../out
     fi ;;
