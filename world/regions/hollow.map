@@ -44,4 +44,4 @@
    (K "Cairn" "the highest stone, alone on the top where the chimney comes out: a place to stand still")
    (T "The Tops" "the roof of the fell under the whole sky, with the fen shining far off to the east")
    (U "Updraft Edge" "seeds rising past the fell's edge higher than any jump: the way to Cloudstair, shown and not yet"))
-  borders: ((R east) (E west) (O south) (U north)))
+  borders: ((R east) (E west) (O south) (U north) (H south)))

@@ -1,0 +1,35 @@
+;;; Paths through already accepted reach edges. This selects witnesses;
+;;; it does not create edges or replace their physics replay.
+(define-library (engine reach paths)
+  (import (engine reach)
+          (engine tilemap))
+  (export graph-witness-path)
+
+  (begin
+    ;; Shortest edge path, ((to-cell . witness) ...), or #f when unreachable.
+    ;; Equal endpoints have the empty path.
+    (define (graph-witness-path graph from target)
+      (let* ((tm (graph-tm graph))
+             (parents (make-vector (* (tilemap-cols tm) (tilemap-rows tm)) #f))
+             (index (lambda (cell) (cell-index tm (car cell) (cdr cell)))))
+        (vector-set! parents (index from) 'start)
+        (let search ((front (list from)) (back '()))
+          (cond
+            ((null? front)
+             (and (pair? back) (search (reverse back) '())))
+            ((equal? (car front) target)
+             (let route ((cell target) (steps '()))
+               (if (equal? cell from)
+                   steps
+                   (let ((link (vector-ref parents (index cell))))
+                     (route (car link) (cons (cons cell (cdr link)) steps))))))
+            (else
+             (let ((current (car front)))
+               (for-each
+                 (lambda (edge)
+                   (let ((to (car edge)))
+                     (unless (vector-ref parents (index to))
+                       (vector-set! parents (index to) (cons current (cdr edge)))
+                       (set! back (cons to back)))))
+                 (graph-edges-from graph current))
+               (search (cdr front) back)))))))))

@@ -26,12 +26,14 @@
           (harkfell tunes)
           (harkfell sound)
           (harkfell gates)
+          (harkfell feel)
           (harkfell cues)
           (harkfell hush)
           (harkfell bench))
 
   (export audio-boot! audio-world! audio-gesture! audio-bench! audio-frame! audio-now
-          audio-carry! audio-tone-room! audio-lines world-place room-moment-name room-moment-names room-moment-now
+          audio-carry! audio-tone-room! audio-lines world-place world-drip room-listen-spot
+          room-moment-name room-moment-names room-moment-now
           audio-pause! audio-resume! audio-paused? audio-set-wall-clock! audio-cue-words
           audio-sound-door! frame-event! save-extras restore-extras!)
 
@@ -90,6 +92,7 @@
       ;; A4: a save keeps the moments heard and the time played, and a
       ;; continue gives them back ((harkfell save))
       (shell-set-save-extras! save-extras restore-extras!)
+      (sound-set-finale-listener! shell-finale-mark!)
       ;; A4: the frame's phases: the card's tune, the hold, the dawn (frame-event!)
       (shell-add-frame-listener! frame-event!)
       ;; D35: the wordmark's reveal is timed by the playing moment as heard
@@ -124,6 +127,9 @@
                         ((string=? item "bench:a4") (bench-set-phases! 'a4))
                         ;; 0.1.1: the web's cues through the old ring, to hear and measure it
                         ((string=? item "cues:ring") (mixer-set-cue-path! 'ring))
+                        ;; Wrongwater: the Ice Well door's climb, soft (the default) or as loud as a moment
+                        ((string=? item "climb:soft") (sound-set-drip-gain! DRIP-GAIN-SOFT))
+                        ((string=? item "climb:moment") (sound-set-drip-gain! DRIP-GAIN-MOMENT))
                         ((and (> (string-length item) 7) (string=? (substring item 0 7) "moment:"))
                          (let ((name (substring item 7 (string-length item))))
                            ;; ask for the text now: on the web the page fetches it
@@ -165,13 +171,31 @@
     ;; wandering moments heard, in the save's one list of strings (a wandering
     ;; one as "wander:NAME"), and the time played.
     (define WANDER-PREFIX "wander:")
+    ;; The Underhum's ending rides in the same list: "finale:ended",
+    ;; "finale:with:2,3,4,5[,7]", "finale:coda". An older save has none, and
+    ;; restores as not ended (the save's forgiving restore).
+    (define FINALE-PREFIX "finale:")
+    (define (finale-strings)
+      (let ((f (sound-finale-flags)))
+        (append (if (car f) (list "finale:ended") '())
+                (if (pair? (cadr f))
+                    (list (string-append "finale:with:" (string-join (map number->string (cadr f)) ",")))
+                    '())
+                (if (caddr f) (list "finale:coda") '()))))
     (define (save-extras)
       (let ((h (sound-hush)))
-        (list (append (hush-spent h) (map (lambda (n) (string-append WANDER-PREFIX n)) (hush-wander-spent h)))
+        (list (append (hush-spent h) (map (lambda (n) (string-append WANDER-PREFIX n)) (hush-wander-spent h))
+                      (finale-strings))
               (hush-played h))))
-    (define (wander-key? k) (and (string? k) (>= (string-length k) 7) (string=? (substring k 0 7) WANDER-PREFIX)))
+    (define (prefix? k pre) (and (string? k) (>= (string-length k) (string-length pre)) (string=? (substring k 0 (string-length pre)) pre)))
+    (define (wander-key? k) (prefix? k WANDER-PREFIX))
+    (define (finale-key? k) (prefix? k FINALE-PREFIX))
     (define (restore-extras! moments played)
-      (sound-restore-hush! (filter (lambda (k) (not (wander-key? k))) moments)
+      (let ((with (find (lambda (k) (prefix? k "finale:with:")) moments)))
+        (sound-finale-restore! (and (member "finale:ended" moments) #t)
+                               (if with (numbers (substring with 12 (string-length with))) '())
+                               (and (member "finale:coda" moments) #t)))
+      (sound-restore-hush! (filter (lambda (k) (not (or (wander-key? k) (finale-key? k)))) moments)
                            played
                            (map (lambda (k) (substring k 7 (string-length k))) (filter wander-key? moments))))
 
@@ -251,6 +275,66 @@
 
     (define (list-head* l n) (if (or (= n 0) (null? l)) '() (cons (car l) (list-head* (cdr l) (- n 1)))))
 
+    ;; The audio protocol always has four fields. Internal gate/save keys
+    ;; remain numeric; composite keys belong in the first audio field.
+    (define (stone-sound-key st)
+      (cond ((stone-heart? st) 'heart)
+            ((stone-keys st)
+             (let ((keys (stone-keys st)))
+               (if (null? (cdr keys)) (car keys) keys)))
+            (else (stone-overtone st))))
+
+    ;; Match position and key so gallery chords and ordinary stones retain
+    ;; their existing notifications.
+    (define (keyed-stone-news w news)
+      (let ((tm (world-tiles w))
+            (keyed (filter stone-keys (world-stones w))))
+        (map
+          (lambda (item)
+            (let ((st
+                    (and (= (length item) 4)
+                         (memq (car item) '(chord ring near-miss sink open))
+                         (find
+                           (lambda (st)
+                             (let ((c (cell-centre tm (stone-cell st))))
+                               (and (= (caddr item) (car c))
+                                    (= (cadddr item) (cdr c))
+                                    (equal? (cadr item)
+                                            (if (eq? (car item) 'chord)
+                                                (stone-keys st)
+                                                (stone-overtone st))))))
+                           keyed))))
+              (if st
+                  (list (if (eq? (car item) 'chord) 'ring (car item))
+                        (stone-sound-key st) (caddr item) (cadddr item))
+                  item)))
+          news)))
+
+    ;; The nearest stillness door, at its listening source rather than its
+    ;; floor stone. The sole clock is gates' counter, in 60 Hz ticks.
+    ;; "open" means the five-second decision has started the stone sinking;
+    ;; physics clears the stone only after its existing 48-tick animation.
+    (define (world-drip w)
+      (let* ((wm (and w (world-map w)))
+             (tm (and wm (world-gates w) (world-tiles w)))
+             (centre (and tm (body-center (world-body w) HARKFELL-FEEL)))
+             (drips (if tm
+                        (map (lambda (st)
+                               (let* ((c (cell-centre tm (or (stone-listen st) (stone-cell st))))
+                                      (dx (- (car c) (car centre)))
+                                      (dy (- (cdr c) (cdr centre))))
+                                 (list (if (eq? (stone-state st) 'shut) 'shut 'open)
+                                       (+ (car c) (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)))
+                                       (+ (cdr c) (* (worldmap-rows wm) (worldmap-size wm) (worldmap-y0 wm)))
+                                       (/ (stone-listening st) 60.0)
+                                       (+ (* dx dx) (* dy dy)))))
+                             (filter stone-still (world-stones w)))
+                        '())))
+        (and (pair? drips)
+             (list-head*
+               (car (list-sort (lambda (a b) (< (list-ref a 4) (list-ref b 4))) drips))
+               4))))
+
     (define (world-place w ct . news)
       (let* ((wm (and w (world-map w)))
              (sx (if wm (* (worldmap-cols wm) (worldmap-size wm) (worldmap-x0 wm)) 0))
@@ -261,13 +345,20 @@
                  (let ((tm (world-tiles w)))
                    (place pl
                           carry: (world-carry w)
+                          ending: (world-ending w)
+                          drip: (world-drip w)
                           tones: (map (lambda (p) (let ((c (cell-centre tm (pickup-cell p))))
                                                     (list (pickup-overtone p) (+ sx (car c)) (+ sy (cdr c)))))
-                                      (world-pickups w))
-                          stones: (map (lambda (st) (let ((c (cell-centre tm (stone-cell st))))
-                                                      (list (stone-overtone st) (stone-state st) (+ sx (car c)) (+ sy (cdr c)))))
-                                       (world-stones w))
-                          news: (abs-news (if (pair? news) (car news) '()) sx sy)))
+                                      (filter (lambda (p)
+                                                (or (not (= (pickup-overtone p) 7))
+                                                    (eq? (place-region pl) 'wrongwater)))
+                                              (world-pickups w)))
+                          stones: (map (lambda (st)
+                                         (let ((c (cell-centre tm (stone-cell st))))
+                                           (list (stone-sound-key st) (stone-state st)
+                                                 (+ sx (car c)) (+ sy (cdr c)))))
+                                       (filter (lambda (st) (not (stone-still st))) (world-stones w)))
+                          news: (abs-news (keyed-stone-news w (if (pair? news) (car news) '())) sx sy)))
                  pl))))
 
     (define (world-place-a2 w ct)
@@ -339,6 +430,8 @@
                            gusts: (room-gusts rm)
                            gaps: (if (eq? (room-region rm) 'cloudstair) (room-gap-cells rm) '())
                            seeds: (room-seed-spots rm)
+                           ;; the Underhum: the chamber's listening place, (listening-place at: (C R))
+                           listen: (room-listen-spot rm)
                            gliding: (body-gliding b)
                            ;; A4: the movement sounds read the body and the tile under its feet
                            mode: (body-mode b)
@@ -353,6 +446,19 @@
     (define (room-abs-x rm c) (+ (* 400.0 (room-x rm)) (* TILE c)))
     (define (room-abs-y rm r) (+ (* 176.0 (room-y rm)) (* TILE r)))
     (define (room-thing-list rm) (let ((ts (room-things rm))) (if (list? ts) ts '())))
+
+    ;; SOUND's listening invitation, centred on the authored tile. This is
+    ;; independent of the chamber's anywhere-stillness trigger.
+    (define (room-listen-spot rm)
+      (let ((thing (find (lambda (t)
+                           (and (pair? t) (eq? (car t) 'listening-place)
+                                (pair? (kw-ref (cdr t) "at"))))
+                         (room-thing-list rm))))
+        (and thing
+             (let ((at (kw-ref (cdr thing) "at")))
+               (list (+ (room-abs-x rm (car at)) 8.0)
+                     (+ (room-abs-y rm (cadr at)) 8.0))))))
+
     (define (room-gusts rm)
       (filter-map (lambda (t)
                     (and (pair? t) (eq? (car t) 'air-field)
@@ -416,8 +522,12 @@
         (lambda () (< (wall-ms) until))))
     (define (sounding?) (any source-live? (mixer-sources)))
 
-    (define (audio-frame! frame-ms work-ms)
-      (let ((now (audio-now)))
+    ;; Optional measurement is used only by the web trace. Normal callers
+    ;; keep the same pump/work ordering and budget.
+    (define (audio-frame! frame-ms work-ms . measured)
+      (let* ((measure? (and (pair? measured) (car measured)))
+             (t0 (and measure? (wall-ms)))
+             (now (audio-now)))
         (cond
           ((or (bench-running?) (bench-done?))
             (begin (shell-take-news!) (shell-take-body-events!) (when (bench-running?) (bench-frame! now frame-ms work-ms))))
@@ -430,9 +540,13 @@
                     (pl (world-place (shell-world) (shell-content) (shell-take-news!))))
                 (sound-frame! now dt (and pl (place pl moves: moves)))))))
         (set! *last* now)
-        (mixer-pump! now)
-        (unless (or *paused-at* (bench-running?) (bench-done?))
-          (sound-work! (work-more? (if (sounding?) WORK-MS-SOUNDING WORK-MS-QUIET))))))
+        (let ((t1 (and measure? (wall-ms))))
+          (mixer-pump! now)
+          (let ((t2 (and measure? (wall-ms))))
+            (unless (or *paused-at* (bench-running?) (bench-done?))
+              (sound-work! (work-more? (if (sounding?) WORK-MS-SOUNDING WORK-MS-QUIET))))
+            (and measure?
+                 (list (- t1 t0) (- t2 t1) (- (wall-ms) t2)))))))
 
     (define (r1 x) (number->string (/ (round (* 10.0 x)) 10.0)))
 

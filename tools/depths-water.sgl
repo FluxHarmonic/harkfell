@@ -1,0 +1,55 @@
+;;; Run on azoth after the release build:
+;;; sigil -L src -L build/release/lib eval -f tools/depths-water.sgl
+(import (sigil list)
+        (engine body)
+        (engine tilemap)
+        (engine reach)
+        (harkfell fixtures)
+        (harkfell feel))
+
+(define ROWS
+  '("#########################"
+    "#                       #"
+    "#        #     ##########"
+    "#        #~~~~~#        #"
+    "#        #~~~~~#        #"
+    "#        #~~~~~#        #"
+    "#                       #"
+    "#                       #"
+    "#                       #"
+    "#########################"
+    "#########################"))
+(define TM (fixture-tilemap ROWS))
+(define START (stand-body TM HARKFELL-FEEL 12 8))
+(define FIRST-WATER #f)
+(define (step b inputs)
+  (if (null? inputs)
+      b
+      (let* ((next (body-step b (car inputs) TM HARKFELL-FEEL))
+             (c (body-center next HARKFELL-FEEL)))
+        (when (and (not FIRST-WATER) (eq? (body-mode next) 'swim))
+          (set! FIRST-WATER c))
+        (step next (cdr inputs)))))
+(define IN-WATER
+  (step START
+    (append (list (intent jump: #t press: #t v: -1))
+            (make-list 19 (intent jump: #t v: -1)))))
+(unless (and FIRST-WATER (<= 80 (cdr FIRST-WATER) 96))
+  (error "FAIL water entry was not through the bottom" FIRST-WATER))
+(write (list 'PASS 'bottom-entry FIRST-WATER)) (newline)
+(define SURFACE (step IN-WATER (make-list 140 (intent h: 1 v: -1))))
+(define SHELF
+  (step SURFACE
+    (append (list (intent h: 1 v: -1 jump: #t press: #t))
+            (make-list 25 (intent h: 1 jump: #t))
+            (make-list 60 NOTHING))))
+(unless (and (eq? (body-mode SHELF) 'ground)
+             (= (+ (body-y SHELF) (feel-box-h HARKFELL-FEEL)) 32)
+             (>= (body-x SHELF) 240))
+  (error "FAIL upper shelf" (body-x SHELF) (body-y SHELF) (body-mode SHELF)))
+(write (list 'PASS 'offset-shelf (body-x SHELF) (body-y SHELF))) (newline)
+(define FLOOR (step IN-WATER (make-list 600 NOTHING)))
+(unless (and (eq? (body-mode FLOOR) 'ground)
+             (= (+ (body-y FLOOR) (feel-box-h HARKFELL-FEEL)) 144))
+  (error "FAIL sinking out did not return to dry floor" (body-x FLOOR) (body-y FLOOR)))
+(write (list 'PASS 'sink-to-dry-floor (body-x FLOOR) (body-y FLOOR))) (newline)

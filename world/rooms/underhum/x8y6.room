@@ -1,0 +1,29 @@
+;; J, the Bearers' Rest, off K's rim (rows 4-5). Four benches, one per
+;; harmonic; behind the false wall (16-17) the hidden fifth, H7's, under its
+;; violet notch. The rough face (column 1) climbs into I. The air shaft
+;; passes behind the east wall (22-23), sealed from the room.
+(room
+  region: underhum
+  at: (8 6)
+  title: "The Bearers' Rest"
+  intent: "four stone benches under a low roof, where the bearers laid down what they carried"
+  bed: (hum 0.6 air 0.3 water 0)
+  light: 0.2
+  grid:
+  ("#%  ##################^^#"
+   "#%  ##################^^#"
+   "#%              ######^^#"
+   "#%              ######^^#"
+   "                ++   #^^#"
+   "                ++   #^^#"
+   "######################^^#"
+   "######################^^#"
+   "######################^^#"
+   "######################^^#"
+   "######################^^#")
+  things: ((bench at: (4 5) overtone: 2)
+           (bench at: (7 5) overtone: 3)
+           (bench at: (10 5) overtone: 4)
+           (bench at: (13 5) overtone: 5)
+           (bench at: (19 5) overtone: 7))
+  decor: none)

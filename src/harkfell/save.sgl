@@ -19,6 +19,9 @@
 ;;;                                   absent in older v1 saves means none
 ;;;     (down #t|#f)                earned ability; absent means #f, even with H2
 ;;;     (tau 0..479))               movement gust phase; absent means zero
+;;;     (ended #t|#f) (ended-with 2 3 4 5 [7]) (coda #t|#f)
+;;;     (ending #t|#f)              quit during the piece resumes at start,
+;;;                                 in daylight; absent means inactive
 ;;;
 ;;; Plain symbols and lists, no keywords: a keyword does not write out as text
 ;;; and read back (measured: it prints as #<object>).
@@ -41,6 +44,7 @@
   (import (sigil struct)
           (sigil list)
           (sigil math)
+          (only (sigil string) string-split)
           (engine tilemap)
           (engine body)
           (engine air)
@@ -57,7 +61,8 @@
           restored restored? restored-cell restored-carry restored-stones
           restored-moments restored-played restored-revealed restored-aurora restored-announced
           restored-notes
-          body-room-cell restored-down restored-tau)
+          body-room-cell restored-down restored-tau
+          restored-ended restored-ended-with restored-coda)
 
   (begin
     (define SAVE-KEY "save")
@@ -77,6 +82,9 @@
       (announced default: '())
       (down default: #f)
       (tau default: 0)
+      (ended default: #f)
+      (ended-with default: '())
+      (coda default: #f)
       (notes default: '()))
 
     ;; A save's field: (NAME . rest) -> rest, or #f.
@@ -85,6 +93,12 @@
 
     (define (int-list? l n) (and (list? l) (= (length l) n) (every-int? l)))
     (define (every-int? l) (or (null? l) (and (integer? (car l)) (every-int? (cdr l)))))
+
+    (define (option values index fallback)
+      (if (> (length values) index) (list-ref values index) fallback))
+
+    (define (true-field fields name)
+      (let ((v (field fields name))) (and (pair? v) (eq? (car v) #t))))
 
     ;; The room a global cell is in, or #f.
     (define (room-of-cell ct cell)
@@ -108,7 +122,8 @@
     ;; The save of a world: entry the soft return's entry body; carry the
     ;; harmonics; stones the world's stones ((harkfell gates)); moments the
     ;; hush's spent keys; played seconds; then, optional in order: revealed
-    ;; and aurora (#t or #f), announced (region symbols). #f when the entry
+    ;; and aurora (#t or #f), announced (region symbols), ended, ended-with,
+    ;; coda and ending (active this session). #f when the entry
     ;; is outside the written world (A0's room).
     (define (save-datum ct entry carry stones moments played . revealed)
       (let ((rc (and ct entry (body-room-cell ct entry))))
@@ -133,6 +148,13 @@
                      (list 'aurora (and (pair? revealed) (pair? (cdr revealed)) (cadr revealed) #t))
                      (list 'down (body-down entry))
                      (list 'tau (body-tau entry))
+                     (list 'ended (and (option revealed 3 #f) #t))
+                     (cons 'ended-with (let ((hs (option revealed 4 '())))
+                                         (if (list? hs)
+                                             (carry-normal (filter (lambda (h) (memv h '(2 3 4 5 7))) hs))
+                                             '())))
+                     (list 'coda (and (option revealed 5 #f) #t))
+                     (list 'ending (and (option revealed 6 #f) #t))
                      (cons 'announced (let ((a (and (pair? revealed) (pair? (cdr revealed))
                                                     (pair? (cddr revealed)) (caddr revealed))))
                                         (if (list? a) (filter symbol? a) '()))))))))
@@ -154,6 +176,23 @@
 
     (define (wander-key? k) (and (>= (string-length k) 7) (string=? (substring k 0 7) "wander:")))
 
+    ;; SOUND's earlier saves kept ending flags among the hush identities.
+    ;; Migrate them before restoring the world; explicit fields win.
+    (define (legacy-finale-key? k)
+      (and (>= (string-length k) 7)
+           (string=? (substring k 0 7) "finale:")))
+
+    (define (legacy-ended-with moments)
+      (let ((key (find (lambda (k)
+                         (and (>= (string-length k) 12)
+                              (string=? (substring k 0 12) "finale:with:")))
+                       moments)))
+        (if key
+            (filter number?
+                    (map string->number
+                         (string-split (substring key 12 (string-length key)) ",")))
+            '())))
+
     (define (string-index-of s ch)
       (let loop ((i 0))
         (cond ((>= i (string-length s)) #f)
@@ -171,7 +210,16 @@
                  (carry (field fields 'carry))
                  (stones (field fields 'stones))
                  (moments (field fields 'moments))
+                 (moments (if (list? moments) (filter string? moments) '()))
                  (played (let ((p (field fields 'played))) (and (pair? p) (car p))))
+                 (ended (if (field fields 'ended)
+                            (true-field fields 'ended)
+                            (and (member "finale:ended" moments) #t)))
+                 (ended-with (or (field fields 'ended-with)
+                                 (legacy-ended-with moments)))
+                 (coda (if (field fields 'coda)
+                           (true-field fields 'coda)
+                           (and (member "finale:coda" moments) #t)))
                  (notes '())
                  (note! (lambda (s) (set! notes (cons s notes))))
                  (world-harmonics (map car (content-pickup-cells ct)))
@@ -206,7 +254,8 @@
                           (let ((r (content-room ct (cadr room) (caddr room))))
                             (and r (eq? (room-region r) (car room)) r))))
                  (g (and rm (int-list? cell 2) (local->global ct rm (car cell) (cadr cell))))
-                 (at (cond ((and g (standable? tm (car g) (cdr g))) g)
+                 (at (cond ((and ended (true-field fields 'ending)) (start-cell ct))
+                           ((and g (standable? tm (car g) (cdr g))) g)
                            (rm (note! "the saved place is no longer a place to stand: the room's door")
                                (room-start-cell ct rm))
                            (else (note! "the saved room is gone: the world's start")
@@ -215,7 +264,8 @@
                  (restored cell: at
                            carry: carry
                            stones: stones
-                           moments: (if (list? moments) (map (lambda (k) (moment-key-now ct k)) (filter string? moments)) '())
+                           moments: (map (lambda (k) (moment-key-now ct k))
+                                         (filter (lambda (k) (not (legacy-finale-key? k))) moments))
                            played: (if (number? played) played 0.0)
                            revealed: (let ((v (field fields 'revealed))) (and (pair? v) (eq? (car v) #t)))
                            aurora: (let ((v (field fields 'aurora))) (and (pair? v) (eq? (car v) #t)))
@@ -223,6 +273,12 @@
                            announced: (let ((v (field fields 'announced)))
                                         (if (list? v) (filter symbol? v) '()))
                            down: (let ((v (field fields 'down))) (and (pair? v) (eq? (car v) #t)))
+                           ended: ended
+                           ended-with: (let ((v ended-with))
+                                         (if (and ended (list? v))
+                                             (carry-normal (filter (lambda (h) (memv h '(2 3 4 5 7))) v))
+                                             '()))
+                           coda: (and ended coda)
                            tau: (let ((v (field fields 'tau)))
                                   (if (and (pair? v) (exact-integer? (car v))
                                            (<= 0 (car v)) (< (car v) AIR-PERIOD))

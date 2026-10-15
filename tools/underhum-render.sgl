@@ -1,0 +1,141 @@
+;;; Render the Underhum's ending as the game plays it, for David's listening
+;;; page: the real director ((harkfell sound)) and the real motif players in
+;;; the mixer's headless mode, every source's blocks captured from the tap at
+;;; its gain and mixed, so the breath, the bed's fade, the mark jumps, the
+;;; voices leaving and the dawn are the game's own. (Cues are not captured:
+;;; headless, the mixer plays none; the cues are rendered on their own by
+;;; tools/cloudstair-render.sgl with tools/underhum-review.jobs.)
+;;;
+;;;   scripts/dev build/audio-harness/bin/harkfell-test --no-strict tools/underhum-render.sgl
+;;;
+;;; OUT (default build/underhum-listening) gets NAME.wav (stereo, 32 kHz
+;;; float, a 0.3 s fade at the end) and NAME.sections (one line per section
+;;; heard: SECONDS SECTION) for each play below. ONLY=NAME,NAME renders those.
+;;; Nothing is published.
+(import (sigil test) (sigil process) (sigil fs) (sigil path) (sigil io) (sigil list) (sigil string)
+        (engine mixer)
+        (harkfell sound)
+        (harkfell finale))
+
+(define RATE 32000)
+(define DT 0.02)
+(define OUTPUT (or (getenv "OUT") "build/underhum-listening"))
+(define ONLY (let ((e (getenv "ONLY"))) (and e (> (string-length e) 0) (string-split e ","))))
+
+(define (u32! bv at value bytes)
+  (let loop ((i 0) (v value))
+    (when (< i bytes) (bytevector-u8-set! bv (+ at i) (modulo v 256)) (loop (+ i 1) (quotient v 256)))))
+(define (ascii! bv at s)
+  (let loop ((i 0)) (when (< i (string-length s)) (bytevector-u8-set! bv (+ at i) (char->integer (string-ref s i))) (loop (+ i 1)))))
+(define (wav-header frames)
+  (let ((h (make-bytevector 44 0)) (bytes (* frames 8)))
+    (ascii! h 0 "RIFF") (u32! h 4 (+ 36 bytes) 4) (ascii! h 8 "WAVEfmt ")
+    (u32! h 16 16 4) (u32! h 20 3 2) (u32! h 22 2 2) (u32! h 24 RATE 4)
+    (u32! h 28 (* RATE 8) 4) (u32! h 32 8 2) (u32! h 34 32 2)
+    (ascii! h 36 "data") (u32! h 40 bytes 4)
+    h))
+
+;; The capture: one stereo f32 buffer for the whole play; each source's
+;; blocks land one after another from the frame it was first pulled at.
+(define *mix* #f)
+(define *frames* 0)
+(define *pump-t* 0.0)
+(define *at* '())     ; ((source-id . next-frame) ...)
+(define (tap id buf n gain)
+  (let* ((e (assoc id *at*))
+         (at (if e (cdr e) (exact (round (* *pump-t* RATE))))))
+    (let loop ((i 0))
+      (when (and (< i n) (< (+ at i) *frames*))
+        (let ((o (* 8 (+ at i))) (k (* 8 i)))
+          (bytevector-ieee-single-set! *mix* o (+ (bytevector-ieee-single-ref *mix* o 'little) (* gain (bytevector-ieee-single-ref buf k 'little))) 'little)
+          (bytevector-ieee-single-set! *mix* (+ o 4) (+ (bytevector-ieee-single-ref *mix* (+ o 4) 'little) (* gain (bytevector-ieee-single-ref buf (+ k 4) 'little))) 'little))
+        (loop (+ i 1))))
+    (set! *at* (cons (cons id (+ at n)) (filter (lambda (x) (not (equal? (car x) id))) *at*)))))
+
+;; a room: the chamber unless said
+(define (room key . opts)
+  (let ((kw (lambda (k d) (let ((e (memq k opts))) (if e (cadr e) d)))))
+    (place key: key region: (kw 'region 'underhum) bed-tune: (kw 'bed "underhum-bed")
+           groups: (kw 'groups '(hum air water drone))
+           levels: (kw 'levels '((hum . 1.0) (air . 1.0) (water . 0.0) (drone . 0.7)))
+           tones: '() carry: (kw 'carry '(2 3 4 5)) news: (kw 'news '()) still: (kw 'still #f)
+           px: 3000.0 py: 950.0 rx: 7 ry: 5)))
+(define BOWL-LEVELS '((wind . 0.3) (water . 0.1) (hum . 1.0) (drone . 0.7)))
+
+;; A play: SECS long; (plan t carry) the place; NEWS ((t . item) ...) sent once.
+(define (play! name secs carry plan news)
+  (when (or (not ONLY) (member name ONLY))
+    (set! *frames* (exact (round (* secs RATE))))
+    (set! *mix* (make-bytevector (* 8 *frames*) 0))
+    (set! *at* '())
+    (mixer-open-headless! RATE tap)
+    (sound-reset!)
+    (sound-set-work-in-frame! #t)
+    (sound-boot! '() (lambda parts #f))
+    (sound-set-rng! 20261012)
+    (let ((port (open-output-file (path-join OUTPUT (string-append name ".sections"))))
+          (evs news) (last #f))
+      (let loop ((t 0.0))
+        (when (< t secs)
+          (let* ((due (filter (lambda (e) (<= (car e) t)) evs)))
+            (set! evs (filter (lambda (e) (> (car e) t)) evs))
+            (sound-frame! t DT (plan t carry (map cdr due))))
+          (set! *pump-t* t)
+          (mixer-pump! t)
+          (let ((s (sound-finale-section)))
+            (unless (equal? (and s (car s)) last)
+              (set! last (and s (car s)))
+              (display (number->string (/ (round (* 100.0 t)) 100.0)) port) (display " " port)
+              (display (if last (symbol->string last) "after") port) (newline port)))
+          (loop (+ t DT))))
+      (close-port port))
+    ;; the last 0.3 s fades
+    (let fade ((i (max 0 (- *frames* (exact (round (* 0.3 RATE)))))))
+      (when (< i *frames*)
+        (let ((g (/ (- *frames* i) (* 0.3 RATE))))
+          (bytevector-ieee-single-set! *mix* (* 8 i) (* g (bytevector-ieee-single-ref *mix* (* 8 i) 'little)) 'little)
+          (bytevector-ieee-single-set! *mix* (+ 4 (* 8 i)) (* g (bytevector-ieee-single-ref *mix* (+ 4 (* 8 i)) 'little)) 'little))
+        (fade (+ i 1))))
+    (let ((port (open-binary-output-file (path-join OUTPUT (string-append name ".wav")))))
+      (write-bytevector (wav-header *frames*) port)
+      (write-bytevector *mix* port)
+      (close-port port))
+    (let peak ((i 0) (p 0.0))
+      (if (< i (* 2 *frames*))
+          (peak (+ i 1) (max p (abs (bytevector-ieee-single-ref *mix* (* 4 i) 'little))))
+          (begin (display "RENDERED ") (display name) (display " peak ") (display p) (newline)
+                 (assert-true (> p 0.0001)) (assert-true (< p 1.0)))))))
+
+;; The plans. A climb as the map has it: the chamber (H 7,5), up the lift to
+;; the Ringing Stair (D 7,4), the gallery (C 6,4, B 5,4), the Throat (A 4,4),
+;; and up through the heart into the bowl (hollow 4,3). The rooms' own
+;; entries are the climb and home (the director's fallbacks), as in play
+;; before SYSTEMS sends its news.
+(define (climb at-d at-bowl)
+  (lambda (t carry news)
+    (cond ((< t at-d) (room "underhum:7,5" 'carry carry 'news news 'still (< t 6.0)))
+          ((< t (+ at-d 15.0)) (room "underhum:7,4" 'carry carry 'news news))
+          ((< t (+ at-d 30.0)) (room "underhum:6,4" 'carry carry 'news news))
+          ((< t (+ at-d 45.0)) (room "underhum:5,4" 'carry carry 'news news))
+          ((< t at-bowl) (room "underhum:4,4" 'carry carry 'news news))
+          (else (room "hollow:4,3" 'region 'hollow 'bed "hollow-bed" 'groups '(wind water hum drone)
+                      'levels BOWL-LEVELS 'carry carry 'news news)))))
+
+(define FUSE-AT 6.0)
+(define FUSE (list (cons FUSE-AT '(finale fuse 0 0))))
+
+(test-group "underhum: render the ending"
+  (test "render"
+    (unless (directory? "build") (make-directory "build"))
+    (unless (directory? OUTPUT) (make-directory OUTPUT))
+    ;; the ending as written: into the column as the theme ends, the climb
+    ;; through one pass of the sky verse, home, close, the dawn
+    (play! "ending" 265.0 '(2 3 4 5) (climb 58.0 128.0) FUSE)
+    (play! "ending-h7" 275.0 '(2 3 4 5 7) (climb 58.0 128.0) FUSE)
+    ;; a slow player: stays in the chamber while hold loops, and climbs
+    ;; through the sky verse twice
+    (play! "ending-slow" 330.0 '(2 3 4 5) (climb 90.0 190.0) FUSE)
+    ;; a fast one: up the lift the moment the fuse sounds, home before the
+    ;; theme (it lands when the fuse ends)
+    (play! "ending-fast" 110.0 '(2 3 4 5) (climb 9.0 20.0) FUSE)
+    (assert-true #t)))

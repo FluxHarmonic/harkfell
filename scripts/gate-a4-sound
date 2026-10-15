@@ -69,6 +69,7 @@ setup_failed() { echo "SETUP-FAILED: $*"; echo "GATE-A4-SOUND SETUP-FAILED"; exi
 
 # --- the tool ---------------------------------------------------------------------------
 [ -x "$TOOL" ] || setup_failed "no tool at $TOOL (cd sketchbook && sigil build --config release)"
+command -v ffmpeg > /dev/null 2>&1 || setup_failed "no ffmpeg on PATH (guix shell ffmpeg -- scripts/gate-a4-sound)"
 echo "tool $TOOL ($(stat -c %y "$TOOL")), its motif $(readlink -f sketchbook/.sigil/deps/motif | sed 's|.*/||')"
 "$TOOL" probe || setup_failed "the tool's motif lacks the 0.7.0 bed kinds"
 # the tool must render with the motif the GAME locks, or its renders say
@@ -130,6 +131,7 @@ under_world() {
     [ -n "$g" ] || { echo "UNDER-WORLD FAIL $c: no gain in SPOTS"; bad=$((bad + 1)); continue; }
     "$TOOL" render-tune "assets/tunes/$c.cts" "$TMP/uw-$c.wav" > /dev/null 2>&1 || { echo "UNDER-WORLD FAIL $c: does not render"; bad=$((bad + 1)); continue; }
     m=$(ffmpeg -hide_banner -nostats -i "$TMP/uw-$c.wav" -af "apad=pad_dur=1,ebur128" -f null - 2>&1 | grep -o 'M: *-\?[0-9.]*' | awk '{print $2}' | sort -g | tail -1)
+    [ -n "$m" ] || setup_failed "no ffmpeg loudness measurement for $c"
     lim=-33; case $c in step-*) lim=-44;; esac
     v=$(awk -v m="$m" -v g="$g" 'BEGIN{printf "%.1f", m + 20*log(g)/log(10)}')
     n=$((n + 1))

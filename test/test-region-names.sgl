@@ -184,7 +184,7 @@
 
 (test-group "region names: the names"
   (test "every region has a name, as its definition and bible give it"
-    (assert-equal '("Cloudstair" "Glasswood" "Reedfen" "The Hollow" "The Pipes")
+    (assert-equal '("Cloudstair" "Glasswood" "Reedfen" "The Hollow" "The Pipes" "The Underhum" "Wrongwater")
                   (list-sort string<? (map region-name-of (content-regions CT)))))
   (test "each is printable ASCII (the drawable glyphs)"
     (for-each (lambda (r)

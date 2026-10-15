@@ -1,0 +1,174 @@
+(import (sigil test)
+        (sigil list)
+        (sigil string)
+        (engine worldmap)
+        (engine reach)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check)
+        (harkfell world)
+        (harkfell gates)
+        (harkfell feel)
+        (harkfell audio)
+        (harkfell shell)
+        (harkfell sound))
+
+;; Explicitly use a review door, so no preceding opening-screen test can
+;; suppress the adapter and no personal save is read or written.
+(shell-test-room!)
+
+(define CT (load-content (read-world-source "world")))
+(define (at-hint x y c r carry)
+  (let* ((cell (local->global CT (content-room CT x y) c r))
+         (tm (worldmap-tiles (content-map CT))))
+    (world-populate (world-at (content-map CT) (cell-body tm HARKFELL-FEEL (car cell) (cdr cell)))
+                    (content-stones CT) (content-pickups CT) carry)))
+(define (wait w n)
+  (if (= n 0) w (wait (world-tick w NOTHING) (- n 1))))
+(define (answers w)
+  (filter (lambda (item) (eq? (car item) 'hint-answer)) (world-news w)))
+
+;; Use the existing well's negative world coordinate. The door and drip
+;; occupy different cells so confusing their positions cannot pass.
+(define WELL (content-room CT -2 6))
+(define LISTEN-CELL (local->global CT WELL 15 9))
+(define DOOR-CELL (local->global CT WELL 11 9))
+;; Stand beside the drip on the recess floor (14,9), inside the door's
+;; radius: (15,9) is now over the drip's pit (the door is Under the Well's
+;; (15,0)), so a body put there falls into it.
+(define (drip-world)
+  (let ((w (at-hint -2 6 14 9 '())))
+    (world-populate w
+      (list (stone cell: DOOR-CELL overtone: 7 still: 5 listen: LISTEN-CELL radius: 32.0))
+      '() '())))
+(define (drip-events w)
+  (filter (lambda (item) (eq? (car item) 'drip-open)) (world-news w)))
+
+(test-group "Wrongwater: the door owns the sound clock"
+  (test "no stillness door means no drip tuple"
+    ;; the world has its drip door now, so a world populated without stones
+    (assert-false (world-drip (world-populate (at-hint -2 6 14 9 '()) '() '() '())))
+    (assert-false (world-drip #f)))
+  (test "the tuple uses the listening source in absolute world pixels"
+    (assert-equal '(shut -552.0 1208.0 0.0) (world-drip (drip-world))))
+  (test "held is exactly the door's counter and resets when its wait cancels"
+    (let* ((w (wait (drip-world) 294))
+           (g (gates-step (world-gates w) (cell-centre (world-tiles w) LISTEN-CELL)
+                          '(0 0 8 14) #t #f))
+           (cancel (world w gates: g)))
+      (assert-equal 4.9 (cadddr (world-drip w)))
+      (assert-equal 0.0 (cadddr (world-drip cancel)))
+      (assert-equal '() (drip-events w))))
+  (test "5 seconds starts logical opening; the cell clears after the 48-tick sink"
+    (let* ((before (wait (drip-world) 299))
+           (opening (wait before 1))
+           (open (wait opening 48))
+           (pl (world-place opening CT (world-news opening))))
+      (assert-equal '() (drip-events before))
+      (assert-equal '(open -552.0 1208.0 5.0) (place-drip pl))
+      (assert-equal 5.0 (cadddr (world-drip open)))
+      (assert-equal 'sinking (stone-state (car (world-stones opening))))
+      (assert-true (stone-open? (car (world-stones open))))
+      (assert-equal 1 (length (drip-events open)))
+      (assert-equal '((drip-open -552.0 1208.0))
+        (filter (lambda (item) (eq? (car item) 'drip-open)) (place-news pl))))))
+
+(test-group "Wrongwater: the three established hints"
+  (test "each answers only after H7 and waits twelve seconds between answers"
+    (for-each
+      (lambda (spot)
+        (let* ((without (apply at-hint (append spot (list '(2 3 4)))))
+               (with (apply at-hint (append spot (list '(2 3 4 7)))))
+               (first (wait with 1))
+               (waiting (wait first 719)))
+          (assert-equal '() (answers (wait without 1)))
+          (assert-equal 1 (length (answers first)))
+          (assert-equal 1 (length (answers waiting)))
+          (assert-equal 2 (length (answers (wait waiting 1))))))
+      '((-6 4 13 7) (-2 6 14 9) (1 8 12 8)))))
+
+(define (pickup-world region)
+  (let* ((source (map (lambda (e)
+                       (cons (car e)
+                             (string-replace
+                               (string-replace
+                                 (string-replace (cdr e) "stonefen" (symbol->string region))
+                                 "overtone: 2" "overtone: 7")
+                               "overtone 2" "overtone 7")))
+                     (read-world-source "test/fixtures/worlds/stone")))
+         (ct (load-content source))
+         (tm (worldmap-tiles (content-map ct)))
+         (w (world-populate (world-at (content-map ct) (cell-body tm HARKFELL-FEEL 2 8))
+                            (content-stones ct) (content-pickups ct) '())))
+    (world-place w ct)))
+
+(test-group "Wrongwater: finding target admission"
+  (test "H7 is a finding target inside Wrongwater"
+    (assert-equal '(7) (map car (place-tones (pickup-world 'wrongwater)))))
+  (test "H7 is absent from finding/ear targets in the surrounding regions"
+    (for-each (lambda (region)
+                (assert-equal '() (place-tones (pickup-world region))))
+              '(glasswood pipes hollow underhum))))
+
+(define HEART-CT
+  (load-content
+    (map (lambda (e)
+           (cons (car e)
+                 (string-replace (cdr e)
+                                 "(ring-stone at: (15 8) overtone: 2)"
+                                 "(ring-stone at: (15 8) overtone: 2 keys: (2 3 4 5))")))
+         (read-world-source "test/fixtures/worlds/stone"))))
+(define (heart-world carry ticks)
+  (let* ((tm (worldmap-tiles (content-map HEART-CT)))
+         (stones (content-stones HEART-CT))
+         (at (cell-centre tm (stone-cell (car stones))))
+         (w (world-populate
+              (world-at (content-map HEART-CT) (cell-body tm HARKFELL-FEEL 2 8))
+              stones '() carry)))
+    (let loop ((g (world-gates w)) (left ticks))
+      (if (= left 0)
+          (world w gates: g)
+          (loop (gates-step g at '(0 0 8 14) #t #t) (- left 1))))))
+
+(test-group "Underhum: heart identity stays at the sound boundary"
+  (test "shut and open tuples are tagged, while the world stays numeric"
+    (for-each
+      (lambda (ticks)
+        (let* ((w (heart-world '(2 3 4 5) ticks))
+               (s (car (world-stones w)))
+               (st (car (place-stones (world-place w HEART-CT)))))
+          (assert-equal 2 (stone-overtone s))
+          (assert-equal '(2 3 4 5) (stone-keys s))
+          (assert-equal 'heart (car st))
+          (assert-equal (stone-state s) (cadr st))
+          (assert-equal 4 (length st))))
+      '(0 1 41 89)))
+  (test "one full-set ring replaces its chord; sink and open keep the identity"
+    (let* ((w (heart-world '(2 3 4 5) 89))
+           (items (place-news (world-place w HEART-CT (gstate-news (world-gates w))))))
+      (assert-equal '(ring sink open) (map car items))
+      (assert-equal '(heart heart heart) (map cadr items))))
+  (test "partial carry produces a tagged near miss"
+    (let* ((w (heart-world '(2 4 5) 1))
+           (items (place-news (world-place w HEART-CT (gstate-news (world-gates w))))))
+      (assert-equal '(near-miss) (map car items))
+      (assert-equal 'heart (cadar items))))
+  (test "ordinary H2 and gallery chords retain their own identities"
+    (let* ((w (heart-world '() 0))
+           (news '((chord (2 3 4 5) 0.0 0.0) (ring 2 0.0 0.0)))
+           (items (place-news (world-place w HEART-CT news))))
+      (assert-equal '((chord (2 3 4 5)) (ring 2))
+                    (map (lambda (item) (list (car item) (cadr item))) items)))
+    (assert-equal 7 (caar (place-stones (pickup-world 'wrongwater)))))
+  (test "other keyed stones use the same four-field tuple and news identity"
+    (let* ((w (heart-world '(2 5) 0))
+           (s (stone (car (world-stones w)) keys: '(2 5)))
+           (g (gstate (world-gates w) stones: (list s)))
+           (w (world w gates: g))
+           (at (cell-centre (world-tiles w) (stone-cell s)))
+           (g (gates-step g at '(0 0 8 14) #t #t))
+           (pl (world-place (world w gates: g) HEART-CT (gstate-news g))))
+      (assert-equal 4 (length (car (place-stones pl))))
+      (assert-equal '(2 5) (caar (place-stones pl)))
+      (assert-equal '(ring) (map car (place-news pl)))
+      (assert-equal '(2 5) (cadar (place-news pl))))))

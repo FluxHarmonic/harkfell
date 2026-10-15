@@ -177,9 +177,11 @@ leg_palette() {
   sky="$(awk '$0 ~ /^ *\(fen-sky-1 "#/ { l = $0; sub(/^[^"]*"#/, "", l); print toupper(substr(l, 1, 6)); exit }' world/world.sgl)"
   peat="$(awk '$0 ~ /^ *\(fen-peat-2 "#/ { l = $0; sub(/^[^"]*"#/, "", l); print toupper(substr(l, 1, 6)); exit }' world/world.sgl)"
   cp -R world "$S/daylight-world"
-  # Static placement must not start a first-visit moment and its sky haze.
+  # The placement probe is still daylight: D51's sounding moment would
+  # deliberately step sky-1 to sky-2. The separate sky leg checks that haze.
   # Keep things well formed: remove the added first item, not the whole list.
-  sed '/^  light:/d; /^  sun:/d; /^  moment:/d; s/(firefly at: ([0-9 ]*) count: [0-9]* drawn: 2)//' world/rooms/reedfen/x9y3.room > "$S/daylight-world/rooms/reedfen/x9y3.room"
+  sed '/^  light:/d; /^  sun:/d; /^  moment:/d; s/(firefly at: ([0-9 ]*) count: [0-9]* drawn: 2)//' \
+    world/rooms/reedfen/x9y3.room > "$S/daylight-world/rooms/reedfen/x9y3.room"
   shoot "$S/shot-daylight.png" --world "$S/daylight-world" --room reedfen:9,3 || return 2
   frames=$((frames + 1))
   at() { convert "$S/shot-daylight.png" -crop "1x1+$1+$2" +repage -format '%[hex:u.p{0,0}]' info:- 2>/dev/null | cut -c1-6 | tr a-z A-Z; }

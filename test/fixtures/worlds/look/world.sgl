@@ -82,6 +82,41 @@
   (cld-grass-3 "#c6bb8b" "lit grass heads, the seeds' cream")
   (cld-cloud "#b0bfce" "the slow cloud below the crags")
   (cld-sun "#dcae5c" "Cloudstair's one warm accent: sunlight on the grass")
+  ;; The Underhum: the rock under the bowl, the Hollow's stone ramp taken
+  ;; darker and warmer; the old people's cut work a little paler than the
+  ;; natural rock. Slots 0..3 are the far dark of the hollows, never sky.
+  ;; No harmonic colour in the rock; the orbs bring the colour.
+  (und-far-1 "#0c0a0a" "the far dark")
+  (und-far-2 "#171312" "far rock, barely there")
+  (und-far-3 "#241e1b" "far rock in a little light")
+  (und-far-4 "#383029" "far rock lit; motes")
+  (und-rock-1 "#141110" "shadow in the rock")
+  (und-rock-2 "#2e2724" "rock in shade")
+  (und-rock-3 "#544a42" "rock")
+  (und-rock-4 "#857868" "rock lit, warm")
+  (und-cut-1 "#25201d" "the joints of cut stone")
+  (und-cut-2 "#4a423b" "cut stone in shade")
+  (und-cut-3 "#a0937f" "chisel edges and worn treads")
+  (und-drip "#2c3337" "the one drip's wet stone")
+  (und-ochre "#8e5a36" "the Underhum's one warm accent: old ochre in the cut work")
+  ;; Wrongwater: Glasswood's ice and the Pipes' stone turned a few degrees
+  ;; off where they belong (stone toward green-grey, ice toward teal), lit
+  ;; from below. NO VIOLET: H7's colour is the only violet on screen
+  ;; (test/test-art.sgl checks every region role's hue). Slots 0..3 are the
+  ;; far cave wall, darkest at the top; the floors are the light.
+  (wrw-wall-1 "#151b1e" "the far wall high up, away from the ground's light")
+  (wrw-wall-2 "#27312f" "the far wall")
+  (wrw-wall-3 "#4a5852" "the far wall low down, lit from below")
+  (wrw-wall-4 "#cbd8cf" "the ground's light, far; the light's own colour")
+  (wrw-stone-1 "#121716" "wet joints, the dark sides")
+  (wrw-stone-2 "#3a4744" "smooth wet stone in shade")
+  (wrw-stone-3 "#7a8c84" "wet stone and undersides, lit from below")
+  (wrw-stone-4 "#dde8dc" "the floors' pale light")
+  (wrw-ice-1 "#22353c" "upward ice in shade")
+  (wrw-ice-2 "#55808a" "upward ice")
+  (wrw-ice-3 "#a8d2d0" "lit ice; a lake's upper surface")
+  (wrw-water "#3d7a78" "the hanging water, teal")
+  (wrw-brass "#c4b06a" "Wrongwater's one warm accent: brass in the light from below")
   ;; the player, the same everywhere
   (fur-1 "#ede5d3" "the creature's fur")
   (fur-2 "#b8ab95" "its fur in shade")
@@ -94,6 +129,9 @@
   (h4 "#8fb4e6" "H4, cold blue")
   (h5 "#e6a0b4" "H5, rose")
   (h7 "#a47ce0" "H7, a violet no region uses")
+  ;; the fundamental: the four colours together, which no harmonic has; the
+  ;; Underhum only (the great stone, the columns after the chord, the heart)
+  (fund "#f4ecdc" "the fundamental, a pale warm white")
   (black "#000000" "fades"))
 
 (region hollow

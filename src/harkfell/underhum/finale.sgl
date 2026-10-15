@@ -1,0 +1,105 @@
+;;; The ending's progression, independent of sound and drawing. The sound
+;;; director acknowledges musical marks with finale-mark; movement only asks
+;;; for rise/home. Input and physics continue throughout every phase.
+(define-library (harkfell underhum finale)
+  (import (sigil struct)
+          (sigil list))
+
+  (export finale finale? finale-step finale-mark finale-restored
+          finale-ended finale-ended-with finale-coda finale-phase
+          finale-lit finale-chamber finale-still finale-t finale-credits
+          finale-events finale-night finale-heard-night)
+
+  (begin
+    (define-struct finale
+      (ended default: #f)
+      (ended-with default: '())
+      (coda default: #f)
+      (phase default: 'quiet)
+      (lit default: #f)
+      (chamber default: 0)
+      (still default: 0)
+      (t default: 0)
+      (credits default: #f)
+      (events default: '()))
+
+    ;; Mark the ending spent when it begins, so quit/continue never replays
+    ;; any part. Animation and timers are session-only.
+    (define (finale-restored ended with coda)
+      (finale ended: ended ended-with: with coda: coda
+              phase: (if ended 'done 'quiet) lit: ended))
+
+    (define (enter f phase)
+      (finale f phase: phase t: 0 events: (append (finale-events f) (list phase))))
+
+    (define (complete-carry? carry)
+      (every (lambda (h) (memv h carry)) '(2 3 4 5)))
+
+    ;; Consecutive ticks in this chamber count, never stillness brought in
+    ;; from another room or ticks during a soft return.
+    (define (finale-step f chamber? still? column? bowl? playing? carry)
+      (let* ((f (finale f events: '()))
+             (chamber (if (and chamber? playing?) (+ (finale-chamber f) 1) 0))
+             (still (if (and chamber? playing? still?) (+ (finale-still f) 1) 0))
+             (f (finale f chamber: chamber still: still
+                        t: (+ (finale-t f) (if playing? 1 0)))))
+        (cond
+          ((not playing?) f)
+          ((and (not (finale-ended f)) (complete-carry? carry) chamber?
+                (or (>= still 120) (>= chamber 900) column?))
+           (enter (finale f ended: #t
+                           ended-with: (filter (lambda (h) (memv h '(2 3 4 5 7))) carry))
+                  'fuse))
+          ((and (eq? (finale-phase f) 'done) chamber?
+                (memv 7 carry) (not (memv 7 (finale-ended-with f)))
+                (not (finale-coda f)))
+           (enter (finale f coda: #t) 'coda))
+          ;; A fast climber may request home even during fuse/theme. The
+          ;; director jumps at the next bar; the world never holds the body.
+          ((and bowl? (memq (finale-phase f) '(fuse theme rise)))
+           (enter (finale f credits: (or (finale-credits f) 0)) 'home))
+          ((and column? (memq (finale-phase f) '(fuse theme)))
+           (enter (finale f credits: 0) 'rise))
+          (else
+           (if (finale-credits f)
+               (finale f credits: (+ (finale-credits f) 1))
+               f)))))
+
+    ;; These acknowledge actual musical progress, not approximate song
+    ;; durations. A late callback cannot restart an already-finished ending.
+    (define (finale-mark f mark)
+      (let ((f (finale f events: '())))
+        (case mark
+          ((fundamental) (if (memq (finale-phase f) '(fuse theme rise home close))
+                             (finale f lit: #t) f))
+          ((theme) (cond ((eq? (finale-phase f) 'fuse)
+                          (enter (finale f lit: #t) 'theme))
+                         ((memq (finale-phase f) '(rise home close)) (finale f lit: #t))
+                         (else f)))
+          ((close) (if (eq? (finale-phase f) 'home) (enter f 'close) f))
+          ((dawn) (if (memq (finale-phase f) '(home close)) (enter f 'dawn) f))
+          ;; SOUND sends dawn before done. Once its playback has finished,
+          ;; the save must stop recording an active piece immediately, even
+          ;; if the provisional dawn counter has not reached its timeout.
+          ((done) (if (memq (finale-phase f) '(home close dawn coda))
+                      (enter f 'done)
+                      f))
+          (else f))))
+
+    ;; Only Hollow's environment uses this night shift; glyph colours keep
+    ;; their fixed roles. Continuing has phase done, hence daylight.
+    (define (finale-night f)
+      (case (finale-phase f)
+        ((home close) 1.0)
+        ((dawn) (max 0.0 (- 1.0 (/ (finale-t f) 1800.0))))
+        (else 0.0)))
+
+    ;; Presentation follows SOUND's heard section and seconds in it. The
+    ;; bible's thirty-second dawn never advances while the mixer is paused.
+    (define (finale-heard-night section)
+      (if (not section)
+          0.0
+          (case (car section)
+            ((home close) 1.0)
+            ((dawn) (max 0.0 (- 1.0 (/ (cdr section) 30.0))))
+            (else 0.0))))))

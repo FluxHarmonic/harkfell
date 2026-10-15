@@ -1,0 +1,20 @@
+;; Isolated 15-cell tarn: walls on both sides; shelf above the surface.
+;; The shelf reaches the outer wall, closing a dry wall-jump chimney.
+(fixture
+  name: "hanging-bottom"
+  expect: reachable
+  why: "bottom entry and an offset upper shelf, with the exact dry control"
+  start: (12 8)
+  target: ((17 1))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#        #     ##########"
+   "#        #~~~~~#        #"
+   "#        #~~~~~#        #"
+   "#        #~~~~~#        #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#########################"
+   "#########################"))

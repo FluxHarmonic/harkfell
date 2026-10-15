@@ -41,6 +41,7 @@
           (engine collide)
           (engine room)
           (engine body)
+          (engine air)
           (engine worldmap)
           (engine reach)
           (substratic time clock)
@@ -52,7 +53,8 @@
           (harkfell content)
           (harkfell creatures)
           (harkfell ice)
-          (harkfell down))
+          (harkfell down)
+          (harkfell underhum finale))
 
   (export world world? world-new world-at
           world-room world-body world-entry world-phase world-timer
@@ -62,7 +64,8 @@
           entry-body cell-body
           world-gates world-carry world-news world-still world-take-news world-populate
           world-stones world-pickups world-critters world-ice world-aurora world-aurora-at
-          map-shift map-cell-shift world-down world-tau)
+          map-shift map-cell-shift world-down world-tau
+          world-ending world-finale-mark world-ended world-ended-with world-coda)
 
   (begin
     (define DIM-TICKS 15)
@@ -82,6 +85,10 @@
       (returns default: 0)
       (entered default: 0)
       (chord-wait default: 0)
+      (hint-wait default: 0)
+      (bench-visit default: -1)
+      (lit-benches default: '())
+      (finale default: #f)
       (aurora default: #f)         ; the third-homecoming has happened in this save
       (aurora-at default: #f)      ; tick of this session's one showing
       (ground default: #f)          ; the last body that stood on ground
@@ -100,6 +107,13 @@
     (define (world-tau w) (body-tau (world-body w)))
     (define (world-stones w) (if (world-gates w) (gstate-stones (world-gates w)) '()))
     (define (world-pickups w) (if (world-gates w) (gstate-pickups (world-gates w)) '()))
+    (define (world-ending w) (or (world-finale w) (finale)))
+    (define (world-ended w) (finale-ended (world-ending w)))
+    (define (world-ended-with w) (finale-ended-with (world-ending w)))
+    (define (world-coda w) (finale-coda (world-ending w)))
+
+    (define (world-finale-mark w mark)
+      (world w finale: (finale-mark (world-ending w) mark)))
 
     ;; The world with its gates: stones and pickups (global cells) and the
     ;; carry. Pickups of a harmonic already carried are gone, and open stones
@@ -204,7 +218,10 @@
                    (g2 (gates-step (gstate g tiles: (world-tiles w) news: '())
                                    (body-center b f)
                                    (list (body-x b) (body-y b) (feel-box-w f) (feel-box-h f))
-                                   (eq? (world-phase w) 'play)))
+                                   (eq? (world-phase w) 'play)
+                                   (and (eq? (body-mode b) 'ground)
+                                        (< (abs (body-vx b)) 0.01)
+                                        (< (abs (body-vy b)) 0.01))))
                    (tm (if (eq? (gstate-tiles g2) (world-tiles w))
                            (gstate-tiles g2)
                            (passage-tiles (world-wm w) (gstate-tiles g2)
@@ -299,7 +316,9 @@
              (p (world-room w))
              (rm (and p (placed-data p))))
         (if (and rm (= wait 0) (eq? (world-phase w) 'play)
-                 (>= (length (world-carry w)) 2))
+                 (>= (length (world-carry w)) 2)
+                 (or (not (eq? (room-region rm) 'underhum))
+                     (finale-lit (world-ending w))))
             (let* ((o (world-origin w))
                    (b (body-center (world-body w) HARKFELL-FEEL))
                    (near (find
@@ -317,6 +336,36 @@
                   w))
             w)))
 
+    ;; The look remembers a bench for this room visit after its fundamental
+    ;; has arrived. Mirror its horizontal radius; height is not a condition.
+    (define (bench-tick w)
+      (let* ((visit (world-entered w))
+             (w (if (= visit (world-bench-visit w))
+                    w
+                    (world w bench-visit: visit lit-benches: '())))
+             (p (world-room w))
+             (rm (and p (placed-data p))))
+        (if (and rm (eq? (room-region rm) 'underhum)
+                 (eq? (world-phase w) 'play) (finale-lit (world-ending w)))
+            (let* ((origin (world-origin w))
+                   (bx (car (body-center (world-body w) HARKFELL-FEEL)))
+                   (new (filter
+                          (lambda (thing)
+                            (let ((at (thing-at thing)))
+                              (and (not (member at (world-lit-benches w)))
+                                   (memv (thing-kw thing "overtone") (world-carry w))
+                                   (< (abs (- bx (+ (car origin) (* 16 (car at)) 8.0))) 32))))
+                          (room-things-of rm 'bench))))
+              (world w lit-benches: (append (map thing-at new) (world-lit-benches w))
+                     news: (append (world-news w)
+                             (map (lambda (thing)
+                                    (let ((at (thing-at thing)))
+                                      (list 'bench (thing-kw thing "overtone")
+                                            (+ (car origin) (* 16 (car at)) 8.0)
+                                            (+ (cdr origin) (* 16 (cdr at)) 8.0))))
+                                  new))))
+            w)))
+
     (define (down-tick w)
       (let* ((p (world-room w))
              (rm (and p (placed-data p)))
@@ -329,10 +378,77 @@
                      news: (append (world-news w) (list (list 'down (car c) (cdr c))))))
             w)))
 
+    ;; The three violet hints answer locally after H7, never as targets.
+    ;; One shared cooldown also prevents a seam crossing from retriggering.
+    (define (hint-answer-tick w)
+      (let* ((wait (max 0 (- (world-hint-wait w) 1)))
+             (w (world w hint-wait: wait))
+             (p (world-room w))
+             (rm (and p (placed-data p))))
+        (if (and rm (= wait 0) (memv 7 (world-carry w))
+                 (eq? (world-phase w) 'play)
+                 (member (list (room-region rm) (room-x rm) (room-y rm))
+                         '((glasswood -6 4) (glasswood -2 6) (pipes 1 8))))
+            (let* ((o (world-origin w))
+                   (b (body-center (world-body w) HARKFELL-FEEL))
+                   (hint (find
+                           (lambda (t)
+                             (let* ((a (thing-at t))
+                                    (dx (- (+ (car o) (* 16 (car a)) 8) (car b)))
+                                    (dy (- (+ (cdr o) (* 16 (cdr a)) 8) (cdr b))))
+                               (<= (+ (* dx dx) (* dy dy)) (* 64 64))))
+                           (append (room-things-of rm 'upward-icicle)
+                                   (room-things-of rm 'upward-drip)))))
+              (if hint
+                  (let ((a (thing-at hint)))
+                    (world w hint-wait: 720
+                           news: (append (world-news w)
+                                   (list (list 'hint-answer 7
+                                               (+ (car o) (* 16 (car a)) 8)
+                                               (+ (cdr o) (* 16 (cdr a)) 8))))))
+                  w))
+            w)))
+
     (define (world-tick w in)
-      (homecoming-tick
-        (standing-chord-tick
-          (ice-tick (critters-tick (still-tick (down-tick (gates-tick (world-tick-body w in)))) w) w))))
+      (let* ((before w)
+             (w (world-tick-body w in))
+             (w (gates-tick w))
+             (w (down-tick w))
+             (w (still-tick w))
+             (w (critters-tick w before))
+             (w (ice-tick w before))
+             (w (standing-chord-tick w))
+             (w (homecoming-tick w))
+             (w (hint-answer-tick w))
+             (w (finale-tick w)))
+        (bench-tick w)))
+
+    (define (finale-tick w)
+      (let* ((p (world-room w))
+             (rm (and p (placed-data p)))
+             (b (world-body w))
+             (c (body-center b HARKFELL-FEEL))
+             (s (tilemap-size (world-tiles w)))
+             (chamber? (and rm (eq? (room-region rm) 'underhum)
+                            (= (room-x rm) 7) (= (room-y rm) 5)))
+             (column? (and chamber?
+                           (or (eq? (tilemap-ref (world-tiles w)
+                                                (exact (floor (/ (car c) s)))
+                                                (exact (floor (/ (cdr c) s)))) 'updraft)
+                               (find (lambda (field)
+                                       (and (> (air-field-lift field) 0)
+                                            (not (air-field-pulsed field))
+                                            (air-contains? field (car c) (cdr c))))
+                                     (tilemap-air (world-tiles w))))))
+             (bowl? (and rm (eq? (room-region rm) 'hollow)
+                         (= (room-x rm) 4) (= (room-y rm) 3)))
+             (f (finale-step (world-ending w) chamber? (> (world-still w) 0)
+                             column? bowl? (eq? (world-phase w) 'play) (world-carry w))))
+        (world w finale: f
+               news: (append (world-news w)
+                       (map (lambda (ev)
+                              (list 'finale ev (car c) (cdr c)))
+                            (finale-events f))))))
 
     (define (world-tick-body w in)
       (let ((w (world w ticks: (+ (world-ticks w) 1))))

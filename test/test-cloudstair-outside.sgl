@@ -21,7 +21,8 @@
   (test "the no-H5 view adds exactly one cell and preserves every other outside room"
     (let* ((outside (cloudstair-outside-rooms SOURCE '(2 3 4)))
            (added '()))
-      (assert-equal 82 (length outside))
+      ;; The shipped 82 outside rooms plus 13 Underhum and 12 Wrongwater.
+      (assert-equal 107 (length outside))
       (for-each
         (lambda (p)
           (let* ((rm (placed-data p))

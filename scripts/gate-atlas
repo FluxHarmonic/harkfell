@@ -1,0 +1,75 @@
+#!/bin/sh
+# The atlas's frame budget (tools/atlas-budget.sgl): the ?atlas overview of
+# world/ and of world/ plus 40 synthetic rooms, drawn the way the shell
+# draws it, on a private display. A frame that overflows sokol_gp's vertex
+# buffer aborts the process (VALIDATE_APPENDBUF_SIZE); each leg passes only
+# on its "ATLAS-BUDGET OK" line.
+#
+#   scripts/gate-atlas            both legs
+#
+# Needs build/dev (scripts/dev sigil build) for harkfell-test and the
+# dependency libraries; this tree's src/ is loaded as source, so no rebuild
+# is needed after an edit. Exit 0 PASS, 1 FAIL, 2 SETUP-FAILED.
+cd "$(dirname "$0")/.." || exit 2
+W=$(pwd)
+[ -x build/dev/bin/harkfell-test ] || { echo "SETUP-FAILED: build/dev/bin/harkfell-test missing (scripts/dev sigil build)"; exit 2; }
+H=build/atlas-harness
+mkdir -p $H/bin $H/lib
+cp build/dev/bin/harkfell-test $H/bin/
+for p in _pkg motif sigil substratic; do ln -sfn "$W/build/dev/lib/$p" $H/lib/$p; done
+ln -sfn "$W/src/engine" $H/lib/engine
+ln -sfn "$W/src/harkfell" $H/lib/harkfell
+
+T=$(mktemp -d "${TMPDIR:-/tmp}/gate-atlas.XXXXXX")
+XPID=
+cleanup() { [ -n "$XPID" ] && kill "$XPID" 2>/dev/null; rm -rf "$T"; }
+trap cleanup EXIT
+
+# The synthetic world: world/ plus 40 closed rooms in the Pipes' region,
+# eight wide and five deep under everything (x -6..1, y 10..14). They break
+# the content gates (off the map, outside the bounds); the tool only draws.
+cp -r world "$T/world+40"
+mkdir -p "$T/world+40/rooms/synthetic"
+n=0
+for y in 10 11 12 13 14; do
+  for x in -6 -5 -4 -3 -2 -1 0 1; do
+    {
+      printf '(room\n  region: pipes\n  at: (%s %s)\n  title: "Synthetic %s,%s"\n' "$x" "$y" "$x" "$y"
+      printf '  intent: "a synthetic room for the atlas budget"\n  bed: (wind 0 water 0 pipes 0 drone 0)\n  grid:\n'
+      printf '  ("#########################"\n'
+      for r in 1 2 3 4 5 6 7 8; do printf '   "#                       #"\n'; done
+      printf '   "#########################"\n   "#########################")\n  decor: auto)\n'
+    } > "$T/world+40/rooms/synthetic/x${x}y${y}.room"
+    n=$((n + 1))
+  done
+done
+[ "$n" -eq 40 ] && [ "$(ls "$T/world+40/rooms/synthetic" | wc -l)" -eq 40 ] || { echo "SETUP-FAILED: synthetic rooms ($n)"; exit 2; }
+
+D=:$((300 + $$ % 500))
+# guix shell forks: run Xvfb from its store path, so XPID is Xvfb itself
+XVFB=$(guix shell xorg-server -- sh -c 'command -v Xvfb')
+[ -x "$XVFB" ] || { echo "SETUP-FAILED: no Xvfb"; exit 2; }
+"$XVFB" $D -screen 0 1400x700x24 -nolisten tcp > "$T/xvfb.log" 2>&1 &
+XPID=$!
+i=0; while [ ! -e "/tmp/.X11-unix/X${D#:}" ]; do i=$((i + 1)); [ $i -gt 60 ] && { echo "SETUP-FAILED: no display $D"; exit 2; }; sleep 1; done
+
+rc=0
+for leg in world "world+40"; do
+  dir=world; [ "$leg" = world ] || dir="$T/$leg"
+  env -u WAYLAND_DISPLAY DISPLAY=$D PULSE_SINK=worker-null ATLAS_WORLD="$dir" \
+    timeout 900 scripts/dev $H/bin/harkfell-test --no-strict tools/atlas-budget.sgl > "$T/$leg.log" 2>&1
+  grep -a '^ATLAS-BUDGET world' "$T/$leg.log" | sed "s|$T/||"
+  if grep -aq '^ATLAS-BUDGET OK' "$T/$leg.log"; then
+    # samplers in use once the overview is cached: 64 less the free ones
+    # (the markers before the first SAMPLER_POOL_EXHAUSTED); the bake's own
+    # peak adds up to 9 transient targets (8 rooms, the page being copied)
+    used=$(awk '/^ATLAS-SAMPLERS creating/ { k = $3 } /SAMPLER_POOL_EXHAUSTED/ && k { print 65 - k; exit }' "$T/$leg.log")
+    echo "PASS $leg: $(grep -a '^ATLAS-BUDGET OK' "$T/$leg.log") samplers-in-use ${used:-unmeasured} of 64"
+  elif grep -aq 'APPENDBUF\|panic\|ABORTING' "$T/$leg.log"; then
+    echo "FAIL $leg: a frame overflowed: $(grep -a 'VALIDATE_[A-Z_]*' -o "$T/$leg.log" | head -1)"; rc=1
+    grep -aq SAMPLER_POOL_EXHAUSTED "$T/$leg.log" && echo "  (sokol's 64 samplers ran out: expected until sigil-graphics shares samplers, BLOCKED-ON t-253c7c)"
+  else
+    echo "FAIL $leg: no OK line (setup or load failure?):"; grep -a "rror\|TIMED-OUT" "$T/$leg.log" | head -5; rc=1
+  fi
+done
+exit $rc

@@ -1,0 +1,61 @@
+;;; (harkfell credits) - The ending's credits: the cards, and when each shows.
+;;; Pure; LOOK draws them over the world in IM Fell (D34, D35: no pause, no
+;;; letterbox, input never stops).
+;;;
+;;; The text is David's choice (D52 in harkfell-design, 2026-10-12): the
+;;; bible's option A ("Short and plain"), with a Knytt card, and "Built
+;;; with Sigil". Seven cards.
+;;;
+;;; WHEN (the bible: "They begin as you start to climb, with the first verse,
+;;; and run through home and close"). The cards are on a clock that starts
+;;; when the climb's music does: the first of rise or home HEARD
+;;; ((harkfell sound) sound-finale-section), so a fast climber whose piece
+;;; jumps straight to home still gets every card. Card k shows from
+;;; k x CARD-EVERY-S for CARD-S, fading in and out over CARD-FADE-S: six cards
+;;; over the climb, rise to home (about two minutes on the map's route). The
+;;; last card ("Thank you for listening.") waits for the dawn, so it is the
+;;; last thing over the brightening Hollow.
+;;;
+;;;   CREDITS                         the cards: lists of lines
+;;;   (credits-at t dawn)             t seconds since the clock started (or #f),
+;;;                                   dawn seconds since it started that the dawn
+;;;                                   began (or #f): (index . alpha) or #f
+
+(define-library (harkfell credits)
+  (import (sigil list))
+  (export CREDITS CARD-EVERY-S CARD-S CARD-FADE-S credits-at credits-last-start)
+  (begin
+    (define CREDITS
+      '(("Harkfell")
+        ("Made by David Wilson")
+        ("With Claude and Codex")
+        ("Built with Sigil")
+        ("Inspired by Knytt, by Nifflas")
+        ("IM Fell types by Igino Marini")
+        ("Thank you for listening.")))
+
+    (define CARD-EVERY-S 20.0)     ; six cards over the climb's two minutes
+    (define CARD-S 12.0)           ; each held long enough to read twice
+    (define CARD-FADE-S 1.5)
+
+    ;; When the last card starts: its turn on the clock, or the dawn if later.
+    (define (credits-last-start dawn)
+      (let ((turn (* CARD-EVERY-S (- (length CREDITS) 1))))
+        (if dawn (max turn dawn) turn)))
+
+    (define (alpha u)
+      (cond ((or (< u 0.0) (> u CARD-S)) 0.0)
+            ((< u CARD-FADE-S) (/ u CARD-FADE-S))
+            ((> u (- CARD-S CARD-FADE-S)) (/ (- CARD-S u) CARD-FADE-S))
+            (else 1.0)))
+
+    (define (credits-at t dawn)
+      (and t
+           (let* ((n (length CREDITS))
+                  (last-at (credits-last-start dawn))
+                  (k (min (- n 2) (exact (floor (/ t CARD-EVERY-S)))))
+                  (u (- t (* k CARD-EVERY-S))))
+             (cond ((>= t last-at)
+                    (let ((a (alpha (- t last-at)))) (and (> a 0.0) (cons (- n 1) a))))
+                   ((> (alpha u) 0.0) (cons k (alpha u)))
+                   (else #f)))))))

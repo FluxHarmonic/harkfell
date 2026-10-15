@@ -1,0 +1,26 @@
+;; I, Behind the Wall. Up from J by the rough face (column 1). The crack
+;; in the west wall looks into the chamber. The air shaft from M tops out
+;; under the roof (row 1) and steps west onto the high ledge (17-20, row 2),
+;; six rows above the floor and out of a jump's reach; drop from it through
+;; the gap (16) to the floor.
+(room
+  region: underhum
+  at: (8 5)
+  title: "Behind the Wall"
+  intent: "a narrow passage behind the chamber's east wall, where a crack shows the hollow beyond: a breath"
+  bed: (hum 0.7 air 0.4 water 0)
+  light: 0.2
+  grid:
+  ("#########################"
+   "################      ^^#"
+   "################      ^^#"
+   "################ #####^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "#%  ##################^^#"
+   "#%  ##################^^#")
+  things: ((crack at: (1 6)))
+  decor: none)

@@ -1,0 +1,261 @@
+#!/bin/sh
+# The Underhum's sound gate (tasks/harkfell-underhum-sound): the ending is
+# timed right and follows the player, green and red.
+#
+#   scripts/gate-underhum-sound              the green arm
+#   scripts/gate-underhum-sound --sabotage   the green arm, then the named sabotages, each must go RED
+#   scripts/gate-underhum-sound --sabotage NAME ...   only those legs
+#
+# THE GREEN ARM
+#   score    tools/underhum-compose.mjs --check: the piece, its H7 version and
+#            the coda in assets/tunes are what the score writes
+#   test     test/test-underhum-sound.sgl, all 41 tests (parts 1 to 6)
+# The test runs on a harkfell-test that loads THIS tree's src/ (folio
+# procedures/harkfell-look-review-harness, "For sound"): HARNESS, default
+# build/audio-harness/bin/harkfell-test, whose lib/harkfell and lib/engine
+# must link here, or SETUP-FAILED. Every tune's render-twice and speaker
+# check is scripts/gate-a4-sound's (the whole of assets/tunes).
+#
+# THE SABOTAGES, each planted in a COMMITTED file, checked to have landed by
+# hash and grep, run on the test part it attacks, restored with git checkout
+# and checked against the pre-plant hash. A leg is RED only with a non-zero
+# exit AND its named test failing, and the named test must pass unplanted
+# first (the green arm's output). The timing-critical ones:
+#   lock-order       H3 and H4 swap lock beats (the fuse's order)
+#   breath-flat      the director stops drawing the breath (the drone is not fused)
+#   fundamental-late the fundamental enters a beat late (finale-drone row 56)
+#   bell-off-beat    H3's bell two rows late in the piece
+#   fuse-cut         a home wish cuts the fuse anywhere, not at its end
+#   home-ignored     home is never jumped to
+#   sky-no-loop      the sky verse is not held in its loop
+#   hold-no-loop     hold is not held in its loop
+#   room-not-climb   entering an Underhum room is not the climb
+#   bed-kept         the bed is not closed at the fuse
+#   no-dawn          the dawn never brings the bed back
+#   replays          a second fuse plays the ending again
+#   h5-in-rise       H5's F# stays in the drone under the Reedfen verse's F natural
+#   dawn-h7-early    with H7 the dawn comes while the fundamental still sounds
+#   moment-during    a room's fixed moment starts during the ending
+#   spots-during     birds and plops during the ending
+#   bed-on-region    a region entered during the ending opens its bed
+#   bed-on-carry     a carry change during the ending reopens the bed
+#   csharp-untuned   the glass flute's C# without its cents (motif's tuning rule)
+#   told-early       the listener told of the fundamental at the fuse, not when it sounds
+#   down-is-climb    dropping below the chamber (Revision 1's K) counts as the climb
+# and the region's:
+#   h7-unstripped    H7's drone voice sounds without H7 carried
+#   heart-early      the heart calls with any harmonic carried
+#   bed-not-after    the after-ending bed is the ordinary one
+#   coda-again       the coda plays for a player who ended with H7
+#
+# Exit: 0 all as expected, 1 a check or a leg went the wrong way, 2 SETUP-FAILED.
+# Scratch goes under /tmp; nothing is written in the tree but the plants.
+set -u
+cd "$(dirname "$0")/.." || exit 2
+TMP="$(mktemp -d /tmp/harkfell-gate-underhum-sound-XXXXXX)"
+PLANTED=""
+trap 'if [ -n "$PLANTED" ]; then git checkout HEAD -- "$PLANTED"; echo "interrupted: restored $PLANTED"; fi; rm -rf "$TMP"' EXIT
+trap 'exit 130' INT TERM
+FAIL=0
+HARNESS=${HARNESS:-build/audio-harness/bin/harkfell-test}
+T=test/test-underhum-sound.sgl
+TOTAL=41
+
+hash() { sha256sum "$1" | cut -c1-16; }
+setup_failed() { echo "SETUP-FAILED: $*"; echo "GATE-UNDERHUM-SOUND SETUP-FAILED"; exit 2; }
+
+# --- the harness: it must load this tree ------------------------------------------------
+[ -x "$HARNESS" ] || setup_failed "no harness at $HARNESS"
+lib="$(dirname "$(dirname "$HARNESS")")/lib"
+for d in harkfell engine; do
+  [ "$(readlink -f "$lib/$d")" = "$(pwd)/src/$d" ] || setup_failed "$lib/$d is $(readlink -f "$lib/$d"), not this tree's src/$d"
+done
+echo "harness $HARNESS loads $(pwd)/src (HEAD $(git rev-parse --short=12 HEAD))"
+
+# run PARTS OUT: the test, only those parts
+run() { UNDERHUM_PARTS="$1" scripts/dev "$HARNESS" --no-strict "$T" > "$2" 2>&1; }
+clean() { sed 's/\x1b\[[0-9;]*m//g' "$1"; }
+
+green() {
+  node tools/underhum-compose.mjs --check > "$TMP/score.out" 2>&1 \
+    && echo "GREEN score: $(tr '\n' ' ' < "$TMP/score.out")" \
+    || { echo "NOT GREEN score: $(tr '\n' ' ' < "$TMP/score.out")"; FAIL=1; }
+  run "1 2 3 4 5 6" "$TMP/green.out"; rc=$?
+  line="$(clean "$TMP/green.out" | grep -a 'Tests:' | tail -1)"
+  passed="$(echo "$line" | sed -n 's/.*Tests: *\([0-9][0-9]*\) passed.*/\1/p')"
+  total="$(echo "$line" | sed -n 's/.*(\([0-9][0-9]*\) total).*/\1/p')"
+  if [ "$rc" -eq 0 ] && [ "${passed:-x}" = "$TOTAL" ] && [ "${total:-y}" = "$TOTAL" ]; then
+    echo "GREEN $T: $passed of $total passed"
+  else
+    echo "NOT GREEN $T: rc=$rc, '$line' (want $TOTAL of $TOTAL)"; clean "$TMP/green.out" | grep -a '✗' | head -5
+    FAIL=1
+  fi
+  clean "$TMP/green.out" | grep -a -E '^ *(lock times|bells|H7 lock|heard):' | sed 's/^ */  /'
+}
+
+passes() {
+  clean "$TMP/green.out" | grep -a '✓' | grep -qF "$1" \
+    || setup_failed "'$1' does not pass unplanted; a sabotage leg on it would prove nothing"
+}
+
+# plant NAME FILE OLD NEW PARTS TESTNAME
+plant() {
+  name=$1 file=$2 old=$3 new=$4 parts=$5 tn=$6
+  if [ -n "$ONLY" ]; then case " $ONLY " in *" $name "*) ;; *) return;; esac; fi
+  passes "$tn"
+  git diff --quiet HEAD -- "$file" || setup_failed "$name: $file differs from HEAD (commit before planting)"
+  before="$(hash "$file")"
+  OLD="$old" NEW="$new" node -e '
+    const fs=require("fs"); const f=process.argv[1]; const s=fs.readFileSync(f,"utf8");
+    const n=s.split(process.env.OLD).length-1;
+    if(n!==1){console.error("anchor found "+n+" times");process.exit(3)}
+    fs.writeFileSync(f, s.replace(process.env.OLD, process.env.NEW));' "$file"
+  prc=$?
+  PLANTED="$file"
+  after="$(hash "$file")"
+  if [ "$prc" -ne 0 ] || [ "$before" = "$after" ] || ! grep -qF "$new" "$file"; then
+    git checkout HEAD -- "$file"; PLANTED=""
+    setup_failed "$name: the plant did not land (rc $prc, hash $before -> $after)"
+  fi
+  changed="$(git diff --numstat HEAD -- "$file" | awk '{print $1+$2}')"
+  echo "planted $name in $file ($before -> $after, $changed lines changed)"
+  out="$TMP/$name.out"
+  run "$parts" "$out"; rc=$?
+  git checkout HEAD -- "$file"
+  PLANTED=""
+  restored="$(hash "$file")"
+  [ "$restored" = "$before" ] || setup_failed "$name: restore gave $restored, not $before"
+  if clean "$out" | grep -a -q 'LOAD ERROR'; then
+    echo "NOT RED $name: the planted tree does not load (a build failure is not a red)"; FAIL=1
+  elif [ "$rc" -ne 0 ] && clean "$out" | grep -a '✗' | grep -qF "$tn"; then
+    echo "RED $name (as it must be): rc=$rc; failing: $tn"
+  else
+    echo "NOT RED $name: rc=$rc; the sabotage was not caught by '$tn'"
+    clean "$out" | grep -a 'Tests:' | tail -1
+    FAIL=1
+  fi
+  echo "restored $file ($restored)"
+}
+
+if [ "${1:-}" != "--sabotage" ]; then
+  green
+  if [ "$FAIL" -eq 0 ]; then echo "GATE-UNDERHUM-SOUND GREEN"; else echo "GATE-UNDERHUM-SOUND RED"; fi
+  exit $FAIL
+fi
+shift
+ONLY="$*"
+
+green
+[ "$FAIL" -eq 0 ] || setup_failed "the green arm is not green; no sabotage leg can be scored"
+
+F=src/harkfell/finale.sgl
+S=src/harkfell/sound.sgl
+
+plant lock-order "$F" \
+  "(cons 3 (beats 5)) (cons 4 (beats 7))" \
+  "(cons 3 (beats 7)) (cons 4 (beats 5))" \
+  "2" "they join it one by one, H2 H3 H4 H5, each by its beat"
+plant breath-flat "$S" \
+  "(* (cdr (assv h FINALE-LEVELS)) (finale-breath h t) th" \
+  "(* (cdr (assv h FINALE-LEVELS)) 1.0 th" \
+  "2" "the director breathes the drone"
+plant fundamental-late assets/tunes/finale-drone.cts \
+  '(row 48 (1 "D-2" 1 30 "000"))' \
+  '(row 56 (1 "D-2" 1 30 "000"))' \
+  "2" "the fundamental: silent until bar 4 (10 s), sounding by 11 s"
+plant bell-off-beat assets/tunes/the-fundamental.cts \
+  '      (row 20 (4 "A-4" 4 36 "000"))' \
+  '      (row 22 (4 "A-4" 4 36 "000"))' \
+  "2" "a stone bell on each lock beat, and none between"
+plant fuse-cut "$F" \
+  "(and last? (eq? section 'calm))))" \
+  "(eq? section 'calm)))" \
+  "4" "home asked during the fuse waits for its end and lands there"
+plant home-ignored "$S" \
+  "((jump-home) (when (player-jump-to-mark! p 'home)" \
+  "((jump-home-never) (when (player-jump-to-mark! p 'home)" \
+  "3" "home lands within a bar of being asked"
+plant sky-no-loop "$F" \
+  "((rise glass pipes sky) '(sky . home))" \
+  "((rise glass pipes) '(sky . home))" \
+  "3" "the sky verse loops until home"
+plant hold-no-loop "$F" \
+  "((calm theme hold) '(hold . rise))" \
+  "((calm theme) '(hold . rise))" \
+  "4" "staying in the chamber, hold loops"
+plant room-not-climb "$S" \
+  "((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) (finale-want! 'rise))" \
+  "((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) #f)" \
+  "4" "a room entered is the climb"
+plant bed-kept "$S" \
+  "        (bed-away! now FUSE-BED-OUT-S)" \
+  "        #f" \
+  "3" "the bed: closed from the fuse's fade to the dawn"
+plant no-dawn "$S" \
+  "      (when (and *region* *bed-tune* (not *bed-src*))" \
+  "      (when (and #f *region* *bed-tune* (not *bed-src*))" \
+  "3" "the bed: closed from the fuse's fade to the dawn, and sounding again after it"
+plant replays "$S" \
+  "            (*ended* (*say* \"sound\" \"finale\" \"fuse-ignored\"))" \
+  "            (#f (*say* \"sound\" \"finale\" \"fuse-ignored\"))" \
+  "3" "the ending ends, is saved, and never plays again"
+plant h7-unstripped "$S" \
+  "        (and t (if h7?" \
+  "        (and t (if #t" \
+  "2" "H7: carried, its voice locks last"
+plant heart-early "$S" \
+  "(define (calls-for? n) (if (heart-stone? n) (every (lambda (h) (memv h *carry*)) HEART-KEY)" \
+  "(define (calls-for? n) (if (heart-stone? n) #t" \
+  "5" "the heart calls once all four are carried"
+plant bed-not-after "$S" \
+  "(define (bed-for name) (if (and *ended* (equal? name UNDERHUM-BED)) AFTER-BED name))" \
+  "(define (bed-for name) name)" \
+  "5" "after the ending the Underhum's bed is the fused one"
+plant coda-again "$S" \
+  "(memv 7 *carry*) (not (memv 7 *ended-with*))" \
+  "(memv 7 *carry*) #t" \
+  "5" "the coda: once, for H7 found after the ending, and only then"
+
+plant h5-in-rise "$F" \
+  "(memq section '(rise pipes))) 0.0)" \
+  "(memq section '(pipes))) 0.0)" \
+  "3" "H5's F# is gone from the drone through the Reedfen verse"
+plant dawn-h7-early "$F" \
+  "(let ((e (assv (if h7? 1 2) (finale-leave-schedule h7?))))" \
+  "(let ((e (assv 2 (finale-leave-schedule h7?))))" \
+  "1" "close: the voices leave H5, H4, H3, H2"
+plant moment-during "$S" \
+  "      (let ((m (and (not (finale-busy?)) (place-moment pl))))" \
+  "      (let ((m (place-moment pl)))" \
+  "5" "during the ending: no moment, no spot sound"
+plant spots-during "$S" \
+  "    (define (spots-frame! pl now)
+      (if (or *moment* (finale-busy?))" \
+  "    (define (spots-frame! pl now)
+      (if *moment*" \
+  "5" "during the ending: no moment, no spot sound"
+plant bed-on-region "$S" \
+  "      (cond ((and (not (eq? (place-region pl) *region*)) (finale-holds-bed?))" \
+  "      (cond ((and #f (not (eq? (place-region pl) *region*)) (finale-holds-bed?))" \
+  "4" "entering the Hollow during the ending opens no bed"
+plant bed-on-carry "$S" \
+  "        (when (and *carry-changed* *region* *bed-tune* (not (finale-holds-bed?)))" \
+  "        (when (and *carry-changed* *region* *bed-tune*)" \
+  "5" "during the ending: no moment, no spot sound"
+plant csharp-untuned assets/tunes/the-fundamental.cts \
+  'drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 0.7 cents: -11.731' \
+  'drone-fm level: 0.35 index: 0.9 index-wander: 0 mod: 1 breath-lo: 1 attack: 0.08 release: 0.7' \
+  "1" "the tuning: every F#, C#, and with H7 every C"
+
+plant told-early "$S" \
+  "(when (and ft (>= ft FINALE-FUNDAMENTAL-S)) (tell! st 'fundamental))" \
+  "(when (and ft (>= ft 0.0)) (tell! st 'fundamental))" \
+  "3" "the listener is told what is heard"
+
+plant down-is-climb "$S" \
+  "((and (eq? (place-region pl) 'underhum) row (< row CHAMBER-ROW)) (finale-want! 'rise))" \
+  "((and (eq? (place-region pl) 'underhum) row (not (= row CHAMBER-ROW))) (finale-want! 'rise))" \
+  "5" "Revision 1's rooms: going down (K, under the stone) is not the climb"
+
+if [ "$FAIL" -eq 0 ]; then echo "GATE-UNDERHUM-SOUND GREEN (every leg RED)"; else echo "GATE-UNDERHUM-SOUND RED"; fi
+exit $FAIL

@@ -2,6 +2,23 @@
 # Run one gate job on HEAD on an azoth runner, and fetch its logs.
 #
 #   scripts/gate-remote suite       dev build, then the whole suite in one call
+#   scripts/gate-remote depths-tests dev build, focused systems tests and sabotage
+#   scripts/gate-remote depths-focused dev build and focused systems tests
+#   scripts/gate-remote depths-041 fresh suite, depths gates and shipped Cloudstair target scope
+#   scripts/gate-remote depths-full integrated suite, release, reach, sound/look and web gates
+#   scripts/gate-remote depths-followup suite/sound, affected look and unfinished web/A3 gates
+#   scripts/gate-remote depths-diagnostics startup, look palette/pools, A4 SOUND and Underhum reach;
+#                                  GATE_POOL_RED names the authored overlay control
+#   scripts/gate-remote depths-affected reach engine controls, final A4 SOUND,
+#                                  workers0/workers3 regional comparison and startup
+#   scripts/gate-remote depths-mixer-region startup/pause/cues, focused sound tests and affected K profiles
+#   scripts/gate-remote depths-startup targeted first-room warmup startup and frame/save/over/render gates
+#   scripts/gate-remote depths-startup-returns also explicit K exits with/without down
+#   scripts/gate-remote depths-unfinished worker startup/prefix proof, isolated
+#                                  ledge returns and startup stage attribution;
+#                                  GATE_REACH_CONTROL names the prior workers0 log
+#   scripts/gate-remote depths-water-paths dev build, path tests and wet/dry route diagnostics
+#   scripts/gate-remote depths-water-check also focused systems tests and strict water fixtures
 #   scripts/gate-remote release     release build (its --replay trace kept as
 #                                   out/replay-native.txt); gate-replay, gate-sound,
 #                                   gate-a4-sound, gate-look, the reach
@@ -11,6 +28,12 @@
 #                                   reach check (ROOM_CHECK_TIMEOUT 10800)
 #   scripts/gate-remote web         web build (the served tree is fetched to
 #                                   build/remote-web-<sha>/) and verify.mjs
+#   scripts/gate-remote review      dev build; the Wrongwater listening page's
+#                                   recordings (tools/wrongwater-review.jobs),
+#                                   fetched to build/remote-review-<sha>.logs/
+#   scripts/gate-remote sabotage    dev build; tools/wrongwater-sabotage.mjs, with
+#                                   the harness's engine and harkfell libraries
+#                                   linked to src/ so a plant in src/ is what runs
 #
 # Each job leases its own runner (procedures/azoth-remote-builds), so the
 # four can run at once. Generalised from Crash The Stack's scripts/build-remote:
@@ -29,7 +52,7 @@ cd "$(dirname "$0")/.."
 say() { printf 'gate-remote: %s\n' "$*" >&2; }
 
 JOB=${1:-}
-case "$JOB" in suite|release|reach|web) ;; *) say "usage: scripts/gate-remote suite|release|reach|web"; exit 125 ;; esac
+case "$JOB" in suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|depths-followup|depths-diagnostics|depths-affected|depths-unfinished|depths-startup|depths-startup-returns|depths-mixer-region|depths-041|review|sabotage) ;; *) say "usage: scripts/gate-remote suite|release|reach|web|depths|depths-tests|depths-focused|depths-water-paths|depths-water-check|depths-full|depths-followup|depths-diagnostics|depths-affected|depths-unfinished|depths-startup|depths-startup-returns|depths-mixer-region|depths-041|review|sabotage"; exit 125 ;; esac
 
 REMOTE=${AZOTH_REMOTE:-$HOME/Projects/Sites/azoth.works/bin/azoth-remote}
 [ -x "$REMOTE" ] || { say "azoth-remote not found at $REMOTE (set AZOTH_REMOTE)"; exit 125; }
@@ -51,6 +74,25 @@ trap 'rm -rf "$STAGE"' EXIT
 . scripts/remote-sigil-toolchain
 stage_remote_sigil "$STAGE" "$SIGIL_V"
 git bundle create "$STAGE/src.bundle" HEAD 2>/dev/null
+CONTROL_PUT=()
+if [ "$JOB" = depths-diagnostics ] || [ "$JOB" = depths-041 ]; then
+  [ -n "${GATE_POOL_RED:-}" ] && [ -f "$GATE_POOL_RED" ] || {
+    say "SETUP-FAILED: GATE_POOL_RED must name the authored rejected-overlay control"
+    exit 125
+  }
+  cp "$GATE_POOL_RED" "$STAGE/reedfen-overlay-map.png"
+  say "authored overlay control $(sha256sum "$STAGE/reedfen-overlay-map.png")"
+  CONTROL_PUT=(--put "$STAGE/reedfen-overlay-map.png:reedfen-overlay-map.png")
+fi
+if [ "$JOB" = depths-unfinished ]; then
+  [ -n "${GATE_REACH_CONTROL:-}" ] && [ -f "$GATE_REACH_CONTROL" ] || {
+    say "SETUP-FAILED: GATE_REACH_CONTROL must name the fetched workers0 control"
+    exit 125
+  }
+  cp "$GATE_REACH_CONTROL" "$STAGE/regional-workers0.log"
+  say "bounded workers0 control $(sha256sum "$STAGE/regional-workers0.log")"
+  CONTROL_PUT=(--put "$STAGE/regional-workers0.log:regional-workers0.log")
+fi
 
 cat > "$STAGE/remote.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -88,6 +130,241 @@ step() {
   return $r
 }
 case "$JOB" in
+  depths-mixer-region)
+    export SIGIL_YOUNG_THRESHOLD=524288 SIGIL_YOUNG_THRESHOLD_MAX=524288
+    printf 'SIGIL_YOUNG_THRESHOLD=%s SIGIL_YOUNG_THRESHOLD_MAX=%s\n' "$SIGIL_YOUNG_THRESHOLD" "$SIGIL_YOUNG_THRESHOLD_MAX" > ../out/reach-gc-env.log
+    if step build-web scripts/dev sigil build --config web; then
+      step web-startup scripts/dev node verify.mjs build/web --legs startup,errors
+      step web-audio-regressions scripts/dev node verify.mjs build/web --legs frame,pause,cues,errors
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi
+    if step build-dev scripts/dev sigil build; then
+      step sound-regressions scripts/dev sigil test --report ../out/sound-regressions.json test/test-sound.sgl test/test-depths-audio-integration.sgl test/test-pause-clock.sgl test/test-a4-web-opening.sgl
+      step underhum-affected-profiles timeout 1800 scripts/dev sigil -L src -L build/dev/lib eval -f tools/depths-underhum-profiles.sgl
+    fi ;;
+  depths-startup|depths-startup-returns)
+    if step build-web scripts/dev sigil build --config web; then
+      step web-startup scripts/dev node verify.mjs build/web --legs startup,errors
+      step web-frame-regressions scripts/dev node verify.mjs build/web --legs render,frame,save,over,errors
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi
+    if [ "$JOB" = depths-startup-returns ] && step build-dev scripts/dev sigil build; then
+      step ledge-returns timeout 600 scripts/dev sigil -L src -L build/dev/lib eval -f tools/depths-ledge-returns.sgl
+      step ledge-returns-down timeout 1200 env HARKFELL_LEDGE_DOWN=1 scripts/dev sigil -L src -L build/dev/lib eval -f tools/depths-ledge-returns.sgl
+    fi ;;
+  depths-unfinished)
+    export SIGIL_YOUNG_THRESHOLD=524288 SIGIL_YOUNG_THRESHOLD_MAX=524288
+    printf 'SIGIL_YOUNG_THRESHOLD=%s SIGIL_YOUNG_THRESHOLD_MAX=%s\n' "$SIGIL_YOUNG_THRESHOLD" "$SIGIL_YOUNG_THRESHOLD_MAX" > ../out/reach-gc-env.log
+    if step build-web scripts/dev sigil build --config web; then
+      step web-startup scripts/dev node verify.mjs build/web --legs startup,errors
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi
+    if step build-dev scripts/dev sigil build; then
+      step audio-adapter-tests scripts/dev sigil test --report ../out/audio-adapter-tests.json test/test-depths-audio-integration.sgl test/test-a4-web-opening.sgl
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      step regional-control sha256sum ../regional-workers0.log
+      step regional-workers3 timeout 1200 env HARKFELL_ROUTE_DIGEST=1 scripts/dev ./build/release/bin/harkfell --room-check --cloudstair-region --quick --workers 3
+      step regional-prefix scripts/reach-compare ../regional-workers0.log ../out/regional-workers3.log --prefix
+      step ledge-returns timeout 2400 scripts/dev sigil -L src -L build/release/lib eval -f tools/depths-ledge-returns.sgl
+    fi ;;
+  depths-affected)
+    if step build-dev scripts/dev sigil build; then
+      step reach-tests scripts/dev sigil test --report ../out/reach-tests.json test/test-reach-paths.sgl test/test-timed-routes.sgl test/test-cloudstair-timed.sgl
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      step strict-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures
+      step depths-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
+      step build-sketchbook scripts/dev sh -c 'cd sketchbook && sigil deps install && sigil build --config release'
+      step gate-a4-sound guix shell ffmpeg -- scripts/gate-a4-sound
+      step regional-workers3 timeout 1200 env HARKFELL_ROUTE_DIGEST=1 scripts/dev ./build/release/bin/harkfell --room-check --cloudstair-region --quick --workers 3
+      step regional-workers0 timeout 1200 env HARKFELL_ROUTE_DIGEST=1 scripts/dev ./build/release/bin/harkfell --room-check --cloudstair-region --quick --workers 0
+      step regional-compare scripts/reach-compare ../out/regional-workers0.log ../out/regional-workers3.log
+    fi
+    if step build-web scripts/dev sigil build --config web; then
+      step web-startup scripts/dev node verify.mjs build/web --legs startup,errors
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi ;;
+  depths-diagnostics)
+    if step build-web scripts/dev sigil build --config web; then
+      step web-startup scripts/dev node verify.mjs build/web --legs startup,errors
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi
+    if step build-dev scripts/dev sigil build; then
+      step look-palette guix shell imagemagick -- scripts/gate-look --palette
+      step overlay-control sha256sum "$HOME/work/reedfen-overlay-map.png"
+      step look-pools env GATE_POOL_RED="$HOME/work/reedfen-overlay-map.png" guix shell imagemagick -- scripts/gate-look --pools
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      step build-sketchbook scripts/dev sh -c 'cd sketchbook && sigil deps install && sigil build --config release'
+      step gate-a4-sound guix shell ffmpeg -- scripts/gate-a4-sound
+      step underhum-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
+    fi ;;
+  depths-followup)
+    if step build-dev scripts/dev sigil build; then
+      step suite scripts/dev sigil test --report ../out/suite.json
+      step audio-harness sh -c 'mkdir -p build/audio-harness/bin build/audio-harness/lib; cp build/dev/bin/harkfell-test build/audio-harness/bin/; for p in _pkg motif sigil substratic; do ln -sfn "$PWD/build/dev/lib/$p" "build/audio-harness/lib/$p"; done; for p in engine harkfell; do ln -sfn "$PWD/src/$p" "build/audio-harness/lib/$p"; done'
+      step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
+      for d in /tmp/harkfell-depths-red-*; do
+        [ -d "$d" ] || continue
+        mkdir -p ../out/depths-red
+        cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+        cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
+      done
+      step underhum-sabotage scripts/dev scripts/gate-underhum-sound --sabotage
+      step wrongwater-sabotage scripts/dev node tools/wrongwater-sabotage.mjs build/audio-harness/bin/harkfell-test
+      step restored-source git diff --exit-code
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      awk -f ../audit-helpers.awk build/release/native/mod_*.c > ../out/audit-release.txt
+      step gate-sound scripts/gate-sound
+      # gate-a4-sound needs the sketchbook's existing native probe tool.
+      step build-sketchbook scripts/dev sh -c 'cd sketchbook && sigil deps install && sigil build --config release'
+      step gate-a4-sound guix shell ffmpeg -- scripts/gate-a4-sound
+    fi
+    if step build-web scripts/dev sigil build --config web; then
+      step web-gates scripts/dev node verify.mjs build/web
+      step play-samplers scripts/dev scripts/gate-play-samplers build/web
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi
+    # Daylight needs this subject's web tree. Stage it before the long reach arm.
+    step gate-look guix shell imagemagick -- scripts/gate-look
+    step full-world env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3 --sabotage ;;
+  depths-041)
+    export SIGIL_YOUNG_THRESHOLD=524288 SIGIL_YOUNG_THRESHOLD_MAX=524288
+    printf 'SIGIL_YOUNG_THRESHOLD=%s SIGIL_YOUNG_THRESHOLD_MAX=%s\n' "$SIGIL_YOUNG_THRESHOLD" "$SIGIL_YOUNG_THRESHOLD_MAX" > ../out/reach-gc-env.log
+    if step build-dev scripts/dev sigil build; then
+      step suite scripts/dev sigil test --report ../out/suite.json
+      step audio-harness sh -c 'mkdir -p build/audio-harness/bin build/audio-harness/lib; cp build/dev/bin/harkfell-test build/audio-harness/bin/; for p in _pkg motif sigil substratic; do ln -sfn "$PWD/build/dev/lib/$p" "build/audio-harness/lib/$p"; done; for p in engine harkfell; do ln -sfn "$PWD/src/$p" "build/audio-harness/lib/$p"; done'
+      step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
+      for d in /tmp/harkfell-depths-red-*; do
+        [ -d "$d" ] || continue
+        mkdir -p ../out/depths-red
+        cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+        cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
+      done
+      step underhum-sabotage scripts/dev scripts/gate-underhum-sound --sabotage
+      step wrongwater-sabotage scripts/dev node tools/wrongwater-sabotage.mjs build/audio-harness/bin/harkfell-test
+      step restored-source git diff --exit-code
+      step atlas scripts/dev scripts/gate-atlas
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      awk -f ../audit-helpers.awk build/release/native/mod_*.c > ../out/audit-release.txt
+      step gate-replay scripts/gate-replay
+      step gate-sound scripts/gate-sound
+      # gate-a4-sound needs the sketchbook's existing native probe tool.
+      step build-sketchbook scripts/dev sh -c 'cd sketchbook && sigil deps install && sigil build --config release'
+      step gate-a4-sound guix shell ffmpeg -- scripts/gate-a4-sound
+      step parse-seams scripts/dev ./build/release/bin/harkfell --room-check --parse-only
+      step depths-water-replay scripts/dev sigil -L src -L build/release/lib eval -f tools/depths-water.sgl
+      step strict-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures
+      step depths-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
+      step underhum-region timeout 14400 scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
+      step wrongwater-region timeout 14400 scripts/dev ./build/release/bin/harkfell --room-check --depths-region wrongwater
+      step a3-mechanics scripts/gate-a3 --no-reach
+    fi
+    if step build-web scripts/dev sigil build --config web; then
+      step pwa-metadata node --test test/test-pwa.mjs test/test-version-json.mjs
+      step web-gates scripts/dev node verify.mjs build/web
+      step play-samplers scripts/dev scripts/gate-play-samplers build/web
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi
+    step gate-look env GATE_TMP="$HOME/work/out/look-evidence" GATE_POOL_RED="$HOME/work/reedfen-overlay-map.png" guix shell imagemagick -- scripts/gate-look
+    if [ -x build/release/bin/harkfell ]; then
+      step cloudstair-targets scripts/dev node scripts/gate-cloudstair-targets.mjs ../out
+    fi ;;
+  depths-full)
+    if step build-dev scripts/dev sigil build; then
+      step suite scripts/dev sigil test --report ../out/suite.json
+      step audio-harness sh -c 'mkdir -p build/audio-harness/bin build/audio-harness/lib; cp build/dev/bin/harkfell-test build/audio-harness/bin/; for p in _pkg motif sigil substratic; do ln -sfn "$PWD/build/dev/lib/$p" "build/audio-harness/lib/$p"; done; for p in engine harkfell; do ln -sfn "$PWD/src/$p" "build/audio-harness/lib/$p"; done'
+      step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
+      for d in /tmp/harkfell-depths-red-*; do
+        [ -d "$d" ] || continue
+        mkdir -p ../out/depths-red
+        cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+        cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
+      done
+      step underhum-sabotage scripts/dev scripts/gate-underhum-sound --sabotage
+      step wrongwater-sabotage scripts/dev node tools/wrongwater-sabotage.mjs build/audio-harness/bin/harkfell-test
+      step restored-source git diff --exit-code
+      step atlas scripts/dev scripts/gate-atlas
+    fi
+    if step build-release scripts/dev sigil build --config release; then
+      awk -f ../audit-helpers.awk build/release/native/mod_*.c > ../out/audit-release.txt
+      step gate-replay scripts/gate-replay
+      step gate-sound scripts/gate-sound
+      # gate-a4-sound needs the sketchbook's existing native probe tool.
+      step build-sketchbook scripts/dev sh -c 'cd sketchbook && sigil deps install && sigil build --config release'
+      step gate-a4-sound scripts/gate-a4-sound
+      step gate-look scripts/gate-look
+      step parse-seams scripts/dev ./build/release/bin/harkfell --room-check --parse-only
+      step depths-water-replay scripts/dev sigil -L src -L build/release/lib eval -f tools/depths-water.sgl
+      step strict-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures
+      step depths-fixtures scripts/dev ./build/release/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
+      step underhum-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
+      step wrongwater-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region wrongwater
+      step full-world env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3 --sabotage
+    fi
+    if step build-web scripts/dev sigil build --config web; then
+      step web-gates scripts/dev node verify.mjs build/web
+      step play-samplers scripts/dev scripts/gate-play-samplers build/web
+      mkdir -p ../out/web
+      tar -C build/web --exclude=./native --exclude=./bin --exclude=./.sigil-package-cache -cf - . | tar -C ../out/web -xf - \
+        && printf '%s\n' "$FULL" > ../out/web.complete
+    fi ;;
+  depths-water-paths|depths-water-check)
+    if step build-dev scripts/dev sigil build; then
+      step reach-paths-tests scripts/dev sigil test --report ../out/reach-paths.json test/test-reach-paths.sgl
+      if [ "$JOB" = depths-water-check ]; then
+        step depths-tests scripts/dev sigil test --report ../out/depths-tests.json test/test-depths-gates.sgl test/test-depths-discovery.sgl test/test-underhum-finale.sgl test/test-save.sgl test/test-gates.sgl test/test-calls.sgl test/test-place.sgl
+      fi
+      step depths-water-routes scripts/dev sigil -L src -L build/dev/lib eval -f tools/depths-water-route.sgl
+      step depths-water-replay scripts/dev sigil -L src -L build/dev/lib eval -f tools/depths-water.sgl
+      if [ "$JOB" = depths-water-check ]; then
+        step depths-water-reach scripts/dev ./build/dev/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
+      fi
+    fi ;;
+  depths|depths-tests|depths-focused)
+    # All SYSTEMS validation on one lease. No production rooms/assets are
+    # fabricated to make the final obligations appear green.
+    if step build-dev scripts/dev sigil build; then
+      step depths-tests scripts/dev sigil test --report ../out/depths-tests.json test/test-depths-gates.sgl test/test-depths-discovery.sgl test/test-underhum-finale.sgl test/test-save.sgl test/test-gates.sgl test/test-calls.sgl test/test-place.sgl
+      if [ "$JOB" != depths-focused ]; then
+        step depths-sabotage scripts/dev node scripts/gate-depths-sabotage.mjs
+        for d in /tmp/harkfell-depths-red-*; do
+          [ -d "$d" ] || continue
+          mkdir -p ../out/depths-red
+          cp "$d"/*.log ../out/depths-red/ 2>/dev/null || true
+          cp "$d"/*.json ../out/depths-red/ 2>/dev/null || true
+        done
+      fi
+    fi
+    if [ "$JOB" = depths ] && step build-release scripts/dev sigil build --config release; then
+      step parse-seams scripts/dev ./build/release/bin/harkfell --room-check --parse-only
+      step depths-water scripts/dev sigil -L src -L build/release/lib eval -f tools/depths-water.sgl
+      step depths-water-reach scripts/dev ./build/release/bin/harkfell --reach-fixtures --fixtures test/fixtures/depths
+      if [ -d world/rooms/underhum ] && [ -d world/rooms/wrongwater ]; then
+        step underhum-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region underhum
+        step wrongwater-region scripts/dev ./build/release/bin/harkfell --room-check --depths-region wrongwater
+        step full-world env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3
+      else
+        echo "BLOCKED authored-region and final full-world reach: room track tips are absent"
+      fi
+    fi ;;
   suite)
     step build-dev scripts/dev sigil build && step suite scripts/dev sigil test --report ;;
   release)
@@ -105,6 +382,18 @@ case "$JOB" in
   reach)
     step build-release scripts/dev sigil build --config release && \
       step gate-a3 env ROOM_CHECK_TIMEOUT=10800 scripts/gate-a3 ;;
+  review)
+    # the test binary (harkfell-test) is built by sigil test, not sigil build
+    step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl && \
+      step render env JOBS=tools/wrongwater-review.jobs OUT=../out/wrongwater-listening \
+        scripts/dev build/dev/bin/harkfell-test --no-strict tools/wrongwater-render.sgl && \
+      step encode sh tools/wrongwater-review-encode.sh ../out/wrongwater-listening ;;
+  sabotage)
+    if step build-dev scripts/dev sigil build && step build-test scripts/dev sigil test --sgl test/test-hush.sgl; then
+      for lib in engine harkfell; do rm -rf "build/dev/lib/$lib" && ln -s "$PWD/src/$lib" "build/dev/lib/$lib"; done
+      step sabotage node tools/wrongwater-sabotage.mjs build/dev/bin/harkfell-test
+      cp build/sabotage-*.log ../out/ 2>/dev/null || true
+    fi ;;
   web)
     if step build-web scripts/dev sigil build --config web; then
       STAMP=$(grep -o 'version: "[^"]*"' build/web/index.html | head -1 | cut -d'"' -f2)
@@ -125,6 +414,7 @@ T0=$(date +%s)
 set +e
 "$REMOTE" --label "harkfell $JOB $SHA" --timeout "${GATE_TIMEOUT:-14400}" --detach \
   --put "$STAGE/src.bundle:src.bundle" --put "$STAGE/remote.sh:remote.sh" --put "$AUDIT:audit-helpers.awk" \
+  "${CONTROL_PUT[@]}" \
   --put "scripts/remote-sigil-toolchain:remote-sigil-toolchain" --put "$STAGE/sigil-delivered:sigil-delivered" \
   --get "out:$STAGE/fetched" -- bash remote.sh "$JOB" "$FULL" "$SHA" "$SIGIL_V"
 rc=$?
@@ -134,13 +424,23 @@ say "remote job $JOB rc=$rc in $(( $(date +%s) - T0 ))s"
 if [ -d "$STAGE/fetched" ]; then
   LOGS="build/remote-$JOB-$SHA.logs"
   rm -rf "$LOGS"; mkdir -p "$LOGS"
-  find "$STAGE/fetched" -maxdepth 1 -type f -exec cp {} "$LOGS/" \;
-  if [ "$JOB" = web ] && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
+  # Retain nested assertion reports too; fetched web artifacts move below.
+  for item in "$STAGE/fetched"/*; do
+    [ -e "$item" ] || continue
+    [ "$(basename "$item")" = web ] && continue
+    cp -a "$item" "$LOGS/"
+  done
+  if { [ "$JOB" = web ] || [ "$JOB" = depths-full ] || [ "$JOB" = depths-041 ] || [ "$JOB" = depths-followup ] || [ "$JOB" = depths-diagnostics ] || [ "$JOB" = depths-affected ] || [ "$JOB" = depths-unfinished ] || [ "$JOB" = depths-startup ] || [ "$JOB" = depths-startup-returns ] || [ "$JOB" = depths-mixer-region ]; } && [ "$(cat "$STAGE/fetched/web.complete" 2>/dev/null)" = "$FULL" ] && [ -f "$STAGE/fetched/web/index.html" ]; then
     STAMP=$(grep -o 'version: "[^"]*"' "$STAGE/fetched/web/index.html" | head -1 | cut -d'"' -f2)
     if [ "$STAMP" = "$SHA" ] && [ ! -e "build/remote-web-$SHA" ]; then
       mv "$STAGE/fetched/web" "build/remote-web-$SHA"; printf '%s\n' "$FULL" > "build/remote-web-$SHA/BUILD-SHA"
       say "fetched the web build of $SHA to build/remote-web-$SHA (stamp verified here)"
     fi
+  fi
+  if [ "$JOB" = review ] && [ -d "$STAGE/fetched/wrongwater-listening" ]; then
+    mv "$STAGE/fetched/wrongwater-listening" "$LOGS/wrongwater-listening"
+    printf '%s\n' "$FULL" > "$LOGS/wrongwater-listening/BUILD-SHA"
+    say "fetched the recordings of $SHA to $LOGS/wrongwater-listening ($(ls "$LOGS/wrongwater-listening" | grep -c '\.ogg$') Opus files, $(du -sh "$LOGS/wrongwater-listening" | cut -f1))"
   fi
   say "runner logs in $LOGS"
 fi

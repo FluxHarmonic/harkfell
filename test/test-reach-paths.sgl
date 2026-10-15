@@ -1,0 +1,28 @@
+(import (sigil test)
+        (engine tilemap)
+        (engine reach)
+        (engine reach paths))
+
+(define EDGES (make-vector 5 '()))
+(define A (witness from: '(0 . 0)))
+(define B (witness from: '(1 . 0)))
+(define C (witness from: '(2 . 0)))
+(vector-set! EDGES 0 (list (cons 1 A) (cons 2 A)))
+(vector-set! EDGES 1 (list (cons 3 B)))
+(vector-set! EDGES 2 (list (cons 0 C) (cons 3 C)))
+(define GRAPH (reach-graph tm: (make-tilemap 5 1 16) edges: EDGES))
+
+(test-group "reach: selecting accepted witness paths"
+  (test "cycles terminate and unreachable cells have no path"
+    (assert-false (graph-witness-path GRAPH '(0 . 0) '(4 . 0)))
+    (assert-equal '() (graph-witness-path GRAPH '(0 . 0) '(0 . 0))))
+  (test "a selected path retains the exact witnesses in traversal order"
+    (let ((route (graph-witness-path GRAPH '(0 . 0) '(3 . 0))))
+      (assert-equal '((1 . 0) (3 . 0)) (map car route))
+      (assert-eq A (cdr (car route)))
+      (assert-eq B (cdr (cadr route)))))
+  (test "a shorter direct edge wins over the earlier multi-edge path"
+    (let ((edges (vector-copy EDGES)))
+      (vector-set! edges 0 (append (vector-ref edges 0) (list (cons 3 A))))
+      (assert-equal 1
+        (length (graph-witness-path (reach-graph GRAPH edges: edges) '(0 . 0) '(3 . 0)))))))

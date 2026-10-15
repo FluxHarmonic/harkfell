@@ -1,0 +1,136 @@
+;;; Isolated geometry diagnostics, with explicit carried voices and down.
+;;; These prove local traversal/escape, not acquisition in the full world.
+;;; Stillness doors are open under the same abstraction as ring-stones;
+;;; live timing is checked separately by test-depths-gates.
+(define-library (harkfell depths reach)
+  (import (sigil list)
+          (engine tilemap)
+          (engine worldmap)
+          (engine reach)
+          (harkfell content)
+          (harkfell check)
+          (harkfell feel))
+
+  (export depths-region-content depths-region-check depths-profiles)
+
+  (begin
+    (define (depths-region-content ct region)
+      (let* ((neighbours (case region
+                           ((underhum) '((4 . 3)))
+                           ((wrongwater) '((-2 . 6) (1 . 8)))
+                           (else (error "unknown depths region" region))))
+             (expected (if (eq? region 'underhum) 13 12))
+             (own (filter (lambda (p) (eq? (room-region (placed-data p)) region))
+                          (content-rooms ct)))
+             (rooms (filter (lambda (p)
+                              (or (eq? (room-region (placed-data p)) region)
+                                  (member (cons (placed-x p) (placed-y p)) neighbours)))
+                            (content-rooms ct))))
+        (unless (= (length own) expected)
+          (error "depths region is not fully authored" region (length own) expected))
+        (unless (= (length rooms) (+ expected (length neighbours)))
+          (error "depths regional border room is missing" region))
+        (content ct rooms: rooms wmap: (make-worldmap rooms 25 11 16)
+                    start: (if (eq? region 'underhum)
+                               '(hollow (4 3) (15 8))
+                               '(glasswood (-2 6) (7 9))))))
+
+    (define (subsets hs)
+      (if (null? hs)
+          (list '())
+          (let ((rest (subsets (cdr hs))))
+            (append rest (map (lambda (s) (cons (car hs) s)) rest)))))
+
+    (define (depths-profiles region)
+      (if (eq? region 'underhum)
+          (append (map (lambda (carry) (cons carry #t)) (subsets '(2 3 4 5)))
+                  (list (cons '(2 3 4 5) #f) (cons '(2 3 4 5 7) #t)))
+          ;; Admission through H3's cave is outside this isolate. H3 without
+          ;; H4 checks the actual well stone; every admitted set is checked
+          ;; with/without the down and with/without H7.
+          (append (list (cons '(2 3) #f))
+                  (apply append
+                    (map (lambda (carry) (list (cons carry #f) (cons carry #t)))
+                         '((2 3 4) (2 3 4 5) (2 3 4 7) (2 3 4 5 7)))))))
+
+    ;; Revision 1's cistern is reached by the modeled glide, and its one-way
+    ;; shaft returns through I's upper ledge. The four west K ledges join
+    ;; that same modeled descent: explicit seeds return home with down, but
+    ;; form a closed K/L component without it. This is a bounded-search
+    ;; classification, not a claim that expert coyote inputs cannot enter.
+    ;; With no down these must stay outside the forward graph; reaching one
+    ;; is still a failure. With down all remain reachable/returnable, and
+    ;; ordinary cells and water traps keep their existing checks.
+    (define (down-only-cells ct rooms tm)
+      (apply append
+        (map (lambda (p)
+               (let* ((rm (placed-data p))
+                      (x (room-x rm))
+                      (y (room-y rm)))
+                 (if (not (eq? (room-region rm) 'underhum))
+                     '()
+                     (filter
+                       (lambda (cell)
+                         (or (and (= y 7) (memv x '(7 8)))
+                             (and (= x 7) (= y 6)
+                                  (member (global->local ct rm cell)
+                                          '((9 . 7) (10 . 7) (3 . 9) (4 . 9))))
+                             (and (= x 8) (= y 5)
+                                  (<= (cdr (global->local ct rm cell)) 2))))
+                       (room-standable-cells ct rm tm)))))
+             rooms)))
+
+    (define (depths-region-check source region profiles log)
+      (let* ((ct (depths-region-content source region))
+             (home (start-cell ct))
+             (exit (if (eq? region 'underhum) home
+                       (local->global ct (content-room ct 1 8) 14 8)))
+             (rooms (filter (lambda (p) (eq? (room-region (placed-data p)) region))
+                            (content-rooms ct)))
+             (failures 0))
+        (log (list 'diagnostic region 'admission-from-world-not-established))
+        (for-each
+          (lambda (profile)
+            (let* ((carry (car profile))
+                   (down (cdr profile))
+                   (tm (tiles-carrying ct carry))
+                   (admitted (if (eq? region 'underhum)
+                                 (every (lambda (h) (memv h carry)) '(2 3 4 5))
+                                 (and (memv 3 carry) (memv 4 carry))))
+                   (graph (reach-search-down tm HARKFELL-FEEL (list home) witness-lands? down
+                            (lambda (anchors steps kind cell)
+                              (when (= (modulo anchors 100) 0)
+                                (log (list region carry down 'anchors anchors 'steps steps))))))
+                   (fwd (reach-forward graph (list home)))
+                   (back (reach-backward graph (list (if admitted exit home))))
+                   (seen? (lambda (v c) (vector-ref v (cell-index tm (car c) (cdr c)))))
+                   (cells (apply append
+                            (map (lambda (p) (room-standable-cells ct (placed-data p) tm)) rooms)))
+                   (requires-down (down-only-cells ct rooms tm))
+                   (bad (filter (lambda (c)
+                                  (cond ((not admitted) (seen? fwd c))
+                                        ((and (not down) (member c requires-down))
+                                         (seen? fwd c))
+                                        (else
+                                         (or (not (seen? fwd c)) (not (seen? back c))))))
+                                cells))
+                   (water-traps
+                     (filter (lambda (w)
+                               (not (find (lambda (c) (seen? back c)) (cdr w))))
+                             (graph-waters graph))))
+              (log (list region 'carry carry 'down down 'admitted (and admitted #t)
+                         'requires-down requires-down
+                         'bad-cells bad
+                         'bad-cells-detail
+                         (map (lambda (cell)
+                                (list 'cell cell
+                                      'forward (seen? fwd cell)
+                                      'return (seen? back cell)
+                                      'modeled-down-only (and (member cell requires-down) #t)))
+                              bad)
+                         'water-traps (map car water-traps)
+                         'stats (graph-stats graph)))
+              (when (or (pair? bad) (pair? water-traps))
+                (set! failures (+ failures 1)))))
+          profiles)
+        failures))))

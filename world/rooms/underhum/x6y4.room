@@ -1,0 +1,27 @@
+;; C, the Gallery of Stones. A row of old stones on an ordinary shelf, B to
+;; D (rows 4-5); mute on the way down, ringing on the way up (SYSTEMS).
+(room
+  region: underhum
+  at: (6 4)
+  title: "The Gallery of Stones"
+  intent: "a row of old stones stands in the dark, mute on the way down and ringing on the way up"
+  bed: (hum 0.6 air 0.4 water 0)
+  light: 0.2
+  grid:
+  ("#########################"
+   "######             ######"
+   "###                   ###"
+   "#                       #"
+   "                         "
+   "                         "
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((gallery-stone at: (4 5))
+           (gallery-stone at: (8 5))
+           (gallery-stone at: (12 5))
+           (gallery-stone at: (16 5))
+           (gallery-stone at: (20 5)))
+  decor: none)

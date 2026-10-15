@@ -1,0 +1,138 @@
+;;; Render Wrongwater sound previews to WAV, for listening and measurement
+;;; (after tools/wrongwater-render.sgl, with a layer end: a fade-out).
+;;; Run with an audio-capable harness at the task lock (no build needed):
+;;;   scripts/dev build/audio-harness/bin/harkfell-test --no-strict tools/wrongwater-render.sgl
+;;; JOBS is a file of jobs, one s-expression each (default
+;;; tools/wrongwater-review.jobs); OUT the directory (default
+;;; build/wrongwater-listening). A job:
+;;;   (job "out-name" SECONDS (layer "tune" GAIN (CARRY ...) ((CH . VOL) ...) [START-S [END-S]]) ...)
+;;; Layers are mixed at their gains; CARRY strips uncarried drone notes as
+;;; the director does (strip-uncarried); VOL sets channel volumes as a
+;;; room's bed: levels would; START-S delays a layer; END-S fades it out over
+;;; 0.5 s from then (the door's climb when you move). Every file is
+;;; written mono (the mid), 32 kHz 16-bit PCM (small enough to fetch from a
+;;; runner and to put on a page; the cut is far under the bed), with a 0.3 s fade at its
+;;; end, as the Pipes review did. Nothing is published.
+(import (sigil test) (sigil process)
+        (sigil fs)
+        (sigil path)
+        (sigil io)
+        (sigil list)
+        (sigil string)
+        (motif tune)
+        (motif tune player)
+        (harkfell sound)
+        (harkfell tunes))
+
+(define RATE 32000)
+(define BLOCK 512)
+(define ZERO (make-bytevector (* 8 BLOCK) 0))
+(define OUTPUT (or (getenv "OUT") "build/wrongwater-listening"))
+(define JOBS (or (getenv "JOBS") "tools/wrongwater-review.jobs"))
+
+(define (u32! bv at value bytes)
+  (let loop ((i 0) (v value))
+    (when (< i bytes)
+      (bytevector-u8-set! bv (+ at i) (modulo v 256))
+      (loop (+ i 1) (quotient v 256)))))
+
+(define (ascii! bv at s)
+  (let loop ((i 0))
+    (when (< i (string-length s))
+      (bytevector-u8-set! bv (+ at i) (char->integer (string-ref s i)))
+      (loop (+ i 1)))))
+
+(define (wav-header frames)
+  (let ((h (make-bytevector 44 0)) (bytes (* frames 2)))
+    (ascii! h 0 "RIFF") (u32! h 4 (+ 36 bytes) 4) (ascii! h 8 "WAVEfmt ")
+    (u32! h 16 16 4) (u32! h 20 1 2) (u32! h 22 1 2) (u32! h 24 RATE 4)
+    (u32! h 28 (* RATE 2) 4) (u32! h 32 2 2) (u32! h 34 16 2)
+    (ascii! h 36 "data") (u32! h 40 bytes 4)
+    h))
+
+;; a sample as 16-bit little-endian PCM, clipped (no s16 setter at this lock)
+(define (s16! bv at v)
+  (let* ((x (exact (round (* 32767.0 (max -1.0 (min 1.0 v))))))
+         (u (if (< x 0) (+ x 65536) x)))
+    (bytevector-u8-set! bv at (modulo u 256))
+    (bytevector-u8-set! bv (+ at 1) (quotient u 256))))
+
+;; A layer: #(player gain start-frame buffer done?)
+(define (open-layer spec)
+  (let* ((name (list-ref spec 1)) (gain (list-ref spec 2))
+         (carry (list-ref spec 3)) (vols (list-ref spec 4))
+         (start (if (> (length spec) 5) (list-ref spec 5) 0))
+         (t (tune-parsed name)))
+    (unless t (error "no tune" name))
+    (let ((p (open-tune-player (if (pair? carry) (strip-uncarried t carry) t) RATE loop: #f)))
+      (for-each (lambda (e) (player-set-channel-volume! p (car e) (inexact (cdr e)))) vols)
+      (vector p (inexact gain) (exact (round (* start RATE))) (make-bytevector (* 8 BLOCK) 0) #f
+              (and (> (length spec) 6) (exact (round (* (list-ref spec 6) RATE))))))))
+
+;; a layer with an end fades to nothing over 0.5 s from it
+(define (end-gain l frame)
+  (let ((e (vector-ref l 5)))
+    (if e (max 0.0 (min 1.0 (- 1.0 (/ (- frame e) (* 0.5 RATE))))) 1.0)))
+
+;; n frames of a layer at frame position `at` into its buffer (silence
+;; before its start and after its end)
+(define (pull-layer! l at n)
+  (let ((buf (vector-ref l 3)) (start (vector-ref l 2)))
+    (bytevector-copy! buf 0 ZERO 0 (bytevector-length buf))
+    (cond ((vector-ref l 4) #f)
+          ((>= at start)
+           (unless (player-pull! (vector-ref l 0) buf 0 n) (vector-set! l 4 #t)))
+          ((> (+ at n) start)
+           ;; the layer starts inside this block
+           (let* ((skip (- start at)) (tmp (make-bytevector (* 8 (- n skip)) 0)))
+             (unless (player-pull! (vector-ref l 0) tmp 0 (- n skip)) (vector-set! l 4 #t))
+             (bytevector-copy! buf (* 8 skip) tmp 0 (bytevector-length tmp))))
+          (else #f))))
+
+(define (render-job job)
+  (let* ((name (list-ref job 1)) (secs (list-ref job 2))
+         (layers (map open-layer (list-tail job 3)))
+         (frames (exact (round (* RATE secs))))
+         (out (make-bytevector (* 8 BLOCK) 0))
+         (port (open-binary-output-file (path-join OUTPUT (string-append name ".wav")))))
+    (write-bytevector (wav-header frames) port)
+    (let loop ((at 0) (peak 0.0))
+      (if (< at frames)
+          (let ((n (min BLOCK (- frames at))))
+            (for-each (lambda (l) (pull-layer! l at n)) layers)
+            (let samples ((i 0) (peak peak))
+              (if (< i n)
+                  (let* ((o (* 8 i))
+                         (m (apply + (map (lambda (l)
+                                            (* (vector-ref l 1) 0.5 (end-gain l (+ at i))
+                                               (+ (bytevector-ieee-single-ref (vector-ref l 3) o 'little)
+                                                  (bytevector-ieee-single-ref (vector-ref l 3) (+ o 4) 'little))))
+                                          layers)))
+                         (left (- frames (+ at i)))
+                         (fade (min 1.0 (/ left (* RATE 0.3))))
+                         (v (* fade m)))
+                    (s16! out (* 2 i) v)
+                    (samples (+ i 1) (max peak (abs m))))
+                  (begin
+                    (write-bytevector (bytevector-copy out 0 (* 2 n)) port)
+                    (loop (+ at n) peak)))))
+          (begin
+            (close-port port)
+            (for-each (lambda (l) (player-close! (vector-ref l 0))) layers)
+            (display "RENDERED ") (display name) (display " peak ") (display peak) (newline)
+            (assert-true (> peak 0.00001))
+            (assert-true (< peak 1.0)))))))
+
+(define (read-jobs file)
+  (call-with-input-file file
+    (lambda (port)
+      (let loop ((acc '()))
+        (let ((x (read port)))
+          (if (eof-object? x) (reverse acc) (loop (cons x acc))))))))
+
+(test-group "wrongwater: render previews"
+  (test "render every job"
+    (unless (directory? "build") (make-directory "build"))
+    (unless (directory? OUTPUT) (make-directory OUTPUT))
+    (for-each render-job (filter (lambda (j) (and (pair? j) (eq? (car j) 'job))) (read-jobs JOBS)))
+    (display "RENDER-DONE") (newline)))

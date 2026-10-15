@@ -1,0 +1,29 @@
+;; L, the Cistern's lower half. The chute from K lands on the west ledge
+;; (row 5), whose east lip (3) is worn and gives way; two glide hops east
+;; over the fissure pits (4-tile gaps, 2 rows down): the ledge (8-9) and the
+;; floor beyond (14-), which
+;; runs east into M, the Last Step (rows 8-9). A miss lands in the pits (x)
+;; and the soft return puts you back where you first stood in this room
+;; (its entry: the chute's landing). The chute is a 2-wide smooth chimney,
+;; so a wall-kicker can climb back up into K: an escape, never a way down.
+(room
+  region: underhum
+  at: (7 7)
+  title: "The Cistern"
+  intent: "the old people's cistern, dry now, its worn ledges stepping down across a fissure into the dark"
+  bed: (hum 0.8 air 0.7 water 0.2)
+  light: 0.2
+  grid:
+  ("#  ######################"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "####                    #"
+   "###                     #"
+   "###     ##               "
+   "###                      "
+   "###xxxxxxxxxxx###########")
+  things: ((thin-ice at: (3 6)))
+  decor: none)

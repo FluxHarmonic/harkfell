@@ -52,12 +52,16 @@
           (harkfell cues)
           (harkfell pipes look)
           (harkfell cloudstair look)
+          (harkfell underhum look)
+          (only (harkfell underhum finale) finale-lit finale-phase finale-still finale-heard-night)
+          (harkfell wrongwater look)
+          (harkfell cues)
           (harkfell sprites))
 
   (export VIEW-W VIEW-H draw-world draw-readout
-          set-draw-content! draw-play present-play!
+          set-draw-content! draw-play prepare-play! warm-play! present-play!
           draw-overview prepare-overview! overview-size overview-room-at draw-news!
-          slot player-frame set-look-sound! region-colours set-look-waking! waking-frame
+          slot player-frame set-look-sound! set-look-finale! region-colours set-look-waking! waking-frame
           floating-reeds room-hue FIREFLY-RINGS firefly-light-budget
           room-render-light room-dark-extra moth-lit?)
 
@@ -85,7 +89,7 @@
                         (list 'water "#3d6690") (list 'accent "#7a3530")
                         (list 'fur-1 "#ebe0cc") (list 'fur-2 "#b8ab95") (list 'ink "#1f1f24")
                         (list 'h2 "#e8a84c") (list 'h3 "#b4dc9a") (list 'h4 "#8fb4e6") (list 'h5 "#e6a0b4")
-                        (list 'h7 "#a47ce0") (list 'black "#000000")))
+                        (list 'h7 "#a47ce0") (list 'black "#000000") (list 'fund "#f4ecdc")))
         v))
 
     (define (region-colours name) (region-rgb name))
@@ -140,7 +144,11 @@
     ;; colours brought up to date once after the content changes.
     (define (use-region! name)
       (let ((e (assq name *strip-texs*))
-            (dark (if (eq? name 'pipes) PIPES-DARK (region-dark-lookup name))))
+            (dark (case name
+                    ((pipes) PIPES-DARK)
+                    ((underhum) UNDERHUM-DARK)
+                    ((wrongwater) WRONGWATER-DARK)
+                    (else (region-dark-lookup name)))))
         (cond ((not e)
                (set! *strip-texs* (cons (cons name (make-strips (region-rgb name) dark)) *strip-texs*)))
               ((memq name *strips-stale*)
@@ -458,8 +466,11 @@
         (if e
             (cdr e)
             (let ((t (make-texture-from-pixels VIEW-W VIEW-H
-                                               (if (cloudstair-backdrop-key? key)
-                                                   (cloudstair-backdrop-bytes key)
+                                               (cond
+                                                 ((cloudstair-backdrop-key? key) (cloudstair-backdrop-bytes key))
+                                                 ((underhum-backdrop-key? key) (underhum-backdrop-bytes key))
+                                                 ((wrongwater-backdrop-key? key) (wrongwater-backdrop-bytes key))
+                                                 (else
                                                (case key
                                                  ((under) (under-bytes))
                                                  ((glasswood-under) (glasswood-under-bytes))
@@ -473,7 +484,7 @@
                                                  ((glasswood-sun-3) (glasswood-bytes 0.75))
                                                  ((glasswood-sun-4) (glasswood-bytes 1.0))
                                                  ((reedfen) (reedfen-bytes))
-                                                 (else (backdrop-bytes key))))
+                                                 (else (backdrop-bytes key)))))
                                                'nearest)))
               (set! *backdrops* (cons (cons key t) *backdrops*))
               t))))
@@ -487,6 +498,7 @@
     ;; unjoined pair of rooms, so most tops are rock).
     (define (under? rm) (and (not (cloudstair? rm)) (room-under? rm)))
     (define (cloudstair? rm) (eq? (room-region rm) 'cloudstair))
+    (define (wrongwater? rm) (eq? (room-region rm) 'wrongwater))
 
     ;; The haze step (D51, replacing D16's focus pull): while a moment's
     ;; music sounds the far sky goes one palette step toward the region's
@@ -503,13 +515,21 @@
     (define *look-now* #f)
     (define *bed-wind* 0.5)
 
-    ;; From the shell, each frame: whether a moment's music sounds (its rows
-    ;; still playing: sound-moment-sounding), the bed's wind level now (0..1;
-    ;; the reeds bend with what you hear), and the clock in seconds.
-    (define (set-look-sound! moment wind . now)
+    ;; The haze follows sounding rows and wall seconds. The Seventh's Rest
+    ;; follows the moment's separate heard clock, including its quiet tail.
+    (define *moment-name* #f)
+    (define *moment-heard* #f)
+    (define *finale-night* 0.0)
+    (define (set-look-finale! section seconds)
+      (set! *finale-night* (finale-heard-night section))
+      (set-underhum-finale-time! seconds))
+    (define (set-look-sound! moment wind . clocks)
       (set! *moment* (and moment #t))
       (set! *bed-wind* (if (number? wind) wind 0.5))
-      (set! *look-now* (and (pair? now) (number? (car now)) (car now))))
+      (set! *look-now* (and (pair? clocks) (number? (car clocks)) (car clocks)))
+      (set! *moment-heard*
+            (and (> (length clocks) 1) (number? (cadr clocks)) (cadr clocks)))
+      (set! *moment-name* (if (> (length clocks) 2) (caddr clocks) moment)))
 
     ;; dt from the shell's clock; a frame without one counts as 1/60 s
     (define (step-focus!)
@@ -519,16 +539,23 @@
 
     ;; The room's backdrop: its region's sky, or earth when it lies under
     ;; another room; stepped into the haze while a moment's music sounds.
+    (define (room-backdrop-key rm)
+      (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
+            ((wrongwater? rm) (wrongwater-backdrop-key rm))
+            ((cloudstair? rm) (cloudstair-backdrop-key rm))
+            ((underhum? rm) (underhum-backdrop-key rm))
+            ((and (not (under? rm)) (glasswood-sheet? rm))
+             ;; Glasswood's sky by the room's sun, in quarters.
+             (vector-ref (vector 'glasswood-sun-0 'glasswood-sun-1
+                                 'glasswood-sun-2 'glasswood-sun-3
+                                 'glasswood-sun-4)
+                         (exact (round (* 4 (room-sun rm))))))
+            ((not (under? rm)) (room-region rm))
+            ((eq? (room-region rm) 'glasswood) 'glasswood-under)
+            (else 'under)))
+
     (define (draw-backdrop! rm)
-      (let ((tex (backdrop (cond ((eq? (room-region rm) 'pipes) (pipes-backdrop-key rm))
-                                 ((cloudstair? rm) (cloudstair-backdrop-key rm))
-                                 ((and (not (under? rm)) (glasswood-sheet? rm))
-                                  ;; Glasswood's sky by the room's sun, in quarters
-                                  (vector-ref (vector (quote glasswood-sun-0) (quote glasswood-sun-1) (quote glasswood-sun-2) (quote glasswood-sun-3) (quote glasswood-sun-4))
-                                              (exact (round (* 4 (room-sun rm))))))
-                                 ((not (under? rm)) (room-region rm))
-                                 ((eq? (room-region rm) (quote glasswood)) (quote glasswood-under))
-                                 (else (quote under)))))
+      (let ((tex (backdrop (room-backdrop-key rm)))
             (bands (haze-bands *focus*)))
         (with-blend-mode (quote none)
           (set-color 1.0 1.0 1.0 1.0)
@@ -586,9 +613,10 @@
              (cave? (and (under? rm) (mat-cells sheet "cave") #t)))
         ;; under water nothing grows: a solid with water on it takes the mask
         ;; of one covered from above (no turf on a pool's floor)
-        (each-tile rm (cond ((eq? (room-region rm) 'pipes)
+        (each-tile rm (cond ((or (eq? (room-region rm) 'pipes) (wrongwater? rm))
                              (lambda (m) (memq m (list 'ledge 'hazard))))
                             ((cloudstair? rm) (lambda (m) #f))   ; all painted ((harkfell cloudstair look))
+                            ((underhum? rm) (lambda (m) #f))     ; all painted ((harkfell underhum look))
                             (else solid-mat?))
                    (lambda (mat x y m gc gr)
                      (let ((m (if (and (not (mask-has? m MASK-UP)) (eq? (material-at gc (- gr 1)) 'water))
@@ -715,8 +743,25 @@
     (define (bowl? rm)
       (and (eq? (room-region rm) 'hollow) (= (room-x rm) 4) (= (room-y rm) 3)))
 
+    ;; The heart: the bowl's stone keyed to the whole set (SYSTEMS's keys:);
+    ;; (harkfell underhum look) draws it.
+    (define (heart-stone? rm st)
+      (and (bowl? rm) (stone-heart? st)))
+
+    ;; The Underhum's finale as the look draws it: fused once the
+    ;; fundamental has been heard (finale-lit), listening while the breaths
+    ;; lock or once the body has kept still in the chamber for half a
+    ;; second; the look review's override wins when set.
+    (define (underhum-phase-of w)
+      (or (underhum-phase)
+          (let ((f (world-ending w)))
+            (cond ((finale-lit f) 'fused)
+                  ((or (eq? (finale-phase f) 'fuse) (> (finale-still f) 30)) 'listening)
+                  (else #f)))))
+
     (define (stone-visible? rm st)
-      (not (and (bowl? rm) (= (stone-overtone st) 5) (null? *passage-air*))))
+      (or (heart-stone? rm st)
+          (not (and (bowl? rm) (= (stone-overtone st) 5) (null? *passage-air*)))))
 
     (define (revealed-cells rm tm)
       (if (not tm)
@@ -747,12 +792,24 @@
                 (draw-pipes-solids! rm
                                     (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
                                     (* S (car g)) (* S (cdr g)))))
+            ;; Wrongwater's wet stone, lit from below ((harkfell wrongwater look))
+            (when (wrongwater? rm)
+              (let ((g (global-tile rm 0 0)))
+                (draw-wrongwater-solids! rm
+                                         (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
+                                         (* S (car g)) (* S (cdr g)))))
             ;; Cloudstair's cliffs likewise ((harkfell cloudstair look))
             (when (cloudstair? rm)
               (let ((g (global-tile rm 0 0)))
                 (draw-cloudstair-solids! rm
                                          (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
                                          (* S (car g)) (* S (cdr g)))))
+            ;; the Underhum's rock likewise ((harkfell underhum look))
+            (when (underhum? rm)
+              (let ((g (global-tile rm 0 0)))
+                (draw-underhum-solids! rm
+                                       (lambda (c r) (let ((gt (global-tile rm c r))) (material-at (car gt) (cdr gt))))
+                                       (* S (car g)) (* S (cdr g)))))
             (draw-solids! rm)
             (draw-drifts! rm)
             (draw-sun-on-branches! rm)
@@ -1013,7 +1070,15 @@
       (with-additive-blend
         (paint-water!)
         (each-tile rm (lambda (m) (eq? m 'water))
-                   (lambda (mat x y m gc gr) (draw-filled-rect x y S S)))))
+                   (lambda (mat x y m gc gr)
+                     ;; Wrongwater's hanging lakes: their own G, so the
+                     ;; resolve draws the surface underneath
+                     (if (and (wrongwater? rm)
+                              (hanging-water? rm (quotient x S) (quotient y S)))
+                         (begin (paint-hanging-water!)
+                                (draw-filled-rect x y S S)
+                                (paint-water!))
+                         (draw-filled-rect x y S S))))))
 
     ;; Thin drifting mist just above exposed water, behind creatures and
     ;; the foreground. Skip solid/reed cells so the banks remain crisp.
@@ -1213,7 +1278,7 @@
     ;; a third of BRITTLE-TICKS. In a dark room only where the moth light is.
     (define (draw-thin-ice! w ox oy seen?)
       (let* ((p (world-room w)) (rm (and p (placed-data p))))
-        (when rm
+        (when (and rm (not (underhum? rm)))   ; the Underhum draws its worn treads itself
           (let ((crust (ice-cell "tarn-crust"))
                 (b (world-body w))
                 (n (body-brittle (world-body w))))
@@ -1333,12 +1398,20 @@
         (and p q (= (placed-x p) (placed-x q)) (= (placed-y p) (placed-y q)))))
 
     (define (room-hue w)
-      (if (and (world-room w)
-               (eq? (room-region (placed-data (world-room w))) 'pipes))
-          ;; Environment light is cream. Harmonic atlas/glyph pixels keep
-          ;; their own slots even at a bright core in the resolve shader.
-          (slot-of 'sky-4)
-          (room-harmonic-hue w)))
+      (let ((region (and (world-room w) (room-region (placed-data (world-room w))))))
+        (cond ((eq? region 'pipes)
+               ;; Environment light is cream. Harmonic atlas/glyph pixels keep
+               ;; their own slots even at a bright core in the resolve shader.
+               (slot-of 'sky-4))
+              ;; Wrongwater's light is the ground's own; violet only while
+              ;; H7 itself lies in the room (its upward icicles glow in their
+              ;; own discs, not the room's light)
+              ((eq? region 'wrongwater)
+               (if (find (lambda (pk) (and (= (pickup-overtone pk) 7) (cell-in-room? w (pickup-cell pk))))
+                         (world-pickups w))
+                   (slot-of 'h7)
+                   (slot-of 'sky-4)))
+              (else (room-harmonic-hue w)))))
 
     (define (room-harmonic-hue w)
       (let* ((stones (filter (lambda (st) (cell-in-room? w (stone-cell st))) (world-stones w)))
@@ -1440,7 +1513,10 @@
     ;; The light a room is drawn at. Open-air lighting belongs to the
     ;; lighting track (the Hollow's dawn shade, Reedfen's covered rooms), so
     ;; every room draws its authored light: level; only moth caves add black.
-    (define (room-render-light rm) (room-light rm))
+    (define (room-render-light rm)
+      (if (eq? (room-region rm) 'hollow)
+          (* (room-light rm) (- 1.0 (* 0.75 *finale-night*)))
+          (room-light rm)))
 
     ;; Glints at the tips of a moth-lit room's hanging icicles, whether or not the
     ;; moth light has reached them (David, playing b22a4d6: he ran into an icicle
@@ -1493,6 +1569,40 @@
         (if (> arr 0.0) (* (car MOTH-RINGS) (+ 0.6 (* 0.4 n)) (+ 0.5 (* 0.5 arr))) 0.0)))
 
     ;; Play into the current (index) pass: the room, its things, the body.
+    ;; The room's door drips (an upward drip rising out of a crack: the Ice
+    ;; Well's, Wrongwater's way in), each as (x base still-s near?): its
+    ;; column and floor in room px, as (harkfell pipes look) draws a drip;
+    ;; the seconds the body has stood still; whether the body is within two
+    ;; tiles of it.
+    ;; With the stillness door that listens at the drip ((harkfell gates):
+    ;; stone-still, stone-listen, stone-listening), the picture runs on the
+    ;; door's own clock and radius, the clock the sound's climb uses, so the
+    ;; rings land on the notes: still-s is its listening seconds while shut,
+    ;; 5 plus the seconds since it began to sink while sinking, and 'open
+    ;; once open; near? is the door's own test (the body's centre within its
+    ;; radius of the drip). Without one, world-still and a box round the drip.
+    (define (door-drips w rm ox oy)
+      (let* ((b (world-body w))
+             (c (body-center b HARKFELL-FEEL))
+             (bx (- (car c) ox)) (by (- (cdr c) oy)))
+        (map (lambda (cell)
+               (let* ((x (+ 8 (* S (car cell)))) (base (+ 14 (* S (cdr cell))))
+                      (g (global-tile rm (car cell) (cdr cell)))
+                      (st (find (lambda (s) (and (stone-still s) (equal? (stone-listen s) g)))
+                                (world-stones w))))
+                 (if st
+                     (let ((dx (- (car c) (+ (* S (car g)) (/ S 2.0))))
+                           (dy (- (cdr c) (+ (* S (cdr g)) (/ S 2.0)))))
+                       (list x base
+                             (case (stone-state st)
+                               ((open) 'open)
+                               ((sinking) (+ (stone-still st) (/ (stone-t st) 60.0)))
+                               (else (/ (stone-listening st) 60.0)))
+                             (<= (sqrt (+ (* dx dx) (* dy dy))) (stone-radius st))))
+                     (let ((near (and (< (abs (- bx x)) (* 2.5 S)) (< (abs (- by base)) (* 2 S)))))
+                       (list x base (if near (/ (world-still w) 60.0) 0.0) near)))))
+             (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))))
+
     (define (draw-play w)
       (let* ((p (world-room w))
              (rm (and p (placed-data p))))
@@ -1521,17 +1631,22 @@
                           (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                  (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
                             (when (and (stone-visible? rm st) (in-room? x y))
+                              (if (heart-stone? rm st)
+                                  ;; STUB(systems): the heart, until it has a kind of its own
+                                  (draw-heart! x y t (world-carry w) (stone-state st) (stone-t st))
                               (if (eq? (room-region rm) 'pipes)
                                   (draw-stone st x y t (world-carry w) (stone-slot rm) "pipes" #t)
                                   ;; the bowl's rose stone keeps its glyph after its reveal
                                   (if (and (bowl? rm) (= (stone-overtone st) 5))
                                       (draw-stone st x y t (world-carry w) (stone-slot rm) #f #t)
-                                      (draw-stone st x y t (world-carry w) (stone-slot rm)))))))
+                                      (draw-stone st x y t (world-carry w) (stone-slot rm))))))))
                         (world-stones w))
               (set-color 1.0 1.0 1.0 1.0)
               (draw-render-target *solid-rt* 0.0 0.0 (inexact VIEW-W) (inexact VIEW-H))
               (draw-reedfen-water-haze! rm t)
               (draw-pipes-panels! rm)
+              (draw-underhum-scenery! rm t (underhum-phase-of w) (world-carry w))
+              (draw-underhum-treads! rm b ox oy)
               ;; Cloudstair's lifts, gusts and seeds, on the shared air clock;
               ;; elsewhere a lift column's seeds (the Hollow's launch lift)
               (if (cloudstair? rm)
@@ -1539,7 +1654,10 @@
                     (draw-cloudstair-air! rm t (world-tau w)
                                          (lambda (x y) (not (kind-solid? (tile-at tm (+ x ox) (+ y oy))))))
                     (draw-cloudstair-seeds! rm t (world-tau w) (- (car c) ox) (- (cdr c) oy) (world-carry w)))
-                  (draw-lift-seeds! rm t (world-tau w)))
+                  ;; the Underhum's columns draw their own motes; the bowl's field
+                  ;; over the heart shows nothing until you rise through it
+                  (unless (or (underhum? rm) (bowl? rm))
+                    (draw-lift-seeds! rm t (world-tau w))))
               ;; the authored down gift, until it is yours
               (unless (world-down w)
                 (for-each (lambda (d)
@@ -1552,6 +1670,9 @@
               ;; D43: the upward icicle, where the room has one
               (draw-upward! rm)
               (draw-upward-drips! rm t)
+              ;; the drip door's drip, which answers you standing still
+              (for-each (lambda (d) (draw-drip-build! (car d) (cadr d) t (caddr d) (cadddr d)))
+                        (door-drips w rm ox oy))
               ;; a reedling perched on a reed tip rides the tip's sway
               (for-each (lambda (c)
                           (unless (eyes? c)
@@ -1564,7 +1685,13 @@
               (draw-body-at b (- (body-x b) ox) (- (body-y b) oy) t)
               (when (body-down b)
                 (draw-down-tuft! b (- (body-x b) ox) (- (body-y b) oy) t))
+              (draw-underhum-sprites! rm b (world-carry w) t (underhum-phase-of w) ox oy)
+              (draw-underhum-extras! rm b (world-carry w) t (underhum-phase-of w) ox oy)
               (draw-water! rm)
+              (when (wrongwater? rm)
+                (draw-wrongwater-surfaces! rm t)
+                (draw-rising-rain! rm t)
+                (draw-seventh-pool! rm (seventh-level rm (world-carry w) *moment-name* *moment-heard*)))
               (cover-thin-water! w ox oy)
               (draw-crusts!)
               (draw-snow! rm t)
@@ -1592,8 +1719,12 @@
                               (let* ((cell (stone-cell st)) (s (tilemap-size tm))
                                      (x (- (* s (car cell)) ox)) (y (- (* s (cdr cell)) oy)))
                                 (when (and (stone-visible? rm st) (in-room? x y))
-                                  (draw-stone-light st x y t slot))))
+                                  (if (heart-stone? rm st)
+                                      (draw-heart-light! x y t (world-carry w) (stone-state st) (stone-t st))
+                                      (draw-stone-light st x y t slot)))))
                             (world-stones w))
+                  (draw-underhum-lights! rm b (world-carry w) t (underhum-phase-of w) ox oy)
+                  (draw-underhum-extra-lights! rm b (world-carry w) t (underhum-phase-of w) ox oy)
                   (for-each (lambda (pk)
                               (let* ((c (cell-centre tm (pickup-cell pk))) (x (- (car c) ox)) (y (- (cdr c) oy)))
                                 (when (in-room? x y) (draw-pickup-light (pickup-overtone pk) x y t))))
@@ -1618,6 +1749,12 @@
                   (draw-icicle-glints! w rm ox oy t)
                   (draw-upward-light! rm t)
                   (draw-pipes-lights! rm t (ways-out rm))
+                  (when (wrongwater? rm)
+                    (draw-wrongwater-light! rm t)
+                    (draw-seventh-pool-light! rm (seventh-level rm (world-carry w) *moment-name* *moment-heard*)))
+                  (draw-violet-well-answer! rm t (world-carry w))
+                  (for-each (lambda (d) (draw-drip-build-light! (car d) (cadr d) t (caddr d) (cadddr d)))
+                            (door-drips w rm ox oy))
                   (draw-glints! t)
                   (draw-shafts! rm t)
                   (for-each (lambda (f) (draw-flash-light (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f))))
@@ -1626,36 +1763,57 @@
               (for-each (lambda (f) (draw-flash (car f) (- (cadr f) ox) (- (caddr f) oy) (- t (cadddr f)) slot))
                         *flashes*)))))
 
-    ;; The whole frame of play, as far as the colour target: bake what the
-    ;; room needs, draw it as slots (after: a thunk drawn last in the same
-    ;; pass, the ears), resolve it; black: optionally a further fade to black
-    ;; (the frame's dawn), by the same dither as the world's dim. Outside any
-    ;; pass.
-    (define (present-play! w after . black)
+    ;; Prepare only cached resources: no world ticks, focus stepping or
+    ;; visible draw. The start screen can do this before the opening sounds.
+    (define (prepare-play! w)
       (ensure-render!)
       (atlas-ensure!)
-      (step-focus!)
       (let* ((p (world-room w))
-             (rm (and p (placed-data p)))
-             (region (if rm (room-region rm) 'none)))
-        (when rm (prepare-layers! rm (world-tiles w)))
+             (rm (and p (placed-data p))))
+        (when rm
+          (prepare-layers! rm (world-tiles w))
+          (backdrop (room-backdrop-key rm)))
+        (use-region! (if rm (room-region rm) 'none))))
+
+    (define (present-play! w after . black)
+      (prepare-play! w)
+      (step-focus!)
+      (resolve-play! w after (if (pair? black) (car black) 0.0)))
+
+    ;; Exercise the first offscreen scene/shader draw while the start is
+    ;; silent. Resource creation alone leaves the first shader use at dawn.
+    ;; Focus and the world keep their clocks; the window is never drawn here.
+    (define (warm-play! w)
+      (prepare-play! w)
+      (resolve-play! w (lambda () #f) 1.0))
+
+    ;; The shared offscreen draw through the palette resolve. AFTER adds the
+    ;; ears in normal play; BLACK is the dawn's extra fade, 0..1.
+    (define (resolve-play! w after black)
+      (let* ((p (world-room w))
+             (rm (and p (placed-data p))))
         ;; a passing cloud's shadow on Cloudstair's stone, none anywhere else
         (apply set-cloud-shade! (if (and rm (cloudstair? rm)) (cloudstair-shade rm (world-ticks w)) (list 0.0 0.0 0.0)))
-        (use-region! region)
         (with-render-target (room-index-rt)
           (set-blend-mode 'normal)
           (draw-play w)
           (set-blend-mode 'normal)
           (after)
           (draw-strips! *strips*))
+        ;; the Underhum's orbs, for the resolve's colours
+        (set-orb-lights! (if rm (underhum-orb-lights rm (world-body w) (world-carry w) (world-ticks w)
+                                                     (underhum-phase-of w) (car (world-origin w)) (cdr (world-origin w)))
+                             '()))
         (resolve! (world-ticks w)
-                  (max (world-dim w) (if (pair? black) (car black) 0.0))
+                  (max (world-dim w) black)
                   (if rm (room-hue w) (slot-of 'h2))
                   (if rm (room-render-light rm) 1.0)
                   (if rm
                       (let ((c (body-center (world-body w) HARKFELL-FEEL))
                             (cs (world-critters w)))
-                        (room-dark-extra rm (moth-arrival (if cs (critters-list cs) '()) (car c) (cdr c))))
+                        (if (underhum? rm)
+                            (underhum-dark-extra rm (underhum-phase-of w))
+                            (room-dark-extra rm (moth-arrival (if cs (critters-list cs) '()) (car c) (cdr c)))))
                       0.0)
                   (and rm (room-daylight-pools? rm)))))
 
@@ -1685,17 +1843,85 @@
                 ((and (= (room-x (car rs)) rx) (= (room-y (car rs)) ry)) (car rs))
                 (else (find (cdr rs)))))))
 
-    ;; Cache rooms in pages of up to eight full-size images. Individual
-    ;; room targets would also exhaust sokol's sampler pool at 82 rooms.
-    ;; Each page is composed in one pass, then kept until content changes.
+    ;; Cache rooms in pages of PAGE-ROOMS full-size images, PAGE-COLS a row.
+    ;; Every texture and render target holds one of sokol's 64 samplers, and
+    ;; a texture cannot be freed: individual room targets ran out at 82
+    ;; rooms, and a page per eight rooms ran out at 150 (110 fitted, measured
+    ;; 2026-10-12, scripts/gate-atlas). A pass clears its target, so a page
+    ;; grows by copying: each frame bakes up to OVERVIEW-BATCH rooms and
+    ;; draws the open page and them into a new page target, then frees the
+    ;; old one. A frame holds at most the two pages and the batch's targets.
     (define *room-colors* '())     ; ((room . (page-texture . index)) ...)
     (define *overview-pages* '())  ; render targets owning those textures
+    (define *open-page* #f)        ; (target texture rooms-in-it) while one fills
     (define OVERVIEW-BATCH 8)
+    (define PAGE-COLS 8)
+    (define PAGE-ROWS 4)
+    (define PAGE-ROOMS (* PAGE-COLS PAGE-ROWS))
+
+    ;; The rooms' coordinate labels are cached the same way. Drawn live, a
+    ;; label costs a rect per glyph pixel row, and one frame's vertex buffer
+    ;; (sokol_gp's, shared by every pass in the frame) cannot hold them all:
+    ;; at 110 rooms the atlas aborted with VALIDATE_APPENDBUF_SIZE (measured
+    ;; 2026-10-12; 104 rooms fitted). Each label is drawn once into a page of
+    ;; LABEL-BATCH, one page a frame after the rooms' pages, and the overview
+    ;; draws it as one textured quad. A pass clears its target, so a page is
+    ;; written whole in one frame.
+    (define *room-labels* '())     ; ((room . (page-texture . index)) ...)
+    (define *label-pages* '())
+    ;; A page is LABEL-COLS labels across and LABEL-ROWS down, 384 x 64: a
+    ;; 48 x 512 page came out empty and a 48 x 64 one did not (measured in
+    ;; the look harness; cause not found). 64 labels a page, one page a
+    ;; frame, stays under the 104 that one frame drew live.
+    (define LABEL-W 48)
+    (define LABEL-H 8)
+    (define LABEL-COLS 8)
+    (define LABEL-ROWS 8)
+    (define LABEL-BATCH (* LABEL-COLS LABEL-ROWS))
 
     (define (drop-overview!)
       (for-each render-target-free! *overview-pages*)
+      (for-each render-target-free! *label-pages*)
       (set! *overview-pages* '())
-      (set! *room-colors* '()))
+      (set! *open-page* #f)
+      (set! *label-pages* '())
+      (set! *room-colors* '())
+      (set! *room-labels* '()))
+
+    (define (room-label rm)
+      (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm))))
+
+    ;; One page of labels for the rooms not yet labelled (up to LABEL-BATCH),
+    ;; LABEL-COLS a row: the dark band (written as is, so it keeps its
+    ;; alpha of 0.6) and the text over it. Outside any pass.
+    (define (prepare-labels! rooms)
+      (let ((batch
+              (let next ((pending rooms) (n 0) (acc '()))
+                (cond
+                  ((or (null? pending) (= n LABEL-BATCH)) (reverse acc))
+                  ((assq (car pending) *room-labels*) (next (cdr pending) n acc))
+                  (else (next (cdr pending) (+ n 1) (cons (car pending) acc)))))))
+        (unless (null? batch)
+          (let ((page (make-render-target (* LABEL-W LABEL-COLS) (* LABEL-H LABEL-ROWS) 'nearest)))
+            (with-render-target page
+              (let draw ((rs batch) (i 0))
+                (unless (null? rs)
+                  (let ((label (room-label (car rs)))
+                        (x (* LABEL-W (modulo i LABEL-COLS))) (y (* LABEL-H (quotient i LABEL-COLS))))
+                    (with-blend-mode 'none
+                      (set-color 0.0 0.0 0.0 0.6)
+                      (draw-filled-rect x y (+ 2 (text-width-mini label 1)) 7))
+                    (set-blend-mode 'normal)
+                    (set-color 0.95 0.95 0.9)
+                    (draw-text-mini label (+ x 1) (+ y 1) 1))
+                  (draw (cdr rs) (+ i 1)))))
+            (set! *label-pages* (cons page *label-pages*))
+            (let ((texture (render-target->texture page)))
+              (let cache ((rs batch) (i 0))
+                (unless (null? rs)
+                  (set! *room-labels* (cons (cons (car rs) (cons texture i)) *room-labels*))
+                  (cache (cdr rs) (+ i 1)))))))
+        (every (lambda (rm) (assq rm *room-labels*)) rooms)))
 
     ;; A room as it stands in the overview: backdrop, foliage (still),
     ;; stones shut, solids, water.
@@ -1712,11 +1938,20 @@
         (draw-cloudstair-air! rm 0 0)
         (draw-cloudstair-seeds! rm 0 0 -1000.0 -1000.0))
       (draw-pipes-panels! rm)
+      (draw-underhum-scenery! rm 0 #f)
       (draw-pipes-cues! rm 0 (ways-out rm))
       (draw-upward-drips! rm 0)
+      (for-each (lambda (cell) (draw-drip-build! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
+                (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm)))
       (with-additive-blend
-        (draw-pipes-lights! rm 0 (ways-out rm)))
-      (draw-water! rm))
+        (draw-pipes-lights! rm 0 (ways-out rm))
+        (when (wrongwater? rm) (draw-wrongwater-light! rm 0))
+        (for-each (lambda (cell) (draw-drip-build-light! (+ 8 (* S (car cell))) (+ 14 (* S (cdr cell))) 0 0.0 #f))
+                  (filter (lambda (cell) (door-drip? rm cell)) (room-upward-drops rm))))
+      (draw-water! rm)
+      (when (wrongwater? rm)
+        (draw-wrongwater-surfaces! rm 0)
+        (draw-rising-rain! rm 0)))
 
     ;; Outside any pass: resolve one bounded batch per frame. Every
     ;; render pass appends to sokol_gp's same per-frame vertex buffer; all
@@ -1724,33 +1959,54 @@
     ;; Call once each frame until this returns #t (all rooms are cached).
     (define (prepare-overview! rooms)
       (ensure-render!)
-      (let ((batch
+      (let* ((have (if *open-page* (caddr *open-page*) 0))
+             (room-for (min OVERVIEW-BATCH (- PAGE-ROOMS have)))
+             (batch
               (let next ((pending rooms) (n 0) (acc '()))
                 (cond
-                  ((or (null? pending) (= n OVERVIEW-BATCH)) (reverse acc))
+                  ((or (null? pending) (= n room-for)) (reverse acc))
                   ((assq (car pending) *room-colors*) (next (cdr pending) n acc))
                   (else (next (cdr pending) (+ n 1) (cons (car pending) acc)))))))
         (unless (null? batch)
           (let* ((targets (map bake-overview-room! batch))
-                 (page (make-render-target (* VIEW-W (length batch)) VIEW-H 'nearest)))
+                 (old (and *open-page* (car *open-page*)))
+                 (old-texture (and *open-page* (cadr *open-page*)))
+                 (pw (* PAGE-COLS VIEW-W)) (ph (* PAGE-ROWS VIEW-H))
+                 (page (make-render-target pw ph 'nearest)))
             (with-render-target page
               (with-blend-mode 'none
                 (set-color 1.0 1.0 1.0 1.0)
-                (let copy ((ts targets) (i 0))
+                (when old
+                  (draw-render-target old 0.0 0.0 (inexact pw) (inexact ph)))
+                (let copy ((ts targets) (i have))
                   (unless (null? ts)
-                    (draw-render-target (car ts) (inexact (* i VIEW-W)) 0.0
+                    (draw-render-target (car ts)
+                                        (inexact (* VIEW-W (modulo i PAGE-COLS)))
+                                        (inexact (* VIEW-H (quotient i PAGE-COLS)))
                                         (inexact VIEW-W) (inexact VIEW-H))
                     (copy (cdr ts) (+ i 1))))))
-            ;; The page pass has consumed the temporary room targets.
+            ;; The page pass has consumed the temporary room targets and the
+            ;; old page; the rooms that were on it now point at the new one.
             (for-each render-target-free! targets)
-            (set! *overview-pages* (cons page *overview-pages*))
-            (let ((texture (render-target->texture page)))
-              (let cache ((rs batch) (i 0))
+            (let ((texture (render-target->texture page))
+                  (n (+ have (length batch))))
+              (when old
+                (render-target-free! old)
+                (set! *overview-pages* (filter (lambda (p) (not (eq? p old))) *overview-pages*))
+                (set! *room-colors*
+                      (map (lambda (e) (if (eq? (cadr e) old-texture) (cons (car e) (cons texture (cddr e))) e))
+                           *room-colors*)))
+              (set! *overview-pages* (cons page *overview-pages*))
+              (set! *open-page* (and (< n PAGE-ROOMS) (list page texture n)))
+              (let cache ((rs batch) (i have))
                 (unless (null? rs)
                   (set! *room-colors*
                         (cons (cons (car rs) (cons texture i)) *room-colors*))
                   (cache (cdr rs) (+ i 1)))))))
-        (every (lambda (rm) (assq rm *room-colors*)) rooms)))
+        ;; the labels after the rooms, never in the same frame as a room batch
+        (and (null? batch)
+             (every (lambda (rm) (assq rm *room-colors*)) rooms)
+             (prepare-labels! rooms))))
 
     (define (bake-overview-room! rm)
       (prepare-layers! rm)
@@ -1759,7 +2015,7 @@
         (set-blend-mode 'normal)
         (draw-room-still rm)
         (draw-strips! *strips*))
-      (resolve! 0 0.0 (slot-of (if (eq? (room-region rm) 'pipes) 'sky-4 'h2))
+      (resolve! 0 0.0 (slot-of (if (memq (room-region rm) '(pipes wrongwater)) 'sky-4 'h2))
                 (room-render-light rm) 0.0 (room-daylight-pools? rm))
       (let ((rt (make-render-target VIEW-W VIEW-H 'nearest)))
         (with-render-target rt
@@ -1800,15 +2056,21 @@
                   (set-color 1.0 1.0 1.0 1.0)
                   (draw-texture-region (cadr e) (inexact ox) (inexact oy)
                                        (* k VIEW-W) (* k VIEW-H)
-                                       (* (cddr e) VIEW-W) VIEW-H VIEW-W (- VIEW-H))))
+                                       (* VIEW-W (modulo (cddr e) PAGE-COLS))
+                                       (* VIEW-H (- PAGE-ROWS (quotient (cddr e) PAGE-COLS)))
+                                       VIEW-W (- VIEW-H))))
               (when labels?
-                (let ((label (string-append "x" (number->string (room-x rm)) "y" (number->string (room-y rm)))))
-                  (set-color 0.0 0.0 0.0 0.6)
-                  (draw-filled-rect (+ ox 1) (+ oy 1) (+ 2 (text-width-mini label 1)) 7)
-                  (set-color 0.95 0.95 0.9)
-                  (draw-text-mini label (+ ox 2) (+ oy 2) 1)
-                  (when (room-moment rm)
-                    (draw-note-mark (- (+ ox (floor-int (* k VIEW-W))) 8) (+ oy 2)))))))
+                ;; the label from its page (prepare-labels!), once baked
+                (let ((l (assq rm *room-labels*)))
+                  (when l
+                    (set-blend-mode 'normal)
+                    (set-color 1.0 1.0 1.0 1.0)
+                    (draw-texture-region (cadr l) (inexact (+ ox 1)) (inexact (+ oy 1)) LABEL-W LABEL-H
+                                         (* LABEL-W (modulo (cddr l) LABEL-COLS))
+                                         (* LABEL-H (- LABEL-ROWS (quotient (cddr l) LABEL-COLS)))
+                                         LABEL-W (- LABEL-H))))
+                (when (room-moment rm)
+                  (draw-note-mark (- (+ ox (floor-int (* k VIEW-W))) 8) (+ oy 2))))))
           rooms)))
 
     ;; Lines of text at the top right of the rectangle x y w, cells of

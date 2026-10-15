@@ -28,7 +28,7 @@
 ;;; Both paths give the same two gains: equal-power with a sqrt 2 make-up,
 ;;; which the sink's balance pan reproduces exactly (cue-balance).
 ;;;
-;;;   (mixer-open! rate-hint)        open the context and the cue sink; #t when sound is possible
+;;;   (mixer-open!)                 open the context and the cue sink; #t when sound is possible
 ;;;   (mixer-open-headless! rate tap)   no sinks: sources pulled to the clock, blocks to the tap
 ;;;   (mixer-resume!)                from a user gesture (the web's autoplay policy)
 ;;;   (mixer-rate) (mixer-open?) (mixer-state)
@@ -53,8 +53,7 @@
 ;;;            while a cue sounded, and while none did ("idle": inaudible)
 
 (define-library (engine mixer)
-  (import (sigil core)
-          (sigil math)
+  (import (sigil math)
           (sigil struct)
           (sigil list)
           (sigil time)
@@ -404,49 +403,75 @@
                     (source-factor! s 'hold 1.0 RELEASE-FADE-S now))
                   *sources*)))
 
-    (define (pump-source! s now)
+    ;; One bounded block. REMAINING is this pump's initial deficit, not a
+    ;; moving target that grows while the device consumes the ring.
+    (define (pump-source! s now remaining)
       (cond
         ((and (holding? now) (source-live? s))
-         (when (source-stream s) (set-audio-stream-volume! (source-stream s) 0.0)))
-        ((and *headless* (source-live? s)) (pump-headless! s now))
+         (when (source-stream s) (set-audio-stream-volume! (source-stream s) 0.0))
+         0)
+        ((and *headless* (source-live? s))
+         (pump-headless! s now)
+         0)
         ((source-live? s)
          (let ((st (stream-for! s)))
            (if (not st)
-               #f
+               0
                (begin
                  (set-audio-stream-volume! st (source-gain s now))
                  (let* ((depth (audio-stream-depth st))
                         (n (min (if (< depth PUSH-RAMP) PUSH-RAMP PUSH-MAX)
+                                remaining
                                 (audio-stream-room st)
                                 (- (depth-frames) depth))))
-                   (when (> n 0)
-                     (let* ((t0 (now-ms))
-                            (more ((source-pull s) *buf* 0 n))
-                            (ms (- (now-ms) t0)))
-                       (ring-add! (pull-ring (source-id s)) (* ms (/ 1024.0 n)))
-                       ;; the block that ended it is the end of its release tail: pushed too
-                       (push-audio-samples st *buf* n)
-                       (if more
-                           #t
-                           (begin
+                   (if (<= n 0)
+                       0
+                       (let* ((t0 (now-ms))
+                              (more ((source-pull s) *buf* 0 n))
+                              (ms (- (now-ms) t0)))
+                         (ring-add! (pull-ring (source-id s)) (* ms (/ 1024.0 n)))
+                         ;; The release's final block is pushed too.
+                         (push-audio-samples st *buf* n)
+                         (unless more
                              (count-sounding! s)
                              (set-source-ended! s #t)
                              (let ((f (source-on-end s))
                                    (heard (+ now (/ depth (* 1.0 *rate*)))))
-                               (when f (mixer-at! heard (lambda () (f heard))))))))))))))
+                               (when f (mixer-at! heard (lambda () (f heard))))))
+                         n)))))))
         ((source-ended? s)
          (let ((st (source-stream s)))
            (when st
              (set-audio-stream-volume! st (source-gain s now))
              (when (<= (audio-stream-depth st) 0)
-               (close-stream! s)))))
-        (else #f)))
+               (close-stream! s))))
+         0)
+        (else 0)))
 
     (define (mixer-pump! now)
       (let ((t0 (now-ms)))
         (set! *now* now)
         (run-events! now)
-        (for-each (lambda (s) (pump-source! s now)) *sources*)
+        ;; A single fresh/dry block covered only about 43ms at 48kHz,
+        ;; leaving a slow frame unable to regain the advertised 350ms lead.
+        ;; Refill each initial deficit in rounds, one block per source, so
+        ;; one source cannot consume the whole refill before others get fed.
+        ;; The snapshot bounds total work even when playback outruns us.
+        (let loop ((pending
+                     (map (lambda (s)
+                            (vector s (max 0 (- (depth-frames) (source-lead s)))))
+                          *sources*)))
+          (for-each
+            (lambda (entry)
+              (let ((n (pump-source! (vector-ref entry 0) now (vector-ref entry 1))))
+                (vector-set! entry 1
+                             (if (> n 0) (max 0 (- (vector-ref entry 1) n)) 0))))
+            pending)
+          (let ((more (filter (lambda (entry)
+                                (and (> (vector-ref entry 1) 0)
+                                     (source-live? (vector-ref entry 0))))
+                              pending)))
+            (when (pair? more) (loop more))))
         ;; ended sources whose sinks have closed leave
         (set! *sources* (filter (lambda (s) (not (and (source-ended s) (not (source-stream s))))) *sources*))
         (pump-cues!)

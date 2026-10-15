@@ -37,4 +37,4 @@
    (V "Under the Choir" "below the cracked pipes, rough walls bring you back to their dry shelf")
    (W "The Last Drips" "the drips thin beside the final pipe and leave its blue note alone: a breath")
    (X "The Last Pipe" "a cold blue note rests on dry limestone at the bottom of the last pipe"))
-  borders: ((A north) (D west)))
+  borders: ((A north) (D west) (S west)))

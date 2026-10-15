@@ -1,0 +1,19 @@
+;; Exact dry control for the 15-cell tarn; the same roof closes its chimney.
+(fixture
+  name: "hanging-dry"
+  expect: unreachable
+  why: "bottom entry and an offset upper shelf, with the exact dry control"
+  start: (12 8)
+  target: ((17 1))
+  grid:
+  ("#########################"
+   "#                       #"
+   "#        #     ##########"
+   "#        #     #        #"
+   "#        #     #        #"
+   "#        #     #        #"
+   "#                       #"
+   "#                       #"
+   "#                       #"
+   "#########################"
+   "#########################"))

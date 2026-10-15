@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runner-only, after one integrated web build. Measures the full authored
+# world in one WebGL context; never trims art to satisfy the sampler pool.
+set -eu
+cd "$(dirname "$0")/.."
+exec node verify.mjs "${1:-build/web}" --legs samplers,errors

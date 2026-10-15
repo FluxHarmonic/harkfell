@@ -67,6 +67,8 @@
           (harkfell save)
           (harkfell frame)
           (harkfell reveal)
+          (harkfell underhum finale)
+          (only (harkfell credits) CREDITS)
           (harkfell title)
           (harkfell render))
 
@@ -79,7 +81,7 @@
           shell-key-down! shell-key-up! shell-keys-clear!
           shell-stick! shell-jump! shell-sector
           shell-set-ms! shell-set-stick-form! shell-stick-form
-          shell-world shell-clock shell-set-frame-stamp!
+          shell-world shell-clock shell-set-frame-stamp! shell-finale-mark!
           shell-latency-lines now-ms
           shell-load-content! shell-content shell-goto! shell-goto-start!
           shell-test-room! shell-set-mode! shell-mode shell-set-still!
@@ -133,6 +135,7 @@
     ;; (shell-begin!); a door (?room=, --room, the atlas, the test room) has
     ;; neither: it is for looking, and it must not overwrite a player's save.
     (define *frame* #f)              ; #f, or the frame until it plays
+    (define *front-prepared-world* #f) ; the hidden world's cached draw resources
     (define *frame-listeners* '())   ; each is called with every phase entered
     (define *key-edge* #f)           ; a key went down since the last frame
     (define *gesture* #f)            ; a key or a touch since the last frame (the web's gesture)
@@ -298,6 +301,11 @@
     (define (shell-set-extra-lines! proc) (set! *extra-lines* proc))
 
     (define (shell-world) *world*)
+    ;; The director acknowledges marks on the real song's clock. It never
+    ;; changes input, position or control while the ending plays.
+    (define (shell-finale-mark! mark)
+      (when *world*
+        (set! *world* (world-finale-mark *world* mark))))
     (define (shell-clock) *clock*)
 
     ;; --- boot ------------------------------------------------------------------
@@ -360,7 +368,8 @@
     (define (populate w old carry)
       (world-populate
         (if old
-            (world w body: (body (world-body w) down: (world-down old) tau: (world-tau old)))
+            (world w body: (body (world-body w) down: (world-down old) tau: (world-tau old))
+                     finale: (world-ending old))
             w)
         (kept-stones old) (content-pickups *content*)
         (append carry (if old (world-carry old) '()))))
@@ -431,6 +440,7 @@
     ;; Returns what the restore forgave (strings), or #f for a new game.
     (define (shell-begin! web? d)
       (set! *frame* (frame-new web?))
+      (set! *front-prepared-world* #f)
       (set! *over-key* #f)
       (set! *over-touch* #f)
       (set! *wall* 0.0)
@@ -454,7 +464,10 @@
                                    (body (body-in-cell (restored-cell r))
                                          down: (restored-down r) tau: (restored-tau r)))))
                  (set! *world* (world (world-populate w stones (content-pickups *content*) (restored-carry r))
-                                      aurora: (restored-aurora r)))
+                                      aurora: (restored-aurora r)
+                                      finale: (finale-restored (restored-ended r)
+                                                              (restored-ended-with r)
+                                                              (restored-coda r))))
                  ;; D47: the region you continue in counts as announced, its
                  ;; name unshown (an older save, read as none announced, too)
                  (set! *announced*
@@ -462,10 +475,20 @@
                          (if (and here (not (memq here a))) (append a (list here)) a)))
                  (set! *mode* 'play)
                  (*save-set* (restored-moments r) (restored-played r))
+                 ;; Explicit world flags are authoritative after legacy save
+                 ;; migration. Restore once; live news must still start music.
+                 (sound-finale-restore! (world-ended *world*)
+                                       (world-ended-with *world*)
+                                       (world-coda *world*))
                  ;; D40: a save to continue, so the start screen offers starting over
                  (set! *frame* (frame-new web? #t))
                  (restored-notes r)))
-              (else (set! *world* #f) (shell-goto-start!) #f))))
+              (else
+               (set! *world* #f)
+               (*save-set* '() 0.0)
+               (sound-finale-restore! #f '() #f)
+               (shell-goto-start!)
+               #f))))
 
     ;; The save of the world now, or #f outside the written world.
     (define (current-save)
@@ -474,7 +497,10 @@
              (save-datum *content*
                          (body (world-entry *world*) down: (world-down *world*) tau: (world-tau *world*))
                          (world-carry *world*) (world-stones *world*)
-                         (car x) (cadr x) *revealed* (world-aurora *world*) *announced*))))
+                         (car x) (cadr x) *revealed* (world-aurora *world*) *announced*
+                         (world-ended *world*) (world-ended-with *world*) (world-coda *world*)
+                         (and (world-ended *world*)
+                              (not (eq? (finale-phase (world-ending *world*)) 'done)))))))
 
     ;; Write the save when what it holds has changed: the entry (a room
     ;; entered), the carry, the stones opened, the moments heard. Not the
@@ -484,7 +510,9 @@
              (sig (list (body-x e) (body-y e) (world-carry *world*)
                         (length (filter stone-open? (world-stones *world*)))
                         (car (*save-get*))
-                        *revealed* (world-aurora *world*) *announced* (world-down *world*))))
+                        *revealed* (world-aurora *world*) *announced* (world-down *world*)
+                        (world-ended *world*) (world-ended-with *world*) (world-coda *world*)
+                        (finale-phase (world-ending *world*)))))
         (unless (equal? sig *save-sig*)
           (let ((d (current-save)))
             (when d
@@ -915,6 +943,20 @@
     (define (present-front! win-w win-h)
       (begin-frame)
       (set-blend-mode 'normal)
+      ;; Bake the restored or new room behind the silent start screen.
+      ;; Doing this at the first dawn drained the opening's audio ring.
+      ;; A start-over creates a different world and prepares that one too.
+      (when (and *world*
+                 (memq (frame-phase *frame*) '(start-in start start-out))
+                 (not (eq? *world* *front-prepared-world*)))
+        (warm-play! *world*)
+        ;; Warm the sharp-fit intermediate too, entirely offscreen. Its
+        ;; scratch destination is cleared by the next room draw.
+        (let ((f (view-fit win-w win-h VIEW-W VIEW-H)))
+          (ensure-targets! f)
+          (with-render-target (room-index-rt)
+            (view-present! *presenter* (room-color-rt) f)))
+        (set! *front-prepared-world* *world*))
       (case (frame-phase *frame*)
         ((start-in start start-out)
          (draw-start! win-w win-h (frame-words-alpha *frame*) *wall*
@@ -961,10 +1003,11 @@
         ;; target ((harkfell draw)'s present-play!); the ears in the same pass,
         ;; in the fur-1 slot
         ;; the look follows the sound: the bed's wind bends the reeds, a
-        ;; moment's music steps the sky into the haze (D51, by the clock)
+        ;; moment's rows control D51's haze; its heard clock lights the Rest.
         (set-look-sound! (sound-moment-sounding)
                          (let ((e (assq 'wind (sound-bed-levels)))) (and e (cdr e)))
-                         (/ t1 1000.0))
+                         (/ t1 1000.0) (sound-moment-time) (sound-moment-playing))
+        (set-look-finale! (sound-finale-section) (sound-finale-time))
         ;; D15: the creature curled asleep until the first input
         (set-look-waking! *waking*)
         ;; the dawn (D15), the world coming in from black by the dither, in
@@ -984,6 +1027,9 @@
         ;; the room's target on the window at its fit, copied opaque, through
         ;; the sharp-bilinear pass when the fit is 'sharp
         (view-present! *presenter* (room-color-rt) f)
+        (let ((card (sound-credits-card)))
+          (when card
+            (draw-credits! win-w win-h (list-ref CREDITS (car card)) (cdr card))))
         ;; D35: the wordmark over the live world, at the first homecoming
         ;; ((harkfell title)'s draw-reveal!, on (harkfell reveal)'s schedule)
         (when (> (shell-reveal-alpha) 0.0)

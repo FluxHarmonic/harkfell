@@ -1,0 +1,26 @@
+;; B, the Bearers' Shelf. Four empty niches in the back wall, each taking
+;; a light in its harmonic's colour as you pass: A to C (rows 4-5).
+(room
+  region: underhum
+  at: (5 4)
+  title: "The Bearers' Shelf"
+  intent: "four empty niches in the wall take a light each as you pass, the colours you carried down: a breath"
+  bed: (hum 0.6 air 0.4 water 0)
+  light: 0.2
+  grid:
+  ("#########################"
+   "###### ### ### ### ######"
+   "####                #####"
+   "##                     ##"
+   "                         "
+   "                         "
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################"
+   "#########################")
+  things: ((niche at: (6 4) overtone: 2)
+           (niche at: (10 4) overtone: 3)
+           (niche at: (14 4) overtone: 4)
+           (niche at: (18 4) overtone: 5))
+  decor: none)

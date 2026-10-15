@@ -1,0 +1,56 @@
+;;; Runner-only diagnostic: expose any accepted wet/dry bypass before
+;;; changing the fixture. Each edge is independently replayed from its
+;;; recorded origin; this is not a continuous live-world route claim.
+(import (sigil fs)
+        (engine body)
+        (engine roomfile)
+        (engine reach)
+        (engine reach paths)
+        (harkfell fixtures)
+        (harkfell feel))
+
+(define (cell p) (cons (car p) (cadr p)))
+(define (line datum) (write datum) (newline))
+
+(define (show-edge tm edge)
+  (let* ((to (car edge))
+         (w (cdr edge))
+         (trace (witness-trace tm HARKFELL-FEEL w)))
+    (unless (witness-lands? tm HARKFELL-FEEL w to)
+      (error "accepted water diagnostic edge failed replay" (witness-from w) to))
+    (line (list 'edge (witness-from w) to
+                'script-ticks (length (witness-script w))
+                'down (body-down (car trace))))
+    (let scan ((bodies trace) (tick 0) (mode #f))
+      (unless (null? bodies)
+        (let ((b (car bodies)))
+          (when (or (not (eq? mode (body-mode b)))
+                    (pair? (body-events b))
+                    (null? (cdr bodies)))
+            (line (list 'body tick (body-x b) (body-y b)
+                        (body-mode b) (body-events b))))
+          (scan (cdr bodies) (+ tick 1) (body-mode b)))))))
+
+(define (read-fixture file)
+  (let ((rf (read-roomfile (read-file-string file) file 'fixture)))
+    (unless (roomfile-ok? rf)
+      (error "invalid water diagnostic fixture" file))
+    rf))
+
+(define (probe file)
+  (let* ((rf (read-fixture file))
+         (tm (fixture-tilemap (roomfile-grid rf)))
+         (start (cell (roomfile-field rf 'start)))
+         (graph (reach-search tm HARKFELL-FEEL (list start) witness-lands?)))
+    (for-each
+      (lambda (target)
+        (let* ((to (cell target))
+               (route (graph-witness-path graph start to)))
+          (line (list 'water-route (roomfile-field rf 'name)
+                      'target to 'expected (roomfile-field rf 'expect)
+                      'reachable (and route #t) 'stats (graph-stats graph)))
+          (when route (for-each (lambda (edge) (show-edge tm edge)) route))))
+      (roomfile-field rf 'target))))
+
+(probe "test/fixtures/depths/hanging-bottom.fixture")
+(probe "test/fixtures/depths/hanging-dry.fixture")

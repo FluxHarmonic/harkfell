@@ -1,0 +1,33 @@
+;; world/rooms/wrongwater/x-3y8.room
+(room
+  region: wrongwater
+  at: (-3 8)
+  title: "Stepping Lakes"
+  intent: "three small lakes hang at different heights, and the way up is to choose your lake and swim through it, then the next"
+  bed: (air 0.15 water 0.5 hang 0.6 drone 0.6)
+  light: 0.6
+  grid:
+  ("#########%  %############"
+   "##########~~~############"
+   "##########~~~############"
+   "###                  ####"
+   "###                  ####"
+   "###~~~####   #####~~~####"
+   "###~~~####   #####~~~####"
+   "###                      "
+   "###                      "
+   "#########################"
+   "#########################")
+  start: (8 8)
+  decor: auto)
+;; Two low lakes, each walled on both sides, bottoms two rows over the floor
+;; (standing row 8): west (3-5) and east (18-20), rows 5-6. They are a
+;; scenic route: swim up either and leap out level with its top onto a ledge
+;; (west 6-9, east 13-17, standing row 4), but the ledges are 4 rows (32 px)
+;; over the floor, inside the 52 px held jump, so a plain jump reaches them
+;; too (reach probe gh-no-low-lakes passes with both lakes removed). From
+;; either ledge's inner edge a jump enters the high lake (10-12, rows 1-2),
+;; which fills the shaft and is the only way up: from its top the rough hole
+;; (10-11, rough 9 and 12) climbs into the Inverted Fall. Coming down the
+;; hole you drop into the high lake and sink out onto the floor. 18 cells of
+;; water, all small and walled. East to the Upward Grove (rows 7-8).

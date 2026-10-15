@@ -43,12 +43,13 @@
           (harkfell check))
 
   (export RADIUS LEAVE RING-TICKS SINK-TICKS TOUCH
-          stone stone? stone-cell stone-overtone stone-state stone-t stone-near stone-shiver
+          stone stone? stone-cell stone-overtone stone-state stone-t stone-near stone-shiver stone-heart?
           pickup pickup? pickup-cell pickup-overtone
           gstate gstate? gstate-stones gstate-pickups gstate-carry gstate-tiles gstate-news
           content-stones content-pickups
           gates-step stone-sink stone-open? open-stone-tiles cell-centre
-          carry-normal)
+          carry-normal stone-keyed? stone-listen-progress
+          stone-keys stone-still stone-listen stone-radius stone-listening)
 
   (begin
     (define RADIUS 64.0)        ; 4 tiles: "within four tiles carrying H3" (section 3)
@@ -64,6 +65,11 @@
     (define-struct stone
       (cell default: #f)
       (overtone default: 2)
+      (keys default: #f)
+      (still default: #f)
+      (listen default: #f)
+      (radius default: 32.0)
+      (listening default: 0)
       (state default: 'shut)
       (t default: 0)
       (near default: #f)
@@ -100,7 +106,43 @@
                   (content-rooms ct))))
 
     (define (content-stones ct)
-      (things-of ct 'ring-stone (lambda (cell o) (stone cell: cell overtone: o))))
+      (apply append
+        (map (lambda (p)
+               (let ((rm (placed-data p)))
+                 (map (lambda (t)
+                        (let* ((a (thing-at t))
+                               (target (thing-kw t "listen"))
+                               (trm (and target (content-room ct (cadr target) (caddr target)))))
+                          (when (and target
+                                     (not (and trm (eq? (room-region trm) (car target)))))
+                            (error "ring-stone listen: room is absent" target))
+                          (stone cell: (local->global ct rm (car a) (cdr a))
+                                 overtone: (thing-kw t "overtone")
+                                 keys: (stone-thing-keys t)
+                                 still: (thing-kw t "still")
+                                 listen: (and trm (local->global ct trm (list-ref target 3) (list-ref target 4)))
+                                 radius: (* 16.0 (or (thing-kw t "radius") 2)))))
+                      (room-things-of rm 'ring-stone))))
+             (content-rooms ct))))
+
+    ;; Keep the numeric overtone used by rendering and saves. SOUND names
+    ;; this full-set gate "heart" only in its place and news protocol.
+    (define (stone-heart? s)
+      (let ((keys (stone-keys s)))
+        (and (not (stone-still s))
+             keys
+             (= (length keys) 4)
+             (every (lambda (h) (memv h keys)) '(2 3 4 5)))))
+
+    (define (stone-keyed? s carry)
+      (and (not (stone-still s))
+           (every (lambda (h) (and (memv h carry) #t))
+                  (or (stone-keys s) (list (stone-overtone s))))))
+
+    (define (stone-listen-progress s)
+      (if (stone-still s)
+          (min 1.0 (/ (stone-listening s) (* 60.0 (stone-still s))))
+          0.0))
 
     (define (content-pickups ct)
       (things-of ct 'harmonic (lambda (cell o) (pickup cell: cell overtone: o))))
@@ -138,7 +180,7 @@
     ;; One tick. centre: the body's centre; box: (x y w h), both in the
     ;; tilemap's pixels. playing: #f while the screen is dark (a soft
     ;; return): nothing is taken or rung then.
-    (define (gates-step g centre box playing)
+    (define (gates-step g centre box playing . still)
       (let* ((tm (gstate-tiles g))
              (news '())
              (say! (lambda (item) (set! news (cons item news))))
@@ -151,7 +193,10 @@
                             (let ((c (cell-centre tm (pickup-cell p))))
                               (say! (list 'pickup (pickup-overtone p) (car c) (cdr c)))))
                           taken))
-             (stones (map (lambda (s) (stone-tick s tm centre carry playing say!)) (gstate-stones g)))
+             (stones (map (lambda (s)
+                            (stone-tick s tm centre carry playing
+                                        (and (pair? still) (car still)) say!))
+                          (gstate-stones g)))
              (opened (filter (lambda (s) (and (stone-open? s)
                                               (not (stone-open? (find-stone (gstate-stones g) (stone-cell s))))))
                              stones)))
@@ -174,24 +219,41 @@
         (and (< (- (car c) TOUCH) (+ x w)) (< x (+ (car c) TOUCH))
              (< (- (cdr c) TOUCH) (+ y h)) (< y (+ (cdr c) TOUCH)))))
 
-    (define (stone-tick s tm centre carry playing say!)
+    (define (stone-tick s tm centre carry playing still? say!)
       (let* ((c (cell-centre tm (stone-cell s)))
              (d (dist c centre))
              (n (stone-overtone s))
-             (keyed (and (memv n carry) #t))
+             (keyed (stone-keyed? s carry))
              (arrive (and playing (<= d RADIUS) (not (stone-near s))))
              (near (cond ((<= d RADIUS) (or (stone-near s) playing))
                          ((> d (+ RADIUS LEAVE)) #f)
                          (else (stone-near s))))
              (s (stone s near: near t: (+ (stone-t s) 1)
                        shiver: (max 0 (- (stone-shiver s) 1))))
-             (item (lambda (what) (say! (list what n (car c) (cdr c))))))
+             (item (lambda (what)
+                     (if (and (eq? what 'ring) (stone-keys s) (> (length (stone-keys s)) 1))
+                         (say! (list 'chord (stone-keys s) (car c) (cdr c)))
+                         (say! (list what n (car c) (cdr c)))))))
         (case (stone-state s)
           ((shut)
            ;; carrying the key inside the radius always rings a shut stone,
            ;; approach or not (review, A3: a key taken while already near it
            ;; waited for you to leave and come back)
-           (cond ((and keyed playing (<= d RADIUS)) (item 'ring) (stone s state: 'ringing t: 0 shiver: 0 near: #t))
+           (cond ((stone-still s)
+                  (let* ((target (cell-centre tm (or (stone-listen s) (stone-cell s))))
+                         (listening (if (and playing still? (<= (dist target centre) (stone-radius s)))
+                                        (+ (stone-listening s) 1)
+                                        0)))
+                    (when (= listening 60) (item 'drip-build))
+                    (when (and (= listening 0) (>= (stone-listening s) 60)) (item 'drip-cancel))
+                    (if (>= listening (* 60 (stone-still s)))
+                        (begin
+                          (say! (list 'drip-open (car target) (cdr target)))
+                          (item 'drip-fall)
+                          (item 'sink)
+                          (stone s state: 'sinking t: 0 listening: listening))
+                        (stone s listening: listening))))
+                 ((and keyed playing (<= d RADIUS)) (item 'ring) (stone s state: 'ringing t: 0 shiver: 0 near: #t))
                  ((and arrive (pair? carry)) (item 'near-miss) (stone s shiver: SHIVER-TICKS))
                  (else s)))
           ((ringing)

@@ -42,8 +42,8 @@
 //              Chrome delivers CDP touches ~90 ms late, so the latency legs
 //              prove the readout works, not what a phone measures)
 //   world      (A1) the page hands over the baked world and it loads clean:
-//              "harkfell: world 62 files, 0 problems" (58 rooms, three maps
-//              and world.sgl: WORLD_FILES), and a plain boot enters the world's start
+//              the file count matches the world baked into the served page,
+//              with zero problems, and a plain boot enters the world's start
 //              (hollow:4,3)
 //   door       (A1) ?room=reedfen:10,4 boots into that room ("harkfell: room
 //              reedfen:10,4") with the body inside the room's slot; a room that
@@ -51,7 +51,7 @@
 //              body in cell (4,7) of the Reed Bridge, and &at=4,9 (rock) is
 //              refused
 //   atlas      (A1) ?atlas shows every room at quarter scale ("harkfell: view
-//              atlas 1940 186": x -1..17, y 2..5, ATLAS); a click on the Drowned Channel's picture enters
+//              its dimensions match the baked world's room bounds; a click on the Drowned Channel's picture enters
 //              it ("harkfell: room reedfen:9,4") and play resumes
 //   atlas2     (A1) the atlas at devicePixelRatio 2 on a 200x150 CSS viewport
 //              (a 400x300 canvas): the fit is not a whole scale ('sharp'), and a
@@ -84,6 +84,9 @@
 //              queue at least 50 ms (it keeps 120). Both figures leave out the
 //              device's output latency
 //   errors     no console error and no exception in any leg
+//   samplers   explicit full-world gate: visit every room door with empty
+//              and full carry in one context, measure actual WebGL sampler
+//              lifetime/peak, and reject sokol sampler/appendbuf aborts
 //
 // Every leg but frame, save and fullscreen boots with &frame=off (open()
 // adds it): the frame is theirs to skip, and a door skips it anyway.
@@ -106,18 +109,43 @@ const PORT = parseInt(opt("--port", "8199"), 10);
 const CDP = parseInt(opt("--cdp", "9299"), 10);
 const RECORD = opt("--record-replay", null);
 const FIXTURE = opt("--replay-fixture", "test/fixtures/replay-web.txt");
-// The 0.4 world's span: Glasswood reaches west to -6, Pipes east to 17
-// and south to 8, and Cloudstair north to -2. Coordinate and atlas checks
-// below retain their exact authored room and tile expectations.
-const X0 = -6, X1 = 17, Y0 = -2, Y1 = 8;
-const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
-const WORLD_FILES = 104 + 5 + 1;  // Hollow 14, Reedfen 22, Glasswood 22, Pipes 24, Cloudstair 22; maps, world.sgl
-const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`;   // rooms at 1/4, a 2 px gap
 const ALL_LEGS = ["boot", "render", "world", "door", "atlas", "atlas2", "sheet", "replay", "envelope", "keys", "float", "fixed", "jump", "two", "timing", "frame", "save", "fullscreen", "pause", "over", "cues", "startup", "errors"];
 const LEGS = (opt("--legs", null) || ALL_LEGS.join(",")).split(",");
 
 if (!fs.existsSync(path.join(ROOT, "index.html"))) { console.log(`SETUP-FAILED: ${ROOT}/index.html missing; build --config web first`); process.exit(2); }
-const stamp = (fs.readFileSync(path.join(ROOT, "index.html"), "utf8").match(/version: "([^"]*)"/) || [])[1];
+const page = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+// package.sgl embeds JSON, not executable metadata. Use the served subject,
+// so a newer working tree cannot change expectations for an older build.
+let bakedWorld;
+try {
+  const assignment = page.match(/window\.HARKFELL_WORLD\s*=\s*(\[[\s\S]*?\]);\s*<\/script>/);
+  if (!assignment) throw new Error("baked HARKFELL_WORLD JSON is missing");
+  bakedWorld = JSON.parse(assignment[1]);
+  if (!Array.isArray(bakedWorld) || !bakedWorld.every(f => Array.isArray(f)
+      && f.length === 2 && f.every(value => typeof value === "string"))) {
+    throw new Error("baked world must contain [path, text] pairs");
+  }
+  if (!bakedWorld.some(([file]) => file === "world/world.sgl")) {
+    throw new Error("baked world/world.sgl is missing");
+  }
+} catch (error) {
+  console.log(`SETUP-FAILED: ${error.message}`);
+  process.exit(2);
+}
+const rooms = bakedWorld.flatMap(([file]) => {
+  const match = file.match(/^world\/rooms\/[^/]+\/x(-?\d+)y(-?\d+)\.room$/);
+  return match ? [[Number(match[1]), Number(match[2])]] : [];
+});
+if (!rooms.length || rooms.some(room => room.some(n => !Number.isSafeInteger(n)))) {
+  console.log("SETUP-FAILED: baked world has no valid room coordinates");
+  process.exit(2);
+}
+const X0 = Math.min(...rooms.map(room => room[0])), X1 = Math.max(...rooms.map(room => room[0]));
+const Y0 = Math.min(...rooms.map(room => room[1])), Y1 = Math.max(...rooms.map(room => room[1]));
+const ROOMS_ACROSS = X1 - X0 + 1, ROOMS_DOWN = Y1 - Y0 + 1;
+const WORLD_FILES = bakedWorld.length;
+const ATLAS = `${2 + 102 * ROOMS_ACROSS} ${2 + 46 * ROOMS_DOWN}`; // 1/4 scale, 2 px gaps
+const stamp = (page.match(/version: "([^"]*)"/) || [])[1];
 const wasmStat = fs.statSync(path.join(ROOT, "harkfell.wasm"));
 console.log(`subject: ${ROOT} version ${stamp} harkfell.wasm ${wasmStat.size} bytes mtime ${wasmStat.mtime.toISOString()}`);
 
@@ -186,6 +214,7 @@ if (!pageWs) { console.log("SETUP-FAILED: no chrome page target after 20 s"); sh
 const ws = new WebSocket(pageWs);
 let msgId = 0; const pending = new Map();
 let lines = [];
+let startupTrace = null;
 const errors = [];
 function send(method, params = {}) {
   return new Promise((res, rej) => { const id = ++msgId; pending.set(id, { res, rej }); ws.send(JSON.stringify({ id, method, params })); });
@@ -196,12 +225,44 @@ ws.addEventListener("message", (ev) => {
   if (msg.method === "Runtime.consoleAPICalled") {
     const text = (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" ");
     lines.push(text);
+    if (startupTrace && startupTrace.length < 128 &&
+        (text.startsWith("harkfell: frame ") || text.startsWith("harkfell: sound ") || text.startsWith("harkfell: work frame "))) {
+      startupTrace.push({ at: msg.params.timestamp ?? Date.now(), line: text });
+    }
     if (msg.params.type === "error") errors.push("console.error: " + text);
+    else if (LEGS.includes("samplers") && /SAMPLER_POOL_EXHAUSTED|VALIDATE_APPENDBUF|ABORTING|panic|Aborted\(/i.test(text)) {
+      errors.push("graphics abort: " + text);
+    }
   }
   if (msg.method === "Runtime.exceptionThrown") errors.push("exception: " + (msg.params.exceptionDetails?.exception?.description || msg.params.exceptionDetails?.text));
 });
 await new Promise((res, rej) => { ws.addEventListener("open", res); ws.addEventListener("error", rej); });
 await send("Page.enable"); await send("Runtime.enable");
+if (LEGS.includes("samplers")) {
+  // Installed before the wasm creates its context. Sokol's GLES backend
+  // uses glGenSamplers/glDeleteSamplers, so this measures actual resources
+  // without exhausting the pool with extra probe allocations.
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+    const stats = window.__harkfellSamplerStats = { available: false, live: 0, peak: 0, created: 0, deleted: 0 };
+    const proto = window.WebGL2RenderingContext?.prototype;
+    if (!proto?.createSampler || !proto?.deleteSampler) return;
+    const make = proto.createSampler, remove = proto.deleteSampler, live = new Set();
+    proto.createSampler = function (...args) {
+      const sampler = make.apply(this, args);
+      if (sampler) {
+        live.add(sampler); stats.created++; stats.live = live.size;
+        stats.peak = Math.max(stats.peak, stats.live);
+      }
+      return sampler;
+    };
+    proto.deleteSampler = function (sampler) {
+      const result = remove.call(this, sampler);
+      if (live.delete(sampler)) { stats.deleted++; stats.live = live.size; }
+      return result;
+    };
+    stats.available = true;
+  })();` });
+}
 await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
 
 const results = [];
@@ -245,6 +306,62 @@ const touch = (type, pts) => send("Input.dispatchTouchEvent", { type, touchPoint
 const W = await evaluate("window.innerWidth"), H = await evaluate("window.innerHeight");
 
 // ---- the legs -------------------------------------------------------------------
+if (LEGS.includes("samplers")) {
+  ran.add("samplers");
+  const doors = bakedWorld.flatMap(([file]) => {
+    const match = file.match(/^world\/rooms\/([^/]+)\/x(-?\d+)y(-?\d+)\.room$/);
+    return match ? [{ key: `${match[1]}:${match[2]},${match[3]}`, region: match[1] }] : [];
+  });
+  const regions = [...new Set(doors.map(door => door.region))];
+  const count = region => doors.filter(door => door.region === region).length;
+  if (count("underhum") !== 13 || count("wrongwater") !== 12) {
+    fail("samplers", `BLOCKED full-world gate needs Underhum 13 and Wrongwater 12; got ${count("underhum")}/${count("wrongwater")}`);
+  } else {
+    await open("trace&room=hollow:4,3&new&still");
+    const coverage = new Set();
+    let routeFailed = false;
+    for (const carry of ["", "2,3,4,5,7"]) {
+      await evaluate(`SigilWebApp.dispatch("carry", ${JSON.stringify(carry)})`);
+      for (const door of doors) {
+        const before = lines.length;
+        const entered = await evaluate(`SigilWebApp.dispatch("goto", ${JSON.stringify(door.key)})`);
+        if (entered !== 1) {
+          fail("samplers", `door refused: ${door.key}`); routeFailed = true; break;
+        }
+        await waitFor(() => lines.slice(before).includes(`harkfell: room ${door.key}`), 10000, `sampler door ${door.key}`);
+        const stats = await evaluate(`new Promise(resolve => {
+          let frames = 0, quiet = 0, created = -1;
+          function tick() {
+            const s = window.__harkfellSamplerStats;
+            if (s.created === created) quiet++; else { created = s.created; quiet = 0; }
+            if (++frames >= 12 && quiet >= 8) resolve({ ...s });
+            else if (frames >= 180) resolve({ ...s, unsettled: true });
+            else requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        })`);
+        console.log(`SAMPLERS door ${door.key} carry ${carry || "none"} live ${stats?.live} peak ${stats?.peak}`);
+        if (!stats?.available || stats.peak < 1 || stats.unsettled || errors.length) {
+          fail("samplers", `door ${door.key}; instrumentation/caches/errors: ${JSON.stringify(stats)}; ${errors.slice(-3).join(" | ")}`);
+          routeFailed = true; break;
+        }
+        coverage.add(`${carry}/${door.key}`);
+      }
+      if (routeFailed) break;
+    }
+    const stats = await evaluate("window.__harkfellSamplerStats");
+    const detail = `rooms ${doors.length}, regions ${regions.length}, doors visited ${coverage.size}/${doors.length * 2}; peak-samplers ${stats?.peak}, live ${stats?.live}, created ${stats?.created}, deleted ${stats?.deleted}`;
+    if (!routeFailed && coverage.size === doors.length * 2 && errors.length === 0) pass("samplers", detail);
+    else {
+      if (!routeFailed) fail("samplers", `incomplete coverage or graphics errors: ${detail}`);
+      console.log(`SAMPLERS partial ${detail}`);
+      if (errors.some(error => /SAMPLER_POOL_EXHAUSTED/i.test(error))) {
+        console.log("BLOCKED-ON t-253c7c: preserve authored art; sampler pool exhausted before the graphics fix");
+      }
+    }
+  }
+}
+
 if (LEGS.includes("boot")) {
   ran.add("boot");
   // a fresh profile with no ?stick: the default form, fixed (David's pick)
@@ -786,12 +903,29 @@ if (LEGS.includes("cues")) {
 const THROTTLE = Number(opt("--cpu-throttle", "4"));
 if (LEGS.includes("startup")) {
   ran.add("startup");
+  const startupSince = Date.now();
+  startupTrace = [];
   await send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
   await open("trace&frame=on&new");
-  await evaluate(`(() => { window.__under = {}; const A = window.SigilWasmAudio;
+  await evaluate(`(() => { window.__under = {}; window.__underChanges = []; window.__underChangeCount = 0; const A = window.SigilWasmAudio;
+    window.__startupTasks = []; window.__startupTaskCount = 0;
+    window.__startupObserver = null;
+    if (window.PerformanceObserver?.supportedEntryTypes.includes('longtask')) {
+      window.__startupObserver = new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          window.__startupTaskCount++;
+          if (window.__startupTasks.length < 64) window.__startupTasks.push({ at: performance.timeOrigin + entry.startTime, duration: entry.duration });
+        }
+      });
+      window.__startupObserver.observe({ type: 'longtask', buffered: true });
+    }
     window.__poll = setInterval(() => { if (!A) return;
       for (let id = 0; id < 256; id++) { const n = A.sinkUnderrunsSounding(id);
-        if (n > (window.__under[id] || 0)) window.__under[id] = n; } }, 100); return true; })()`);
+        if (n > (window.__under[id] || 0)) {
+          window.__under[id] = n;
+          window.__underChangeCount++;
+          if (window.__underChanges.length < 64) window.__underChanges.push({ at: Date.now(), sink: id, frames: n });
+        } } }, 100); return true; })()`);
   await waitFor(() => lines.find((l) => l === "harkfell: frame start"), 30000, "startup: frame start");
   await sleep(3000);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", code: "KeyX" });
@@ -814,6 +948,15 @@ if (LEGS.includes("startup")) {
   (ready && total === 0 ? pass : fail)("startup",
     `cpu x${THROTTLE}; movement cues ready before control: ${ready} (${readyAt >= 0 ? lines[readyAt] : "no cues-moving line"}); ` +
     `sounding underruns ${total} frames, per sink ${under}`);
+  if (!ready || total !== 0) {
+    const changes = JSON.parse(await evaluate(`JSON.stringify({ samples: window.__underChanges, count: window.__underChangeCount,
+      longTasks: window.__startupTasks, longTaskCount: window.__startupTaskCount, longTasksAvailable: !!window.__startupObserver })`));
+    const relative = ({ at, ...sample }) => ({ ms: at - startupSince, ...sample });
+    console.log("DIAGNOSTIC startup " + JSON.stringify({ phases: startupTrace.map(relative), changes: changes.samples.map(relative), changeCount: changes.count,
+      longTasks: changes.longTasks.map(relative), longTaskCount: changes.longTaskCount, longTasksAvailable: changes.longTasksAvailable }));
+  }
+  await evaluate(`window.__startupObserver?.disconnect()`);
+  startupTrace = null;
 }
 
 if (LEGS.includes("errors")) {

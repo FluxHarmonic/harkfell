@@ -11,9 +11,14 @@
 ;;;                       one room in play: body at cell (C R), carrying
 ;;;                       CARRY (e.g. 2-3, or none), after TICKS world ticks;
 ;;;                       MODE down carries the cattail down, glide also holds
-;;;                       jump, ride stands 120 ticks then jumps west holding it;
+;;;                       jump; ride stands 120 ticks then glides west; fidgetK steps right and back until the last K ticks,
+;;;                       then stands still (prints "LOOK still N"); heardS
+;;;                       draws as if the Seventh's Rest moment had been
+;;;                       heard S seconds;
 ;;;                       TAU0 is where the gust clock starts (default 0)
 ;;;                       C "start" (any R) puts it where ?room= would
+;;;   room:...:MODE:TAU0:PHASE  the Underhum's finale state for the frame: none,
+;;;                       listening or fused (the look's review override)
 ;;;   name:REGION:X:Y:C:R:CARRY:TICKS:ALPHA:W:H
 ;;;                       the same room on a W x H window (fitted as the web
 ;;;                       fits it), with D47's region name over it at ALPHA
@@ -27,7 +32,8 @@
         (substratic view present)
         (harkfell content) (harkfell source) (harkfell draw) (harkfell render)
         (harkfell view) (harkfell title)
-        (harkfell world) (harkfell gates) (harkfell check) (harkfell feel))
+        (harkfell world) (harkfell gates) (harkfell check) (harkfell feel)
+        (harkfell underhum look))
 
 (define CONTROL (getenv "PIPES_LOOK_CONTROL"))
 (define (load-review) (load-content (read-world-source "world")))
@@ -49,17 +55,40 @@
          (down? (member mode '("down" "glide" "ride")))
          ;; TAU0 (optional 10th field): the gust clock the body starts at
          (tau0 (if (> (length parts) 9) (num (list-ref parts 9)) 0))
+         (_ (set-underhum-review-phase!
+              (let ((p (and (> (length parts) 10) (list-ref parts 10))))
+                (and p (not (string=? p "none")) (string->symbol p)))))
          (b (body (cell-body (worldmap-tiles wm) HARKFELL-FEEL (car g) (cdr g)) down: (and down? #t) tau: tau0))
-         ;; ride: stand 120 ticks (a carried harmonic rings its stone open), then
-         ;; jump and glide west, holding jump (D50's homeward wind)
-         (in (lambda (n) (cond ((string=? mode "glide") (intent jump: #t))
-                               ((and (string=? mode "ride") (= n 120)) (intent h: -1 jump: #t press: #t))
-                               ((and (string=? mode "ride") (> n 120)) (intent h: -1 jump: #t))
-                               (else (intent)))))
+         (in (if (string=? mode "glide") (intent jump: #t) (intent)))
+         ;; fidgetK: a step right and back every 30 ticks until the last K
+         ;; ticks, then stand: the body has stood still about K ticks while
+         ;; a dark room's moths have had the whole time to arrive (the drip
+         ;; door's build, by seconds of stillness)
+         (hop-k (and (> (string-length mode) 6) (string=? (substring mode 0 6) "fidget")
+                     (string->number (substring mode 6 (string-length mode)))))
+         (input (lambda (n)
+                  (cond ((string=? mode "ride")
+                         (let ((elapsed (- (num (list-ref parts 7)) n)))
+                           (cond ((= elapsed 120) (intent h: -1 jump: #t press: #t))
+                                 ((> elapsed 120) (intent h: -1 jump: #t))
+                                 (else (intent)))))
+                        ((not (and hop-k (> n hop-k))) in)
+                        ((< (modulo n 30) 4) (intent h: 1))
+                        ((< 14 (modulo n 30) 19) (intent h: -1))
+                        (else in))))
          (w (world-populate (world-at wm b) (content-stones ct) (content-pickups ct)
                             (carry-of (list-ref parts 6)))))
     (let loop ((w w) (n (num (list-ref parts 7))))
-      (if (= n 0) w (loop (cdr (world-take-news (world-tick w (in (- (num (list-ref parts 7)) n))))) (- n 1))))))
+      (if (= n 0)
+          (begin
+            (when hop-k (display "LOOK still ") (display (world-still w)) (newline))
+            ;; heardS: as if the Seventh's Rest moment had been heard S
+            ;; seconds (the harness plays no sound); otherwise none
+            (let ((s (and (> (string-length mode) 5) (string=? (substring mode 0 5) "heard")
+                          (string->number (substring mode 5 (string-length mode))))))
+              (set-look-sound! (and s "seventh-rest") #f #f s))
+            w)
+          (loop (cdr (world-take-news (world-tick w (input n)))) (- n 1))))))
 
 (define (selected) (string-trim (read-file-string CONTROL)))
 

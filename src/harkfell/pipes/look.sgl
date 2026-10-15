@@ -491,6 +491,19 @@
                  (slot-rect! 'h7 (+ x 18) (+ y 12) 28 1)
                  (slot-rect! 'h7 (+ x 18) (+ y 12) 1 9)
                  (slot-rect! 'h7 (+ x 45) (+ y 12) 1 9))
+                ;; Wrongwater's Seventh's Rest: the harmonic series as a
+                ;; string in 1..6 segments (the art), and the seventh, in
+                ;; seven, in H7's violet (the art's formula, row 21)
+                ((seventh)
+                 (paint-slot! (slot-of 'h7))
+                 (let along ((px 6))
+                   (when (<= px 57)
+                     (let* ((p (/ (* 7.0 (- px 6)) 51.0))
+                            (s (exact (floor p)))
+                            (d (exact (floor (+ 0.5 (sin (* 3.14159265 (- p s)))))))
+                            (d (if (odd? s) (- d) d)))
+                       (draw-filled-rect (+ x px) (+ y (- 21 d)) 1 1))
+                     (along (+ px 1)))))
                 (else #f)))))
         (room-things-of rm 'mural)))
 
@@ -632,7 +645,7 @@
                           (apply slot-rect! 'ground-3 (lip-shade span rect))
                           (apply slot-rect! 'ground-4 rect))
                         (span-lips span)))
-            (room-exit-spans rm))
+            (room-cue-spans rm))
           (paint-slot! (slot-of 'sky-4))
           (for-each (lambda (span) (pixels! (way-motes rm span t))) ways))
         (for-each
@@ -723,7 +736,7 @@
                           (paint-light! 0.25)
                           (apply draw-filled-rect (lip-shade span rect)))
                         (span-lips span)))
-            (room-exit-spans rm))
+            (room-cue-spans rm))
           (for-each (lambda (span) (draw-way-light! rm span t)) ways))
         (for-each
           (lambda (cell)
@@ -765,7 +778,11 @@
             (with-additive-blend
               (disc! x y 3 0.5)
               (disc! x (- base 29) 4 0.4))))
-        (room-upward-drops rm)))
+        ;; a drip over open air is a door drip ((harkfell wrongwater look)
+        ;; draws it, answering stillness)
+        (filter (lambda (cell)
+                  (memv (room-char rm (car cell) (+ (cdr cell) 1)) '(#\# #\% #\= #\o #\~)))
+                (room-upward-drops rm))))
 
     ;; A brief third-homecoming: three broad drifting curtains, drawn
     ;; with whole indexed pixels and a sparse fade instead of blended RGB.

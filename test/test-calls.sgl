@@ -79,3 +79,25 @@
   (test "the tell and the shatter each reach the director"
     (assert-true (member '("sound" "ice" "tell") SAID))
     (assert-true (member '("sound" "ice" "shatter") SAID))))
+
+(test-group "calls: the heart protocol is safe before sound-track integration"
+  (test "an explicit key list calls only with every listed key"
+    (let* ((stone (list (list '(2 5) 'shut EAST 100.0)))
+           (full (listen (pl '(2 5) '() stone) (call-id 2)))
+           (partial (listen (pl '(2) '() stone) (call-id 2))))
+      (assert-true (and (car full) (> (car full) 0.0)))
+      (assert-false (car partial))))
+  (test "all four keys call; partial carry has neither an H2 call nor hum"
+    (let* ((stone (list (list 'heart 'shut EAST 100.0)))
+           (full (listen (pl '(2 3 4 5) '() stone) (call-id 2)))
+           (partial (listen (pl '(2 4 5) '() stone) (call-id 2))))
+      (assert-true (and (car full) (> (car full) 0.0)))
+      (assert-false (car partial))
+      (assert-false (sound-voice-source "stone-hum"))))
+  (test "tagged news can be consumed without coercing heart to a number"
+    (sound-frame! 4.0 0.0
+      (place (pl '(2 3 4 5) '() '())
+             news: '((ring heart 500.0 100.0)
+                     (near-miss heart 500.0 100.0)
+                     (sink heart 500.0 100.0))))
+    (assert-false (sound-voice-source "stone-hum"))))

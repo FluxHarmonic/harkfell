@@ -48,6 +48,7 @@
           (harkfell check)
           (harkfell cloudstair reach)
           (harkfell cloudstair region)
+          (harkfell depths reach)
           (harkfell cloudstair timing)
           (harkfell cloudstair progression)
           (harkfell source)
@@ -441,6 +442,14 @@
                     (say (if (= failures 0) "PASS" "FAIL")
                          " Cloudstair authored timing: " (number->string failures)
                          " failures (regional/world reach NOT established)")
+                    (if (= failures 0) 0 1)))
+                ((arg-value args "--depths-region")
+                  (let* ((region (string->symbol (arg-value args "--depths-region")))
+                         (failures (depths-region-check ct region (depths-profiles region)
+                                     (lambda (record) (write record) (newline)))))
+                    (say (if (= failures 0) "PASS" "FAIL")
+                         " depths regional geometry: " (number->string failures)
+                         " failures (full-world acquisition NOT established)")
                     (if (= failures 0) 0 1)))
                 ;; --carry must be well formed and alone (not with --quick): a
                 ;; dropped token would silently check another profile.

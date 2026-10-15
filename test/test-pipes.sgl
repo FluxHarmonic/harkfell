@@ -7,6 +7,7 @@
         (harkfell content)
         (harkfell source)
         (harkfell cues)
+        (harkfell legend)
         (harkfell check)
         (harkfell feel)
         (harkfell gates)
@@ -39,6 +40,21 @@
                        (room-exits (content-room CT 3 4))))
     (assert-false (find (lambda (e) (eq? (car e) 'north))
                        (room-exits (content-room CT 4 6)))))
+  ;; Wrongwater's way out comes through Against the Drip's west wall on row
+  ;; 4, four rows over its floor: one way in, never a way out, so the tells
+  ;; (lips, light, the exit cue) must not advertise it. The control: the
+  ;; west opening is really there.
+  (test "Against the Drip's passage from Wrongwater is not advertised as an exit"
+    (let ((s (content-room CT 1 8)))
+      (assert-true (kind-open? (char-kind (room-char s 0 4))))
+      ;; Geometry includes the real seam; the visual projection hides it.
+      (assert-true (find (lambda (span) (eq? (car span) 'west))
+                         (room-exit-spans s)))
+      (assert-false (find (lambda (span) (eq? (car span) 'west))
+                          (room-cue-spans s)))
+      (assert-true (find (lambda (span) (eq? (car span) 'east))
+                         (room-cue-spans s)))
+      (assert-equal '(east) (map car (room-exits s)))))
   (test "only I and P have fixed static footprints"
     (assert-equal '((3 . 6) (4 . 7))
                   (map (lambda (rm) (cons (room-x rm) (room-y rm)))

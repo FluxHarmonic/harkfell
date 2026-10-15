@@ -1,0 +1,25 @@
+;; world/rooms/wrongwater/x0y9.room
+(room
+  region: wrongwater
+  at: (0 9)
+  title: "The Climb Back"
+  intent: "a rough shaft climbs from under the grove back up to the way out: a second way, and a small lake to look at on the way"
+  bed: (air 0.15 water 0.3 hang 0.35 drone 0.6)
+  light: 0.6
+  grid:
+  ("###%  %##################"
+   "###%  %#######~~~~~######"
+   "###%  %####   ~~~~~   ###"
+   "###%  %                ##"
+   "###%  %                ##"
+   "                       ##"
+   "                       ##"
+   "                       ##"
+   "#########################"
+   "#########################"
+   "#########################")
+  decor: auto)
+;; The shaft (4-5) has rough walls (3 and 6) from the top down to row 4, a
+;; held jump's grab over the floor (standing row 7), and climbs through the
+;; Way Out's floor. A small lake (14-18, rows 1-2) hangs out of reach: a
+;; picture. West to the Drowned Grove (rows 5-7).

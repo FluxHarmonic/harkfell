@@ -1,0 +1,26 @@
+;; M, the Last Step: the payoff. The stone's root ends here over the floor;
+;; the bearers' story runs along the back wall. The way back is the old air
+;; shaft (columns 22-23, steady ^, enclosed), entered at its foot (column
+;; 21, rows 8-9): it rises through J into I and only ever goes up.
+(room
+  region: underhum
+  at: (8 7)
+  title: "The Last Step"
+  intent: "the bottom of the cistern, where the stone's root ends and the bearers' story is cut into the wall"
+  bed: (hum 0.9 air 0.5 water 0)
+  light: 0.2
+  grid:
+  ("######################^^#"
+   "######################^^#"
+   "######################^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "#                    #^^#"
+   "                      ^^#"
+   "                      ^^#"
+   "#########################")
+  things: ((root at: (17 3))
+           (mural at: (2 6) image: bearers-story))
+  decor: none)
