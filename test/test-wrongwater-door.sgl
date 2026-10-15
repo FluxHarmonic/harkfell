@@ -59,6 +59,8 @@
            (later (run w NOTHING 120)))
       (assert-true (memq (stone-state (door w)) '(sinking open)))
       (assert-equal '(-2 7) (room-of later))))
+  ;; The outside check's exclusion of the Ice Well's (15,10) cites this test
+  ;; (cli.sgl, outside-drip-pit-keyed?): change it only with that key.
   (test "walking across the recess: into the pit, never into Wrongwater, and out again"
     (let loop ((w (in-well 13 9)) (n 0))
       (when (< n 120)

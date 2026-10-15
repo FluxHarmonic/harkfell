@@ -58,7 +58,8 @@
           (sigil gc))
 
   (export room-check-main reach-worker-main reach-bench-main arg-value
-          cloudstair-outside-rooms outside-timed-exclusions)
+          cloudstair-outside-rooms outside-timed-exclusions
+          outside-depths-view underhum-sealed-without-h5?)
 
   (begin
     (define (say . parts) (display (apply string-append parts)) (newline))
@@ -322,7 +323,9 @@
     ;; only carrying a harmonic picked up there (H5, in x12y-2), goes
     ;; unjudged: e.g. Hollow x4y3's H5 stone (21,6) and its pocket (20,6).
     ;; That pocket has a separate timed gate, with a named exclusion only
-    ;; in this temporary no-H5 view. The spatial search never models down,
+    ;; in this temporary no-H5 view. The Underhum, entered only through the
+    ;; H5-keyed heart, is checked the other way round: no cell of it may be
+    ;; reached (outside-depths-view). The spatial search never models down,
     ;; which every player entering Cloudstair has. Cloudstair itself is the
     ;; regional replay's.
     (define (outside-pocket-room? p)
@@ -431,11 +434,147 @@
                  p))
            rooms))
 
+    ;; T is exactly (KIND at: AT FIELD VALUE ...): FIELDS is ((name . value)
+    ;; ...), and T's length pins it to no other field.
+    (define (thing-exactly? t kind at fields)
+      (and (pair? t) (eq? (car t) kind)
+           (= (length t) (+ 3 (* 2 (length fields))))
+           (equal? (thing-at t) at)
+           (let loop ((fs fields))
+             (or (null? fs)
+                 (and (equal? (thing-kw t (caar fs)) (cdar fs))
+                      (loop (cdr fs)))))))
+
+    (define (room-at? p region x y)
+      (let ((rm (placed-data p)))
+        (and (eq? (room-region rm) region) (= (room-x rm) x) (= (room-y rm) y))))
+
+    ;; The Underhum in the no-H5 view. Its only way in is the bowl's south
+    ;; edge under the heart, Hollow x4y3's ring-stone at (12,9) (3ff5f97),
+    ;; keyed to the whole set (2 3 4 5) (8112ea9). The stone rule
+    ;; (stone-thing-open?) opens it only when every key is carried, and this
+    ;; view never carries H5, so here no Underhum cell may be reached. Every
+    ;; cell of every Underhum room is declared unreached: an unreached cell is
+    ;; then expected, and a reached one is a stale declaration, which
+    ;; (harkfell check) counts as a problem ("unreached: lists ..., which the
+    ;; start does reach"). That keeps the seal checked: a second, unkeyed way
+    ;; in that this search finds turns the check red, where removing the
+    ;; rooms (as Cloudstair's are) would hide it. The search never models
+    ;; down, so a way in only down opens is checked neither here nor by
+    ;; --depths-region underhum (whose isolate holds Hollow x4y3 alone). The
+    ;; guard below (underhum-sealed-without-h5?) fails the check before the
+    ;; search if the heart stops needing H5. The Underhum's own traversal and
+    ;; ways back, with H5 and with or without down, are --depths-region
+    ;; underhum's (gate-remote's depths modes).
+    (define (underhum-room? p) (eq? (room-region (placed-data p)) 'underhum))
+
+    (define ALL-ROOM-CELLS
+      (apply append
+        (map (lambda (r) (map (lambda (c) (cons c r)) (iota ROOM-COLS))) (iota ROOM-ROWS))))
+
+    ;; Hollow x4y3's ring-stones at (12,9): the heart, and any other stone on
+    ;; its cell (the cell opens if any of them does).
+    (define (underhum-hearts rooms)
+      (let ((p (find (lambda (p) (room-at? p 'hollow 4 3)) rooms)))
+        (if p
+            (filter (lambda (t) (equal? (thing-at t) '(12 . 9)))
+                    (room-things-of (placed-data p) 'ring-stone))
+            '())))
+
+    ;; The heart is there, and every stone on its cell is no stillness door
+    ;; (the checker opens those in every carry set) and has 5 among its keys,
+    ;; so the cell stays shut in every carry set without H5.
+    (define (underhum-sealed-without-h5? rooms)
+      (let ((hearts (underhum-hearts rooms)))
+        (and (pair? hearts)
+             (not (find (lambda (heart)
+                          (or (thing-kw heart "still")
+                              (not (memv 5 (stone-thing-keys heart)))))
+                        hearts)))))
+
+    ;; The Ice Well's (15,10), the one-cell pit over Wrongwater's drip door
+    ;; (630f507, 112ceb9). Its floor is Under the Well's (15,0), a stillness
+    ;; door (still: 5): shut until a body stands still by the drip for five
+    ;; seconds. The reach checker opens every still: stone in every carry set
+    ;; (stone-thing-open?), so its search falls through the pit into
+    ;; Wrongwater, never rests on (15,10), and calls the cell unreached. Yet
+    ;; the cell is reached and left: this search reaches the recess, (12,9)
+    ;; to (14,9) and (16,9), carrying H2 H3 H4 (the recess's blue door needs
+    ;; H4; exp-49), and test-wrongwater-door's "walking across the recess:
+    ;; into the pit, never into Wrongwater, and out again" walks a body
+    ;; carrying H2 H3 H4 from (13,9) into the pit, on the shut door, and out
+    ;; again, on the real world and physics, in every suite. So that one
+    ;; cell is declared unreached in the outside view, and only while the
+    ;; Ice Well's grid and things, Under the Well's top row and its door are
+    ;; exactly as below: any change to them revokes it, so (15,10) counts
+    ;; again until the key is renewed against a passing test-wrongwater-door
+    ;; (that test names this exclusion). Every other Ice Well cell, and every
+    ;; trap and stale declaration there, counts.
+    (define ICE-WELL-AT-DOOR-TEST
+      '("########~~~##############"
+        "########~~~##############"
+        "########~~~##############"
+        "####    ~~~##############"
+        "####    ~~~##############"
+        "########~~~##############"
+        "########~~~##############"
+        "########~~~##############"
+        "########~~~##############"
+        "#######  ~~o     ########"
+        "############### #########"))
+    (define UNDER-THE-WELL-TOP-ROW "###############o#########")
+
+    (define (outside-drip-pit-keyed? rooms)
+      (let ((well (find (lambda (p) (room-at? p 'glasswood -2 6)) rooms))
+            (under (find (lambda (p) (room-at? p 'wrongwater -2 7)) rooms)))
+        (and well under
+             (let ((things (room-things (placed-data well)))
+                   (urm (placed-data under)))
+               (and (equal? (room-grid (placed-data well)) ICE-WELL-AT-DOOR-TEST)
+                    (= (length things) 3)
+                    (find (lambda (t) (thing-exactly? t 'ring-stone '(11 . 9) '(("overtone" . 4)))) things)
+                    (find (lambda (t) (thing-exactly? t 'upward-drip '(15 . 9) '())) things)
+                    (find (lambda (t) (thing-exactly? t 'lantern-moth '(6 . 3) '(("count" . 3) ("drawn" . 3))))
+                          things)
+                    (pair? (room-grid urm))
+                    (equal? (car (room-grid urm)) UNDER-THE-WELL-TOP-ROW)
+                    (find (lambda (t)
+                            (thing-exactly? t 'ring-stone '(15 . 0)
+                              '(("overtone" . 7) ("still" . 5) ("radius" . 2)
+                                ("listen" . (glasswood -2 6 15 9)))))
+                          (room-things urm))
+                    #t)))))
+
+    ;; The no-H5 outside view's Depths rules (above): every Underhum cell
+    ;; declared, and the Ice Well's (15,10) while it is keyed. Authored
+    ;; declarations are kept.
+    (define (outside-depths-view rooms)
+      (let ((pit (outside-drip-pit-keyed? rooms)))
+        (map (lambda (p)
+               (let* ((rm (placed-data p))
+                      (declared (room-unreached rm)))
+                 (cond ((underhum-room? p)
+                        (placed p data:
+                          (room rm unreached:
+                            (append declared
+                                    (filter (lambda (c) (not (member c declared))) ALL-ROOM-CELLS)))))
+                       ((and pit (room-at? p 'glasswood -2 6))
+                        (placed p data:
+                          (room rm unreached:
+                            (if (member '(15 . 10) declared)
+                                declared
+                                (cons '(15 . 10) declared)))))
+                       (else p))))
+             rooms)))
+
     (define (outside-cloudstair-check ct args keys t0)
       (let* ((wm (content-map ct))
-             (outside (outside-timed-exclusions (cloudstair-outside-rooms ct '())))
+             (outside (outside-depths-view
+                        (outside-timed-exclusions (cloudstair-outside-rooms ct '()))))
              (pocket-room (find outside-pocket-room? outside))
              (ledge-room (find outside-lift-ledge-room? outside))
+             (underhum (filter underhum-room? outside))
+             (pit-keyed (outside-drip-pit-keyed? outside))
              (ct* (content ct rooms: outside
                            wmap: (make-worldmap outside (worldmap-cols wm) (worldmap-rows wm)
                                                 (worldmap-size wm)))))
@@ -454,6 +593,10 @@
               ((find air-field-pulsed (tilemap-air (worldmap-tiles (content-map ct*))))
                (say "FAIL room-check outside Cloudstair: a pulsed air field outside Cloudstair, which the spatial check cannot prove")
                1)
+              ((and (pair? underhum) (not (underhum-sealed-without-h5? outside)))
+               (say "FAIL room-check outside Cloudstair: the Underhum's heart, hollow:4,3 (12,9), is missing, "
+                    "a stillness door or opens without H5, so this no-H5 view cannot hold the Underhum sealed")
+               1)
               (else
                (spatial-room-check ct* args keys t0
                  (string-append
@@ -463,6 +606,16 @@
                        "")
                    (if ledge-room
                        " [excluded: hollow:7,2 (7,1), lift ledge: reached carrying (2 4) with down by diagnostic timed search exp-31 (3471ab9), not re-gated, void if x7y2 changes]"
+                       "")
+                   (if (pair? underhum)
+                       (string-append
+                         " [Underhum: " (number->string (length underhum))
+                         " rooms sealed without H5 by the heart, hollow:4,3 (12,9), keys ("
+                         (string-join (map number->string (stone-thing-keys (car (underhum-hearts outside)))) " ")
+                         "); a reached Underhum cell fails; traversal is --depths-region underhum's]")
+                       "")
+                   (if pit-keyed
+                       " [excluded: glasswood:-2,6 (15,10), drip pit: its floor is a stillness door the checker opens; reached and left in test-wrongwater-door, void if the Ice Well or the door changes]"
                        "")))))))
 
     (define (room-check-main args)

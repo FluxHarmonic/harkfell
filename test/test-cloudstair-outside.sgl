@@ -149,3 +149,145 @@
     (assert-equal '() (ledge-unreached-with 'ring-stone '(ring-stone at: (6 3) overtone: 3))))
   (test "an extra field on the stone (keys:) revokes the exception"
     (assert-equal '() (ledge-unreached-with 'ring-stone '(ring-stone at: (6 3) overtone: 4 keys: (4))))))
+
+;; The no-H5 outside view, with the Depths rules applied.
+(define (depths-view source)
+  (outside-depths-view (outside-timed-exclusions (cloudstair-outside-rooms source '()))))
+
+(define (source-replacing old new)
+  (content SOURCE rooms:
+    (map (lambda (p) (if (eq? p old) new p)) (content-rooms SOURCE))))
+
+(define (heart? t)
+  (and (eq? (car t) 'ring-stone) (equal? (thing-at t) '(12 . 9))))
+
+;; The world's rooms with the bowl's heart replaced by NEW (#f: removed).
+(define (rooms-with-heart new)
+  (let* ((rm (placed-data BOWL))
+         (things (if new
+                     (map (lambda (t) (if (heart? t) new t)) (room-things rm))
+                     (filter (lambda (t) (not (heart? t))) (room-things rm)))))
+    (assert-false (equal? things (room-things rm)))
+    (content-rooms (source-with-bowl (placed BOWL data: (room rm things: things))))))
+
+(define WELL (source-placement -2 6))
+(define UNDER (source-placement -2 7))
+
+(define (well-unreached-in source)
+  (let ((well (find (lambda (p) (and (= (placed-x p) -2) (= (placed-y p) 6))) (depths-view source))))
+    (room-unreached (placed-data well))))
+
+;; The Ice Well's declaration with the room at OLD's place given DATA.
+(define (well-unreached-with old data)
+  (well-unreached-in (source-replacing old (placed old data: data))))
+
+;; The same with OLD's one thing of KIND replaced by NEW (as many things).
+(define (well-unreached-with-thing old kind new)
+  (let* ((rm (placed-data old))
+         (things (map (lambda (t) (if (eq? (car t) kind) new t)) (room-things rm))))
+    (assert-equal (length (room-things rm)) (length things))
+    (assert-equal 1 (length (filter (lambda (t) (eq? (car t) kind)) (room-things rm))))
+    (assert-true (member new things))
+    (assert-false (member new (room-things rm)))
+    (well-unreached-with old (room rm things: things))))
+
+(test-group "outside Cloudstair: the Depths in the no-H5 view"
+  (test "every Underhum cell is declared, the Ice Well gains (15,10), and every other room is as it was"
+    (let* ((rooms (outside-timed-exclusions (cloudstair-outside-rooms SOURCE '())))
+           (out (outside-depths-view rooms))
+           (underhum 0)
+           (added '()))
+      (assert-equal (length rooms) (length out))
+      (for-each
+        (lambda (before after)
+          (let ((old (placed-data before)) (rm (placed-data after)))
+            (assert-eq (placed-tiles before) (placed-tiles after))
+            (for-each (lambda (cell) (assert-true (member cell (room-unreached rm))))
+                      (room-unreached old))
+            (cond ((eq? (room-region rm) 'underhum)
+                   (set! underhum (+ underhum 1))
+                   ;; every cell of the 25 x 11 grid, once
+                   (assert-equal 275 (length (room-unreached rm)))
+                   (assert-true (member '(0 . 0) (room-unreached rm)))
+                   (assert-true (member '(24 . 10) (room-unreached rm))))
+                  (else
+                   (for-each (lambda (cell)
+                               (unless (member cell (room-unreached old))
+                                 (set! added (cons (list (room-region rm) (room-x rm) (room-y rm) cell) added))))
+                             (room-unreached rm))
+                   (unless (eq? before WELL)
+                     (assert-eq before after))))))
+        rooms out)
+      (assert-equal 13 underhum)
+      (assert-equal '((glasswood -2 6 (15 . 10))) added)
+      (assert-equal '() (room-unreached (placed-data WELL)))))
+  (test "the heart as authored seals the Underhum without H5"
+    (assert-true (underhum-sealed-without-h5? (content-rooms SOURCE))))
+  (test "a heart keyed without 5 breaks the seal"
+    (assert-false (underhum-sealed-without-h5?
+                    (rooms-with-heart '(ring-stone at: (12 9) overtone: 2 keys: (2 3 4))))))
+  ;; (its key is 5, so only the still: check can refuse it)
+  (test "a heart that is a stillness door breaks the seal"
+    (assert-false (underhum-sealed-without-h5?
+                    (rooms-with-heart '(ring-stone at: (12 9) overtone: 5 still: 5)))))
+  (test "a missing heart breaks the seal"
+    (assert-false (underhum-sealed-without-h5? (rooms-with-heart #f))))
+  (test "a heart keyed (5) alone still seals"
+    (assert-true (underhum-sealed-without-h5?
+                   (rooms-with-heart '(ring-stone at: (12 9) overtone: 5)))))
+  (test "a second, unkeyed stone on the heart's cell breaks the seal"
+    (let ((rm (placed-data BOWL)))
+      (assert-false (underhum-sealed-without-h5?
+                      (content-rooms
+                        (source-with-bowl
+                          (placed BOWL data:
+                            (room rm things: (cons '(ring-stone at: (12 9) overtone: 2) (room-things rm))))))))))
+  (test "an authored Ice Well declaration is kept, and gains (15,10)"
+    (assert-equal '((15 . 10) (3 . 2))
+                  (well-unreached-with WELL (room (placed-data WELL) unreached: '((3 . 2))))))
+  (test "an authored Ice Well declaration of (15,10) lists it once"
+    (assert-equal '((15 . 10) (3 . 2))
+                  (well-unreached-with WELL (room (placed-data WELL) unreached: '((15 . 10) (3 . 2))))))
+  (test "any edit to the Ice Well's grid revokes (15,10)"
+    (let* ((rm (placed-data WELL))
+           (grid (map (lambda (row) (if (equal? row "####    ~~~##############") "#####   ~~~##############" row))
+                      (room-grid rm))))
+      (assert-false (equal? grid (room-grid rm)))
+      (assert-equal '() (well-unreached-with WELL (room rm grid: grid)))))
+  ;; Each of these changes one field of one thing and keeps the count.
+  (test "a different blue door (overtone 3) revokes (15,10)"
+    (assert-equal '() (well-unreached-with-thing WELL 'ring-stone '(ring-stone at: (11 9) overtone: 3))))
+  (test "a moved drip revokes (15,10)"
+    (assert-equal '() (well-unreached-with-thing WELL 'upward-drip '(upward-drip at: (16 9)))))
+  (test "a different moth count revokes (15,10)"
+    (assert-equal '() (well-unreached-with-thing WELL 'lantern-moth '(lantern-moth at: (6 3) count: 4 drawn: 3))))
+  (test "an extra thing in the Ice Well revokes (15,10)"
+    (let ((rm (placed-data WELL)))
+      (assert-equal '()
+        (well-unreached-with WELL (room rm things: (cons '(firefly at: (5 3) count: 3 drawn: 2) (room-things rm)))))))
+  (test "a drip door with another stillness time revokes (15,10)"
+    (assert-equal '()
+      (well-unreached-with-thing UNDER 'ring-stone
+        '(ring-stone at: (15 0) overtone: 7 still: 4 radius: 2 listen: (glasswood -2 6 15 9)))))
+  (test "a drip door with another overtone revokes (15,10)"
+    (assert-equal '()
+      (well-unreached-with-thing UNDER 'ring-stone
+        '(ring-stone at: (15 0) overtone: 6 still: 5 radius: 2 listen: (glasswood -2 6 15 9)))))
+  (test "a drip door with another radius revokes (15,10)"
+    (assert-equal '()
+      (well-unreached-with-thing UNDER 'ring-stone
+        '(ring-stone at: (15 0) overtone: 7 still: 5 radius: 3 listen: (glasswood -2 6 15 9)))))
+  (test "a drip door listening elsewhere revokes (15,10)"
+    (assert-equal '()
+      (well-unreached-with-thing UNDER 'ring-stone
+        '(ring-stone at: (15 0) overtone: 7 still: 5 radius: 2 listen: (glasswood -2 6 14 9)))))
+  (test "without the drip door the Ice Well receives no exception"
+    (let ((rm (placed-data UNDER)))
+      (assert-equal '()
+        (well-unreached-with UNDER
+          (room rm things: (filter (lambda (t) (not (eq? (car t) 'ring-stone))) (room-things rm)))))))
+  (test "an edit to Under the Well's top row revokes (15,10)"
+    (let* ((rm (placed-data UNDER))
+           (grid (cons "############## o#########" (cdr (room-grid rm)))))
+      (assert-false (equal? grid (room-grid rm)))
+      (assert-equal '() (well-unreached-with UNDER (room rm grid: grid))))))
