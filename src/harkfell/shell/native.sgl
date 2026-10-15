@@ -194,7 +194,12 @@
               (shell-present! (frame-width) (frame-height) ticks)
               (set! *work-ms* (- (now-ms) w0)))
             (shell-playtest-after-frame! (frame-width) (frame-height))
-            (unless (quit-requested?) (frame (+ n 1))))))))
+            ;; run-game destroys the GL context after this thunk returns.
+            ;; Release its GPU resources while that context is still current,
+            ;; before foreign-object finalizers run during VM teardown.
+            (if (quit-requested?)
+                (gfx-shutdown)
+                (frame (+ n 1))))))))
 
     (define *work-ms* 0.0)     ; A2: the last frame's work (the bench reads it)
 

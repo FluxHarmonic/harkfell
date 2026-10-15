@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Exercise the native release in Ubuntu 24.04 with private Xvfb and null audio.
+# Run on a build host: scripts/gate-native-quit [RELEASE-BINARY] [OUTPUT-DIR]
+# The executable is copied and made portable; the build is never modified.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+binary=${1:-build/release/bin/harkfell}
+out=${2:-build/native-quit}
+image=${NATIVE_QUIT_IMAGE:-harkfell-native-quit:ubuntu-24.04}
+mkdir -p "$out"
+out=$(realpath "$out")
+for tool in docker patchelf; do
+  command -v "$tool" >/dev/null || { echo "SETUP-FAILED: missing $tool"; exit 125; }
+done
+[ -x "$binary" ] || { echo "SETUP-FAILED: missing $binary"; exit 125; }
+[ -d build/release/assets ] || { echo 'SETUP-FAILED: missing release assets'; exit 125; }
+
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+  docker build -t "$image" - > "$out/image.log" 2>&1 <<'DOCKER'
+FROM ubuntu:24.04
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    libgl1 libegl1 libgles2 libgl1-mesa-dri libglx-mesa0 libegl-mesa0 \
+    libwayland-client0 libwayland-egl1 \
+    libwayland-cursor0 libxkbcommon0 libx11-6 libx11-xcb1 libxcursor1 libxrandr2 \
+    libxi6 libxinerama1 libxext6 libasound2t64 libasound2-plugins libpulse0 \
+    pulseaudio xvfb xdotool x11-utils coreutils && rm -rf /var/lib/apt/lists/*
+DOCKER
+fi
+scratch=$(mktemp -d /tmp/harkfell-native-quit.XXXXXX)
+trap 'rm -rf "$scratch"' EXIT
+mkdir -p "$scratch/game"
+cp "$binary" "$scratch/game/harkfell"
+cp -aL build/release/assets world "$scratch/game/"
+patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 "$scratch/game/harkfell"
+sha256sum "$binary" "$scratch/game/harkfell" > "$out/binaries.sha256"
+docker image inspect --format '{{.Id}}' "$image" > "$out/image-id"
+
+# No host display, audio socket, GPU, save directory, or network is exposed.
+set +e
+docker run --rm --init --network none --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp/home -e XDG_RUNTIME_DIR=/tmp/runtime \
+  -e XDG_DATA_HOME=/tmp/data -e DISPLAY=:91 \
+  -e PULSE_SERVER=unix:/tmp/pulse.sock -e PULSE_SINK=worker-null \
+  -e LIBGL_ALWAYS_SOFTWARE=1 \
+  -v "$scratch/game:/game:ro" -v "$out:/evidence" -w /game \
+  "$image" bash -s > "$out/container.log" 2>&1 <<'CONTAINER'
+set -euo pipefail
+mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME"
+chmod 700 "$XDG_RUNTIME_DIR"
+Xvfb :91 -screen 0 1700x900x24 +extension GLX -nolisten tcp > /evidence/xvfb.log 2>&1 &
+xvfb_pid=$!
+pulseaudio -n --daemonize=no --exit-idle-time=-1 \
+  --load='module-native-protocol-unix socket=/tmp/pulse.sock auth-anonymous=1' \
+  --load='module-null-sink sink_name=worker-null' > /evidence/pulse.log 2>&1 &
+pulse_pid=$!
+trap 'kill "$xvfb_pid" "$pulse_pid" 2>/dev/null || true' EXIT
+for n in $(seq 1 100); do
+  [ -S /tmp/.X11-unix/X91 ] && [ -S /tmp/pulse.sock ] && break
+  sleep 0.1
+done
+[ -S /tmp/.X11-unix/X91 ] && [ -S /tmp/pulse.sock ] || exit 125
+
+# Include title textures, offscreen targets, and streaming audio before quitting.
+timeout 120 ./harkfell > /evidence/game.log 2>&1 &
+game_pid=$!
+window=''
+for n in $(seq 1 200); do
+  window=$(xdotool search --name '^Harkfell$' 2>/dev/null | head -1 || true)
+  [ -n "$window" ] && break
+  kill -0 "$game_pid" 2>/dev/null || break
+  sleep 0.25
+done
+if [ -z "$window" ]; then
+  wait "$game_pid" || true
+  echo 'SETUP-FAILED: game never opened a window'
+  exit 125
+fi
+sleep 8
+kill -0 "$game_pid" || { echo 'FAIL: game exited before Escape'; exit 1; }
+xwininfo -id "$window" > /evidence/window.txt
+xdotool keydown --window "$window" Escape
+set +e
+wait "$game_pid"
+rc=$?
+set -e
+echo "$rc" > /evidence/exit-code
+if [ "$rc" != 0 ]; then
+  echo "FAIL: Escape-to-quit exited $rc (expected 0)"
+  exit 1
+fi
+grep -q 'harkfell: audio .* running' /evidence/game.log || {
+  echo 'SETUP-FAILED: running audio was not confirmed'
+  exit 125
+}
+echo 'PASS: Ubuntu 24.04 native Escape-to-quit exits 0 with running null audio'
+CONTAINER
+rc=$?
+set -e
+cat "$out/container.log"
+echo "RESULT native-quit rc=$rc"
+exit "$rc"
