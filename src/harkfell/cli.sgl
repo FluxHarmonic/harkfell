@@ -369,16 +369,20 @@
     ;; `--cloudstair-region --waypoints 32,45` (region cell (32,45) is x7y2's
     ;; (7,1)), from home (29,47) carrying (2 4) with down, arrived at tau 166,
     ;; bound not hit. That run was diagnostic (it prints no verdict) and
-    ;; nothing re-runs it. Since 3471ab9 the world has changed only in x4y3
-    ;; (its (20,6) unreached declaration and comments) and BIBLE.md. So that
-    ;; one cell, and no other, is declared unreached in the outside view, for
-    ;; every carry set, and only while x7y2 is exactly as exp-31 ran it (the
-    ;; grid below, the blue ring-stone at (6,3) and the steady lift at (8,0),
-    ;; nothing else): any edit to the room revokes it, so (7,1) counts again
-    ;; until a new timed run is cited. Every other x7y2 cell, and every trap,
-    ;; water trap and stale declaration there, counts as in any room. If the
-    ;; spatial search reaches (7,1), the declaration is stale and the check
-    ;; FAILs on it.
+    ;; nothing re-runs it. What it ran on is the region search's rooms (the
+    ;; Cloudstair rooms and Hollow x6y2, x7y2, x7y3), the physics (feel.sgl,
+    ;; body.sgl, air.sgl, collide.sgl) and the rule that opens x7y2's stone
+    ;; (it has no keys: or still:, so its overtone): none of these differs
+    ;; from 3471ab9 at bc1e136 or on master 62548c1. So that one cell, and no
+    ;; other, is declared unreached in the outside view, for every carry set,
+    ;; and only while x7y2's grid and things are exactly as exp-31 ran them
+    ;; (the grid below; the ring-stone at (6,3), overtone 4, and the steady
+    ;; lift at (8,0), size (3 8), each with no other field; nothing else): any
+    ;; change to them revokes it, so (7,1) counts again until a new timed run
+    ;; is cited. The key is x7y2 alone: an edit to x6y2, x7y3, a Cloudstair
+    ;; room or the physics does not revoke it, so such an edit must re-run the
+    ;; timed check or drop this exclusion. Every other x7y2 cell, and every
+    ;; trap, water trap and stale declaration there, counts as in any room.
     (define X7Y2-AT-EXP-31
       '("########^^^##############"
         "      # ^^^             #"
@@ -398,13 +402,15 @@
              (= (room-x rm) 7) (= (room-y rm) 2)
              (equal? (room-grid rm) X7Y2-AT-EXP-31)
              (= (length things) 2)
+             ;; each thing's length pins its fields to exactly these
+             ;; (no keys:, still: or other field beside them)
              (find (lambda (t)
-                     (and (eq? (car t) 'ring-stone)
+                     (and (eq? (car t) 'ring-stone) (= (length t) 5)
                           (equal? (thing-at t) '(6 . 3))
                           (equal? (thing-kw t "overtone") 4)))
                    things)
              (find (lambda (t)
-                     (and (eq? (car t) 'air-field)
+                     (and (eq? (car t) 'air-field) (= (length t) 7)
                           (equal? (thing-at t) '(8 . 0))
                           (equal? (thing-kw t "size") '(3 8))
                           (eq? (thing-kw t "kind") 'steady-lift)))

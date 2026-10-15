@@ -74,6 +74,18 @@
   (content SOURCE rooms:
     (map (lambda (old) (if (eq? old LEDGE) p old)) (content-rooms SOURCE))))
 
+;; x7y2's unreached declaration in the outside view after the timed
+;; exclusions, with its one KIND thing replaced by NEW (two things still).
+(define (ledge-unreached-with kind new)
+  (let* ((rm (placed-data LEDGE))
+         (things (map (lambda (t) (if (eq? (car t) kind) new t)) (room-things rm)))
+         (p (placed LEDGE data: (room rm things: things)))
+         (out (outside-timed-exclusions (cloudstair-outside-rooms (source-with-ledge p) '())))
+         (ledge (find (lambda (p) (and (= (placed-x p) 7) (= (placed-y p) 2))) out)))
+    (assert-equal 2 (length things))
+    (assert-true (member new things))
+    (room-unreached (placed-data ledge))))
+
 (test-group "outside Cloudstair: x7y2's lift ledge (7,1), reached by timed exp-31"
   (test "the timed exclusions add exactly x7y2's (7,1) and leave every other room as it was"
     (let* ((rooms (cloudstair-outside-rooms SOURCE '(2 3 4)))
@@ -128,4 +140,11 @@
                 (room rm things: (cons '(firefly at: (15 5) count: 3 drawn: 2) (room-things rm)))))
            (out (outside-timed-exclusions (cloudstair-outside-rooms (source-with-ledge p) '())))
            (ledge (find (lambda (p) (and (= (placed-x p) 7) (= (placed-y p) 2))) out)))
-      (assert-equal '() (room-unreached (placed-data ledge))))))
+      (assert-equal '() (room-unreached (placed-data ledge)))))
+  ;; Each of these keeps exactly two things and changes one field of one.
+  (test "a different lift (size (3 7)) revokes the exception"
+    (assert-equal '() (ledge-unreached-with 'air-field '(air-field at: (8 0) size: (3 7) kind: steady-lift))))
+  (test "a different stone (overtone 3) revokes the exception"
+    (assert-equal '() (ledge-unreached-with 'ring-stone '(ring-stone at: (6 3) overtone: 3))))
+  (test "an extra field on the stone (keys:) revokes the exception"
+    (assert-equal '() (ledge-unreached-with 'ring-stone '(ring-stone at: (6 3) overtone: 4 keys: (4))))))
