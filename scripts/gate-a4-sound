@@ -371,8 +371,8 @@ plant creak-waits "$S" \
   "(memq (cadr item) '(tell))" \
   "$GT" "thin ice's creak sounds under it"
 plant glass-tagless "$S" \
-  "                          (\"glaze-wind\" . open-sky) (\"under-ice\" . water)))" \
-  "                          ))" \
+  "                          (\"glaze-wind\" . open-sky) (\"under-ice\" . water)" \
+  "" \
   "$GT" "every region's wandering moment has a tag (Glasswood names two)"
 # tails-cut: a cue cut at the bank's 6 s limit while still ringing is kept as it is
 passes test/test-cue-tails.sgl "every cue's last 20 ms are at least 40 dB under its peak"
