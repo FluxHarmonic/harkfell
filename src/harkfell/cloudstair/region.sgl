@@ -6,7 +6,8 @@
           (engine body) (engine air) (engine tilemap) (engine worldmap)
           (engine reach) (engine reach timed) (engine reach routes) (engine reach prof)
           (engine reach geopool) (engine reach wire)
-          (only (engine reach pool) pool-verify! pool-submit! pool-drain-until! pool-drain! pool-size)
+          (only (engine reach pool) pool-verify! pool-submit! pool-drain-until! pool-drain! pool-size
+                pool-cancel-queued!)
           (harkfell content) (harkfell check) (harkfell feel)
           (harkfell cloudstair reach) (harkfell cloudstair routes))
 
@@ -163,8 +164,9 @@
                   reached))))))
 
     ;; A hash of what a check is built from (tiles with every stone shut and
-    ;; every stone open, air fields, start, pickups, rooms): a pool worker must
-    ;; report the same one as the check before any of its answers is used.
+    ;; every stone open, air fields, start, pickups, rooms) and of its mode
+    ;; (cell returns or not): a pool worker must report the same one as the
+    ;; check before any of its answers is used.
     (define (cloudstair-fingerprint ct)
       (let ((shut (tiles-carrying ct (quote ()))) (open (tiles-carrying ct (quote (2 3 4 5)))))
         (number->string
@@ -177,7 +179,8 @@
                                                (air-field-gate f)))
                              (tilemap-air shut))
                         (start-cell ct) (content-pickup-cells ct) (content-stone-cells ct)
-                        (length (content-rooms ct))))))))
+                        (length (content-rooms ct))
+                        (if CELL-RETURNS 1 0)))))))
 
     ;; The spatial guide's tilemap: every stone open, pulsed lifts steady
     ;; (candidates only; every accepted route is replayed on actual fields).
@@ -404,7 +407,8 @@
         ;; checked at its exact key (a failure ends this worker, an error in
         ;; the check).
         (define (proven-return? node target)
-          (and RETURN-MEMO (equal? target home) (still? node)
+          ;; (never in cell mode: its searches are independent of each other)
+          (and RETURN-MEMO (not CELL-RETURNS) (equal? target home) (still? node)
                (let ((hit (if (dict-contains? proven (return-memo-key node))
                               node
                               (let ((rest (align node)))
@@ -676,7 +680,9 @@
                    (let ((rest (align node 0)))
                      (and rest (dict-contains? return-proven (memo-key rest)) rest)))))
         (define (proven-return? node target)
-          (and RETURN-MEMO (equal? target home)
+          ;; (never in cell mode: its searches are independent of each other,
+          ;; so its pass is one batch on the pool, see parallel-pass!)
+          (and RETURN-MEMO (not CELL-RETURNS) (equal? target home)
                (let ((hit (proven-key node)))
                  (and hit
                       (begin
@@ -717,7 +723,7 @@
                    (entry-fails 0) (unreached '()) (traps '())
                    (landings #{}) (rotations #{}) (landing-count 0) (complete (and root #t))
                    (covered #{}) (cell-done #{}) (cell-skips 0)
-                   (target-count 0))
+                   (target-count 0) (cap-logged #f))
               (define (record! node)
                 (prof-inc! 'record-call)
                 (prof-time 'time-record (lambda () (record*! node))))
@@ -743,6 +749,20 @@
                            'carry carry 'down down 'cell (cell-of node)
                            'tau (body-tau (timed-node-body node)) 'data (timed-node-data node)
                            'exhausted exhausted)))
+              ;; The landing bound (--landing-cap, the override knob, or the
+              ;; search bound) is reached: the profile stops where it is and is
+              ;; incomplete, named once on its own RED line. Checked before each
+              ;; target, between drain passes, and after each merged return.
+              (define (cap-reached!)
+                (unless cap-logged
+                  (set! cap-logged #t)
+                  (log (list 'RED 'landing-cap-reached 'carry carry 'down down
+                             'landings landing-count 'cap landing-bound
+                             'from (cond (LANDING-BOUND-OVERRIDE 'landing-bound-override)
+                                         (LANDING-CAP 'landing-cap)
+                                         (else 'search-bound))
+                             'targets target-count 'checked n-checked)))
+                (set! complete #f))
               ;; record*! with the two values a drain worker computed for node
               ;; (its shelter answer and its aligned rest): the same effect.
               (define (apply-record! node shelter rest-aligned)
@@ -764,12 +784,17 @@
               ;; worker. A search never reads the landings it records, so
               ;; merging after the round equals recording during it, and no
               ;; result depends on timing. Returns when the pass is done.
+              ;; Cell returns: the return memo is off (proven-return? is #f in
+              ;; cell mode, and no proven keys are sent), so every search is
+              ;; independent of every other: a pass is ONE batch, all of it on
+              ;; the pool at once, merged in selection order as each answer and
+              ;; all before it are in. No round waits for its slowest search.
               (define (parallel-pass! pending checked-add!)
                 ;; the round's searches run on the pool's workers, or ("local") on a
                 ;; drain server in this process: the same code, for checking
                 (let* ((p (and (not (equal? PARALLEL-DRAIN-MODE "local")) (car pool)))
                        (local (and (not p) (local-drain-server)))
-                       (r DRAIN-ROUND))
+                       (r (if CELL-RETURNS (max 1 (length pending)) DRAIN-ROUND)))
                   (let round ((ps pending))
                     (when (and complete DRAIN-ROUNDS-LIMIT (>= drain-rounds DRAIN-ROUNDS-LIMIT))
                       ;; diagnostic: the drain stops here, so the run is incomplete
@@ -780,24 +805,53 @@
                       (let* ((batch (let take ((xs ps) (n r) (acc '()))
                                       (if (or (null? xs) (= n 0)) (reverse acc)
                                           (take (cdr xs) (- n 1) (cons (car xs) acc)))))
-                             (answers (make-vector (length batch) #f)))
+                             (answers (make-vector (length batch) #f))
+                             ;; this batch's continuations: an early stop cancels
+                             ;; only these (other requests, e.g. a finder's guesses,
+                             ;; may also be queued)
+                             (batch-ks '()))
                         (let submit ((es batch) (i 0))
                           (when (pair? es)
                             (let ((slot i)
                                   (line (wire-join (append (list "D" (number->string bound))
                                                            (wire-node (cdr (car es)))))))
                               (if p
-                                  (pool-submit! p line (lambda (answer) (vector-set! answers slot answer)))
+                                  (let ((k (lambda (answer) (vector-set! answers slot answer))))
+                                    (set! batch-ks (cons k batch-ks))
+                                    (pool-submit! p line k))
                                   (vector-set! answers slot (local line))))
                             (submit (cdr es) (+ i 1))))
-                        (when p
-                          (pool-drain-until! p (lambda () (let all ((i 0)) (or (= i (vector-length answers))
-                                                                              (and (vector-ref answers i) (all (+ i 1))))))))
                         (let merge ((es batch) (i 0) (fresh '()))
                           (cond
                             ((or (null? es) (not complete))
-                             ;; the round's proven keys, to every worker before the next round
-                             (when (pair? fresh)
+                             ;; At the end of the batch every answer is merged. After an
+                             ;; early stop (landing cap, a bounded search, the rounds
+                             ;; limit) the batch's unstarted searches are cancelled, and
+                             ;; the pool is drained (an early stop must not close it with
+                             ;; requests in flight): the batch's searches in flight, and
+                             ;; any other caller's queued requests, such as a route
+                             ;; finder's guesses, still run; the batch's answers are not
+                             ;; merged.
+                             (when (and p (not complete))
+                               (let ((cancelled (pool-cancel-queued! p (lambda (line k) (memq k batch-ks)))))
+                                 (pool-drain! p)
+                                 ;; every slot from i on is now an answer that arrived
+                                 ;; and is not merged, or a cancelled search (#f)
+                                 (let slots ((j i) (arrived 0) (never 0))
+                                   (if (< j (vector-length answers))
+                                       (if (vector-ref answers j)
+                                           (slots (+ j 1) (+ arrived 1) never)
+                                           (slots (+ j 1) arrived (+ never 1)))
+                                       (begin
+                                         (unless (= never cancelled)
+                                           (error "drain stop: a batch search neither answered nor cancelled"
+                                                  never cancelled))
+                                         (log (list (quote drain-stopped) (quote merged) i
+                                                    (quote arrived-unmerged) arrived
+                                                    (quote cancelled) cancelled)))))))
+                             ;; the round's proven keys, to every worker before the next
+                             ;; round (none in cell mode: its memo is off)
+                             (when (and (pair? fresh) (not CELL-RETURNS))
                                (let ((line (wire-join (append (list "Q" (number->string (length fresh)))
                                                               (apply append (map wire-value (reverse fresh)))))))
                                  (if p
@@ -810,8 +864,13 @@
                                      (local line))))
                              (round (let skip ((xs ps) (n (length batch))) (if (= n 0) xs (skip (cdr xs) (- n 1))))))
                             (else
+                             ;; merge in order: wait for this answer (those before it are in)
+                             (when p (pool-drain-until! p (lambda () (vector-ref answers i))))
                              (let* ((entry (car es))
-                                    (toks (wire-tokens (vector-ref answers i)))
+                                    (toks (let ((ts (wire-tokens (vector-ref answers i))))
+                                            ;; merged: the answer's text is freed
+                                            (vector-set! answers i #t)
+                                            ts))
                                     (found (string=? (list-ref toks 1) "T"))
                                     (at-home (string=? (list-ref toks 2) "T"))
                                     (incomplete (string=? (list-ref toks 3) "T"))
@@ -855,6 +914,9 @@
                                    (when CELL-RETURNS
                                      (log (list (quote region-cells) (quote groups) (length (dict-keys cell-done))
                                                 (quote skipped) cell-skips))))
+                                 ;; the cap, after each merged answer: the batch stops here
+                                 (when (and complete (>= landing-count landing-bound))
+                                   (cap-reached!))
                                  (merge (cdr es) (+ i 1) fresh)))))))))))
               (set! search-incomplete #f)
               (set! return-proven #{}) (set! return-proven-exact #{}) (set! memo-stops 0) (set! n-checked 0)
@@ -877,16 +939,17 @@
                         (when ROUTE-REPORT
                           (log (list (quote region-memory) (quote targets) target-count
                                      (quote rss) (cdr (or (assq (quote rss-bytes) (gc-stats)) (cons 0 0))))))
-                        (if (or (>= landing-count landing-bound) (not complete))
-                            (set! complete #f)
-                            (begin
-                              (unless (or (dict-contains? covered target)
-                                          (seek root target record!))
-                                (set! unreached (cons target unreached)))
-                              (when search-incomplete
-                                (set! complete #f)
-                                (log (list 'RED 'regional-route-bound 'carry carry
-                                           'target target 'bound bound))))))
+                        (cond
+                          ((not complete) #f)
+                          ((>= landing-count landing-bound) (cap-reached!))
+                          (else
+                           (unless (or (dict-contains? covered target)
+                                       (seek root target record!))
+                             (set! unreached (cons target unreached)))
+                           (when search-incomplete
+                             (set! complete #f)
+                             (log (list 'RED 'regional-route-bound 'carry carry
+                                        'target target 'bound bound))))))
                       targets)
                     ;; Directed return from each genuine retained landing.
                     ;; New landings from return trials also create obligations.
@@ -919,7 +982,7 @@
                                                    (not (dict-contains? checked (car entry))))
                                                  (dict-entries landings))))))
                           (cond ((not complete) #f)
-                                ((>= landing-count landing-bound) (set! complete #f))
+                                ((>= landing-count landing-bound) (cap-reached!))
                                 ((null? pending) #t)
                                 (else
                                  (if (or (equal? PARALLEL-DRAIN-MODE "local") (and PARALLEL-DRAIN (pair? pool) (car pool)))
@@ -929,6 +992,9 @@
                                                        (set! n-checked (+ n-checked 1))))
                                  (for-each
                                    (lambda (entry)
+                                     ;; the cap, before each return search
+                                     (when (and complete (>= landing-count landing-bound))
+                                       (cap-reached!))
                                      (when complete
                                        (set! checked (dict-set checked (car entry) #t))
                                        (set! n-checked (+ n-checked 1))

@@ -58,7 +58,7 @@
           (sigil gc))
 
   (export room-check-main reach-worker-main reach-bench-main arg-value
-          cloudstair-outside-rooms)
+          cloudstair-outside-rooms outside-timed-exclusions)
 
   (begin
     (define (say . parts) (display (apply string-append parts)) (newline))
@@ -90,14 +90,17 @@
     ;; with down; --quick, (2 4) with down; else the diagnostic set (which
     ;; holds the negatives). --negatives adds, to --carry or --quick, the
     ;; entrance negatives: every diagnostic profile without down or without
-    ;; H4, each of which must not enter Cloudstair at all.
+    ;; H4, each of which must not enter Cloudstair at all; each profile
+    ;; once (none is already in the base, which room-check-main requires to
+    ;; carry H4).
     (define (region-profiles args)
       (let* ((c (carry-arg args))
              (base (cond ((pair? c) (list (cons c #t)))
                          ((member "--quick" args) (list (cons '(2 4) #t)))
                          (else (cloudstair-diagnostic-profiles)))))
         (if (and (member "--negatives" args) (or (pair? c) (member "--quick" args)))
-            (append base (filter (lambda (p) (not (and (cdr p) (memv 4 (car p)))))
+            (append base (filter (lambda (p) (and (not (and (cdr p) (memv 4 (car p))))
+                                                  (not (member p base))))
                                  (cloudstair-diagnostic-profiles)))
             base)))
 
@@ -124,9 +127,10 @@
       (let ((v (or (arg-value args "--workers") (getenv "HARKFELL_REACH_WORKERS"))))
         (or (and v (string->number v)) 0)))
 
-    ;; harkfell --reach-worker cloudstair-region [--world DIR]: one pool
-    ;; worker, request lines on stdin, answers on stdout, nothing else
-    ;; printed there. Ends at end of input.
+    ;; harkfell --reach-worker cloudstair-region [--world DIR] [--cell-returns]:
+    ;; one pool worker, request lines on stdin, answers on stdout, nothing
+    ;; else printed there. Ends at end of input. --cell-returns: the parent
+    ;; runs cell mode, so the worker's return memo is off as the parent's is.
     ;; harkfell --reach-bench [--world DIR]: what one tick of the Cloudstair
     ;; regional stepper costs natively, and its parts. Diagnostic only.
     (define (reach-bench-main args)
@@ -188,6 +192,7 @@
       (let* ((dir (or (arg-value args "--world") "world"))
              (ct (load-content (read-world-source dir))))
         (cond ((member "cloudstair-region" args)
+               (when (member "--cell-returns" args) (set-cell-returns! #t))
                (pool-serve (cloudstair-region-worker ct))
                0)
               ((member "cloudstair-world" args)
@@ -251,10 +256,8 @@
 
     ;; The spatial room-check (gate 3 of section 8) on ct: every room's
     ;; reach and traps, per carry set a player can hold. scope labels the
-    ;; verdict line ("" for the whole world). diagnostic, optional: room
-    ;; labels whose problems are printed as diagnostic and not counted (the
-    ;; verdict line names them); none for the whole world.
-    (define (spatial-room-check ct args keys t0 scope . diagnostic)
+    ;; verdict line ("" for the whole world). Every problem counts.
+    (define (spatial-room-check ct args keys t0 scope)
       (let* ((g (if (member "--verbose" args)
                     (content-reach ct (lambda (n steps kind cell)
                                         (say "  anchor " (number->string n) " kind " (number->string kind)
@@ -262,16 +265,7 @@
                                              " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
                     (content-reach ct)))
              (t1 (now-s))
-             (diag (if (pair? diagnostic) (car diagnostic) '()))
-             (diag-paths (map (lambda (rm) (room-path rm))
-                              (filter (lambda (rm) (member (room-label rm) diag))
-                                      (map placed-data (content-rooms ct)))))
-             (all-ps (reach-problems ct g))
-             (rps (filter (lambda (p) (not (member (problem-path p) diag-paths))) all-ps))
-             (dps (filter (lambda (p) (member (problem-path p) diag-paths)) all-ps))
-             (diag-label (if (null? diag) ""
-                             (string-append " [diagnostic only, not counted: " (string-join diag " ")
-                                            ", " (number->string (length dps)) " problems]")))
+             (rps (reach-problems ct g))
              (rooms (map placed-data (content-rooms ct)))
              (shown (if (null? keys)
                         rooms
@@ -285,9 +279,6 @@
                              (number->string (cadr e)) "," (number->string (cddr e)) ")"))
                       (apply append (map (lambda (e) (graph-rejected (cset-graph e))) g)))))
         (for-each (lambda (p) (say (problem->string p))) rps)
-        (for-each (lambda (p) (say "diagnostic (air field: the timed check owns this room): "
-                                   (problem->string p)))
-                  dps)
         (let ((pk (arg-value args "--path"))
               (pc (let ((m (member "--path" args))) (and m (pair? (cdr m)) (pair? (cddr m)) (caddr m)))))
           (when (and g pk pc)
@@ -312,11 +303,10 @@
         (newline)
         (if (null? rps)
             (begin
-              (say "PASS room-check" scope ": " (number->string (length rooms)) " rooms, parse seams map reach green"
-                   diag-label)
+              (say "PASS room-check" scope ": " (number->string (length rooms)) " rooms, parse seams map reach green")
               0)
             (begin
-              (say "FAIL room-check" scope ": " (number->string (length rps)) " reach problems" diag-label)
+              (say "FAIL room-check" scope ": " (number->string (length rps)) " reach problems")
               1))))
 
     ;; --outside-cloudstair: the spatial room-check on every room outside
@@ -374,10 +364,78 @@
                           p))
                    outside-base)))))
 
+    ;; Hollow x7y2 (7,1), the ledge beside the steady lift under the sealed
+    ;; Cloudstair border. The spatial search (which never models down) does
+    ;; not reach it; an actual timed search does: exp-31 on 3471ab9,
+    ;; `--cloudstair-region --waypoints 32,45` (region cell (32,45) is x7y2's
+    ;; (7,1)), from home (29,47) carrying (2 4) with down, arrived at tau 166,
+    ;; bound not hit. That run was diagnostic (it prints no verdict) and
+    ;; nothing re-runs it. What it ran on is the region search's rooms (the
+    ;; Cloudstair rooms and Hollow x6y2, x7y2, x7y3), the physics (feel.sgl,
+    ;; body.sgl, air.sgl, collide.sgl) and the rule that opens x7y2's stone
+    ;; (it has no keys: or still:, so its overtone): none of these differs
+    ;; from 3471ab9 at bc1e136 or on master 62548c1. So that one cell, and no
+    ;; other, is declared unreached in the outside view, for every carry set,
+    ;; and only while x7y2's grid and things are exactly as exp-31 ran them
+    ;; (the grid below; the ring-stone at (6,3), overtone 4, and the steady
+    ;; lift at (8,0), size (3 8), each with no other field; nothing else): any
+    ;; change to them revokes it, so (7,1) counts again until a new timed run
+    ;; is cited. The key is x7y2 alone: an edit to x6y2, x7y3, a Cloudstair
+    ;; room or the physics does not revoke it, so such an edit must re-run the
+    ;; timed check or drop this exclusion. Every other x7y2 cell, and every
+    ;; trap, water trap and stale declaration there, counts as in any room.
+    (define X7Y2-AT-EXP-31
+      '("########^^^##############"
+        "      # ^^^             #"
+        "      ##^^^             #"
+        "      o ^^^             #"
+        "####### ^^^             #"
+        "####### ^^^             #"
+        "####### ^^^             #"
+        "#######=======          #"
+        "#########################"
+        "####### ^^^             #"
+        "####### ^^^             #"))
+    (define (outside-lift-ledge-room? p)
+      (let* ((rm (placed-data p))
+             (things (room-things rm)))
+        (and (eq? (room-region rm) 'hollow)
+             (= (room-x rm) 7) (= (room-y rm) 2)
+             (equal? (room-grid rm) X7Y2-AT-EXP-31)
+             (= (length things) 2)
+             ;; each thing's length pins its fields to exactly these
+             ;; (no keys:, still: or other field beside them)
+             (find (lambda (t)
+                     (and (eq? (car t) 'ring-stone) (= (length t) 5)
+                          (equal? (thing-at t) '(6 . 3))
+                          (equal? (thing-kw t "overtone") 4)))
+                   things)
+             (find (lambda (t)
+                     (and (eq? (car t) 'air-field) (= (length t) 7)
+                          (equal? (thing-at t) '(8 . 0))
+                          (equal? (thing-kw t "size") '(3 8))
+                          (eq? (thing-kw t "kind") 'steady-lift)))
+                   things)
+             #t)))
+
+    (define (outside-timed-exclusions rooms)
+      (map (lambda (p)
+             (if (outside-lift-ledge-room? p)
+                 (let* ((rm (placed-data p))
+                        (declared (room-unreached rm)))
+                   (placed p data:
+                     (room rm unreached:
+                       (if (member '(7 . 1) declared)
+                           declared
+                           (cons '(7 . 1) declared)))))
+                 p))
+           rooms))
+
     (define (outside-cloudstair-check ct args keys t0)
       (let* ((wm (content-map ct))
-             (outside (cloudstair-outside-rooms ct '()))
+             (outside (outside-timed-exclusions (cloudstair-outside-rooms ct '())))
              (pocket-room (find outside-pocket-room? outside))
+             (ledge-room (find outside-lift-ledge-room? outside))
              (ct* (content ct rooms: outside
                            wmap: (make-worldmap outside (worldmap-cols wm) (worldmap-rows wm)
                                                 (worldmap-size wm)))))
@@ -397,20 +455,15 @@
                (say "FAIL room-check outside Cloudstair: a pulsed air field outside Cloudstair, which the spatial check cannot prove")
                1)
               (else
-               ;; Rooms holding an air field (steady: x7y2's lift): SYSTEMS rates a
-               ;; spatial verdict there diagnostic only, so the timed check owns them.
-               (let ((air-rooms (map (lambda (p) (room-label (placed-data p)))
-                                     (filter (lambda (p) (pair? (tilemap-air (placed-tiles p)))) outside))))
-                 (unless (null? air-rooms)
-                   (say "rooms with an air field, diagnostic only (the timed check owns them): "
-                        (string-join air-rooms " ")))
-                 (spatial-room-check ct* args keys t0
-                   (string-append
-                     " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
-                     (if pocket-room
-                         " [excluded: hollow:4,3 (20,6), H5-only, timed bowl gate af83a32]"
-                         ""))
-                   air-rooms))))))
+               (spatial-room-check ct* args keys t0
+                 (string-append
+                   " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
+                   (if pocket-room
+                       " [excluded: hollow:4,3 (20,6), H5-only, timed bowl gate af83a32]"
+                       "")
+                   (if ledge-room
+                       " [excluded: hollow:7,2 (7,1), lift ledge: reached carrying (2 4) with down by diagnostic timed search exp-31 (3471ab9), not re-gated, void if x7y2 changes]"
+                       "")))))))
 
     (define (room-check-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
@@ -459,6 +512,15 @@
                   (say "SETUP-FAILED room-check: --carry takes the harmonics carried, 2 to 5, "
                        "comma-separated, each once (e.g. --carry 2,3,4), and not with --quick")
                   2)
+                ;; --carry names an entry profile: it carries H4 (run with down).
+                ;; Without H4 the check would only run that carry as an entrance
+                ;; negative (Cloudstair stays shut) and could PASS checking no cell.
+                ((and (member "--cloudstair-region" args)
+                      (pair? (carry-arg args)) (not (memv 4 (carry-arg args))))
+                  (say "SETUP-FAILED room-check: --carry " (arg-value args "--carry")
+                       " has no H4, so it is not an entry profile (an entry carries H4, with down); "
+                       "the entrance negatives are --negatives")
+                  2)
                 ;; --landing-cap N: a whole number of landings, or nothing runs.
                 ((and (member "--cloudstair-region" args) (member "--landing-cap" args)
                       (not (let ((n (string->number (or (arg-value args "--landing-cap") ""))))
@@ -501,9 +563,12 @@
                                    (let ((c (string->number (arg-value args "--landing-cap"))))
                                      (set-landing-cap! c)
                                      c)))
+                         ;; the workers run the same mode (cell mode: their return
+                         ;; memo off too)
                          (pool (and (> n 0)
-                                    (make-pool (list (executable-path) "--reach-worker"
-                                                     "cloudstair-region" "--world" dir)
+                                    (make-pool (append (list (executable-path) "--reach-worker"
+                                                             "cloudstair-region" "--world" dir)
+                                                       (if cell-mode (list "--cell-returns") '()))
                                                n)))
                          ;; the 0.4 entries are (2 4) and (2 3 4) with down
                          (profiles (region-profiles args))
