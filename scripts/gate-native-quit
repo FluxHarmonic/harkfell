@@ -37,7 +37,7 @@ docker image inspect --format '{{.Id}}' "$image" > "$out/image-id"
 
 # No host display, audio socket, GPU, save directory, or network is exposed.
 set +e
-docker run --rm --init --network none --user "$(id -u):$(id -g)" \
+docker run --rm --init -i --network none --user "$(id -u):$(id -g)" \
   -e HOME=/tmp/home -e XDG_RUNTIME_DIR=/tmp/runtime \
   -e XDG_DATA_HOME=/tmp/data -e DISPLAY=:91 \
   -e PULSE_SERVER=unix:/tmp/pulse.sock -e PULSE_SINK=worker-null \
@@ -97,5 +97,12 @@ CONTAINER
 rc=$?
 set -e
 cat "$out/container.log"
+if [ "$rc" = 0 ]; then
+  if [ "$(cat "$out/exit-code" 2>/dev/null)" != 0 ] ||
+     ! grep -q '^PASS: Ubuntu 24.04 native Escape-to-quit exits 0 with running null audio$' "$out/container.log"; then
+    echo 'SETUP-FAILED: container did not complete the native quit check'
+    rc=125
+  fi
+fi
 echo "RESULT native-quit rc=$rc"
 exit "$rc"
