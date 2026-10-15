@@ -826,10 +826,12 @@
                             ((or (null? es) (not complete))
                              ;; At the end of the batch every answer is merged. After an
                              ;; early stop (landing cap, a bounded search, the rounds
-                             ;; limit) the batch's unstarted searches are cancelled and
-                             ;; only those in flight are waited for (an early stop must
-                             ;; not close the pool with requests in flight); their
-                             ;; answers are not merged.
+                             ;; limit) the batch's unstarted searches are cancelled, and
+                             ;; the pool is drained (an early stop must not close it with
+                             ;; requests in flight): the batch's searches in flight, and
+                             ;; any other caller's queued requests, such as a route
+                             ;; finder's guesses, still run; the batch's answers are not
+                             ;; merged.
                              (when (and p (not complete))
                                (let ((cancelled (pool-cancel-queued! p (lambda (line k) (memq k batch-ks)))))
                                  (pool-drain! p)

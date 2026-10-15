@@ -152,7 +152,9 @@
     ;; An early stop: the caller's own requests queued but not yet written to
     ;; any worker are dropped (drop? picks them, by line and continuation:
     ;; other callers' requests, such as a route finder's guesses, stay
-    ;; queued), so the caller then waits only for its requests in flight.
+    ;; queued). A pool-drain! after it still runs every other caller's queued
+    ;; requests, and whatever their continuations queue, but none of the
+    ;; dropped ones.
     (define (pool-cancel-queued! pool drop?)
       (let loop ((jobs (pool-queue pool)) (kept '()) (n 0))
         (cond ((null? jobs)
