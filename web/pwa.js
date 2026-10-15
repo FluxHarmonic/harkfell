@@ -21,15 +21,27 @@
     state.registration.waiting.postMessage({ type: "SKIP_WAITING" });
   };
   state.check = () => state.registration?.update();
+  async function loadInfo(attempt = 0) {
+    try {
+      const response = await fetch("version.json", { cache: "no-store" });
+      if (!response.ok || !/^application\/json\b/.test(response.headers.get("content-type") || "")) return;
+      const text = await response.text();
+      if (app.dispatch("update-info", text) === 1) {
+        state.info = JSON.parse(text);
+        return;
+      }
+    } catch (error) {
+      console.log("harkfell: version.json unavailable " + error.message);
+    }
+    // Startup can interrupt a fetch or precede the game's update handler.
+    // Retry briefly; an unavailable update must leave the start screen usable.
+    if (attempt < 4) setTimeout(() => loadInfo(attempt + 1), 1000 * 2 ** attempt);
+  }
   function ready(a) {
     app = a;
     // This snapshot belongs to the cached page/wasm, not the latest site.
     // A failed metadata fetch leaves the start screen usable and quiet.
-    fetch("version.json", { cache: "no-store" }).then(async (response) => {
-      if (!response.ok || !/^application\/json\b/.test(response.headers.get("content-type") || "")) return;
-      const text = await response.text();
-      if (app.dispatch("update-info", text) === 1) state.info = JSON.parse(text);
-    }).catch((error) => console.log("harkfell: version.json unavailable " + error.message));
+    loadInfo();
     if (state.state === "waiting") app.dispatch("update", "waiting");
   }
   if (window.SigilWebApp?.started) ready(window.SigilWebApp);

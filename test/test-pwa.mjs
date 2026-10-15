@@ -8,7 +8,7 @@ import { test } from "node:test";
 
 const source = fs.readFileSync(process.env.HARKFELL_PWA_SOURCE || "web/pwa.js", "utf8");
 
-async function page(controlled) {
+async function page(controlled, options = {}) {
   const window = new EventTarget();
   const document = new EventTarget();
   const serviceWorker = new EventTarget();
@@ -23,14 +23,15 @@ async function page(controlled) {
   serviceWorker.register = async () => registration;
   registration.update = async () => {};
   const updates = [];
-  window.SigilWebApp = { started: true, dispatch: (...args) => updates.push(args) };
+  window.SigilWebApp = options.app || { started: true, dispatch: (...args) => updates.push(args) };
   let announcements = 0;
   window.addEventListener("harkfell-update-waiting", () => announcements++);
   let reloads = 0;
   vm.runInNewContext(source, {
     window, document, navigator: { serviceWorker }, Event,
     location: { reload: () => reloads++ }, console: { log() {} },
-    fetch: async () => ({ ok: false })
+    fetch: options.fetch || (async () => ({ ok: false })),
+    setTimeout: options.setTimeout || setTimeout
   });
   await new Promise(setImmediate);
   function install() {
@@ -67,6 +68,51 @@ test("a controlled page announces the waiting update once, and reloads only when
   assert.equal(p.messages[0].type, "SKIP_WAITING");
   p.serviceWorker.dispatchEvent(new Event("controllerchange"));
   assert.equal(p.reloads(), 1);
+});
+
+test("metadata survives an interrupted fetch and an update handler not yet ready", async () => {
+  const timers = [];
+  const metadata = { version: "0.5.0", summary: "The depths." };
+  let fetches = 0, deliveries = 0;
+  const p = await page(false, {
+    app: { started: true, dispatch: () => ++deliveries === 1 ? 0 : 1 },
+    fetch: async () => {
+      if (++fetches === 1) throw new Error("interrupted");
+      return { ok: true, headers: { get: () => "application/json" },
+        text: async () => JSON.stringify(metadata) };
+    },
+    setTimeout: callback => timers.push(callback)
+  });
+  assert.equal(p.window.harkfellUpdate.info, undefined);
+  assert.equal(timers.length, 1);
+  timers.shift()();
+  await new Promise(setImmediate);
+  assert.equal(p.window.harkfellUpdate.info, undefined);
+  assert.equal(timers.length, 1);
+  timers.shift()();
+  await new Promise(setImmediate);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.window.harkfellUpdate.info)), metadata);
+  assert.equal(fetches, 3);
+  assert.equal(deliveries, 2);
+  assert.equal(timers.length, 0);
+});
+
+test("unavailable metadata retries finitely and leaves the first install quiet", async () => {
+  const timers = [];
+  let fetches = 0;
+  const p = await page(false, {
+    fetch: async () => { fetches++; throw new Error("offline"); },
+    setTimeout: callback => timers.push(callback)
+  });
+  for (let attempt = 0; attempt < 4; attempt++) {
+    assert.equal(timers.length, 1);
+    timers.shift()();
+    await new Promise(setImmediate);
+  }
+  assert.equal(fetches, 5);
+  assert.equal(timers.length, 0);
+  assert.equal(p.window.harkfellUpdate.info, undefined);
+  assert.equal(p.announcements(), 0);
 });
 
 // 0.3.3: installed as an app and full screen (the manifest's fullscreen, or the

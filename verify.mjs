@@ -406,8 +406,9 @@ if (LEGS.includes("world")) {
 if (LEGS.includes("door")) {
   ran.add("door");
   await open("trace&room=reedfen:10,4");
-  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door");
-  const r = lines.find((l) => l.startsWith("harkfell: room "));
+  // Boot can trace the Hollow before applying the requested door. Require
+  // that door's own event, then check its body coordinates below.
+  const r = await waitFor(() => lines.find((l) => l === "harkfell: room reedfen:10,4"), 10000, "door");
   const at = await where();
   // reedfen:10,4: column 10 - X0 and row 4 - Y0 of the map's rooms
   const inside = at.x >= (10 - X0) * 400 && at.x < (11 - X0) * 400 && at.y >= (4 - Y0) * 176 && at.y < (5 - Y0) * 176;
@@ -417,14 +418,14 @@ if (LEGS.includes("door")) {
   const none = await waitFor(() => lines.find((l) => l.startsWith("harkfell: no-room")), 10000, "door no-room");
   // &at: cell (4,7) of reedfen:9,3 (the ninth room across, the second down)
   await open("trace&room=reedfen:9,3&at=4,7");
-  await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door at");
+  await waitFor(() => lines.find((l) => l === "harkfell: room reedfen:9,3"), 10000, "door at");
   const a2 = await where();
   const inCell = Math.floor((a2.x + 4) / 16) === (9 - X0) * 25 + 4 && Math.floor((a2.y + 7) / 16) === (3 - Y0) * 11 + 7;
   await open("trace&room=reedfen:9,3&at=4,9");
   const rock = await waitFor(() => lines.find((l) => l.startsWith("harkfell: no-room")), 10000, "door rock");
   // Glasswood: a door at a negative coordinate, First Sight, the map's first column
   await open("trace&room=glasswood:-1,3");
-  const neg = await waitFor(() => lines.find((l) => l.startsWith("harkfell: room ")), 10000, "door negative");
+  const neg = await waitFor(() => lines.find((l) => l === "harkfell: room glasswood:-1,3"), 10000, "door negative");
   const an = await where();
   const negInside = an.x >= (-1 - X0) * 400 && an.x < (0 - X0) * 400 && an.y >= (3 - Y0) * 176 && an.y < (4 - Y0) * 176;
   (r === "harkfell: room reedfen:10,4" && inside && none === "harkfell: no-room reedfen:40,40" && inCell && rock === "harkfell: no-room reedfen:9,3@4,9" &&
