@@ -641,10 +641,13 @@
                   0)
                 ((member "--cloudstair-timing" args)
                   (let ((failures
-                          (cloudstair-authored-timing ct
+                          (apply cloudstair-authored-timing ct
                             (if (member "--quick" args) (list (cons '(2 4) #t))
                                 (cloudstair-diagnostic-profiles))
-                            (lambda (record) (write record) (newline)))))
+                            (lambda (record) (write record) (newline))
+                            (if (member "--timing-leg" args)
+                                (list (or (arg-value args "--timing-leg") ""))
+                                '()))))
                     (say (if (= failures 0) "PASS" "FAIL")
                          " Cloudstair authored timing: " (number->string failures)
                          " failures (regional/world reach NOT established)")

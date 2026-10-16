@@ -120,7 +120,15 @@
       (define failures 0)
       ;; Isolate each real authored leg, closing alternatives. Translation
       ;; changes only the map origin; the grids, fields and clock are intact.
-      (if (null? selected)
+      ;; A public string selector still takes the isolated-room path. Symbols
+      ;; are used only by the recursive call after constructing that isolate.
+      ;; Reject unknown names: an empty selection must never report success.
+      (when (and (pair? selected) (string? (car selected))
+                 (not (find (lambda (leg)
+                              (string=? (symbol->string (car leg)) (car selected)))
+                            LEGS)))
+        (error "unknown authored timing leg" (car selected)))
+      (if (or (null? selected) (string? (car selected)))
           (for-each
             (lambda (leg)
               (let* ((name (car leg))
@@ -136,7 +144,11 @@
                                         wmap: (make-worldmap rooms 25 11 16))))
                 (set! failures
                   (+ failures (cloudstair-authored-timing probe profiles log name)))))
-            LEGS)
+            (if (null? selected)
+                LEGS
+                (filter (lambda (leg)
+                          (string=? (symbol->string (car leg)) (car selected)))
+                        LEGS)))
           (begin
             (for-each
               (lambda (profile)
