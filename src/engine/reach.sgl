@@ -91,6 +91,7 @@
           (engine collide)
           (engine air)
           (engine body)
+          (engine reach prof)
           (only (sigil process) getenv))
 
   (export make-intent* NOTHING
@@ -1096,18 +1097,20 @@
                         (set! queue (cons k queue)))))
                   starts)
         (unless serving
-        (let drain ()
-          (unless (null? queue)
-            (let ((k (car queue)))
-              (if (and remote (not (reusable? k)))
-                  (begin
-                    (request-queued!)
-                    (set! queue (cdr queue))
-                    (expand-remote! k))
-                  (begin
-                    (set! queue (cdr queue))
-                    (expand! k)))
-              (drain)))))
+          (prof-time 'spatial-anchors
+            (lambda ()
+              (let drain ()
+                (unless (null? queue)
+                  (let ((k (car queue)))
+                    (if (and remote (not (reusable? k)))
+                        (begin
+                          (request-queued!)
+                          (set! queue (cdr queue))
+                          (expand-remote! k))
+                        (begin
+                          (set! queue (cdr queue))
+                          (expand! k)))
+                    (drain)))))))
 
         ;; standing-to-standing candidates: from each stand anchor, a
         ;; breadth-first walk over non-stand anchors (at most PATH-HOPS
@@ -1285,22 +1288,24 @@
           (if serving
               (vector expand-one load-graph! walk-one)
           (begin
-          (prepare-remote-walks!)
-          (let each ((k 0))
-            (when (< k nkeys)
-              (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
-                (let* ((old (let ((o (vector-ref old-walks k))) (and (not (eq? o (quote none))) o)))
-                       (r (or old (if walk-remote? (remote-walk k) (walk-from k))))
-                       (i (let ((c (key-cell k))) (cell-index tm (car c) (cdr c)))))
-                  (when old (set! reused-cands (+ reused-cands 1)))
-                  (vector-set! cand-memo k r)
-                  (for-each (lambda (e) (vector-set! edges i (cons (cons (car e) (cadr e)) (vector-ref edges i))))
-                            (caddr r))
-                  (set! rejected-edges (append (reverse (cadddr r)) rejected-edges))
-                  (set! candidates (+ candidates (list-ref r 4)))
-                  (set! rejected (+ rejected (list-ref r 5)))
-                  (set! no-realize (+ no-realize (list-ref r 6)))))
-              (each (+ k 1))))
+          (prof-time 'spatial-prepare-walks (lambda () (prepare-remote-walks!)))
+          (prof-time 'spatial-walks
+            (lambda ()
+              (let each ((k 0))
+                (when (< k nkeys)
+                  (when (and (vector-ref reps k) (= (key-kind k) K-STAND))
+                    (let* ((old (let ((o (vector-ref old-walks k))) (and (not (eq? o (quote none))) o)))
+                           (r (or old (if walk-remote? (remote-walk k) (walk-from k))))
+                           (i (let ((c (key-cell k))) (cell-index tm (car c) (cdr c)))))
+                      (when old (set! reused-cands (+ reused-cands 1)))
+                      (vector-set! cand-memo k r)
+                      (for-each (lambda (e) (vector-set! edges i (cons (cons (car e) (cadr e)) (vector-ref edges i))))
+                                (caddr r))
+                      (set! rejected-edges (append (reverse (cadddr r)) rejected-edges))
+                      (set! candidates (+ candidates (list-ref r 4)))
+                      (set! rejected (+ rejected (list-ref r 5)))
+                      (set! no-realize (+ no-realize (list-ref r 6)))))
+                  (each (+ k 1))))))
           (reach-graph tm: tm
                        cells: (standable-cells tm)
                        waters: (let each ((k 0) (acc '()))

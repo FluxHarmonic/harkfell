@@ -48,11 +48,16 @@
           (lambda (node in) (prof-inc! label) (advance node in))
           advance))
 
-    (define (prof-report tag)
+    (define (prof-report tag . port)
       (when enabled
-        (write (list 'prof tag 'jiffies (- (current-jiffy) t-start)
-                     'jps (jiffies-per-second)
-                     (dict-entries counters)
-                     (filter (lambda (e) (memq (car e) (quote (minor-collections major-collections minor-time-ns major-time-ns bytes-allocated rss-bytes promoted-bytes remset-peak))))
-                             (gc-stats))))
-        (newline)))))
+        (let ((out (if (pair? port) (car port) (current-output-port))))
+          (write (list 'prof tag 'jiffies (- (current-jiffy) t-start)
+                       'jps (jiffies-per-second)
+                       (dict-entries counters)
+                       (filter (lambda (e)
+                                 (memq (car e)
+                                       '(minor-collections major-collections minor-time-ns major-time-ns
+                                         bytes-allocated rss-bytes promoted-bytes remset-peak)))
+                               (gc-stats)))
+                 out)
+          (newline out))))))

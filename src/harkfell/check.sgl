@@ -41,6 +41,7 @@
           (engine worldmap)
           (engine reach)
           (engine reach geopool)
+          (engine reach prof)
           (harkfell passages)
           (harkfell feel)
           (harkfell content))
@@ -385,7 +386,13 @@
                                    (entries (cdr p))
                                    ;; the first set searched (the last of done) lends its memo
                                    (base (and (pair? done) (cset-graph (list-ref done (- (length done) 1)))))
-                                   (g (apply content-reach-seeded ct carry base entries log))
+                                   (g (prof-time 'spatial-graph
+                                        (lambda ()
+                                          (apply content-reach-seeded ct carry base entries log))))
+                                   (profiled
+                                     (when (prof-on?)
+                                       (prof-report (list 'spatial-carry carry)
+                                                    (current-error-port))))
                                    (tm (graph-tm g))
                                    (touch-all (edge-touches g carry pickups))
                                    (by-from (let ((v (make-vector (* (tilemap-cols tm) (tilemap-rows tm)) '())))

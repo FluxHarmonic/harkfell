@@ -28,7 +28,8 @@
 ;;; A worker that exits or answers garbage is an error in this process,
 ;;; never a silent result.
 (define-library (engine reach pool)
-  (import (sigil list) (sigil string) (sigil io) (sigil process) (sigil async))
+  (import (sigil list) (sigil string) (sigil io) (sigil process) (sigil async)
+          (engine reach prof))
 
   (export make-pool pool? pool-size pool-submit! pool-submit-urgent! pool-drain!
           pool-drain-until! pool-cancel-queued! pool-close! pool-serve pool-requests pool-verify!)
@@ -133,12 +134,14 @@
     ;; One round: start what can start, wait for any answer, deliver it.
     ;; #f when nothing is queued or in flight.
     (define (pump! pool)
-      (assign! pool)
+      (prof-time 'spatial-pool-assign (lambda () (assign! pool)))
       (let ((ws (busy pool)))
         (and (pair? ws)
              (begin
-               (await-readable-fds (map (lambda (w) (vector-ref w 1)) ws))
-               (for-each collect! ws)
+               (prof-time 'spatial-pool-wait
+                 (lambda () (await-readable-fds (map (lambda (w) (vector-ref w 1)) ws))))
+               (prof-time 'spatial-pool-collect
+                 (lambda () (for-each collect! ws)))
                #t))))
 
     (define (pool-drain-until! pool done?)
