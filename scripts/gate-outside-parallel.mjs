@@ -10,13 +10,18 @@ const out = path.resolve(process.argv[2]);
 const reference = process.argv[3];
 const workers = Number(process.argv[4] || 8);
 const profiling = process.argv.includes('--profile');
+const thresholdIndex = process.argv.indexOf('--young-threshold');
+const youngThreshold = thresholdIndex < 0 ? 524288 : Number(process.argv[thresholdIndex + 1]);
 assert.ok(reference && Number.isInteger(workers) && workers >= 1 && workers <= 10);
+assert.ok(Number.isInteger(youngThreshold) && youngThreshold >= 524288 && youngThreshold <= 67108864,
+  '--young-threshold must be an integer from 524288 to 67108864 bytes');
 fs.mkdirSync(out, { recursive: false });
 const env = { ...process.env };
 for (const name of Object.keys(env)) {
   if (/^(HARKFELL_|SIGIL_GC_|SIGIL_YOUNG_)/.test(name)) delete env[name];
 }
-Object.assign(env, { SIGIL_YOUNG_THRESHOLD: '524288', SIGIL_YOUNG_THRESHOLD_MAX: '524288' });
+Object.assign(env, { SIGIL_YOUNG_THRESHOLD: String(youngThreshold),
+  SIGIL_YOUNG_THRESHOLD_MAX: String(youngThreshold) });
 
 function check(name, world, count, checked = false, profile = false) {
   const log = path.join(out, `${name}.log`);
@@ -71,7 +76,8 @@ const parallel = check('outside-workers', 'world', workers, false, profiling);
 assert.equal(parallel.rawCode, 0);
 assert.ok(verdict('outside', parallel.rawCode, fs.readFileSync(parallel.log, 'utf8')));
 assert.equal(parallel.result, normalized('outside', serialText), 'outside complete output differs from serial');
-const summary = { passed: true, workers, profiling, seconds: parallel.seconds, underOneHour: parallel.seconds < 3600,
+const summary = { passed: true, workers, profiling, youngThreshold,
+  seconds: parallel.seconds, underOneHour: parallel.seconds < 3600,
   equal: 'all outside output lines; only measured seconds normalized', fixtures, reference };
 fs.writeFileSync(path.join(out, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
 console.log(`RESULT outside-parallel PASS equality=exact workers=${workers} wall=${summary.seconds}s under-one-hour=${summary.underOneHour}`);
