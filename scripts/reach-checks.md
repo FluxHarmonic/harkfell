@@ -45,3 +45,44 @@ scheduler, corruption and negative-result controls run with:
 ```
 node --test scripts/test-reach-checks.mjs
 ```
+
+Verdict caching adds a fresh whole-world parse/map/seam preflight to every run.
+The native checker emits each analysis scope from the same room selectors it
+uses for physics. Cached physics is keyed by those rooms' bytes, every authored
+pickup/down supplier across regions, global layout and metadata, checker and
+toolchain sources, executable hash, complete profile, arguments and environment.
+An unrelated room edit can reuse unaffected physics after the global preflight
+passes. A new/removed/moved room changes the topology and invalidates every key.
+
+Immediately after a successful native release build, bind it to its inputs:
+
+```
+node scripts/reach-checks.mjs --record-build
+scripts/dev node scripts/reach-checks.mjs build/reach-cold --cache build/reach-verdict-cache
+scripts/dev node scripts/reach-checks.mjs build/reach-warm --cache build/reach-verdict-cache
+node scripts/reach-checks.mjs --compare build/reach-cold build/reach-warm
+```
+
+Changing native source requires rebuilding and recording the new build.
+Cache files store their complete input descriptor and raw evidence; corrupt or
+failed entries cannot supply a hit. New run receipts retain the original verdict
+and its provenance while binding it to the current validated world. Collection
+recomputes cache keys and revalidates the fresh preflight as well as every result.
+Cache writes are atomic and occur only after unchanged inputs are confirmed.
+Keep cache directories beside the validation evidence; they can be shared by
+hosts using the exact same executable and inputs. Serial reference mode always
+executes its checks without a cache.
+
+Run cache invalidation/negative controls on a build host with
+`node --test scripts/test-reach-cache.mjs`. For the real-world cold/warm gate and
+native room, cross-region ability, checker and parse controls, use a clean,
+isolated checkout with a freshly attested release build:
+
+```
+scripts/dev node scripts/gate-reach-cache.mjs build/cache-validation --sabotage
+```
+
+The native controls restore all edited source and the original executable. They
+prove a blocked lift and a rebuilt checker with an impossible gust go red after
+cache misses, moving Reedfen's down forces a fresh Cloudstair check, a stale
+checker build is refused, and malformed content cannot hide behind a cache hit.

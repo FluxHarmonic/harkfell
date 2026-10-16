@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { sha, attestBuild, verifyBuild, dependencyScopes, cacheDescriptor,
+  cachedVerdict, storeVerdict } from './reach-cache.mjs';
 
 export const legs = ['F-L', 'M-S', 'I-east', 'I-west', 'P-west-gap-east',
   'P-west-gap-west', 'P-east-gap-east', 'P-east-gap-west'];
@@ -15,9 +17,23 @@ const clean = text => text.replace(/\x1b\[[0-9;]*m/g, '').replace(/\r/g, '');
 const profiles = Array.from({ length: 16 }, (_, mask) => [2, 3, 4, 5].filter((_, i) => mask & (1 << i)));
 
 export function inputs(root = '.') {
-  const files = execFileSync('git', ['ls-files', '-z', '--', 'world', 'src', 'package.sgl',
-    'sigil.lock', 'scripts/reach-checks.mjs', 'scripts/gate-cloudstair-targets.mjs'], { cwd: root })
+  const tracked = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'world', 'src', 'package.sgl',
+    'sigil.lock', 'scripts/reach-checks.mjs', 'scripts/reach-cache.mjs', 'scripts/gate-cloudstair-targets.mjs'], { cwd: root })
     .toString().split('\0').filter(Boolean).sort();
+  // The native reader also sees untracked/ignored authored world files. Match
+  // its filename rules instead of trusting Git's view of the runtime world.
+  const runtime = ['world/world.sgl'];
+  function names(dir, suffix) {
+    return fs.existsSync(path.join(root, dir)) ? fs.readdirSync(path.join(root, dir))
+      .filter(name => !/^[.#]/.test(name) && name.endsWith(suffix)).map(name => `${dir}/${name}`) : [];
+  }
+  runtime.push(...names('world/regions', '.map'));
+  if (fs.existsSync(path.join(root, 'world/rooms'))) {
+    for (const region of fs.readdirSync(path.join(root, 'world/rooms'))) {
+      if (fs.statSync(path.join(root, 'world/rooms', region)).isDirectory()) runtime.push(...names(`world/rooms/${region}`, '.room'));
+    }
+  }
+  const files = [...new Set([...tracked, ...runtime.filter(file => fs.existsSync(path.join(root, file)))])].sort();
   const manifest = files.map(file => [file, hash(fs.readFileSync(path.join(root, file)))]);
   return { digest: hash(JSON.stringify(manifest)), manifest };
 }
@@ -81,16 +97,40 @@ function environment(id) {
   return env;
 }
 
+function policy(id) {
+  const env = Object.fromEntries(Object.entries(environment(id)).filter(([key]) => /^(HARKFELL_|SIGIL_GC_|SIGIL_YOUNG_)/.test(key)));
+  return { scope, args: command(id), environment: env };
+}
+
 export async function run({ out, jobs = 4, only = ids, serial = false,
-  binary = './build/release/bin/harkfell', limit = 18000 }) {
+  binary = './build/release/bin/harkfell', limit = 18000, cache,
+  buildReceipt = 'build/release/reach-build.json' }) {
   if (!Number.isInteger(jobs) || jobs < 1 || jobs > 32) throw Error('jobs must be 1..32');
   if (!only.length || new Set(only).size !== only.length || only.some(id => !ids.includes(id))) throw Error('invalid or duplicate check selection');
   if (serial && only.length !== ids.length) throw Error('serial requires the complete scope');
+  if (serial && cache) throw Error('serial reference must not use cached verdicts');
+  const start = Date.now();
   fs.mkdirSync(out, { recursive: false }); // Never mix a retry with older evidence.
   const source = inputs();
   const binaryHash = hash(fs.readFileSync(binary));
   const head = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
-  const start = Date.now();
+  let cacheInfo;
+  if (cache) {
+    verifyBuild(source, binary, buildReceipt);
+    const log = 'preflight.log';
+    const fd = fs.openSync(path.join(out, log), 'wx');
+    const code = await new Promise((resolve, reject) => {
+      const child = spawn('timeout', ['--kill-after=10', '120', binary, '--room-check', '--reach-cache-inputs'], {
+        stdio: ['ignore', fd, fd], env: environment('outside'),
+      });
+      child.once('error', reject);
+      child.once('close', resolve);
+    }).finally(() => fs.closeSync(fd));
+    const text = fs.readFileSync(path.join(out, log), 'utf8');
+    if (code !== 0) throw Error(`fresh whole-world preflight failed: raw=${code}`);
+    cacheInfo = { schema: 1, preflight: { log, code, logHash: hash(text), inputs: source.digest },
+      dependencies: dependencyScopes(text, ids) };
+  }
   const queue = serial ? ['timing-all', 'outside', 'targets-2-4', 'targets-2-3-4'] : [...only];
   const records = [];
   const children = new Set();
@@ -111,6 +151,21 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
       const log = `${id}.log`;
       const fd = fs.openSync(path.join(out, log), 'wx');
       const started = Date.now();
+      const descriptor = cache && cacheDescriptor(id, source, cacheInfo.dependencies, binaryHash, policy(id));
+      const cached = cache && cachedVerdict(cache, descriptor, verdict, normalized);
+      if (cached?.hit) {
+        fs.closeSync(fd);
+        fs.writeFileSync(path.join(out, log), cached.text);
+        const record = { ...cached.record, log, head, inputs: source.digest,
+          cacheHit: true, cacheKey: cached.key, cacheInputs: descriptor,
+          origin: { head: cached.record.head, inputs: cached.record.inputs, seconds: cached.record.seconds },
+          seconds: (Date.now() - started) / 1000 };
+        records.push(record);
+        fs.writeFileSync(path.join(out, `${id}.json`), JSON.stringify(record, null, 2) + '\n');
+        console.log(`HIT ${id} key=${cached.key}`);
+        continue;
+      }
+      if (cache) console.log(`MISS ${id} ${cached.reason} key=${cached.key}`);
       console.log(`START ${id} ${new Date(started).toISOString()}`);
       const child = spawn('timeout', ['--kill-after=10', String(limit), binary, ...args], {
         stdio: ['ignore', fd, fd], detached: true, env: environment(id),
@@ -128,6 +183,7 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
         const record = { id: checkId, ...result, passed: !interrupted && verdict(checkId, result.code, text),
           log, logHash: hash(text), resultHash: hash(normalized(checkId, text)), args,
           seconds: (Date.now() - started) / 1000, binaryHash, head, inputs: source.digest };
+        if (cache) Object.assign(record, { cacheHit: false, cacheKey: cached.key, cacheInputs: descriptor });
         records.push(record);
         fs.writeFileSync(path.join(out, `${checkId}.json`), JSON.stringify(record, null, 2) + '\n');
         console.log(`${record.passed ? 'PASS' : 'FAIL'} ${checkId} raw=${result.code} wall=${record.seconds}s`);
@@ -140,10 +196,17 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
     process.removeListener('SIGINT', stop);
   }
   const unchanged = inputs().digest === source.digest;
+  if (cache && unchanged && !interrupted) {
+    for (const record of records) {
+      if (!record.cacheHit && record.passed) storeVerdict(cache, record.cacheInputs, record,
+        fs.readFileSync(path.join(out, record.log), 'utf8'));
+    }
+  }
   const passed = !interrupted && unchanged && records.length === only.length && records.every(record => record.passed);
   const receipt = { scope, passed, complete: only.length === ids.length, unchanged,
     seconds: (Date.now() - start) / 1000, jobs: serial ? 1 : jobs, serial,
-    inputs: source, binaryHash, head, records: records.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)) };
+    inputs: source, binaryHash, head, cache: cacheInfo,
+    records: records.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)) };
   fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(receipt, null, 2) + '\n');
   console.log(`RESULT reach-checks ${passed ? 'PASS' : 'FAIL'} complete=${receipt.complete} wall=${receipt.seconds}s; ${scope}`);
   return receipt;
@@ -160,6 +223,15 @@ export function collect(dirs) {
         || hash(JSON.stringify(receipt.inputs.manifest)) !== receipt.inputs.digest) throw Error(`invalid run: ${dir}`);
     digest ??= receipt.inputs.digest;
     if (digest !== receipt.inputs.digest) throw Error('different source inputs');
+    let dependencies;
+    if (receipt.cache) {
+      const preflight = receipt.cache.preflight;
+      if (preflight.log !== 'preflight.log' || preflight.code !== 0 || preflight.inputs !== digest) throw Error('invalid preflight');
+      const text = fs.readFileSync(path.join(dir, preflight.log), 'utf8');
+      if (hash(text) !== preflight.logHash) throw Error('corrupt preflight');
+      dependencies = dependencyScopes(text, ids);
+      if (JSON.stringify(dependencies) !== JSON.stringify(receipt.cache.dependencies)) throw Error('wrong dependency scopes');
+    }
     for (const record of receipt.records) {
       if (!ids.includes(record.id) || records.has(record.id) || record.inputs !== digest) throw Error(`duplicate/invalid check: ${record.id}`);
       if (path.basename(record.log) !== record.log) throw Error('invalid log path');
@@ -167,6 +239,13 @@ export function collect(dirs) {
       const result = normalized(record.id, text);
       if (!record.passed || hash(text) !== record.logHash || hash(result) !== record.resultHash
           || !verdict(record.id, record.code, text)) throw Error(`invalid result: ${record.id}`);
+      if (dependencies) {
+        const descriptor = cacheDescriptor(record.id, receipt.inputs, dependencies, receipt.binaryHash, policy(record.id));
+        if (sha(JSON.stringify(descriptor)) !== record.cacheKey
+            || sha(JSON.stringify(record.cacheInputs)) !== record.cacheKey
+            || record.binaryHash !== receipt.binaryHash
+            || JSON.stringify(record.args) !== JSON.stringify(command(record.id))) throw Error(`wrong cache context: ${record.id}`);
+      } else if (record.cacheHit || record.cacheKey) throw Error('cache evidence without fresh preflight');
       records.set(record.id, { ...record, result });
     }
   }
@@ -184,6 +263,11 @@ export function compare(left, right) {
 }
 
 async function main(args) {
+  if (args[0] === '--record-build') {
+    if (args.length !== 1) throw Error('usage: --record-build (immediately after a successful release build)');
+    console.log(JSON.stringify(attestBuild(inputs(), './build/release/bin/harkfell')));
+    return;
+  }
   if (args[0] === '--collect') {
     const result = collect(args.slice(1));
     console.log(`PASS combined reach: ${result.records.length} checks; ${scope}`);
@@ -195,12 +279,16 @@ async function main(args) {
     return;
   }
   const options = { out: args.shift() };
-  if (!options.out) throw Error('usage: reach-checks.mjs NEW-EVIDENCE-DIR [--jobs N] [--only IDS] [--serial]');
+  if (!options.out) throw Error('usage: reach-checks.mjs NEW-EVIDENCE-DIR [--jobs N] [--only IDS] [--cache DIR] [--serial]');
   while (args.length) {
     const option = args.shift();
     if (option === '--serial') options.serial = true;
     else if (option === '--jobs') options.jobs = Number(args.shift());
     else if (option === '--only') options.only = args.shift()?.split(',');
+    else if (option === '--cache') {
+      options.cache = args.shift();
+      if (!options.cache || options.cache.startsWith('--')) throw Error('--cache requires a directory');
+    }
     else throw Error(`unknown option: ${option}`);
   }
   const result = await run(options);

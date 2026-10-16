@@ -7,9 +7,23 @@
           (harkfell feel) (harkfell cloudstair reach)
           (harkfell cloudstair probes) (harkfell cloudstair inputs))
 
-  (export cloudstair-authored-timing)
+  (export cloudstair-authored-timing cloudstair-timing-rooms)
 
   (begin
+    ;; Shared by the actual isolate and its persisted verdict dependencies.
+    (define (cloudstair-timing-rooms ct name)
+      (let ((places
+              (case name
+                ((F-L) '((8 . 0) (8 . -1)))
+                ((M-S) '((9 . -1) (9 . -2)))
+                ((I-east I-west) '((11 . 0)))
+                ((P-west-gap-east P-west-gap-west P-east-gap-east P-east-gap-west)
+                 '((12 . -1) (11 . -1) (12 . 0)))
+                (else (error "unknown authored timing leg" name)))))
+        (filter (lambda (p)
+                  (member (cons (placed-x p) (placed-y p)) places))
+                (content-rooms ct))))
+
     (define (cloudstair-authored-timing CT profiles log . selected)
       (define WM (content-map CT))
       (define F HARKFELL-FEEL)
@@ -132,14 +146,7 @@
           (for-each
             (lambda (leg)
               (let* ((name (car leg))
-                     (places (case name
-                               ((F-L) '((8 . 0) (8 . -1)))
-                               ((M-S) '((9 . -1) (9 . -2)))
-                               ((I-east I-west) '((11 . 0)))
-                               (else '((12 . -1) (11 . -1) (12 . 0)))))
-                     (rooms (filter (lambda (p)
-                                      (member (cons (placed-x p) (placed-y p)) places))
-                                    (content-rooms CT)))
+                     (rooms (cloudstair-timing-rooms CT name))
                      (probe (content CT rooms: rooms
                                         wmap: (make-worldmap rooms 25 11 16))))
                 (set! failures

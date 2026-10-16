@@ -618,6 +618,36 @@
                        " [excluded: glasswood:-2,6 (15,10), drip pit: its floor is a stillness door the checker opens; reached and left in test-wrongwater-door, void if the Ice Well or the door changes]"
                        "")))))))
 
+    ;; This runs only after fresh, whole-world parse/map/seam validation.
+    ;; Physics dependencies come from the same selectors the searches use.
+    ;; Every pickup/ability supplier is included across region boundaries.
+    (define (reach-cache-inputs ct)
+      (define (rooms id selected)
+        (for-each
+          (lambda (p)
+            (say "CACHE-ROOM " id " " (room-path (placed-data p))))
+          selected))
+      (for-each
+        (lambda (p)
+          (let ((rm (placed-data p)))
+            (say "CACHE-LAYOUT " (symbol->string (room-region rm)) " "
+                 (number->string (placed-x p)) " " (number->string (placed-y p)))
+            (when (or (pair? (room-things-of rm 'down))
+                      (pair? (room-things-of rm 'harmonic)))
+              (say "CACHE-ABILITY " (room-path rm)))))
+        (content-rooms ct))
+      (rooms "outside" (cloudstair-outside-rooms ct '()))
+      (rooms "targets-2-4" (content-rooms (cloudstair-region-content ct)))
+      (rooms "targets-2-3-4" (content-rooms (cloudstair-region-content ct)))
+      (for-each
+        (lambda (name)
+          (rooms (string-append "timing-" (symbol->string name))
+                 (cloudstair-timing-rooms ct name)))
+        '(F-L M-S I-east I-west P-west-gap-east P-west-gap-west
+          P-east-gap-east P-east-gap-west))
+      (say "PASS reach-cache-inputs: parse seams map green; 11 physics scopes")
+      0)
+
     (define (room-check-main args)
       (let* ((dir (or (arg-value args "--world") "world"))
              (keys (filter (lambda (a) (and (parse-room-key a) (not (equal? a dir)))) args)))
@@ -633,6 +663,8 @@
                 ((not (null? ps))
                   (say "FAIL room-check: " (number->string (length ps)) " problems before reach (reach not run)")
                   1)
+                ((member "--reach-cache-inputs" args)
+                  (reach-cache-inputs ct))
                 ((member "--outside-cloudstair" args)
                   (outside-cloudstair-check ct args keys t0))
                 ((member "--parse-only" args)
