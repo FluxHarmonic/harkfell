@@ -41,6 +41,7 @@
           (engine worldmap)
           (engine reach)
           (engine reach geopool)
+          (engine reach geometry memo)
           (engine reach prof)
           (harkfell passages)
           (harkfell feel)
@@ -236,8 +237,10 @@
                     ;; Carry acquisition remains in the parent. Only pure
                     ;; expansions/walks are distributed, applied in serial order.
                     (pool (and (pair? log) (pair? (cdr log)) (cadr log)))
+                    (memo (and pool (pair? (cddr log)) (caddr log)))
+                    (generation (and memo (geometry-memo-select! memo tm HARKFELL-FEEL #f)))
                     (options (if pool
-                                 (list (car log) (make-geometry-remote pool (list carry starts)))
+                                 (list (car log) (make-geometry-remote pool (list carry starts) memo))
                                  log)))
                (if (and base *reuse*)
                    (apply reach-search* tm HARKFELL-FEEL starts witness-lands?
@@ -376,7 +379,11 @@
     (define (content-reach ct . log)
       (let ((s (start-cell ct)))
         (and s
-             (let* ((pickups (content-pickup-cells ct))
+             (let* ((pool (and (pair? log) (pair? (cdr log)) (cadr log)))
+                    (options (if pool
+                                 (list (car log) pool (make-geometry-memo))
+                                 log))
+                    (pickups (content-pickup-cells ct))
                     (sets
                       (let loop ((pending (list (list '() s))) (done '()))
                         (if (null? pending)
@@ -388,7 +395,7 @@
                                    (base (and (pair? done) (cset-graph (list-ref done (- (length done) 1)))))
                                    (g (prof-time 'spatial-graph
                                         (lambda ()
-                                          (apply content-reach-seeded ct carry base entries log))))
+                                          (apply content-reach-seeded ct carry base entries options))))
                                    (profiled
                                      (when (prof-on?)
                                        (prof-report (list 'spatial-carry carry)

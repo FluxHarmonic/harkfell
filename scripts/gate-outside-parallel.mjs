@@ -76,6 +76,11 @@ const parallel = check('outside-workers', 'world', workers, false, profiling);
 assert.equal(parallel.rawCode, 0);
 assert.ok(verdict('outside', parallel.rawCode, fs.readFileSync(parallel.log, 'utf8')));
 assert.equal(parallel.result, normalized('outside', serialText), 'outside complete output differs from serial');
+if (process.argv.includes('--require-anchor-memo')) {
+  const diagnostic = fs.readFileSync(path.join(out, 'outside-workers.stderr.log'), 'utf8');
+  assert.match(diagnostic, /\(spatial-anchor-memo-hit \. [1-9][0-9]*\)/,
+    'the full native check must exercise the anchor memo');
+}
 const summary = { passed: true, workers, profiling, youngThreshold,
   seconds: parallel.seconds, underOneHour: parallel.seconds < 3600,
   equal: 'all outside output lines; only measured seconds normalized', fixtures, reference };

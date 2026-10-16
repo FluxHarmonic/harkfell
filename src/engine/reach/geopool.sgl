@@ -15,7 +15,8 @@
 ;;;     "G <k>"           -> "G <walk result>"        walk from stand anchor k
 (define-library (engine reach geopool)
   (import (sigil list) (sigil string)
-          (engine body) (engine reach) (engine reach wire) (engine reach pool))
+          (engine body) (engine reach) (engine reach wire) (engine reach pool)
+          (engine reach geometry memo) (engine reach prof))
 
   (export make-geometry-remote geometry-task-handler geometry-spec-handler)
 
@@ -104,22 +105,35 @@
               (set! handlers (list (cons spec handler))))
             (handler (wire-join (cons (cadr toks) (cdr r))))))))
 
-    ;; (make-geometry-remote pool [spec]): with spec, a wire-able value naming
+    ;; (make-geometry-remote pool [spec [memo]]): with spec, a wire-able value naming
     ;; the search (for example (carry down starts)), every request is prefixed
     ;; "S <op> <spec>" for workers that build that search on demand
-    ;; (geometry-spec-handler); the answers are the same.
+    ;; (geometry-spec-handler); the answers are the same. An optional memo
+    ;; must be selected for this search's physics before constructing remote.
     (define (make-geometry-remote pool . spec)
-      (let ((results #{}) (walks #{})
+      (let* ((results #{}) (walks #{})
+            (memo (and (pair? spec) (pair? (cdr spec)) (cadr spec)))
+            (generation (and memo (geometry-memo-generation memo)))
             (op (lambda (o) (if (pair? spec) (cons "S" (cons o (wire-value (car spec)))) (list o)))))
         (vector
           ;; request! k rep urgent?
           (lambda (k rep urgent?)
-            ((if urgent? pool-submit-urgent! pool-submit!) pool
-             (wire-join (append (op "X") (list (number->string k)) (wire-value (wire-body-value rep))))
-             (lambda (line)
-               (let ((v (car (wire-read-value (cdr (wire-tokens line))))))
-                 (set! results (dict-set results k
-                                         (list (map value-note (car v)) (cadr v) (caddr v))))))))
+            (let* ((body (cons (number->string k) (wire-value (wire-body-value rep))))
+                   (key (and memo (wire-join body)))
+                   (old (and memo (geometry-memo-ref memo key))))
+              (if old
+                  (begin
+                    (prof-inc! 'spatial-anchor-memo-hit)
+                    (set! results (dict-set results k old)))
+                  (begin
+                    (prof-inc! 'spatial-anchor-memo-miss)
+                    ((if urgent? pool-submit-urgent! pool-submit!) pool
+                     (wire-join (append (op "X") body))
+                     (lambda (line)
+                       (let* ((v (car (wire-read-value (cdr (wire-tokens line)))))
+                              (answer (list (map value-note (car v)) (cadr v) (caddr v))))
+                         (when memo (geometry-memo-set! memo generation key answer))
+                         (set! results (dict-set results k answer)))))))))
           ;; await k
           (lambda (k)
             (pool-drain-until! pool (lambda () (dict-contains? results k)))

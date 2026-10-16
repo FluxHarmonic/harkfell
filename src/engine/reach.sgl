@@ -103,7 +103,7 @@
           graph-tm graph-cells graph-edges graph-starts graph-stats
           graph-edges-from graph-rejected graph-waters cell-index index-cell
           replay-witness witness-lands? witness-bodies witness-trace graph-walk-rect settle-cell
-          reach-forward reach-backward)
+          reach-forward reach-backward reach-physics-context)
 
   (begin
     ;; --- intents, interned -------------------------------------------------------
@@ -529,6 +529,21 @@
     (define (reach-search-down* tm f starts accept? down prior changed . log)
       (apply reach-search-profile* tm f starts accept? prior changed down log))
 
+    ;; A gated air field reads its gate even outside the tracked trajectory
+    ;; rectangle. Share this context with pure geometry memo invalidation.
+    (define (tilemap-air-context tm)
+      (map (lambda (fl)
+             (let ((gate (air-field-gate fl)))
+               (list (air-field-x fl) (air-field-y fl) (air-field-w fl) (air-field-h fl)
+                     (air-field-lift fl) (air-field-east fl) (air-field-west fl)
+                     (air-field-pulsed fl) gate
+                     (and gate (not (kind-solid? (tile-at tm (car gate) (cdr gate))))))))
+           (tilemap-air tm)))
+
+    (define (reach-physics-context tm f down)
+      (list (tilemap-cols tm) (tilemap-rows tm) (tilemap-size tm) (tilemap-edge tm)
+            f down (tilemap-air-context tm)))
+
     (define (reach-search-profile* tm f starts accept? prior changed down . log)
       (when (find air-field-pulsed (tilemap-air tm))
         (error "Spatial reach cannot prove timed fields; use exact timed reach"))
@@ -587,14 +602,7 @@
         ;; whether its gate cell is open here: body-step reads that cell
         ;; wherever the body is in the footprint, outside any rectangle REUSE
         ;; tracks, so a change of gate must invalidate every anchor.
-        (define air-sig
-          (map (lambda (fl)
-                 (let ((gate (air-field-gate fl)))
-                   (list (air-field-x fl) (air-field-y fl) (air-field-w fl) (air-field-h fl)
-                         (air-field-lift fl) (air-field-east fl) (air-field-west fl)
-                         (air-field-pulsed fl) gate
-                         (and gate (not (kind-solid? (tile-at tm (car gate) (cdr gate))))))))
-               (tilemap-air tm)))
+        (define air-sig (tilemap-air-context tm))
         ;; What makes two representatives the same state.
         (define (rep-sig b)
           (list (body-x b) (body-y b) (body-vx b) (body-vy b) (body-mode b) (body-side b) (body-facing b)

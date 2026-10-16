@@ -1,0 +1,43 @@
+;;; Pure anchor answers shared between successive searches of one world.
+;;; The parent still makes its original REUSE decisions and charges the
+;;; answer's original step count. This memo only avoids recomputing physics.
+(define-library (engine reach geometry memo)
+  (import (sigil list) (engine reach) (engine tilemap))
+
+  (export make-geometry-memo geometry-memo-select! geometry-memo-ref geometry-memo-set!
+          geometry-memo-generation)
+
+  (begin
+    ;; Previous tilemap, physics context, answers, generation. Each answer is
+    ;; (notes rectangle steps), keyed by the exact anchor/body wire request.
+    (define (make-geometry-memo) (vector #f #f #{} 0))
+    (define (geometry-memo-generation memo) (vector-ref memo 3))
+    (define (geometry-memo-ref memo key) (dict-ref (vector-ref memo 2) key #f))
+
+    (define (geometry-memo-set! memo generation key answer)
+      ;; A response from an earlier search cannot populate a newer context.
+      (when (= generation (geometry-memo-generation memo))
+        (vector-set! memo 2 (dict-set (vector-ref memo 2) key answer))))
+
+    (define (rectangle-changed? rect cells)
+      (find (lambda (cell)
+              (and (<= (car rect) (car cell) (caddr rect))
+                   (<= (cadr rect) (cdr cell) (cadddr rect))))
+            cells))
+
+    (define (geometry-memo-select! memo tm feel down)
+      (let ((prior (vector-ref memo 0))
+            (context (reach-physics-context tm feel down)))
+        (if (and prior (equal? context (vector-ref memo 1)))
+            (let ((changed (map (lambda (i) (index-cell tm i)) (tilemap-changes prior tm))))
+              (unless (null? changed)
+                (for-each
+                  (lambda (entry)
+                    (when (rectangle-changed? (cadr (cdr entry)) changed)
+                      (vector-set! memo 2 (dict-remove (vector-ref memo 2) (car entry)))))
+                  (dict-entries (vector-ref memo 2)))))
+            (vector-set! memo 2 #{}))
+        (vector-set! memo 0 tm)
+        (vector-set! memo 1 context)
+        (vector-set! memo 3 (+ 1 (geometry-memo-generation memo)))
+        (geometry-memo-generation memo)))))
