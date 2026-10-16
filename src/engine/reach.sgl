@@ -932,7 +932,7 @@
 
         (define (expand! k)
           (set! expanded (+ expanded 1))
-          (when (pair? log)
+          (when (and (pair? log) (car log))
             ((car log) expanded steps (key-kind k) (key-cell k)))
           (let* ((rep (vector-ref reps k))
                  (sig (rep-sig rep))

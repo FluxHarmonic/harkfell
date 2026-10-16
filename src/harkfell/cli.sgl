@@ -199,6 +199,11 @@
               ((member "cloudstair-world" args)
                (pool-serve (cloudstair-world-worker ct))
                0)
+              ((member "outside" args)
+               (unless (null? (content-problems ct))
+                 (error "outside worker: invalid source world"))
+               (pool-serve (content-spatial-worker (outside-check-content ct)))
+               0)
               (else (display "reach-worker: unknown kind" (current-error-port)) 2))))
 
     (define (now-s) (/ (* 1.0 (current-jiffy)) (jiffies-per-second)))
@@ -258,13 +263,16 @@
     ;; The spatial room-check (gate 3 of section 8) on ct: every room's
     ;; reach and traps, per carry set a player can hold. scope labels the
     ;; verdict line ("" for the whole world). Every problem counts.
-    (define (spatial-room-check ct args keys t0 scope)
-      (let* ((g (if (member "--verbose" args)
-                    (content-reach ct (lambda (n steps kind cell)
-                                        (say "  anchor " (number->string n) " kind " (number->string kind)
-                                             " cell " (number->string (car cell)) "," (number->string (cdr cell))
-                                             " steps " (number->string steps) " t " (number->string (exact (round (- (now-s) t0)))))))
-                    (content-reach ct)))
+    (define (spatial-room-check ct args keys t0 scope . pool)
+      (let* ((log (and (member "--verbose" args)
+                      (lambda (n steps kind cell)
+                        (say "  anchor " (number->string n) " kind " (number->string kind)
+                             " cell " (number->string (car cell)) "," (number->string (cdr cell))
+                             " steps " (number->string steps) " t "
+                             (number->string (exact (round (- (now-s) t0))))))))
+             (g (if (pair? pool)
+                    (content-reach ct log (car pool))
+                    (if log (content-reach ct log) (content-reach ct))))
              (t1 (now-s))
              (rps (reach-problems ct g))
              (rooms (map placed-data (content-rooms ct)))
@@ -567,21 +575,29 @@
                        (else p))))
              rooms)))
 
-    (define (outside-cloudstair-check ct args keys t0)
+    (define (outside-check-content ct)
       (let* ((wm (content-map ct))
              (outside (outside-depths-view
-                        (outside-timed-exclusions (cloudstair-outside-rooms ct '()))))
+                        (outside-timed-exclusions (cloudstair-outside-rooms ct '())))))
+        (content ct rooms: outside
+                    wmap: (make-worldmap outside (worldmap-cols wm) (worldmap-rows wm)
+                                         (worldmap-size wm)))))
+
+    (define (outside-cloudstair-check ct args keys t0)
+      (let* ((ct* (outside-check-content ct))
+             (outside (content-rooms ct*))
              (pocket-room (find outside-pocket-room? outside))
              (ledge-room (find outside-lift-ledge-room? outside))
              (underhum (filter underhum-room? outside))
              (pit-keyed (outside-drip-pit-keyed? outside))
-             (ct* (content ct rooms: outside
-                           wmap: (make-worldmap outside (worldmap-cols wm) (worldmap-rows wm)
-                                                (worldmap-size wm)))))
+             (n (reach-worker-count args)))
         (say "outside Cloudstair: " (number->string (length outside)) " rooms; "
              (number->string (- (length (content-rooms ct)) (length outside)))
              " Cloudstair rooms removed, their slots solid")
-        (cond ((find (lambda (f) (member f args))
+        (cond ((not (and (integer? n) (<= 0 n 10)))
+               (say "SETUP-FAILED room-check: outside --workers must be an integer from 0 to 10")
+               2)
+              ((find (lambda (f) (member f args))
                      '("--parse-only" "--cloudstair-timing" "--waypoints" "--cloudstair-region"))
                (say "SETUP-FAILED room-check: --outside-cloudstair runs alone, not with "
                     (find (lambda (f) (member f args))
@@ -598,25 +614,35 @@
                     "a stillness door or opens without H5, so this no-H5 view cannot hold the Underhum sealed")
                1)
               (else
-               (spatial-room-check ct* args keys t0
-                 (string-append
-                   " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
-                   (if pocket-room
-                       " [excluded: hollow:4,3 (20,6), H5-only, timed bowl gate af83a32]"
-                       "")
-                   (if ledge-room
-                       " [excluded: hollow:7,2 (7,1), lift ledge: reached carrying (2 4) with down by diagnostic timed search exp-31 (3471ab9), not re-gated, void if x7y2 changes]"
-                       "")
-                   (if (pair? underhum)
-                       (string-append
-                         " [Underhum: " (number->string (length underhum))
-                         " rooms sealed without H5 by the heart, hollow:4,3 (12,9), keys ("
-                         (string-join (map number->string (stone-thing-keys (car (underhum-hearts outside)))) " ")
-                         "); a reached Underhum cell fails; traversal is --depths-region underhum's]")
-                       "")
-                   (if pit-keyed
-                       " [excluded: glasswood:-2,6 (15,10), drip pit: its floor is a stillness door the checker opens; reached and left in test-wrongwater-door, void if the Ice Well or the door changes]"
-                       "")))))))
+               (let* ((pool (and (> n 0)
+                                 (make-pool (list (executable-path) "--reach-worker" "outside"
+                                                  "--world" (or (arg-value args "--world") "world")) n)))
+                      (verified (and pool
+                                     (pool-verify! pool "I"
+                                       (string-append "I " (spatial-worker-context ct*)))))
+                      (result
+                        (spatial-room-check ct* args keys t0
+                          (string-append
+                            " outside Cloudstair [without down, without Cloudstair's harmonics (H5), Cloudstair sealed]"
+                            (if pocket-room
+                                " [excluded: hollow:4,3 (20,6), H5-only, timed bowl gate af83a32]"
+                                "")
+                            (if ledge-room
+                                " [excluded: hollow:7,2 (7,1), lift ledge: reached carrying (2 4) with down by diagnostic timed search exp-31 (3471ab9), not re-gated, void if x7y2 changes]"
+                                "")
+                            (if (pair? underhum)
+                                (string-append
+                                  " [Underhum: " (number->string (length underhum))
+                                  " rooms sealed without H5 by the heart, hollow:4,3 (12,9), keys ("
+                                  (string-join (map number->string (stone-thing-keys (car (underhum-hearts outside)))) " ")
+                                  "); a reached Underhum cell fails; traversal is --depths-region underhum's]")
+                                "")
+                            (if pit-keyed
+                                " [excluded: glasswood:-2,6 (15,10), drip pit: its floor is a stillness door the checker opens; reached and left in test-wrongwater-door, void if the Ice Well or the door changes]"
+                                ""))
+                          pool)))
+                 (when pool (pool-close! pool))
+                 result)))))
 
     ;; This runs only after fresh, whole-world parse/map/seam validation.
     ;; Physics dependencies come from the same selectors the searches use.

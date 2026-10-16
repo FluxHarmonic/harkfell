@@ -31,6 +31,7 @@
 
 (define-library (harkfell check)
   (import (sigil struct)
+          (sigil io)
           (sigil list)
           (sigil string)
           (sigil math)
@@ -39,6 +40,7 @@
           (engine roomfile)
           (engine worldmap)
           (engine reach)
+          (engine reach geopool)
           (harkfell passages)
           (harkfell feel)
           (harkfell content))
@@ -50,7 +52,7 @@
           content-pickup-cells content-stone-cells tiles-carrying
           content-reach-seeded PICKUP-TOUCH carry-union edge-touches
           cset? cset-carry cset-graph cset-entries cset-fwd cset-back cset-touch
-          body-touches?)
+          body-touches? spatial-worker-context content-spatial-worker)
 
   (begin
     (define (room-tile-origin ct rm)
@@ -229,11 +231,34 @@
       (let ((s (start-cell ct))
             (tm (tiles-carrying ct carry)))
         (and s
-             (let ((starts (cons s (filter (lambda (c) (not (equal? c s))) seeds))))
+             (let* ((starts (cons s (filter (lambda (c) (not (equal? c s))) seeds)))
+                    ;; Carry acquisition remains in the parent. Only pure
+                    ;; expansions/walks are distributed, applied in serial order.
+                    (pool (and (pair? log) (pair? (cdr log)) (cadr log)))
+                    (options (if pool
+                                 (list (car log) (make-geometry-remote pool (list carry starts)))
+                                 log)))
                (if (and base *reuse*)
                    (apply reach-search* tm HARKFELL-FEEL starts witness-lands?
-                          (graph-memo base) (tilemap-changes (graph-tm base) tm) log)
-                   (apply reach-search tm HARKFELL-FEEL starts witness-lands? log))))))
+                          (graph-memo base) (tilemap-changes (graph-tm base) tm) options)
+                   (apply reach-search tm HARKFELL-FEEL starts witness-lands? options))))))
+
+    ;; Exact source equality, rather than a truncated digest: a worker must
+    ;; have read the parent's world before any geometry answer is accepted.
+    (define (spatial-worker-context ct)
+      (with-output-to-string (lambda () (write (content-source ct)))))
+
+    (define (content-spatial-worker ct)
+      (let ((context (string-append "I " (spatial-worker-context ct)))
+            (geometry
+              (geometry-spec-handler
+                (lambda (spec)
+                  (reach-search (tiles-carrying ct (car spec)) HARKFELL-FEEL
+                                (cadr spec) witness-lands? #f 'serve)))))
+        (lambda (line)
+          (if (string=? line "I")
+              context
+              (geometry line)))))
 
     ;; REUSE on (the default) or off: --no-reuse, and the fixture check that
     ;; compares the two.

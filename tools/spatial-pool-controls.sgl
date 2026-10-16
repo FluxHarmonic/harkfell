@@ -1,0 +1,26 @@
+(import (sigil test)
+        (engine reach pool)
+        (harkfell content)
+        (harkfell source)
+        (harkfell check))
+
+(define WORLD "test/fixtures/worlds/carry-softlock")
+(define OTHER "test/fixtures/worlds/carry-softlock-rock")
+(define CT (load-content (read-world-source WORLD)))
+
+(test-group "spatial geometry workers fail closed"
+  (test "different source world cannot supply geometry"
+    (let ((pool (make-pool (list "./build/release/bin/harkfell"
+                                 "--reach-worker" "outside" "--world" OTHER) 1)))
+      (assert-error
+        (pool-verify! pool "I" (string-append "I " (spatial-worker-context CT))))
+      (pool-close! pool)))
+  (test "a dead worker cannot become an empty successful search"
+    (let ((pool (make-pool (list "sh" "-c" "exit 1") 1)))
+      (assert-error (pool-verify! pool "I" "I expected"))
+      (pool-close! pool)))
+  (test "a malformed worker response fails verification"
+    (let ((pool (make-pool
+                  (list "sh" "-c" "while IFS= read -r line; do echo WRONG; done") 1)))
+      (assert-error (pool-verify! pool "I" "I expected"))
+      (pool-close! pool))))
