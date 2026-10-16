@@ -24,3 +24,17 @@
                   (list "sh" "-c" "while IFS= read -r line; do echo WRONG; done") 1)))
       (assert-error (pool-verify! pool "I" "I expected"))
       (pool-close! pool))))
+
+(let ((summary (run-tests-filtered (lambda (test) #t))))
+  (for-each
+    (lambda (result)
+      (display (test-result-name result))
+      (display ": ")
+      (display (if (test-result-passed? result) "PASS" (test-result-message result)))
+      (newline))
+    (test-summary-results summary))
+  (unless (and (= (test-summary-total summary) 3)
+               (= (test-summary-passed summary) 3)
+               (= (test-summary-failed summary) 0))
+    (error "spatial pool controls did not execute all three tests"))
+  (display "RESULT spatial-pool-controls PASS 3/3\n"))
