@@ -12,7 +12,7 @@ test('preflight cannot omit a scope or its cross-region abilities', () => {
   assert.throws(() => dependencyScopes('FAIL invalid world', ids), /failed/);
 });
 
-test('cold/warm cache and room, ability, checker, parse, topology and corruption sabotage', async () => {
+test('cold/warm cache and room, ability, checker, parse, topology and corruption sabotage', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reach-cache-test-'));
   const prior = process.cwd();
   const put = (name, text) => {
@@ -26,7 +26,7 @@ test('cold/warm cache and room, ability, checker, parse, topology and corruption
     'src/checker.sgl', 'package.sgl', 'sigil.lock']) put(file, 'GREEN\n');
   execFileSync('git', ['init', '-q', root]);
   execFileSync('git', ['add', '.'], { cwd: root });
-  execFileSync('git', ['-c', 'user.name=David Wilson', '-c', 'user.email=david@daviwil.com',
+  execFileSync('git', ['-c', 'user.name=Reach Test Fixture', '-c', 'user.email=reach-tests@example.invalid',
     'commit', '-qm', 'Checker cache fixture'], { cwd: root });
   const allRows = Object.fromEntries(legs.map(name => [name,
     Array.from({ length: 16 }, (_, mask) => [2, 3, 4, 5].filter((_, i) => mask & (1 << i)))
@@ -67,7 +67,11 @@ else if (args.includes('--cloudstair-timing')) {
   try {
     process.chdir(root);
     const binary = './build/release/bin/harkfell', cache = 'build/verdict-cache';
-    const attest = () => attestBuild(inputs(), binary);
+    const attest = () => {
+      // The double interprets source; rewriting it models a completed rebuild.
+      fs.writeFileSync(binary, fs.readFileSync(binary));
+      return attestBuild(inputs(), binary);
+    };
     attest();
     const cold = await run({ out: 'build/cold', binary, cache, jobs: 3 });
     assert.ok(cold.passed);
@@ -77,6 +81,13 @@ else if (args.includes('--cloudstair-timing')) {
     assert.ok(warm.records.every(record => record.cacheHit));
     assert.match(compare(collect(['build/cold']), collect(['build/warm'])), /^SAME:/);
     assert.equal(fs.readFileSync('checks-ran.log', 'utf8').trim().split('\n').length, 11);
+    await t.test('cached receipts cannot qualify a changed checkout', () => {
+      put(cloud, 'GREEN changed after evidence was recorded\n');
+      try {
+        assert.throws(() => collect(['build/cold']), /running checkout/);
+        assert.throws(() => collect(['build/warm']), /running checkout/);
+      } finally { put(cloud, 'GREEN\n'); }
+    });
     const differentWorkers = await run({ out: 'build/serial-outside', binary, cache,
       only: ['outside'], outsideWorkers: 0 });
     assert.ok(differentWorkers.passed && !differentWorkers.records[0].cacheHit);
@@ -133,6 +144,15 @@ else if (args.includes('--cloudstair-timing')) {
     assert.ok(repaired.passed && !repaired.records[0].cacheHit);
     fs.appendFileSync('build/warm/preflight.log', 'corrupted transfer');
     assert.throws(() => collect(['build/warm']), /corrupt preflight/);
+    // Cache publication may fail after valid checks; their receipt must survive
+    // while the failed invocation remains uncollectable.
+    put('build/cache-is-a-file', 'cannot create cache entries here\n');
+    await assert.rejects(run({ out: 'build/store-error', binary,
+      cache: 'build/cache-is-a-file', only: ['outside'] }), /EEXIST|ENOTDIR/);
+    const failed = JSON.parse(fs.readFileSync('build/store-error/run.json'));
+    assert.equal(failed.passed, false);
+    assert.equal(failed.records.length, 1);
+    assert.ok(failed.records[0].passed && failed.cacheStoreError);
   } finally {
     process.chdir(prior);
     fs.rmSync(root, { recursive: true, force: true });

@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { run, collect, compare, legs, ids, verdict, normalized } from './reach-checks.mjs';
+import { run, collect, compare, legs, ids, verdict, normalized, inputs } from './reach-checks.mjs';
+import { attestBuild, sha } from './reach-cache.mjs';
 
 const row = (name, carry, down) => `(${name} carry (${carry.join(' ')}) down ${down} phases 480 window-failures 0 survivors 480 no-down-crossings 0 stranded () required-return #t unreachable-profile-return-misses 0)`;
 const timing = name => Array.from({ length: 16 }, (_, mask) => [2, 3, 4, 5].filter((_, i) => mask & (1 << i)))
@@ -41,7 +44,7 @@ test('normalization preserves assertion and search differences', () => {
   assert.notEqual(normalized('outside', 'reach 123, 12 s\n'), normalized('outside', 'reach 124, 12 s\n'));
 });
 
-test('bounded scheduler, monolithic serial comparison, distributed collection and fail-closed controls', async () => {
+test('bounded scheduler, monolithic serial comparison, distributed collection and fail-closed controls', async t => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'reach-checks-test-'));
   const binary = path.join(temp, 'checker');
   const events = path.join(temp, 'events');
@@ -92,6 +95,22 @@ setTimeout(() => {
     assert.throws(() => collect([parallel]), /wrong check arguments/);
     fs.writeFileSync(receiptPath, originalReceipt);
     assert.match(compare(a, b), /^SAME:/);
+    await t.test('collection rejects internally consistent evidence from another checkout', () => {
+      const stale = JSON.parse(originalReceipt);
+      stale.inputs.manifest[0][1] = '0'.repeat(64);
+      stale.inputs.digest = sha(JSON.stringify(stale.inputs.manifest));
+      for (const record of stale.records) record.inputs = stale.inputs.digest;
+      fs.writeFileSync(receiptPath, JSON.stringify(stale));
+      try { assert.throws(() => collect([parallel]), /running checkout/); }
+      finally { fs.writeFileSync(receiptPath, originalReceipt); }
+    });
+    await t.test('collection rejects a record from a different executable', () => {
+      const mixed = JSON.parse(originalReceipt);
+      mixed.records[0].binaryHash = '0'.repeat(64);
+      fs.writeFileSync(receiptPath, JSON.stringify(mixed));
+      try { assert.throws(() => collect([parallel]), /checker binar/); }
+      finally { fs.writeFileSync(receiptPath, originalReceipt); }
+    });
     const changed = structuredClone(b);
     changed.records[0].result += 'PLANTED DIFFERENCE\n';
     assert.throws(() => compare(a, changed), /DIFFER/);
@@ -102,6 +121,16 @@ setTimeout(() => {
     const remaining = path.join(temp, 'remaining');
     await run({ out: remaining, binary, only: ids.slice(1) });
     assert.match(compare(a, collect([partial, remaining])), /^SAME:/);
+    await t.test('collection rejects mixed executable hashes across complete shards', () => {
+      const file = path.join(remaining, 'run.json');
+      const original = fs.readFileSync(file, 'utf8');
+      const mixed = JSON.parse(original);
+      mixed.binaryHash = '0'.repeat(64);
+      for (const record of mixed.records) record.binaryHash = mixed.binaryHash;
+      fs.writeFileSync(file, JSON.stringify(mixed));
+      try { assert.throws(() => collect([partial, remaining]), /different checker binaries/); }
+      finally { fs.writeFileSync(file, original); }
+    });
     const log = path.join(parallel, 'outside.log');
     fs.appendFileSync(log, 'FAIL planted corruption\n');
     assert.throws(() => collect([parallel]), /invalid result/);
@@ -111,4 +140,84 @@ setTimeout(() => {
     const missing = await run({ out: path.join(temp, 'missing'), binary: '/missing-checker', only: ['outside'] }).catch(() => null);
     assert.equal(missing?.passed ?? false, false);
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+test('stale native executables are refused before any mode executes or attests them', async t => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'reach-stale-test-'));
+  const binary = path.join(temp, 'checker');
+  const marker = path.join(temp, 'executed');
+  const buildReceipt = path.join(temp, 'build.json');
+  fs.writeFileSync(binary, `#!/bin/sh
+echo entered >> '${marker}'
+echo 'PASS room-check outside Cloudstair: 107 rooms, parse seams map reach green'
+`, { mode: 0o755 });
+  try {
+    const source = inputs();
+    attestBuild(source, binary, buildReceipt);
+    fs.utimesSync(binary, new Date(0), new Date(0));
+    for (const [name, options] of [
+      ['parallel', { only: ['outside'], jobs: 3 }],
+      ['serial', { serial: true }],
+      ['cache', { only: ['outside'], cache: path.join(temp, 'cache') }],
+    ]) {
+      await t.test(`stale binary cannot run in ${name} mode`, async () => {
+        await assert.rejects(run({ out: path.join(temp, name), binary, buildReceipt, ...options }), /stale checker build/);
+        assert.equal(fs.existsSync(marker), false, 'the stale binary was executed');
+      });
+      fs.rmSync(marker, { force: true });
+    }
+    await t.test('stale binary cannot be bound to current source by attestBuild', () => {
+      assert.throws(() => attestBuild(source, binary, path.join(temp, 'stale-build.json')), /stale checker build/);
+      assert.equal(fs.existsSync(path.join(temp, 'stale-build.json')), false);
+    });
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+test('a repeated interrupt reaps only admitted detached checkers', { timeout: 15000 }, async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'reach-interrupt-test-'));
+  const binary = path.join(temp, 'checker');
+  const marker = path.join(temp, 'pid');
+  const out = path.join(temp, 'receipt');
+  fs.writeFileSync(binary, `#!/usr/bin/env node
+const fs = require('node:fs');
+process.on('SIGTERM', () => fs.appendFileSync(${JSON.stringify(marker)}, '\\nterm'));
+fs.writeFileSync(${JSON.stringify(marker)}, String(process.pid));
+setInterval(() => {}, 100);
+`, { mode: 0o755 });
+  const module = pathToFileURL(path.resolve('scripts/reach-checks.mjs')).href;
+  const code = `import { run } from ${JSON.stringify(module)};
+const result = await run(${JSON.stringify({ out, binary, only: ['outside'], limit: 10 })});
+process.exitCode = result.passed ? 0 : 1;`;
+  const runner = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: 'ignore' });
+  const exit = new Promise(resolve => runner.once('exit', (code, signal) => resolve({ code, signal })));
+  const waitFor = async predicate => {
+    const deadline = Date.now() + 5000;
+    while (!predicate()) {
+      assert.ok(Date.now() < deadline, 'interrupt control timed out');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  let checker;
+  try {
+    await waitFor(() => fs.existsSync(marker));
+    checker = Number(fs.readFileSync(marker, 'utf8').split('\n')[0]);
+    runner.kill('SIGINT');
+    await waitFor(() => fs.readFileSync(marker, 'utf8').includes('term'));
+    runner.kill('SIGINT');
+    await waitFor(() => runner.exitCode !== null || runner.signalCode !== null);
+    assert.deepEqual(await exit, { code: 1, signal: null });
+    const receipt = JSON.parse(fs.readFileSync(path.join(out, 'run.json')));
+    assert.equal(receipt.passed, false);
+    assert.equal(receipt.records.length, 1);
+    const state = `/proc/${checker}/stat`;
+    assert.ok(!fs.existsSync(state) || fs.readFileSync(state, 'utf8').split(') ')[1].startsWith('Z'),
+      'the admitted checker survived the second interrupt');
+  } finally {
+    if (runner.exitCode === null && runner.signalCode === null) runner.kill('SIGKILL');
+    if (checker) {
+      try { process.kill(checker, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
+    await exit;
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 });

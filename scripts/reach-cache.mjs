@@ -7,13 +7,24 @@ export const sha = value => createHash('sha256').update(value).digest('hex');
 const nativeFile = file => file.startsWith('src/') || ['package.sgl', 'sigil.lock'].includes(file);
 const nativeDigest = source => sha(JSON.stringify(source.manifest.filter(([file]) => nativeFile(file))));
 
+export function verifyFreshBuild(source, binary) {
+  const built = fs.statSync(binary, { bigint: true }).mtimeNs;
+  for (const [file] of source.manifest) {
+    if (nativeFile(file) && fs.statSync(file, { bigint: true }).mtimeNs > built) {
+      throw Error(`stale checker build: ${binary} is older than ${file}; rebuild the release executable`);
+    }
+  }
+}
+
 export function attestBuild(source, binary, file = 'build/release/reach-build.json') {
+  verifyFreshBuild(source, binary);
   const receipt = { schema: 1, nativeInputs: nativeDigest(source), binaryHash: sha(fs.readFileSync(binary)) };
   fs.writeFileSync(file, JSON.stringify(receipt, null, 2) + '\n');
   return receipt;
 }
 
 export function verifyBuild(source, binary, file = 'build/release/reach-build.json') {
+  verifyFreshBuild(source, binary);
   const receipt = JSON.parse(fs.readFileSync(file));
   if (receipt.schema !== 1 || receipt.nativeInputs !== nativeDigest(source)
       || receipt.binaryHash !== sha(fs.readFileSync(binary))) {

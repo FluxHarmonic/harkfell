@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { sha, attestBuild, verifyBuild, dependencyScopes, cacheDescriptor,
+import { sha, attestBuild, verifyBuild, verifyFreshBuild, dependencyScopes, cacheDescriptor,
   cachedVerdict, storeVerdict } from './reach-cache.mjs';
 
 export const legs = ['F-L', 'M-S', 'I-east', 'I-west', 'P-west-gap-east',
@@ -115,6 +115,7 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
   const start = Date.now();
   fs.mkdirSync(out, { recursive: false }); // Never mix a retry with older evidence.
   const source = inputs();
+  verifyFreshBuild(source, binary);
   const binaryHash = hash(fs.readFileSync(binary));
   const head = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
   let cacheInfo;
@@ -139,14 +140,15 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
   const children = new Set();
   let interrupted = false;
   const stop = () => {
+    const signal = interrupted ? 'SIGKILL' : 'SIGTERM';
     interrupted = true;
     // Each admitted child owns a fresh session, including its timeout/workers.
     for (const child of children) {
-      try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      try { process.kill(-child.pid, signal); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
   };
-  process.once('SIGTERM', stop);
-  process.once('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
   async function worker() {
     while (queue.length && !interrupted) {
       const id = queue.shift();
@@ -199,18 +201,29 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
     process.removeListener('SIGINT', stop);
   }
   const unchanged = inputs().digest === source.digest;
-  if (cache && unchanged && !interrupted) {
-    for (const record of records) {
-      if (!record.cacheHit && record.passed) storeVerdict(cache, record.cacheInputs, record,
-        fs.readFileSync(path.join(out, record.log), 'utf8'));
-    }
-  }
   const passed = !interrupted && unchanged && records.length === only.length && records.every(record => record.passed);
   const receipt = { scope, passed, complete: only.length === ids.length, unchanged,
     seconds: (Date.now() - start) / 1000, jobs: serial ? 1 : jobs, serial, outsideWorkers,
     inputs: source, binaryHash, head, cache: cacheInfo,
     records: records.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)) };
   fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(receipt, null, 2) + '\n');
+  // Preserve complete diagnostics even if cache publication fails afterward.
+  if (cache && unchanged && !interrupted) {
+    try {
+      for (const record of records) {
+        if (!record.cacheHit && record.passed) storeVerdict(cache, record.cacheInputs, record,
+          fs.readFileSync(path.join(out, record.log), 'utf8'));
+      }
+      receipt.seconds = (Date.now() - start) / 1000;
+      fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(receipt, null, 2) + '\n');
+    } catch (error) {
+      receipt.passed = false;
+      receipt.cacheStoreError = error.message;
+      receipt.seconds = (Date.now() - start) / 1000;
+      fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(receipt, null, 2) + '\n');
+      throw error;
+    }
+  }
   console.log(`RESULT reach-checks ${passed ? 'PASS' : 'FAIL'} complete=${receipt.complete} wall=${receipt.seconds}s; ${scope}`);
   return receipt;
 }
@@ -219,7 +232,9 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
 // transfer, duplicate check or edited receipt can never become a green gate.
 export function collect(dirs) {
   const records = new Map();
+  const current = inputs().digest;
   let digest;
+  let binaryHash;
   for (const dir of dirs) {
     const receipt = JSON.parse(fs.readFileSync(path.join(dir, 'run.json')));
     // Older evidence omitted the flag and ran outside serially.
@@ -228,6 +243,10 @@ export function collect(dirs) {
         || (receipt.serial && outsideWorkers !== 0))) throw Error('invalid outside worker policy');
     if (!receipt.passed || !receipt.unchanged || receipt.scope !== scope
         || hash(JSON.stringify(receipt.inputs.manifest)) !== receipt.inputs.digest) throw Error(`invalid run: ${dir}`);
+    if (receipt.inputs.digest !== current) throw Error(`evidence differs from running checkout: ${dir}`);
+    if (!/^[a-f0-9]{64}$/.test(receipt.binaryHash)) throw Error(`invalid checker binary hash: ${dir}`);
+    binaryHash ??= receipt.binaryHash;
+    if (receipt.binaryHash !== binaryHash) throw Error('different checker binaries');
     digest ??= receipt.inputs.digest;
     if (digest !== receipt.inputs.digest) throw Error('different source inputs');
     let dependencies;
@@ -241,6 +260,7 @@ export function collect(dirs) {
     }
     for (const record of receipt.records) {
       if (!ids.includes(record.id) || records.has(record.id) || record.inputs !== digest) throw Error(`duplicate/invalid check: ${record.id}`);
+      if (record.binaryHash !== binaryHash) throw Error(`wrong checker binary: ${record.id}`);
       if (path.basename(record.log) !== record.log) throw Error('invalid log path');
       const text = fs.readFileSync(path.join(dir, record.log), 'utf8');
       const result = normalized(record.id, text);
