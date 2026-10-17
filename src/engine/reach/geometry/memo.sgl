@@ -13,7 +13,7 @@
     ;; Each answer is
     ;; (notes rectangle steps), keyed by the exact anchor/body wire request.
     (define (make-geometry-memo . limit)
-      (let ((cap (if (pair? limit) (car limit) 4096)))
+      (let ((cap (if (pair? limit) (car limit) 65536)))
         (unless (and (integer? cap) (> cap 0))
           (error "geometry memo capacity must be a positive integer"))
         (vector #f #f #{} 0 cap 0)))

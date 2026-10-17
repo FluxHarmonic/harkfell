@@ -14,7 +14,7 @@ Outside uses eight geometry workers by default; `--outside-workers 0..10`
 controls that count independently of `--jobs`. Its parent applies answers in
 the original order. Pure anchor answers can be reused across carries only
 when tracked tiles and the complete physics context still match; original
-search counters and assertions remain intact. The memo retains at most 4,096
+search counters and assertions remain intact. The memo retains at most 65,536
 answers; reaching capacity discards retained answers and recomputes on misses.
 Worker count is recorded and
 bound into outside cache keys and strict collection. Serial mode always uses
