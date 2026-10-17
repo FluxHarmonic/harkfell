@@ -75,9 +75,10 @@ export function verdict(id, code, text) {
     && text.includes('(drain-rounds-limit 0 not-a-gate-verdict)');
 }
 
-function command(id) {
+function command(id, outsideWorkers = 8) {
   const base = ['--room-check'];
-  if (id === 'outside') return [...base, '--outside-cloudstair'];
+  if (id === 'outside') return [...base, '--outside-cloudstair',
+    ...(outsideWorkers === null ? [] : ['--workers', String(outsideWorkers)])];
   if (id.startsWith('timing-')) return [...base, '--cloudstair-timing',
     ...(id === 'timing-all' ? [] : ['--timing-leg', id.slice(7)])];
   return [...base, '--cloudstair-region', '--carry', id.slice(8).replaceAll('-', ','),
@@ -97,15 +98,17 @@ function environment(id) {
   return env;
 }
 
-function policy(id) {
+function policy(id, outsideWorkers = 8) {
   const env = Object.fromEntries(Object.entries(environment(id)).filter(([key]) => /^(HARKFELL_|SIGIL_GC_|SIGIL_YOUNG_)/.test(key)));
-  return { scope, args: command(id), environment: env };
+  return { scope, args: command(id, outsideWorkers), environment: env };
 }
 
 export async function run({ out, jobs = 4, only = ids, serial = false,
   binary = './build/release/bin/harkfell', limit = 18000, cache,
-  buildReceipt = 'build/release/reach-build.json' }) {
+  buildReceipt = 'build/release/reach-build.json', outsideWorkers = 8 }) {
   if (!Number.isInteger(jobs) || jobs < 1 || jobs > 32) throw Error('jobs must be 1..32');
+  if (!Number.isInteger(outsideWorkers) || outsideWorkers < 0 || outsideWorkers > 10) throw Error('outside workers must be 0..10');
+  if (serial) outsideWorkers = 0;
   if (!only.length || new Set(only).size !== only.length || only.some(id => !ids.includes(id))) throw Error('invalid or duplicate check selection');
   if (serial && only.length !== ids.length) throw Error('serial requires the complete scope');
   if (serial && cache) throw Error('serial reference must not use cached verdicts');
@@ -147,11 +150,11 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
   async function worker() {
     while (queue.length && !interrupted) {
       const id = queue.shift();
-      const args = command(id);
+      const args = command(id, outsideWorkers);
       const log = `${id}.log`;
       const fd = fs.openSync(path.join(out, log), 'wx');
       const started = Date.now();
-      const descriptor = cache && cacheDescriptor(id, source, cacheInfo.dependencies, binaryHash, policy(id));
+      const descriptor = cache && cacheDescriptor(id, source, cacheInfo.dependencies, binaryHash, policy(id, outsideWorkers));
       const cached = cache && cachedVerdict(cache, descriptor, verdict, normalized);
       if (cached?.hit) {
         fs.closeSync(fd);
@@ -204,7 +207,7 @@ export async function run({ out, jobs = 4, only = ids, serial = false,
   }
   const passed = !interrupted && unchanged && records.length === only.length && records.every(record => record.passed);
   const receipt = { scope, passed, complete: only.length === ids.length, unchanged,
-    seconds: (Date.now() - start) / 1000, jobs: serial ? 1 : jobs, serial,
+    seconds: (Date.now() - start) / 1000, jobs: serial ? 1 : jobs, serial, outsideWorkers,
     inputs: source, binaryHash, head, cache: cacheInfo,
     records: records.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)) };
   fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(receipt, null, 2) + '\n');
@@ -219,6 +222,10 @@ export function collect(dirs) {
   let digest;
   for (const dir of dirs) {
     const receipt = JSON.parse(fs.readFileSync(path.join(dir, 'run.json')));
+    // Older evidence omitted the flag and ran outside serially.
+    const outsideWorkers = receipt.outsideWorkers ?? null;
+    if (outsideWorkers !== null && (!Number.isInteger(outsideWorkers) || outsideWorkers < 0 || outsideWorkers > 10
+        || (receipt.serial && outsideWorkers !== 0))) throw Error('invalid outside worker policy');
     if (!receipt.passed || !receipt.unchanged || receipt.scope !== scope
         || hash(JSON.stringify(receipt.inputs.manifest)) !== receipt.inputs.digest) throw Error(`invalid run: ${dir}`);
     digest ??= receipt.inputs.digest;
@@ -239,12 +246,14 @@ export function collect(dirs) {
       const result = normalized(record.id, text);
       if (!record.passed || hash(text) !== record.logHash || hash(result) !== record.resultHash
           || !verdict(record.id, record.code, text)) throw Error(`invalid result: ${record.id}`);
+      const args = command(receipt.serial && record.id.startsWith('timing-') ? 'timing-all' : record.id, outsideWorkers);
+      if (JSON.stringify(record.args) !== JSON.stringify(args)) throw Error(`wrong check arguments: ${record.id}`);
       if (dependencies) {
-        const descriptor = cacheDescriptor(record.id, receipt.inputs, dependencies, receipt.binaryHash, policy(record.id));
+        const descriptor = cacheDescriptor(record.id, receipt.inputs, dependencies, receipt.binaryHash, policy(record.id, outsideWorkers));
         if (sha(JSON.stringify(descriptor)) !== record.cacheKey
             || sha(JSON.stringify(record.cacheInputs)) !== record.cacheKey
             || record.binaryHash !== receipt.binaryHash
-            || JSON.stringify(record.args) !== JSON.stringify(command(record.id))) throw Error(`wrong cache context: ${record.id}`);
+            || JSON.stringify(record.args) !== JSON.stringify(command(record.id, outsideWorkers))) throw Error(`wrong cache context: ${record.id}`);
       } else if (record.cacheHit || record.cacheKey) throw Error('cache evidence without fresh preflight');
       records.set(record.id, { ...record, result });
     }
@@ -279,11 +288,12 @@ async function main(args) {
     return;
   }
   const options = { out: args.shift() };
-  if (!options.out) throw Error('usage: reach-checks.mjs NEW-EVIDENCE-DIR [--jobs N] [--only IDS] [--cache DIR] [--serial]');
+  if (!options.out) throw Error('usage: reach-checks.mjs NEW-EVIDENCE-DIR [--jobs N] [--outside-workers N] [--only IDS] [--cache DIR] [--serial]');
   while (args.length) {
     const option = args.shift();
     if (option === '--serial') options.serial = true;
     else if (option === '--jobs') options.jobs = Number(args.shift());
+    else if (option === '--outside-workers') options.outsideWorkers = Number(args.shift());
     else if (option === '--only') options.only = args.shift()?.split(',');
     else if (option === '--cache') {
       options.cache = args.shift();

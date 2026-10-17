@@ -77,6 +77,14 @@ else if (args.includes('--cloudstair-timing')) {
     assert.ok(warm.records.every(record => record.cacheHit));
     assert.match(compare(collect(['build/cold']), collect(['build/warm'])), /^SAME:/);
     assert.equal(fs.readFileSync('checks-ran.log', 'utf8').trim().split('\n').length, 11);
+    const differentWorkers = await run({ out: 'build/serial-outside', binary, cache,
+      only: ['outside'], outsideWorkers: 0 });
+    assert.ok(differentWorkers.passed && !differentWorkers.records[0].cacheHit);
+    assert.notEqual(differentWorkers.records[0].cacheKey,
+      cold.records.find(record => record.id === 'outside').cacheKey);
+    const sameWorkers = await run({ out: 'build/serial-outside-warm', binary, cache,
+      only: ['outside'], outsideWorkers: 0 });
+    assert.ok(sameWorkers.passed && sameWorkers.records[0].cacheHit);
 
     // A room regression re-executes its consumers, while outside's independent
     // proof remains a hit. No stale green timing/target verdict may survive.

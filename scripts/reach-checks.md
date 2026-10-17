@@ -10,6 +10,13 @@ node scripts/reach-checks.mjs --compare build/reach-serial build/reach-parallel
 Run expensive checks on build hosts. `--jobs` bounds independent checks; each
 target profile additionally starts its existing three search workers. Budget
 memory for each simultaneous regional search and reserve cores for other work.
+Outside uses eight geometry workers by default; `--outside-workers 0..10`
+controls that count independently of `--jobs`. Its parent applies answers in
+the original order. Pure anchor answers can be reused across carries only
+when tracked tiles and the complete physics context still match; original
+search counters and assertions remain intact. Worker count is recorded and
+bound into outside cache keys and strict collection. Serial mode always uses
+zero outside workers and never reuses a verdict cache.
 `--serial` uses the original unfiltered timing matrix, followed by outside and
 the two target profiles. Parallel timing slices use the same isolated rooms,
 all 32 carry/down profiles and all 480 phases. No search assertion changes.

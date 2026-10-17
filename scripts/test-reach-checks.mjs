@@ -80,6 +80,17 @@ setTimeout(() => {
     assert.equal(peak, 3);
     assert.ok((await run({ out: serial, binary, serial: true })).passed);
     const a = collect([serial]), b = collect([parallel]);
+    assert.deepEqual(a.records.find(record => record.id === 'outside').args,
+      ['--room-check', '--outside-cloudstair', '--workers', '0']);
+    assert.deepEqual(b.records.find(record => record.id === 'outside').args,
+      ['--room-check', '--outside-cloudstair', '--workers', '8']);
+    const receiptPath = path.join(parallel, 'run.json');
+    const originalReceipt = fs.readFileSync(receiptPath, 'utf8');
+    const wrongPolicy = JSON.parse(originalReceipt);
+    wrongPolicy.outsideWorkers = 7;
+    fs.writeFileSync(receiptPath, JSON.stringify(wrongPolicy));
+    assert.throws(() => collect([parallel]), /wrong check arguments/);
+    fs.writeFileSync(receiptPath, originalReceipt);
     assert.match(compare(a, b), /^SAME:/);
     const changed = structuredClone(b);
     changed.records[0].result += 'PLANTED DIFFERENCE\n';
@@ -96,6 +107,7 @@ setTimeout(() => {
     assert.throws(() => collect([parallel]), /invalid result/);
     await assert.rejects(run({ out: parallel, binary }), /EEXIST/);
     await assert.rejects(run({ out: path.join(temp, 'empty'), binary, only: [] }), /invalid/);
+    await assert.rejects(run({ out: path.join(temp, 'workers'), binary, outsideWorkers: 11 }), /outside workers/);
     const missing = await run({ out: path.join(temp, 'missing'), binary: '/missing-checker', only: ['outside'] }).catch(() => null);
     assert.equal(missing?.passed ?? false, false);
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
