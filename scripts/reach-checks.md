@@ -14,7 +14,9 @@ Outside uses eight geometry workers by default; `--outside-workers 0..10`
 controls that count independently of `--jobs`. Its parent applies answers in
 the original order. Pure anchor answers can be reused across carries only
 when tracked tiles and the complete physics context still match; original
-search counters and assertions remain intact. Worker count is recorded and
+search counters and assertions remain intact. The memo retains at most 4,096
+answers; reaching capacity discards retained answers and recomputes on misses.
+Worker count is recorded and
 bound into outside cache keys and strict collection. Serial mode always uses
 zero outside workers and never reuses a verdict cache.
 `--serial` uses the original unfiltered timing matrix, followed by outside and
@@ -38,11 +40,15 @@ node scripts/reach-checks.mjs --collect build/shard-a build/shard-b
 ```
 
 A shard reports `complete=false` and cannot independently qualify the release.
-Collection requires all eleven checks exactly once, matching source manifests,
+Collection requires all eleven checks exactly once, source manifests matching
+the running checkout, one executable hash across all shards and records,
 valid raw log hashes and re-evaluated assertions. Failed, timed out, missing,
 duplicate or corrupt results fail the gate. Evidence directories must be new.
 Receipts record source and executable hashes, arguments, raw exits and wall
-seconds. SIGINT/SIGTERM stop only the process groups this runner launched.
+seconds. SIGINT/SIGTERM stop only the process groups this runner launched;
+a repeated interrupt kills those groups if graceful termination is ignored.
+Every execution mode and build attestation refuse a binary older than any
+recorded native input; a checkout or rebase can conservatively require rebuilding.
 
 Comparison checks every timing row and the complete outside/target logs,
 including search counters and the checker's scope labels. Only measured
@@ -76,6 +82,8 @@ failed entries cannot supply a hit. New run receipts retain the original verdict
 and its provenance while binding it to the current validated world. Collection
 recomputes cache keys and revalidates the fresh preflight as well as every result.
 Cache writes are atomic and occur only after unchanged inputs are confirmed.
+The complete run receipt is written before cache publication; a publication
+failure is recorded as a failed invocation without losing its raw diagnostics.
 Keep cache directories beside the validation evidence; they can be shared by
 hosts using the exact same executable and inputs. Serial reference mode always
 executes its checks without a cache.
