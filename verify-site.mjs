@@ -51,7 +51,8 @@
 //             nobody published all answer 404 (with the site's 404 page), never a 200 index.html
 //   preview   og:image and twitter:image are the 1200x528 Standing Stones
 //             shot with type, size and alt; twitter:card summary_large_image
-//   crosslink the landing's footer links Crash The Stack beside Flux Harmonic
+//   crosslink the landing's footer links Crash The Stack, Signal Overdrive and
+//             Phantom Burn beside Flux Harmonic
 //   webgl     scripts/webgl-check.mjs on /play/, one Chrome per case: with
 //             WebGL off or only WebGL 1, substratic.js says the game needs
 //             WebGL 2 and the wasm is never fetched; with no context for the
@@ -77,6 +78,9 @@
 //             as on itch.io) requests nothing from plausible.io
 //   privacy   the landing's footer says "Privacy-friendly analytics by
 //             Plausible: no cookies, no personal data."
+//   badge     the footer ends with the Created with Sigil badge: the on-dark
+//             SVG served from this site (nothing from usesigil.org), 78x51,
+//             decoded, alt "Created with Sigil", linking https://usesigil.org/
 //   analytics-down  plausible.io unreachable (every request refused): / and
 //             /play/ at harkfell.com still work, the world loads, and the
 //             only errors are the refused plausible.io requests
@@ -661,15 +665,16 @@ const newsPosts = [];
 }
 
 // ---- crosslink (2026-09-26) -------------------------------------------------------
-// The landing's footer links the other Flux Harmonic game, beside the studio's mark.
+// The landing's footer links the other Flux Harmonic games, beside the studio's mark
+// (Signal Overdrive and Phantom Burn joined Crash The Stack on 2026-10-23).
 {
   const foot = (/<footer>([\s\S]*?)<\/footer>/.exec(text("index.html")) || [])[1] || "";
   const detail = [];
   if (!foot) detail.push("index.html has no footer");
-  if (!/<p>Also from Flux Harmonic: <a href="https:\/\/crashthestack\.com\/">Crash The Stack<\/a><\/p>/.test(foot)) detail.push("the footer does not link Crash The Stack");
+  if (!/<p>Also from Flux Harmonic: <a href="https:\/\/crashthestack\.com\/">Crash The Stack<\/a>, <a href="https:\/\/signaloverdrive\.net\/">Signal Overdrive<\/a> and <a href="https:\/\/phantomburn\.net\/">Phantom Burn<\/a><\/p>/.test(foot)) detail.push("the footer does not link Crash The Stack, Signal Overdrive and Phantom Burn");
   if (!/href="https:\/\/fluxharmonic\.com\/"/.test(foot)) detail.push("the footer lost the Flux Harmonic link");
   if (detail.length) fail("crosslink", detail.join("; "));
-  else pass("crosslink", "the landing's footer links Crash The Stack beside the Flux Harmonic mark");
+  else pass("crosslink", "the landing's footer links Crash The Stack, Signal Overdrive and Phantom Burn beside the Flux Harmonic mark");
 }
 
 // ---- webgl (2026-09-29) ----------------------------------------------------------
@@ -769,6 +774,55 @@ const noSw = await send("Page.addScriptToEvaluateOnNewDocument", {
   else pass("privacy", `the landing's footer says "${PRIVACY}", Plausible linking its data policy`);
 }
 
+// ---- badge (2026-10-23) ---------------------------------------------------------------
+// The footer ends with the "Created with Sigil" badge: the on-dark SVG from
+// usesigil.org/badge/, copied into the site so nothing loads from usesigil.org,
+// drawn at its real size of 78x51 and linking https://usesigil.org/.
+{
+  const detail = [];
+  const BADGE = "created-with-sigil-on-dark.svg";
+  const foot = (/<footer>([\s\S]*?)<\/footer>/.exec(text("index.html")) || [])[1] || "";
+  const tags = foot.match(/<a class="created-with-sigil"[\s\S]*?<\/a>/g) || [];
+  if (tags.length !== 1) detail.push(`the footer has ${tags.length} badge links, not 1`);
+  if (!/<div class="foot-badge">\s*<a class="created-with-sigil"[^>]*>[\s\S]*?<\/a>\s*<\/div>\s*$/.test(foot)) detail.push(`the footer does not end with the badge on its own foot-badge row`);
+  if ((foot.match(/href="https:\/\/usesigil\.org/g) || []).length !== 1) detail.push(`the footer links usesigil.org ${(foot.match(/href="https:\/\/usesigil\.org/g) || []).length} times, not once`);
+  if (tags.length === 1 && !/^<a class="created-with-sigil" href="https:\/\/usesigil\.org\/"><img src="\/created-with-sigil-on-dark\.svg" width="78" height="51"( loading="lazy")? alt="Created with Sigil"><\/a>$/.test(tags[0])) detail.push(`the badge markup changed: ${tags[0]}`);
+  const svg = fs.existsSync(path.join(DIR, BADGE)) ? text(BADGE) : "";
+  if (!svg) detail.push(`${BADGE} is not in the tree`);
+  else if (!/^<svg [^>]*width="78" height="51"/.test(svg) || !svg.includes("<title>Created with Sigil</title>")) detail.push(`${BADGE} is not the 78x51 badge`);
+  const r = await fetch(`${origin}/${BADGE}`);
+  if (r.status !== 200 || !/^image\/svg\+xml/.test(r.headers.get("content-type") || "")) detail.push(`/${BADGE} answered ${r.status} ${r.headers.get("content-type")}`);
+  await send("Page.navigate", { url: `${origin}/` });
+  await waitFor(() => evalJS("document.readyState === 'complete'"), 15000);
+  await evalJS("(() => { const i = document.querySelector('footer a.created-with-sigil img'); if (i) i.scrollIntoView(); return !!i; })()").catch(() => null);
+  const b = await waitFor(() => evalJS(`(() => {
+    if (location.href !== "${origin}/" || document.readyState !== "complete") return null;
+    const f = document.querySelector("footer"), a = f && f.querySelector("a.created-with-sigil"), i = a && a.querySelector("img");
+    if (!i || !i.complete || !i.naturalWidth) return null;
+    const r = i.getBoundingClientRect(), fr = f.getBoundingClientRect();
+    return { href: a.href, src: i.currentSrc, alt: i.alt, w: r.width, h: r.height, last: f.lastElementChild === a.parentElement && a.parentElement.classList.contains("foot-badge"),
+             centered: Math.abs((r.left + r.right) / 2 - (fr.left + fr.right) / 2) < 1,
+             pad: Math.min(...["Top", "Right", "Bottom", "Left"].map((s) => parseFloat(getComputedStyle(a.parentElement)["padding" + s]))),
+             links: f.querySelectorAll('a[href^="https://usesigil.org"]').length,
+             inside: r.left >= fr.left && r.right <= fr.right && r.bottom <= fr.bottom,
+             off: performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /usesigil\\.org/.test(n)) };
+  })()`), 10000);
+  if (!b) detail.push("the badge never decoded on the landing");
+  else {
+    if (b.href !== "https://usesigil.org/") detail.push(`the badge links ${b.href}`);
+    if (b.src !== `${origin}/${BADGE}`) detail.push(`the badge loads ${b.src}, not this site's /${BADGE}`);
+    if (b.alt !== "Created with Sigil") detail.push(`the badge's alt is "${b.alt}"`);
+    if (b.w !== 78 || b.h !== 51) detail.push(`the badge draws at ${b.w}x${b.h}, not 78x51`);
+    if (!b.last) detail.push(`the badge is not on its own foot-badge row at the end of the footer`);
+    if (!b.centered) detail.push(`the badge is not centered in the footer`);
+    if (!(b.pad >= 13)) detail.push(`the badge row's padding is ${b.pad} px, under the 13 px clear space`);
+    if (b.links !== 1) detail.push(`the footer links usesigil.org ${b.links} times, not once (a plain Sigil link beside the badge?)`);
+    if (!b.inside) detail.push("the badge overflows the footer");
+    if (b.off.length) detail.push(`the landing requested ${b.off.join(", ")}`);
+  }
+  if (detail.length) fail("badge", detail.join("; "));
+  else pass("badge", `the footer ends with the 78x51 Created with Sigil badge from this site's /${BADGE}, linking https://usesigil.org/; nothing requested from usesigil.org`);
+}
 // ---- analytics-down: plausible.io unreachable ------------------------------------------
 {
   stub.setMode("down");
